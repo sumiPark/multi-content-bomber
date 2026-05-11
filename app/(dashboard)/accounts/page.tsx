@@ -30,7 +30,7 @@ const PLATFORMS = [
     id: "YOUTUBE" as const,
     name: "YouTube",
     color: "bg-red-500",
-    enabled: false,
+    enabled: true,
   },
 ];
 

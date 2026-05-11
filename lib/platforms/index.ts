@@ -1,6 +1,7 @@
 import "server-only";
 import { instagram } from "./instagram";
 import { tiktok } from "./tiktok";
+import { youtube } from "./youtube";
 import type { Platform, PlatformAdapter } from "./types";
 
 export type { Platform, PlatformAdapter, OAuthTokens } from "./types";
@@ -8,7 +9,7 @@ export type { Platform, PlatformAdapter, OAuthTokens } from "./types";
 const ADAPTERS: Partial<Record<Platform, PlatformAdapter>> = {
   INSTAGRAM: instagram,
   TIKTOK: tiktok,
-  // YOUTUBE: 추후 추가
+  YOUTUBE: youtube,
 };
 
 export function getAdapter(platform: Platform): PlatformAdapter | null {
