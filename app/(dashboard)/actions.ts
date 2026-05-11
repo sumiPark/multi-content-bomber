@@ -25,11 +25,29 @@ const generateInputSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({}),
   description: z.string().max(500).optional(),
   presetId: z.string().uuid().optional(),
+  platforms: z
+    .array(z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK"]))
+    .min(1, "플랫폼을 1개 이상 선택해주세요.")
+    .max(3),
+  internalTitle: z.string().max(200).optional(),
 });
 
 const updateInputSchema = z.object({
   contentId: z.string().uuid(),
   captions: captionsSchema,
+});
+
+const regenerateInputSchema = z.object({
+  contentId: z.string().uuid(),
+  mediaType: z.enum(["IMAGE", "VIDEO"]),
+  analyzePaths: z.array(z.string().min(1)).min(1).max(10),
+  description: z.string().max(500).optional(),
+  presetId: z.string().uuid().optional(),
+  platforms: z
+    .array(z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK"]))
+    .min(1)
+    .max(3),
+  previousCaptions: captionsSchema,
 });
 
 const createJobsInputSchema = z.object({
@@ -38,8 +56,31 @@ const createJobsInputSchema = z.object({
   scheduledFor: z.string().nullable(),
 });
 
+const createBlankInputSchema = z.object({
+  mediaType: z.enum(["IMAGE", "VIDEO"]),
+  mediaPaths: z.array(z.string().min(1)).min(1).max(10),
+  analyzePaths: z.array(z.string().min(1)).min(1).max(10),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  platforms: z
+    .array(z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK"]))
+    .min(1)
+    .max(3),
+  internalTitle: z.string().max(200).optional(),
+});
+
+const updateInternalTitleSchema = z.object({
+  contentId: z.string().uuid(),
+  internalTitle: z.string().max(200),
+});
+
 export type GenerateCaptionsResult =
-  | { ok: true; contentId: string; captions: Captions; savedAt: string }
+  | {
+      ok: true;
+      contentId: string;
+      captions: Captions;
+      savedAt: string;
+      thumbnailUrls: string[];
+    }
   | { ok: false; error: string };
 
 export type UpdateCaptionsResult =
@@ -50,8 +91,42 @@ export type CreatePublishJobsResult =
   | { ok: true; count: number }
   | { ok: false; error: string };
 
+export type CreateBlankContentResult =
+  | {
+      ok: true;
+      contentId: string;
+      captions: Captions;
+      savedAt: string;
+      thumbnailUrls: string[];
+    }
+  | { ok: false; error: string };
+
+export type RegenerateCaptionsResult =
+  | {
+      ok: true;
+      contentId: string;
+      captions: Captions;
+      savedAt: string;
+      thumbnailUrls: string[];
+    }
+  | { ok: false; error: string };
+
 type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
 type MediaType = "VIDEO" | "IMAGE";
+
+function buildBlankCaptions(platforms: Platform[]): Captions {
+  return {
+    youtube: platforms.includes("YOUTUBE")
+      ? { title: "", description: "", hashtags: [], category: "" }
+      : undefined,
+    instagram: platforms.includes("INSTAGRAM")
+      ? { caption: "", hashtags: [], cover_text: "" }
+      : undefined,
+    tiktok: platforms.includes("TIKTOK")
+      ? { caption: "", hashtags: [] }
+      : undefined,
+  };
+}
 
 function pickPostType(
   platform: Platform,
@@ -132,6 +207,7 @@ export async function generateCaptionsAction(
       {
         description: parsed.data.description,
         presetInstructions,
+        platforms: parsed.data.platforms,
       },
     );
   } catch (err) {
@@ -143,6 +219,8 @@ export async function generateCaptionsAction(
     };
   }
 
+  const internalTitle = parsed.data.internalTitle?.trim() || null;
+
   const { data: content, error: insertError } = await supabase
     .from("contents")
     .insert({
@@ -153,6 +231,8 @@ export async function generateCaptionsAction(
       metadata: parsed.data.metadata as Json,
       ai_captions: captions as unknown as Json,
       ai_analyzed_at: new Date().toISOString(),
+      // @ts-expect-error internal_title은 0008 마이그레이션 이후 추가
+      internal_title: internalTitle,
     })
     .select("id, updated_at")
     .single();
@@ -171,7 +251,40 @@ export async function generateCaptionsAction(
     contentId: content.id,
     captions,
     savedAt: content.updated_at,
+    thumbnailUrls: signed.map((s) => s.signedUrl as string),
   };
+}
+
+export async function updateInternalTitleAction(
+  input: z.infer<typeof updateInternalTitleSchema>,
+): Promise<{ ok: true; savedAt: string } | { ok: false; error: string }> {
+  const parsed = updateInternalTitleSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  const { data: updated, error } = await supabase
+    .from("contents")
+    .update({
+      // @ts-expect-error internal_title은 0008 마이그레이션 이후 추가
+      internal_title: parsed.data.internalTitle.trim() || null,
+    })
+    .eq("id", parsed.data.contentId)
+    .select("updated_at")
+    .single();
+
+  if (error || !updated) {
+    return { ok: false, error: `수정 실패: ${error?.message ?? "unknown"}` };
+  }
+  revalidatePath("/");
+  revalidatePath("/contents");
+  revalidatePath("/postings");
+  return { ok: true, savedAt: updated.updated_at };
 }
 
 export async function updateCaptionsAction(
@@ -202,6 +315,160 @@ export async function updateCaptionsAction(
   revalidatePath("/");
 
   return { ok: true, savedAt: updated.updated_at };
+}
+
+export async function regenerateCaptionsAction(
+  input: z.infer<typeof regenerateInputSchema>,
+): Promise<RegenerateCaptionsResult> {
+  const parsed = regenerateInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  let presetInstructions: string | undefined;
+  if (parsed.data.presetId) {
+    const { data: preset } = await supabase
+      .from("caption_presets")
+      .select("instructions")
+      .eq("id", parsed.data.presetId)
+      .maybeSingle();
+    presetInstructions = preset?.instructions ?? undefined;
+  }
+
+  const { data: signed, error: signedError } = await supabase.storage
+    .from("media")
+    .createSignedUrls(parsed.data.analyzePaths, SIGNED_URL_TTL_SECONDS);
+  if (signedError || !signed) {
+    return {
+      ok: false,
+      error: `서명 URL 생성 실패: ${signedError?.message ?? "unknown"}`,
+    };
+  }
+  const failed = signed.find((s) => s.error || !s.signedUrl);
+  if (failed) {
+    return { ok: false, error: `서명 URL 생성 실패: ${failed.error}` };
+  }
+
+  let captions: Captions;
+  try {
+    captions = await generateCaptions(
+      signed.map((s) => s.signedUrl as string),
+      {
+        description: parsed.data.description,
+        presetInstructions,
+        platforms: parsed.data.platforms,
+        previousCaptions: parsed.data.previousCaptions,
+      },
+    );
+  } catch (err) {
+    console.error("[regenerateCaptionsAction] OpenAI failed:", err);
+    return {
+      ok: false,
+      error:
+        err instanceof Error ? err.message : "AI 캡션 재생성에 실패했습니다.",
+    };
+  }
+
+  const { data: updated, error: updateError } = await supabase
+    .from("contents")
+    .update({
+      ai_captions: captions as unknown as Json,
+      ai_analyzed_at: new Date().toISOString(),
+    })
+    .eq("id", parsed.data.contentId)
+    .select("id, updated_at")
+    .single();
+
+  if (updateError || !updated) {
+    return {
+      ok: false,
+      error: `저장 실패: ${updateError?.message ?? "unknown"}`,
+    };
+  }
+
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    contentId: updated.id,
+    captions,
+    savedAt: updated.updated_at,
+    thumbnailUrls: signed.map((s) => s.signedUrl as string),
+  };
+}
+
+export async function createBlankContentAction(
+  input: z.infer<typeof createBlankInputSchema>,
+): Promise<CreateBlankContentResult> {
+  const parsed = createBlankInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("organization_id")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (!profile?.organization_id) {
+    return { ok: false, error: "소속된 조직이 없습니다." };
+  }
+
+  const blank = buildBlankCaptions(parsed.data.platforms);
+  const internalTitle = parsed.data.internalTitle?.trim() || null;
+
+  const { data: content, error: insertError } = await supabase
+    .from("contents")
+    .insert({
+      organization_id: profile.organization_id,
+      created_by: user.id,
+      media_type: parsed.data.mediaType,
+      media_urls: parsed.data.mediaPaths,
+      metadata: parsed.data.metadata as Json,
+      ai_captions: blank as unknown as Json,
+      ai_analyzed_at: null,
+      // @ts-expect-error internal_title은 0008 마이그레이션 이후 추가
+      internal_title: internalTitle,
+    })
+    .select("id, updated_at")
+    .single();
+
+  if (insertError || !content) {
+    return {
+      ok: false,
+      error: `저장 실패: ${insertError?.message ?? "unknown"}`,
+    };
+  }
+
+  const { data: thumbSigned } = await supabase.storage
+    .from("media")
+    .createSignedUrls(parsed.data.analyzePaths, SIGNED_URL_TTL_SECONDS);
+  const thumbnailUrls =
+    thumbSigned
+      ?.map((s) => s.signedUrl)
+      .filter((u): u is string => typeof u === "string" && u.length > 0) ?? [];
+
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    contentId: content.id,
+    captions: blank,
+    savedAt: content.updated_at,
+    thumbnailUrls,
+  };
 }
 
 export async function createPublishJobsAction(

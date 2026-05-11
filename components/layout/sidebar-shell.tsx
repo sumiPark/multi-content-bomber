@@ -5,9 +5,11 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ComponentType } from "react";
 import {
   Archive,
+  BarChart3,
   History,
   LayoutDashboard,
   Link2,
+  ListChecks,
   LogOut,
   Menu,
   PlusCircle,
@@ -31,7 +33,10 @@ interface NavGroup {
 const NAV_GROUPS: NavGroup[] = [
   {
     label: "현황",
-    items: [{ href: "/", label: "대시보드", icon: LayoutDashboard }],
+    items: [
+      { href: "/", label: "대시보드", icon: LayoutDashboard },
+      { href: "/analytics", label: "분석/리포팅", icon: BarChart3 },
+    ],
   },
   {
     label: "준비",
@@ -44,6 +49,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "작업",
     items: [
       { href: "/upload", label: "새 콘텐츠", icon: PlusCircle },
+      { href: "/postings", label: "포스팅 관리", icon: ListChecks },
       { href: "/uploads", label: "업로드 이력", icon: History },
       { href: "/contents", label: "보관함", icon: Archive },
     ],

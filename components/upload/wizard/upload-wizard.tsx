@@ -1,9 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Sparkles } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  CircleAlert,
+  Pencil,
+  Sparkles,
+} from "lucide-react";
 import { CaptionResult } from "@/components/ai/caption-result";
 import { ImageDropzone } from "@/components/upload/image-dropzone";
 import { VideoDropzone } from "@/components/upload/video-dropzone";
@@ -20,25 +26,41 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
+  createBlankContentAction,
   createPublishJobsAction,
   generateCaptionsAction,
+  regenerateCaptionsAction,
+  type CreateBlankContentResult,
   type GenerateCaptionsResult,
+  type RegenerateCaptionsResult,
 } from "@/app/(dashboard)/actions";
 import type { Captions } from "@/lib/ai/caption-generator";
+import type { Platform } from "@/lib/platforms";
 import { uploadMedia, uploadOne } from "@/lib/storage/upload";
+import {
+  extractImageMeta,
+  extractVideoMeta,
+} from "@/lib/upload/extract-meta";
+import {
+  validateMedia,
+  type MediaItem,
+  type PlatformVerdict,
+  type ValidationResult,
+} from "@/lib/upload/validation";
 import { extractFirstFrame } from "@/lib/video/extract-frame";
 import { StepIndicator } from "./step-indicator";
 
 const STEPS = [
-  { key: 1, label: "미디어" },
-  { key: 2, label: "계정" },
+  { key: 1, label: "계정" },
+  { key: 2, label: "미디어" },
   { key: 3, label: "캡션" },
-  { key: 4, label: "예약" },
+  { key: 4, label: "검토" },
+  { key: 5, label: "예약" },
 ];
 
 interface SocialAccountSummary {
   id: string;
-  platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
+  platform: Platform;
   display_name: string | null;
   is_active: boolean;
   token_expires_at: string | null;
@@ -59,6 +81,13 @@ interface UploadWizardProps {
 
 type MediaType = "IMAGE" | "VIDEO";
 type ScheduleMode = "now" | "scheduled";
+type CaptionMode = "ai" | "manual";
+
+const PLATFORM_COLORS: Record<Platform, string> = {
+  YOUTUBE: "bg-red-500",
+  INSTAGRAM: "bg-pink-500",
+  TIKTOK: "bg-zinc-900",
+};
 
 export function UploadWizard({
   organizationId,
@@ -68,6 +97,7 @@ export function UploadWizard({
 }: UploadWizardProps) {
   const router = useRouter();
   const [step, setStep] = useState(1);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
   const [mediaType, setMediaType] = useState<MediaType>("IMAGE");
   const [files, setFiles] = useState<File[]>([]);
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -76,14 +106,17 @@ export function UploadWizard({
   const [mediaMetadata, setMediaMetadata] = useState<Record<string, unknown>>(
     {},
   );
+  const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
+  const [internalTitle, setInternalTitle] = useState("");
   const [presetId, setPresetId] = useState<string>("");
   const [description, setDescription] = useState("");
   const [generating, setGenerating] = useState(false);
   const [captions, setCaptions] = useState<Captions | null>(null);
   const [contentId, setContentId] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [thumbnailUrls, setThumbnailUrls] = useState<string[]>([]);
+  const [captionMode, setCaptionMode] = useState<CaptionMode>("ai");
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("now");
   const [scheduledAt, setScheduledAt] = useState("");
   const [completing, setCompleting] = useState(false);
@@ -94,33 +127,144 @@ export function UploadWizard({
     [presets, presetId],
   );
 
-  const canAdvanceStep1 =
-    mediaType === "IMAGE" ? files.length > 0 : !!videoFile;
+  const selectedAccounts = useMemo(
+    () => socialAccounts.filter((a) => selectedAccountIds.includes(a.id)),
+    [socialAccounts, selectedAccountIds],
+  );
+
+  const selectedPlatforms = useMemo<Platform[]>(() => {
+    const set = new Set<Platform>();
+    for (const acc of selectedAccounts) set.add(acc.platform);
+    return Array.from(set);
+  }, [selectedAccounts]);
+
+  const includesTiktok = selectedPlatforms.includes("TIKTOK");
+
+  // TikTok이 포함되면 영상 모드 강제 (TikTok Content Posting API는 영상만 지원)
+  useEffect(() => {
+    if (includesTiktok && mediaType === "IMAGE") {
+      setMediaType("VIDEO");
+      setFiles([]);
+      setMediaPaths([]);
+      setAnalyzePaths([]);
+      setMediaMetadata({});
+    }
+  }, [includesTiktok, mediaType]);
+
+  // 메타데이터(해상도/길이) 추출 후 정확한 검증.
+  // 드롭 직후와 "다음" 직후의 검증 결과가 달라지지 않도록 처음부터 메타를 뽑는다.
+  useEffect(() => {
+    if (selectedPlatforms.length === 0) {
+      setValidation(null);
+      return;
+    }
+    let cancelled = false;
+
+    async function run() {
+      if (mediaType === "IMAGE") {
+        if (files.length === 0) {
+          setValidation(null);
+          return;
+        }
+        const items: MediaItem[] = await Promise.all(
+          files.map(async (f) => {
+            try {
+              const meta = await extractImageMeta(f);
+              return { file: f, width: meta.width, height: meta.height };
+            } catch {
+              return { file: f };
+            }
+          }),
+        );
+        if (cancelled) return;
+        setValidation(validateMedia("IMAGE", items, selectedPlatforms));
+      } else {
+        if (!videoFile) {
+          setValidation(null);
+          return;
+        }
+        try {
+          const meta = await extractVideoMeta(videoFile);
+          if (cancelled) return;
+          setValidation(
+            validateMedia(
+              "VIDEO",
+              [
+                {
+                  file: videoFile,
+                  width: meta.width,
+                  height: meta.height,
+                  durationSeconds: meta.durationSeconds,
+                },
+              ],
+              selectedPlatforms,
+            ),
+          );
+        } catch {
+          if (cancelled) return;
+          setValidation(
+            validateMedia("VIDEO", [{ file: videoFile }], selectedPlatforms),
+          );
+        }
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [files, videoFile, mediaType, selectedPlatforms]);
+
+  const canAdvanceStep1 = selectedAccountIds.length > 0;
+
+  const canAdvanceStep2 = useMemo(() => {
+    if (mediaType === "IMAGE" && files.length === 0) return false;
+    if (mediaType === "VIDEO" && !videoFile) return false;
+    return validation?.ok ?? false;
+  }, [mediaType, files, videoFile, validation]);
+
+  const canAdvanceStep3 = !!captions;
+
+  const canAdvanceStep4 =
+    !!captions &&
+    selectedAccountIds.length > 0 &&
+    (validation?.ok ?? false);
 
   function switchMediaType(next: MediaType) {
     if (mediaType === next) return;
     setMediaType(next);
     setFiles([]);
     setVideoFile(null);
+    setMediaPaths([]);
+    setAnalyzePaths([]);
+    setMediaMetadata({});
     setError(null);
   }
 
-  async function advanceFromStep1() {
+  function toggleAccount(id: string, checked: boolean) {
+    setSelectedAccountIds((prev) =>
+      checked ? [...prev, id] : prev.filter((x) => x !== id),
+    );
+    // 계정 변경 시 captions stale 처리
+    setCaptions(null);
+    setContentId(null);
+    setThumbnailUrls([]);
+  }
+
+  async function advanceFromStep2() {
     setError(null);
-    if (!canAdvanceStep1) return;
+    if (!canAdvanceStep2) return;
     setUploading(true);
     try {
       if (mediaType === "IMAGE") {
-        const uploaded = await uploadMedia({
-          files,
-          organizationId,
-          userId,
-        });
+        const uploaded = await uploadMedia({ files, organizationId, userId });
         const paths = uploaded.map((u) => u.path);
         setMediaPaths(paths);
         setAnalyzePaths(paths);
         setMediaMetadata({});
       } else if (videoFile) {
+        // 검증은 이미 useEffect에서 정확한 메타데이터로 끝남.
+        // 여기서는 thumbnail 추출 + 업로드만.
         const frame = await extractFirstFrame(videoFile);
         const [videoUpload, thumbUpload] = await Promise.all([
           uploadOne({
@@ -147,7 +291,7 @@ export function UploadWizard({
           original_mime: videoFile.type,
         });
       }
-      setStep(2);
+      setStep(3);
     } catch (err) {
       setError(err instanceof Error ? err.message : "업로드 실패");
     } finally {
@@ -166,6 +310,8 @@ export function UploadWizard({
         metadata: mediaMetadata,
         description: description.trim() || undefined,
         presetId: presetId || undefined,
+        platforms: selectedPlatforms,
+        internalTitle: internalTitle.trim() || undefined,
       });
       if (!result.ok) {
         setError(result.error);
@@ -174,292 +320,925 @@ export function UploadWizard({
       setCaptions(result.captions);
       setContentId(result.contentId);
       setSavedAt(result.savedAt);
+      setThumbnailUrls(result.thumbnailUrls);
     } finally {
       setGenerating(false);
     }
   }
 
-  async function handleComplete() {
+  async function handleRegenerate() {
+    if (!contentId || !captions) return;
     setError(null);
-    if (contentId && selectedAccountIds.length > 0) {
-      setCompleting(true);
-      const scheduledFor =
-        scheduleMode === "scheduled" && scheduledAt
-          ? new Date(scheduledAt).toISOString()
-          : null;
-      const result = await createPublishJobsAction({
+    setGenerating(true);
+    try {
+      const result: RegenerateCaptionsResult = await regenerateCaptionsAction({
         contentId,
-        accountIds: selectedAccountIds,
-        scheduledFor,
+        mediaType,
+        analyzePaths,
+        description: description.trim() || undefined,
+        presetId: presetId || undefined,
+        platforms: selectedPlatforms,
+        previousCaptions: captions,
       });
-      setCompleting(false);
       if (!result.ok) {
         setError(result.error);
         return;
       }
+      setCaptions(result.captions);
+      setSavedAt(result.savedAt);
+      setThumbnailUrls(result.thumbnailUrls);
+    } finally {
+      setGenerating(false);
     }
+  }
 
-    if (contentId) {
-      router.push(`/?content=${contentId}`);
-    } else {
-      router.push("/contents");
+  async function handleStartManual() {
+    setError(null);
+    setGenerating(true);
+    try {
+      const result: CreateBlankContentResult = await createBlankContentAction({
+        mediaType,
+        mediaPaths,
+        analyzePaths,
+        metadata: mediaMetadata,
+        platforms: selectedPlatforms,
+        internalTitle: internalTitle.trim() || undefined,
+      });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setCaptions(result.captions);
+      setContentId(result.contentId);
+      setSavedAt(result.savedAt);
+      setThumbnailUrls(result.thumbnailUrls);
+    } finally {
+      setGenerating(false);
     }
+  }
+
+  function handleSwitchCaptionMode(next: CaptionMode) {
+    if (next === captionMode) return;
+    if (captions) {
+      const ok = window.confirm(
+        "이미 작성/생성된 캡션이 있어요. 모드를 바꾸면 기존 내용이 사라지고 처음부터 다시 시작합니다. 계속할까요?",
+      );
+      if (!ok) return;
+      setCaptions(null);
+      setContentId(null);
+      setSavedAt(null);
+      setThumbnailUrls([]);
+    }
+    setCaptionMode(next);
+  }
+
+  async function handleComplete() {
+    setError(null);
+    if (!contentId || selectedAccountIds.length === 0) return;
+    setCompleting(true);
+    const scheduledFor =
+      scheduleMode === "scheduled" && scheduledAt
+        ? new Date(scheduledAt).toISOString()
+        : null;
+    const result = await createPublishJobsAction({
+      contentId,
+      accountIds: selectedAccountIds,
+      scheduledFor,
+    });
+    setCompleting(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    router.push(`/?content=${contentId}`);
     router.refresh();
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>새 콘텐츠 만들기</CardTitle>
-        <CardDescription>
-          4단계로 미디어를 업로드하고 게시 준비를 합니다.
-        </CardDescription>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <CardTitle>새 콘텐츠 만들기</CardTitle>
+            <CardDescription>
+              5단계로 계정 선택, 미디어 업로드, 캡션 작성, 검토, 예약을 진행합니다.
+            </CardDescription>
+          </div>
+        </div>
+        <div className="mt-3 space-y-1">
+          <Label htmlFor="internal-title" className="text-xs">
+            내부 타이틀 (선택)
+          </Label>
+          <input
+            id="internal-title"
+            type="text"
+            value={internalTitle}
+            onChange={(e) => setInternalTitle(e.target.value)}
+            maxLength={200}
+            placeholder="예) 한강 카페 1편 — 보관함/포스팅 관리에서 식별용 라벨"
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+          />
+        </div>
         <div className="pt-4">
           <StepIndicator current={step} steps={STEPS} />
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && (
+          <div className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            <CircleAlert className="size-4 shrink-0" />
+            <p>{error}</p>
+          </div>
+        )}
 
         {step === 1 && (
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <Button
-                variant={mediaType === "IMAGE" ? "default" : "outline"}
-                onClick={() => switchMediaType("IMAGE")}
-                disabled={uploading}
-                className="flex-1"
-              >
-                이미지 (1~10장)
-              </Button>
-              <Button
-                variant={mediaType === "VIDEO" ? "default" : "outline"}
-                onClick={() => switchMediaType("VIDEO")}
-                disabled={uploading}
-                className="flex-1"
-              >
-                영상 (1개)
-              </Button>
-            </div>
-            {mediaType === "IMAGE" ? (
-              <ImageDropzone onChange={setFiles} />
-            ) : (
-              <VideoDropzone onChange={setVideoFile} />
-            )}
-            <div className="flex justify-end">
-              <Button
-                onClick={advanceFromStep1}
-                disabled={!canAdvanceStep1 || uploading}
-              >
-                {uploading
-                  ? mediaType === "VIDEO"
-                    ? "업로드 + 프레임 추출 중..."
-                    : `업로드 중... (${files.length}장)`
-                  : mediaType === "VIDEO"
-                    ? "다음 단계"
-                    : `다음 단계 (${files.length}장)`}
-              </Button>
-            </div>
-          </div>
+          <Step1Accounts
+            socialAccounts={socialAccounts}
+            selectedAccountIds={selectedAccountIds}
+            onToggle={toggleAccount}
+            onNext={() => setStep(2)}
+            canAdvance={canAdvanceStep1}
+          />
         )}
 
         {step === 2 && (
-          <div className="space-y-4">
-            {socialAccounts.length === 0 ? (
-              <div className="rounded-md border bg-muted/30 p-8 text-center">
-                <p className="text-sm">아직 연동된 계정이 없어요.</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  계정 없이도 캡션 생성과 저장은 가능합니다.
-                </p>
-                <Link
-                  href="/accounts"
-                  className={buttonVariants({ variant: "link", size: "sm" })}
-                >
-                  계정 관리로 이동
-                </Link>
-              </div>
-            ) : (
-              <ul className="space-y-2">
-                {socialAccounts.map((acc) => {
-                  const checked = selectedAccountIds.includes(acc.id);
-                  return (
-                    <li key={acc.id}>
-                      <label className="flex cursor-pointer items-center gap-3 rounded-md border p-3 transition hover:bg-accent/40">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) => {
-                            setSelectedAccountIds((prev) =>
-                              e.target.checked
-                                ? [...prev, acc.id]
-                                : prev.filter((id) => id !== acc.id),
-                            );
-                          }}
-                          className="size-4"
-                        />
-                        <div className="flex-1">
-                          <p className="text-sm font-medium">
-                            {acc.display_name ?? "(이름 없음)"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {acc.platform}
-                          </p>
-                        </div>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            <div className="flex justify-between">
-              <Button variant="outline" onClick={() => setStep(1)}>
-                이전
-              </Button>
-              <Button onClick={() => setStep(3)}>
-                {socialAccounts.length === 0
-                  ? "건너뛰기"
-                  : `다음 단계 (${selectedAccountIds.length}개 선택)`}
-              </Button>
-            </div>
-          </div>
+          <Step2Media
+            mediaType={mediaType}
+            files={files}
+            videoFile={videoFile}
+            uploading={uploading}
+            validation={validation}
+            selectedPlatforms={selectedPlatforms}
+            includesTiktok={includesTiktok}
+            onSwitchType={switchMediaType}
+            onChangeFiles={setFiles}
+            onChangeVideo={setVideoFile}
+            onPrev={() => setStep(1)}
+            onNext={advanceFromStep2}
+            canAdvance={canAdvanceStep2}
+          />
         )}
 
         {step === 3 && (
-          <div className="space-y-4">
-            {!captions ? (
-              <>
-                {presets.length > 0 && (
-                  <div className="space-y-2">
-                    <Label htmlFor="preset">캡션 프리셋 (선택)</Label>
-                    <select
-                      id="preset"
-                      value={presetId}
-                      onChange={(e) => setPresetId(e.target.value)}
-                      disabled={generating}
-                      className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                    >
-                      <option value="">— 사용 안 함 —</option>
-                      {presets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                    {selectedPreset?.description && (
-                      <p className="text-xs text-muted-foreground">
-                        {selectedPreset.description}
-                      </p>
-                    )}
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="description">기본 설명 (선택)</Label>
-                  <Textarea
-                    id="description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="예) 홍대 브런치 카페 후기, 톤은 따뜻하고 일상적으로"
-                    rows={3}
-                    disabled={generating}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    설명을 입력하면 AI가 더 정확한 톤의 캡션을 생성합니다.
-                  </p>
-                </div>
-                <Button onClick={handleGenerate} disabled={generating}>
-                  <Sparkles className="size-4" />
-                  {generating ? "AI 분석 중..." : "AI 캡션 생성"}
-                </Button>
-              </>
-            ) : (
-              contentId &&
-              savedAt && (
-                <CaptionResult
-                  contentId={contentId}
-                  captions={captions}
-                  savedAt={savedAt}
-                  thumbnails={[]}
-                />
-              )
-            )}
-            <div className="flex justify-between">
-              <Button
-                variant="outline"
-                onClick={() => setStep(2)}
-                disabled={generating}
-              >
-                이전
-              </Button>
-              <Button onClick={() => setStep(4)} disabled={!captions}>
-                다음 단계
-              </Button>
-            </div>
-          </div>
+          <Step3Caption
+            captions={captions}
+            contentId={contentId}
+            savedAt={savedAt}
+            thumbnailUrls={thumbnailUrls}
+            description={description}
+            presetId={presetId}
+            presets={presets}
+            selectedPreset={selectedPreset}
+            generating={generating}
+            captionMode={captionMode}
+            onSwitchMode={handleSwitchCaptionMode}
+            onChangeDescription={setDescription}
+            onChangePreset={setPresetId}
+            onGenerate={handleGenerate}
+            onStartManual={handleStartManual}
+            onRegenerate={handleRegenerate}
+            onPrev={() => setStep(2)}
+            onNext={() => setStep(4)}
+            canAdvance={canAdvanceStep3}
+          />
         )}
 
         {step === 4 && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>업로드 시점</Label>
-              <div className="flex gap-2">
-                <Button
-                  variant={scheduleMode === "now" ? "default" : "outline"}
-                  onClick={() => setScheduleMode("now")}
-                  className="flex-1"
-                >
-                  즉시 업로드
-                </Button>
-                <Button
-                  variant={
-                    scheduleMode === "scheduled" ? "default" : "outline"
-                  }
-                  onClick={() => setScheduleMode("scheduled")}
-                  className="flex-1"
-                >
-                  예약 업로드
-                </Button>
-              </div>
-              {scheduleMode === "scheduled" && (
-                <input
-                  type="datetime-local"
-                  value={scheduledAt}
-                  onChange={(e) => setScheduledAt(e.target.value)}
-                  className={cn(
-                    "mt-2 w-full rounded-md border bg-background px-3 py-2 text-sm",
-                  )}
-                />
-              )}
-            </div>
+          <Step4Review
+            selectedAccounts={selectedAccounts}
+            captions={captions}
+            validation={validation}
+            mediaType={mediaType}
+            mediaCount={
+              mediaType === "IMAGE" ? files.length : videoFile ? 1 : 0
+            }
+            onJump={setStep}
+            onPrev={() => setStep(3)}
+            onNext={() => setStep(5)}
+            canAdvance={canAdvanceStep4}
+          />
+        )}
 
-            <div className="rounded-md border bg-muted/30 p-4 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span>선택된 계정</span>
-                <Badge variant="outline">
-                  {selectedAccountIds.length}개
-                </Badge>
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                {selectedAccountIds.length === 0
-                  ? "계정 미선택 — 콘텐츠만 보관함에 저장됩니다."
-                  : "각 계정별 publish_job이 PENDING 상태로 등록됩니다. 워커가 활성화되면 자동 게시 (Phase 4)."}
-              </p>
-            </div>
-
-            <div className="flex justify-between">
-              <Button
-                variant="outline"
-                onClick={() => setStep(3)}
-                disabled={completing}
-              >
-                이전
-              </Button>
-              <Button onClick={handleComplete} disabled={completing}>
-                {completing ? "등록 중..." : "완료"}
-              </Button>
-            </div>
-          </div>
+        {step === 5 && (
+          <Step5Schedule
+            scheduleMode={scheduleMode}
+            scheduledAt={scheduledAt}
+            selectedAccountCount={selectedAccountIds.length}
+            completing={completing}
+            onChangeMode={setScheduleMode}
+            onChangeScheduledAt={setScheduledAt}
+            onPrev={() => setStep(4)}
+            onComplete={handleComplete}
+          />
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 1 — 계정 선택
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Step1Accounts({
+  socialAccounts,
+  selectedAccountIds,
+  onToggle,
+  onNext,
+  canAdvance,
+}: {
+  socialAccounts: {
+    id: string;
+    platform: Platform;
+    display_name: string | null;
+    is_active: boolean;
+  }[];
+  selectedAccountIds: string[];
+  onToggle: (id: string, checked: boolean) => void;
+  onNext: () => void;
+  canAdvance: boolean;
+}) {
+  const grouped = useMemo(() => {
+    const g: Record<Platform, typeof socialAccounts> = {
+      YOUTUBE: [],
+      INSTAGRAM: [],
+      TIKTOK: [],
+    };
+    for (const a of socialAccounts) g[a.platform].push(a);
+    return g;
+  }, [socialAccounts]);
+
+  if (socialAccounts.length === 0) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-md border bg-muted/30 p-8 text-center">
+          <p className="text-sm">아직 연동된 계정이 없어요.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            먼저 게시할 플랫폼 계정을 연결해주세요.
+          </p>
+          <Link
+            href="/accounts"
+            className={cn(buttonVariants({ size: "sm" }), "mt-4")}
+          >
+            계정 관리로 이동
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        이 콘텐츠를 게시할 계정을 선택해주세요. 선택된 플랫폼 조합이 다음
+        단계의 검증과 캡션 생성에 사용됩니다.
+      </p>
+      {(["YOUTUBE", "INSTAGRAM", "TIKTOK"] as const).map((platform) => {
+        const list = grouped[platform];
+        if (list.length === 0) return null;
+        return (
+          <div key={platform} className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div
+                className={cn(
+                  "flex size-5 items-center justify-center rounded-full text-[10px] font-semibold text-white",
+                  PLATFORM_COLORS[platform],
+                )}
+              >
+                {platform.charAt(0)}
+              </div>
+              <h3 className="text-sm font-medium">{platform}</h3>
+            </div>
+            <ul className="space-y-2">
+              {list.map((acc) => {
+                const checked = selectedAccountIds.includes(acc.id);
+                const disabled = !acc.is_active;
+                return (
+                  <li key={acc.id}>
+                    <label
+                      className={cn(
+                        "flex items-center gap-3 rounded-md border p-3 transition",
+                        disabled
+                          ? "cursor-not-allowed opacity-50"
+                          : "cursor-pointer hover:bg-accent/40",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={(e) => onToggle(acc.id, e.target.checked)}
+                        className="size-4"
+                      />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium">
+                          {acc.display_name ?? "(이름 없음)"}
+                        </p>
+                      </div>
+                      {!acc.is_active && (
+                        <Badge variant="destructive">비활성</Badge>
+                      )}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+      <div className="flex justify-end">
+        <Button onClick={onNext} disabled={!canAdvance}>
+          다음 단계 ({selectedAccountIds.length}개 선택)
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 2 — 미디어 업로드 + 검증
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Step2Media({
+  mediaType,
+  files,
+  videoFile,
+  uploading,
+  validation,
+  selectedPlatforms,
+  includesTiktok,
+  onSwitchType,
+  onChangeFiles,
+  onChangeVideo,
+  onPrev,
+  onNext,
+  canAdvance,
+}: {
+  mediaType: MediaType;
+  files: File[];
+  videoFile: File | null;
+  uploading: boolean;
+  validation: ValidationResult | null;
+  selectedPlatforms: Platform[];
+  includesTiktok: boolean;
+  onSwitchType: (t: MediaType) => void;
+  onChangeFiles: (f: File[]) => void;
+  onChangeVideo: (f: File | null) => void;
+  onPrev: () => void;
+  onNext: () => void;
+  canAdvance: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      {includesTiktok && (
+        <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700">
+          <CircleAlert className="size-4 shrink-0" />
+          <p>
+            TikTok 계정이 포함되어 있어 <strong>영상만 업로드 가능</strong>해요.
+            (Content Posting API는 이미지 게시를 지원하지 않습니다.)
+          </p>
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Button
+          variant={mediaType === "IMAGE" ? "default" : "outline"}
+          onClick={() => onSwitchType("IMAGE")}
+          disabled={uploading || includesTiktok}
+          className="flex-1"
+        >
+          이미지 (1~10장)
+        </Button>
+        <Button
+          variant={mediaType === "VIDEO" ? "default" : "outline"}
+          onClick={() => onSwitchType("VIDEO")}
+          disabled={uploading}
+          className="flex-1"
+        >
+          영상 (1개)
+        </Button>
+      </div>
+      {mediaType === "IMAGE" ? (
+        <ImageDropzone onChange={onChangeFiles} />
+      ) : (
+        <VideoDropzone onChange={onChangeVideo} />
+      )}
+      {validation && (
+        <ValidationPanel
+          validation={validation}
+          selectedPlatforms={selectedPlatforms}
+        />
+      )}
+      <div className="flex justify-between">
+        <Button variant="outline" onClick={onPrev} disabled={uploading}>
+          이전
+        </Button>
+        <Button onClick={onNext} disabled={!canAdvance || uploading}>
+          {uploading
+            ? mediaType === "VIDEO"
+              ? "업로드 + 프레임 추출 중..."
+              : `업로드 중... (${files.length}장)`
+            : mediaType === "VIDEO"
+              ? "다음 단계"
+              : `다음 단계 (${files.length}장)`}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ValidationPanel({
+  validation,
+  selectedPlatforms,
+}: {
+  validation: ValidationResult;
+  selectedPlatforms: Platform[];
+}) {
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+      <p className="text-xs font-medium text-muted-foreground">
+        플랫폼별 적합성
+      </p>
+      <ul className="space-y-2">
+        {selectedPlatforms.map((p) => {
+          const v = validation.perPlatform.find((x) => x.platform === p);
+          if (!v) return null;
+          return <PlatformVerdictRow key={p} verdict={v} />;
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function PlatformVerdictRow({ verdict }: { verdict: PlatformVerdict }) {
+  const icon =
+    verdict.status === "ok" ? (
+      <Check className="size-4 text-green-600" />
+    ) : verdict.status === "warning" ? (
+      <AlertTriangle className="size-4 text-amber-600" />
+    ) : (
+      <CircleAlert className="size-4 text-destructive" />
+    );
+  return (
+    <li className="space-y-1">
+      <div className="flex items-center gap-2 text-sm">
+        {icon}
+        <span className="font-medium">{verdict.platform}</span>
+        <Badge
+          variant={
+            verdict.status === "blocked" ? "destructive" : "outline"
+          }
+          className="text-[10px]"
+        >
+          {verdict.status === "ok"
+            ? "적합"
+            : verdict.status === "warning"
+              ? "경고"
+              : "게시 불가"}
+        </Badge>
+      </div>
+      {verdict.issues.length > 0 && (
+        <ul className="ml-6 space-y-0.5 text-xs text-muted-foreground">
+          {verdict.issues.map((iss, i) => (
+            <li key={i}>
+              {iss.severity === "error" ? "❌" : "⚠️"} {iss.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 3 — 캡션 작성
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Step3Caption({
+  captions,
+  contentId,
+  savedAt,
+  thumbnailUrls,
+  description,
+  presetId,
+  presets,
+  selectedPreset,
+  generating,
+  captionMode,
+  onSwitchMode,
+  onChangeDescription,
+  onChangePreset,
+  onGenerate,
+  onStartManual,
+  onRegenerate,
+  onPrev,
+  onNext,
+  canAdvance,
+}: {
+  captions: Captions | null;
+  contentId: string | null;
+  savedAt: string | null;
+  thumbnailUrls: string[];
+  description: string;
+  presetId: string;
+  presets: PresetSummary[];
+  selectedPreset: PresetSummary | undefined;
+  generating: boolean;
+  captionMode: CaptionMode;
+  onSwitchMode: (m: CaptionMode) => void;
+  onChangeDescription: (v: string) => void;
+  onChangePreset: (v: string) => void;
+  onGenerate: () => void;
+  onStartManual: () => void;
+  onRegenerate: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+  canAdvance: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <Button
+          variant={captionMode === "ai" ? "default" : "outline"}
+          onClick={() => onSwitchMode("ai")}
+          disabled={generating}
+          className="flex-1"
+        >
+          <Sparkles className="size-4" /> AI 자동 생성
+        </Button>
+        <Button
+          variant={captionMode === "manual" ? "default" : "outline"}
+          onClick={() => onSwitchMode("manual")}
+          disabled={generating}
+          className="flex-1"
+        >
+          <Pencil className="size-4" /> 직접 작성
+        </Button>
+      </div>
+
+      {!captions ? (
+        captionMode === "ai" ? (
+          <>
+            {presets.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="preset">캡션 프리셋 (선택)</Label>
+                <select
+                  id="preset"
+                  value={presetId}
+                  onChange={(e) => onChangePreset(e.target.value)}
+                  disabled={generating}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">— 사용 안 함 —</option>
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                {selectedPreset?.description && (
+                  <p className="text-xs text-muted-foreground">
+                    {selectedPreset.description}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="description">기본 설명 (선택)</Label>
+              <Textarea
+                id="description"
+                value={description}
+                onChange={(e) => onChangeDescription(e.target.value)}
+                placeholder="예) 홍대 브런치 카페 후기, 톤은 따뜻하고 일상적으로"
+                rows={3}
+                disabled={generating}
+              />
+              <p className="text-xs text-muted-foreground">
+                설명을 입력하면 AI가 더 정확한 톤의 캡션을 생성합니다.
+              </p>
+            </div>
+            <Button onClick={onGenerate} disabled={generating}>
+              <Sparkles className="size-4" />
+              {generating ? "AI 분석 중..." : "AI 캡션 생성"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              빈 캡션으로 시작해서 플랫폼별 탭에서 직접 작성합니다. 시작하면
+              임시 콘텐츠가 보관함에 저장돼요.
+            </p>
+            <Button onClick={onStartManual} disabled={generating}>
+              <Pencil className="size-4" />
+              {generating ? "준비 중..." : "직접 작성 시작"}
+            </Button>
+          </>
+        )
+      ) : (
+        contentId &&
+        savedAt && (
+          <>
+            <CaptionResult
+              contentId={contentId}
+              captions={captions}
+              savedAt={savedAt}
+              thumbnails={thumbnailUrls}
+              initialEditing={captionMode === "manual"}
+            />
+            {captionMode === "ai" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRegenerate}
+                disabled={generating}
+              >
+                <Sparkles className="size-4" />
+                {generating ? "다른 스타일로 생성 중..." : "다시 생성 (다른 스타일)"}
+              </Button>
+            )}
+          </>
+        )
+      )}
+      <div className="flex justify-between">
+        <Button variant="outline" onClick={onPrev} disabled={generating}>
+          이전
+        </Button>
+        <Button onClick={onNext} disabled={!canAdvance}>
+          다음 단계
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface PresetSummary {
+  id: string;
+  name: string;
+  description: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 4 — 최종 검토
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Step4Review({
+  selectedAccounts,
+  captions,
+  validation,
+  mediaType,
+  mediaCount,
+  onJump,
+  onPrev,
+  onNext,
+  canAdvance,
+}: {
+  selectedAccounts: {
+    id: string;
+    platform: Platform;
+    display_name: string | null;
+  }[];
+  captions: Captions | null;
+  validation: ValidationResult | null;
+  mediaType: MediaType;
+  mediaCount: number;
+  onJump: (step: number) => void;
+  onPrev: () => void;
+  onNext: () => void;
+  canAdvance: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <ReviewSection
+        title="미디어"
+        onEdit={() => onJump(2)}
+        summary={
+          mediaType === "IMAGE"
+            ? `이미지 ${mediaCount}장`
+            : `영상 1개`
+        }
+      />
+      <ReviewSection
+        title="계정"
+        onEdit={() => onJump(1)}
+        summary={`${selectedAccounts.length}개 계정 선택`}
+      >
+        <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+          {selectedAccounts.map((acc) => {
+            const verdict = validation?.perPlatform.find(
+              (v) => v.platform === acc.platform,
+            );
+            return (
+              <li key={acc.id} className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "inline-block size-2 rounded-full",
+                    PLATFORM_COLORS[acc.platform],
+                  )}
+                />
+                <span>{acc.display_name ?? "(이름 없음)"}</span>
+                <span>·</span>
+                <span>{acc.platform}</span>
+                {verdict && (
+                  <Badge
+                    variant={
+                      verdict.status === "blocked"
+                        ? "destructive"
+                        : verdict.status === "warning"
+                          ? "outline"
+                          : "secondary"
+                    }
+                    className="ml-1 text-[10px]"
+                  >
+                    {verdict.status === "ok"
+                      ? "✅"
+                      : verdict.status === "warning"
+                        ? "⚠️"
+                        : "❌"}
+                  </Badge>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </ReviewSection>
+      <ReviewSection
+        title="캡션"
+        onEdit={() => onJump(3)}
+        summary={
+          captions
+            ? `${[
+                captions.youtube && "YouTube",
+                captions.instagram && "Instagram",
+                captions.tiktok && "TikTok",
+              ]
+                .filter(Boolean)
+                .join(", ")} 캡션 작성됨`
+            : "캡션 미작성"
+        }
+      >
+        {captions && <CaptionPreview captions={captions} />}
+      </ReviewSection>
+      {!canAdvance && (
+        <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700">
+          <AlertTriangle className="size-4 shrink-0" />
+          <p>
+            게시 불가 항목이 있어요. 위의 "수정" 링크로 돌아가 문제를
+            해결해주세요.
+          </p>
+        </div>
+      )}
+      <div className="flex justify-between">
+        <Button variant="outline" onClick={onPrev}>
+          이전
+        </Button>
+        <Button onClick={onNext} disabled={!canAdvance}>
+          다음 단계
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ReviewSection({
+  title,
+  summary,
+  onEdit,
+  children,
+}: {
+  title: string;
+  summary: string;
+  onEdit: () => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">{title}</p>
+          <p className="text-sm">{summary}</p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onEdit} className="-mt-1">
+          <Pencil className="size-3.5" /> 수정
+        </Button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function CaptionPreview({ captions }: { captions: Captions }) {
+  return (
+    <ul className="mt-2 space-y-2 text-xs">
+      {captions.youtube && (
+        <li className="rounded bg-muted/40 p-2">
+          <p className="font-medium">YouTube</p>
+          <p className="line-clamp-1 text-muted-foreground">
+            {captions.youtube.title}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            해시태그 {captions.youtube.hashtags.length}개
+          </p>
+        </li>
+      )}
+      {captions.instagram && (
+        <li className="rounded bg-muted/40 p-2">
+          <p className="font-medium">Instagram</p>
+          <p className="line-clamp-2 text-muted-foreground">
+            {captions.instagram.caption}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            해시태그 {captions.instagram.hashtags.length}개
+          </p>
+        </li>
+      )}
+      {captions.tiktok && (
+        <li className="rounded bg-muted/40 p-2">
+          <p className="font-medium">TikTok</p>
+          <p className="line-clamp-2 text-muted-foreground">
+            {captions.tiktok.caption}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            해시태그 {captions.tiktok.hashtags.length}개 (본문 인라인)
+          </p>
+        </li>
+      )}
+    </ul>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 5 — 예약 및 업로드
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Step5Schedule({
+  scheduleMode,
+  scheduledAt,
+  selectedAccountCount,
+  completing,
+  onChangeMode,
+  onChangeScheduledAt,
+  onPrev,
+  onComplete,
+}: {
+  scheduleMode: ScheduleMode;
+  scheduledAt: string;
+  selectedAccountCount: number;
+  completing: boolean;
+  onChangeMode: (m: ScheduleMode) => void;
+  onChangeScheduledAt: (v: string) => void;
+  onPrev: () => void;
+  onComplete: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>업로드 시점</Label>
+        <div className="flex gap-2">
+          <Button
+            variant={scheduleMode === "now" ? "default" : "outline"}
+            onClick={() => onChangeMode("now")}
+            className="flex-1"
+          >
+            즉시 업로드
+          </Button>
+          <Button
+            variant={scheduleMode === "scheduled" ? "default" : "outline"}
+            onClick={() => onChangeMode("scheduled")}
+            className="flex-1"
+          >
+            예약 업로드
+          </Button>
+        </div>
+        {scheduleMode === "scheduled" && (
+          <input
+            type="datetime-local"
+            value={scheduledAt}
+            onChange={(e) => onChangeScheduledAt(e.target.value)}
+            className={cn(
+              "mt-2 w-full rounded-md border bg-background px-3 py-2 text-sm",
+            )}
+          />
+        )}
+      </div>
+
+      <div className="rounded-md border bg-muted/30 p-4 text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <span>선택된 계정</span>
+          <Badge variant="outline">{selectedAccountCount}개</Badge>
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          각 계정별 publish_job이 PENDING 상태로 등록됩니다. 워커가 활성화되면
+          자동 게시 (Phase 4b).
+        </p>
+      </div>
+
+      <div className="flex justify-between">
+        <Button variant="outline" onClick={onPrev} disabled={completing}>
+          이전
+        </Button>
+        <Button onClick={onComplete} disabled={completing}>
+          {completing ? "등록 중..." : "완료"}
+        </Button>
+      </div>
+    </div>
   );
 }

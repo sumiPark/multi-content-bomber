@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, Pencil, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,53 +20,76 @@ import {
   type UpdateCaptionsResult,
 } from "@/app/(dashboard)/actions";
 import type { Captions } from "@/lib/ai/caption-generator";
+import {
+  InstagramPreview,
+  TiktokPreview,
+  YoutubeShortsPreview,
+} from "./caption-previews";
 
 interface CaptionResultProps {
   contentId: string;
   captions: Captions;
   savedAt: string;
   thumbnails: string[];
+  initialEditing?: boolean;
+}
+
+type YoutubeDraft = {
+  title: string;
+  description: string;
+  hashtagsText: string;
+  category: string;
+};
+type InstagramDraft = {
+  caption: string;
+  hashtagsText: string;
+  cover_text: string;
+};
+type TiktokDraft = {
+  caption: string;
+};
+
+function extractHashtags(text: string): string[] {
+  const matches = text.match(/#[^\s#]+/g);
+  return matches ?? [];
+}
+
+function mergeTiktokCaption(caption: string, hashtags: string[]): string {
+  if (hashtags.length === 0) return caption;
+  const allInCaption = hashtags.every((h) => caption.includes(h));
+  if (allInCaption) return caption;
+  const trimmed = caption.trim();
+  return trimmed + (trimmed ? "\n\n" : "") + hashtags.join(" ");
 }
 
 type DraftCaptions = {
-  youtube: {
-    title: string;
-    description: string;
-    hashtagsText: string;
-    category: string;
-  };
-  instagram: {
-    caption: string;
-    hashtagsText: string;
-    cover_text: string;
-  };
-  tiktok: {
-    hook: string;
-    caption: string;
-    hashtagsText: string;
-    sound_recommendation: string;
-  };
+  youtube?: YoutubeDraft;
+  instagram?: InstagramDraft;
+  tiktok?: TiktokDraft;
 };
 
 function toDraft(c: Captions): DraftCaptions {
   return {
-    youtube: {
-      title: c.youtube.title,
-      description: c.youtube.description,
-      hashtagsText: c.youtube.hashtags.join(" "),
-      category: c.youtube.category ?? "",
-    },
-    instagram: {
-      caption: c.instagram.caption,
-      hashtagsText: c.instagram.hashtags.join(" "),
-      cover_text: c.instagram.cover_text ?? "",
-    },
-    tiktok: {
-      hook: c.tiktok.hook,
-      caption: c.tiktok.caption,
-      hashtagsText: c.tiktok.hashtags.join(" "),
-      sound_recommendation: c.tiktok.sound_recommendation ?? "",
-    },
+    youtube: c.youtube
+      ? {
+          title: c.youtube.title,
+          description: c.youtube.description,
+          hashtagsText: c.youtube.hashtags.join(" "),
+          category: c.youtube.category ?? "",
+        }
+      : undefined,
+    instagram: c.instagram
+      ? {
+          caption: c.instagram.caption,
+          hashtagsText: c.instagram.hashtags.join(" "),
+          cover_text: c.instagram.cover_text ?? "",
+        }
+      : undefined,
+    tiktok: c.tiktok
+      ? {
+          caption: mergeTiktokCaption(c.tiktok.caption, c.tiktok.hashtags),
+        }
+      : undefined,
   };
 }
 
@@ -74,23 +97,27 @@ function fromDraft(d: DraftCaptions): Captions {
   const splitHashtags = (s: string) =>
     s.trim().split(/\s+/).filter(Boolean);
   return {
-    youtube: {
-      title: d.youtube.title.trim(),
-      description: d.youtube.description.trim(),
-      hashtags: splitHashtags(d.youtube.hashtagsText),
-      category: d.youtube.category.trim(),
-    },
-    instagram: {
-      caption: d.instagram.caption.trim(),
-      hashtags: splitHashtags(d.instagram.hashtagsText),
-      cover_text: d.instagram.cover_text.trim(),
-    },
-    tiktok: {
-      hook: d.tiktok.hook.trim(),
-      caption: d.tiktok.caption.trim(),
-      hashtags: splitHashtags(d.tiktok.hashtagsText),
-      sound_recommendation: d.tiktok.sound_recommendation.trim(),
-    },
+    youtube: d.youtube
+      ? {
+          title: d.youtube.title.trim(),
+          description: d.youtube.description.trim(),
+          hashtags: splitHashtags(d.youtube.hashtagsText),
+          category: d.youtube.category.trim(),
+        }
+      : undefined,
+    instagram: d.instagram
+      ? {
+          caption: d.instagram.caption.trim(),
+          hashtags: splitHashtags(d.instagram.hashtagsText),
+          cover_text: d.instagram.cover_text.trim(),
+        }
+      : undefined,
+    tiktok: d.tiktok
+      ? {
+          caption: d.tiktok.caption.trim(),
+          hashtags: extractHashtags(d.tiktok.caption),
+        }
+      : undefined,
   };
 }
 
@@ -99,12 +126,21 @@ export function CaptionResult({
   captions,
   savedAt,
   thumbnails,
+  initialEditing = false,
 }: CaptionResultProps) {
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(initialEditing);
   const [draft, setDraft] = useState<DraftCaptions>(() => toDraft(captions));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState(savedAt);
+
+  const activeTabs = useMemo(() => {
+    const tabs: Array<"youtube" | "instagram" | "tiktok"> = [];
+    if (draft.youtube) tabs.push("youtube");
+    if (draft.instagram) tabs.push("instagram");
+    if (draft.tiktok) tabs.push("tiktok");
+    return tabs;
+  }, [draft]);
 
   async function handleSave() {
     setSaving(true);
@@ -126,6 +162,17 @@ export function CaptionResult({
     setDraft(toDraft(captions));
     setIsEditing(false);
     setError(null);
+  }
+
+  if (activeTabs.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>AI 캡션</CardTitle>
+          <CardDescription>저장된 캡션이 없습니다.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
   }
 
   return (
@@ -194,153 +241,178 @@ export function CaptionResult({
           </ul>
         )}
 
-        <Tabs defaultValue="instagram">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="youtube">YouTube</TabsTrigger>
-            <TabsTrigger value="instagram">Instagram</TabsTrigger>
-            <TabsTrigger value="tiktok">TikTok</TabsTrigger>
+        <Tabs defaultValue={activeTabs[0]}>
+          <TabsList
+            className="grid w-full"
+            style={{
+              gridTemplateColumns: `repeat(${activeTabs.length}, minmax(0, 1fr))`,
+            }}
+          >
+            {activeTabs.includes("youtube") && (
+              <TabsTrigger value="youtube">YouTube</TabsTrigger>
+            )}
+            {activeTabs.includes("instagram") && (
+              <TabsTrigger value="instagram">Instagram</TabsTrigger>
+            )}
+            {activeTabs.includes("tiktok") && (
+              <TabsTrigger value="tiktok">TikTok</TabsTrigger>
+            )}
           </TabsList>
 
-          <TabsContent value="youtube" className="space-y-4 pt-4">
-            <Field
-              label="제목 (100자 이내)"
-              value={draft.youtube.title}
-              readOnly={!isEditing}
-              rows={1}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  youtube: { ...draft.youtube, title: v },
-                })
-              }
-            />
-            <Field
-              label="설명 (5000자 이내, 타임스탬프/CTA 포함)"
-              value={draft.youtube.description}
-              readOnly={!isEditing}
-              rows={6}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  youtube: { ...draft.youtube, description: v },
-                })
-              }
-            />
-            <Field
-              label="카테고리"
-              value={draft.youtube.category}
-              readOnly={!isEditing}
-              rows={1}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  youtube: { ...draft.youtube, category: v },
-                })
-              }
-            />
-            <Field
-              label="해시태그 (최대 30개)"
-              value={draft.youtube.hashtagsText}
-              readOnly={!isEditing}
-              rows={3}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  youtube: { ...draft.youtube, hashtagsText: v },
-                })
-              }
-            />
-          </TabsContent>
+          {draft.youtube && (
+            <TabsContent value="youtube" className="pt-4">
+              <div className="grid gap-6 lg:grid-cols-[1fr_240px]">
+                <div className="space-y-4">
+                  <Field
+                    label="제목 (100자 이내)"
+                    value={draft.youtube.title}
+                    readOnly={!isEditing}
+                    rows={1}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        youtube: { ...draft.youtube!, title: v },
+                      })
+                    }
+                  />
+                  <Field
+                    label="설명 (5000자 이내, 타임스탬프/CTA 포함)"
+                    value={draft.youtube.description}
+                    readOnly={!isEditing}
+                    rows={6}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        youtube: { ...draft.youtube!, description: v },
+                      })
+                    }
+                  />
+                  <Field
+                    label="카테고리"
+                    value={draft.youtube.category}
+                    readOnly={!isEditing}
+                    rows={1}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        youtube: { ...draft.youtube!, category: v },
+                      })
+                    }
+                  />
+                  <Field
+                    label="해시태그 (최대 15개)"
+                    value={draft.youtube.hashtagsText}
+                    readOnly={!isEditing}
+                    rows={3}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        youtube: { ...draft.youtube!, hashtagsText: v },
+                      })
+                    }
+                  />
+                </div>
+                <div className="lg:sticky lg:top-4 lg:self-start">
+                  <YoutubeShortsPreview
+                    title={draft.youtube.title}
+                    description={draft.youtube.description}
+                    hashtags={draft.youtube.hashtagsText
+                      .trim()
+                      .split(/\s+/)
+                      .filter(Boolean)}
+                    thumbnailUrl={thumbnails[0]}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+          )}
 
-          <TabsContent value="instagram" className="space-y-4 pt-4">
-            <Field
-              label="릴스 커버 텍스트"
-              value={draft.instagram.cover_text}
-              readOnly={!isEditing}
-              rows={1}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  instagram: { ...draft.instagram, cover_text: v },
-                })
-              }
-            />
-            <Field
-              label="캡션 (2200자 이내)"
-              value={draft.instagram.caption}
-              readOnly={!isEditing}
-              rows={8}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  instagram: { ...draft.instagram, caption: v },
-                })
-              }
-            />
-            <Field
-              label="해시태그 (최대 30개)"
-              value={draft.instagram.hashtagsText}
-              readOnly={!isEditing}
-              rows={3}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  instagram: { ...draft.instagram, hashtagsText: v },
-                })
-              }
-            />
-          </TabsContent>
+          {draft.instagram && (
+            <TabsContent value="instagram" className="pt-4">
+              <div className="grid gap-6 lg:grid-cols-[1fr_240px]">
+                <div className="space-y-4">
+                  <Field
+                    label="릴스 커버 텍스트"
+                    value={draft.instagram.cover_text}
+                    readOnly={!isEditing}
+                    rows={1}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        instagram: { ...draft.instagram!, cover_text: v },
+                      })
+                    }
+                  />
+                  <Field
+                    label="캡션 (2200자 이내)"
+                    value={draft.instagram.caption}
+                    readOnly={!isEditing}
+                    rows={8}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        instagram: { ...draft.instagram!, caption: v },
+                      })
+                    }
+                  />
+                  <Field
+                    label="해시태그 (최대 20개)"
+                    value={draft.instagram.hashtagsText}
+                    readOnly={!isEditing}
+                    rows={3}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        instagram: { ...draft.instagram!, hashtagsText: v },
+                      })
+                    }
+                  />
+                </div>
+                <div className="lg:sticky lg:top-4 lg:self-start">
+                  <InstagramPreview
+                    caption={draft.instagram.caption}
+                    coverText={draft.instagram.cover_text}
+                    hashtags={draft.instagram.hashtagsText
+                      .trim()
+                      .split(/\s+/)
+                      .filter(Boolean)}
+                    thumbnailUrl={thumbnails[0]}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+          )}
 
-          <TabsContent value="tiktok" className="space-y-4 pt-4">
-            <Field
-              label="훅 (첫 3초)"
-              value={draft.tiktok.hook}
-              readOnly={!isEditing}
-              rows={1}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  tiktok: { ...draft.tiktok, hook: v },
-                })
-              }
-            />
-            <Field
-              label="본문 (hook + caption 합쳐서 300자 이내)"
-              value={draft.tiktok.caption}
-              readOnly={!isEditing}
-              rows={4}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  tiktok: { ...draft.tiktok, caption: v },
-                })
-              }
-            />
-            <Field
-              label="사운드/효과 추천"
-              value={draft.tiktok.sound_recommendation}
-              readOnly={!isEditing}
-              rows={1}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  tiktok: { ...draft.tiktok, sound_recommendation: v },
-                })
-              }
-            />
-            <Field
-              label="해시태그 (최대 5개, 바이럴 중심)"
-              value={draft.tiktok.hashtagsText}
-              readOnly={!isEditing}
-              rows={2}
-              onChange={(v) =>
-                setDraft({
-                  ...draft,
-                  tiktok: { ...draft.tiktok, hashtagsText: v },
-                })
-              }
-            />
-          </TabsContent>
+          {draft.tiktok && (
+            <TabsContent value="tiktok" className="pt-4">
+              <div className="grid gap-6 lg:grid-cols-[1fr_240px]">
+                <div className="space-y-4">
+                  <Field
+                    label="본문 (300자 이내, 해시태그 #는 본문 안에 직접 작성)"
+                    value={draft.tiktok.caption}
+                    readOnly={!isEditing}
+                    rows={6}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        tiktok: { ...draft.tiktok!, caption: v },
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    해시태그는 본문 안에 #으로 작성하세요. 저장 시 자동으로
+                    추출되어 검색용 메타데이터에 포함됩니다.
+                  </p>
+                </div>
+                <div className="lg:sticky lg:top-4 lg:self-start">
+                  <TiktokPreview
+                    caption={draft.tiktok.caption}
+                    thumbnailUrl={thumbnails[0]}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       </CardContent>
     </Card>

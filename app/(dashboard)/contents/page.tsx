@@ -26,11 +26,25 @@ export default async function ContentsPage() {
     .maybeSingle();
   if (!profile?.organization_id) redirect("/onboarding");
 
-  const { data: contents } = await supabase
+  // internal_title는 0008 마이그레이션 이후 추가. 타입 재생성 전이므로
+  // 응답 전체를 명시 타입으로 cast (재생성 후 cast 제거).
+  type ContentRow = {
+    id: string;
+    media_urls: string[];
+    ai_captions: unknown;
+    created_at: string;
+    updated_at: string;
+    created_by: string | null;
+    internal_title: string | null;
+  };
+
+  const { data: contents } = (await supabase
     .from("contents")
-    .select("id, media_urls, ai_captions, created_at, updated_at, created_by")
+    .select(
+      "id, media_urls, ai_captions, created_at, updated_at, created_by, internal_title",
+    )
     .order("created_at", { ascending: false })
-    .limit(PAGE_LIMIT);
+    .limit(PAGE_LIMIT)) as unknown as { data: ContentRow[] | null };
 
   const list = contents ?? [];
   const firstPaths = list
@@ -78,9 +92,13 @@ export default async function ContentsPage() {
           <ul className="space-y-3 pr-3">
             {list.map((c) => {
               const captionsResult = captionsSchema.safeParse(c.ai_captions);
-              const preview = captionsResult.success
-                ? captionsResult.data.instagram.caption
+              const captionPreview = captionsResult.success
+                ? (captionsResult.data.youtube?.title ??
+                  captionsResult.data.instagram?.caption ??
+                  captionsResult.data.tiktok?.caption ??
+                  "")
                 : "";
+              const internal = c.internal_title;
               const thumbUrl = c.media_urls[0]
                 ? thumbsByPath.get(c.media_urls[0])
                 : undefined;
@@ -107,13 +125,26 @@ export default async function ContentsPage() {
                           )}
                         </div>
                         <div className="flex min-w-0 flex-1 flex-col justify-between">
-                          <p className="line-clamp-2 text-sm">
-                            {preview || (
-                              <span className="text-muted-foreground">
-                                (캡션 없음)
-                              </span>
-                            )}
-                          </p>
+                          <div className="space-y-1">
+                            {internal ? (
+                              <p className="line-clamp-1 text-sm font-medium">
+                                {internal}
+                              </p>
+                            ) : null}
+                            <p
+                              className={
+                                internal
+                                  ? "line-clamp-1 text-xs text-muted-foreground"
+                                  : "line-clamp-2 text-sm"
+                              }
+                            >
+                              {captionPreview || (
+                                <span className="text-muted-foreground">
+                                  (캡션 없음)
+                                </span>
+                              )}
+                            </p>
+                          </div>
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <RelativeTime iso={c.updated_at} />
                             {!isMine && (
