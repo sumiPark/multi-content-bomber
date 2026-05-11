@@ -41,7 +41,15 @@ export async function GET(
   // Verify CSRF state
   const expectedState = request.cookies.get(STATE_COOKIE)?.value;
   if (!expectedState || expectedState !== state) {
-    const response = redirectWithError(request, "OAuth state 검증 실패");
+    console.warn(
+      `[oauth callback] state mismatch platform=${platform} hasCookie=${!!expectedState} cookieLen=${expectedState?.length ?? 0} queryLen=${state.length}`,
+    );
+    const response = redirectWithError(
+      request,
+      expectedState
+        ? "OAuth state 불일치 — 다시 시도해주세요."
+        : "OAuth 세션이 만료되었습니다 (15분). 다시 시도해주세요.",
+    );
     response.cookies.delete(STATE_COOKIE);
     return response;
   }

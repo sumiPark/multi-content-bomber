@@ -9,7 +9,7 @@ import {
 } from "@/lib/platforms";
 
 const STATE_COOKIE = "oauth_state";
-const STATE_TTL_SECONDS = 300; // 5 minutes
+const STATE_TTL_SECONDS = 900; // 15 minutes — Google "테스트 중인 앱" 경고 + 권한 동의 단계 고려
 
 export async function GET(
   request: NextRequest,
