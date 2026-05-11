@@ -23,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { PlatformIcon } from "@/components/ui/platform-icon";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
@@ -64,6 +65,13 @@ interface SocialAccountSummary {
   display_name: string | null;
   is_active: boolean;
   token_expires_at: string | null;
+  group_id: string | null;
+}
+
+interface AccountGroupSummary {
+  id: string;
+  name: string;
+  color: string;
 }
 
 interface PresetSummary {
@@ -76,6 +84,7 @@ interface UploadWizardProps {
   organizationId: string;
   userId: string;
   socialAccounts: SocialAccountSummary[];
+  accountGroups: AccountGroupSummary[];
   presets: PresetSummary[];
 }
 
@@ -83,16 +92,11 @@ type MediaType = "IMAGE" | "VIDEO";
 type ScheduleMode = "now" | "scheduled";
 type CaptionMode = "ai" | "manual";
 
-const PLATFORM_COLORS: Record<Platform, string> = {
-  YOUTUBE: "bg-red-500",
-  INSTAGRAM: "bg-pink-500",
-  TIKTOK: "bg-zinc-900",
-};
-
 export function UploadWizard({
   organizationId,
   userId,
   socialAccounts = [],
+  accountGroups = [],
   presets = [],
 }: UploadWizardProps) {
   const router = useRouter();
@@ -454,8 +458,15 @@ export function UploadWizard({
         {step === 1 && (
           <Step1Accounts
             socialAccounts={socialAccounts}
+            accountGroups={accountGroups}
             selectedAccountIds={selectedAccountIds}
             onToggle={toggleAccount}
+            onSetSelection={(ids) => {
+              setSelectedAccountIds(ids);
+              setCaptions(null);
+              setContentId(null);
+              setThumbnailUrls([]);
+            }}
             onNext={() => setStep(2)}
             canAdvance={canAdvanceStep1}
           />
@@ -540,10 +551,24 @@ export function UploadWizard({
 // Step 1 — 계정 선택
 // ─────────────────────────────────────────────────────────────────────────────
 
+const GROUP_DOT_COLOR: Record<string, string> = {
+  zinc: "bg-zinc-400",
+  red: "bg-red-500",
+  amber: "bg-amber-500",
+  green: "bg-green-500",
+  blue: "bg-blue-500",
+  pink: "bg-pink-500",
+  purple: "bg-purple-500",
+};
+
+const GROUP_BAR_COLOR: Record<string, string> = GROUP_DOT_COLOR;
+
 function Step1Accounts({
   socialAccounts,
+  accountGroups,
   selectedAccountIds,
   onToggle,
+  onSetSelection,
   onNext,
   canAdvance,
 }: {
@@ -552,20 +577,24 @@ function Step1Accounts({
     platform: Platform;
     display_name: string | null;
     is_active: boolean;
+    group_id: string | null;
   }[];
+  accountGroups: { id: string; name: string; color: string }[];
   selectedAccountIds: string[];
   onToggle: (id: string, checked: boolean) => void;
+  onSetSelection: (ids: string[]) => void;
   onNext: () => void;
   canAdvance: boolean;
 }) {
-  const grouped = useMemo(() => {
-    const g: Record<Platform, typeof socialAccounts> = {
-      YOUTUBE: [],
-      INSTAGRAM: [],
-      TIKTOK: [],
-    };
-    for (const a of socialAccounts) g[a.platform].push(a);
-    return g;
+  // 그룹별로 묶기 (활성 계정만 선택 가능, 비활성도 회색 표시).
+  const accountsByGroup = useMemo(() => {
+    const m = new Map<string | null, typeof socialAccounts>();
+    for (const acc of socialAccounts) {
+      const list = m.get(acc.group_id) ?? [];
+      list.push(acc);
+      m.set(acc.group_id, list);
+    }
+    return m;
   }, [socialAccounts]);
 
   if (socialAccounts.length === 0) {
@@ -587,65 +616,156 @@ function Step1Accounts({
     );
   }
 
+  function toggleGroup(accounts: typeof socialAccounts) {
+    const eligible = accounts.filter((a) => a.is_active);
+    if (eligible.length === 0) return;
+    const accIds = eligible.map((a) => a.id);
+    const allSelected = accIds.every((id) => selectedAccountIds.includes(id));
+    if (allSelected) {
+      onSetSelection(selectedAccountIds.filter((id) => !accIds.includes(id)));
+    } else {
+      const next = new Set(selectedAccountIds);
+      for (const id of accIds) next.add(id);
+      onSetSelection(Array.from(next));
+    }
+  }
+
+  // 표시 순서: 그룹들 먼저(생성순) → 미지정.
+  const sections: Array<{
+    key: string;
+    title: string;
+    color: string;
+    list: typeof socialAccounts;
+    isUnassigned: boolean;
+  }> = [
+    ...accountGroups
+      .map((g) => ({
+        key: g.id,
+        title: g.name,
+        color: g.color,
+        list: accountsByGroup.get(g.id) ?? [],
+        isUnassigned: false,
+      }))
+      .filter((s) => s.list.length > 0),
+  ];
+  const unassigned = accountsByGroup.get(null) ?? [];
+  if (unassigned.length > 0) {
+    sections.push({
+      key: "_unassigned",
+      title: "그룹 미지정",
+      color: "zinc",
+      list: unassigned,
+      isUnassigned: true,
+    });
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        이 콘텐츠를 게시할 계정을 선택해주세요. 선택된 플랫폼 조합이 다음
-        단계의 검증과 캡션 생성에 사용됩니다.
+        그룹 헤더의 체크박스로 한 번에 선택하거나, 개별 계정을 직접 체크할 수 있어요.
       </p>
-      {(["YOUTUBE", "INSTAGRAM", "TIKTOK"] as const).map((platform) => {
-        const list = grouped[platform];
-        if (list.length === 0) return null;
-        return (
-          <div key={platform} className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div
+
+      <div className="space-y-3">
+        {sections.map((section) => {
+          const eligible = section.list.filter((a) => a.is_active);
+          const selectedInGroup = eligible.filter((a) =>
+            selectedAccountIds.includes(a.id),
+          );
+          const allSelected =
+            eligible.length > 0 && selectedInGroup.length === eligible.length;
+          const partial =
+            selectedInGroup.length > 0 && !allSelected;
+          const bar = GROUP_BAR_COLOR[section.color] ?? GROUP_BAR_COLOR.zinc;
+          return (
+            <div
+              key={section.key}
+              className={cn(
+                "relative overflow-hidden rounded-md border",
+                section.isUnassigned && "border-dashed",
+              )}
+            >
+              <div className={cn("absolute inset-y-0 left-0 w-1", bar)} />
+              {/* Section header — 클릭으로 전체 토글 */}
+              <button
+                type="button"
+                onClick={() => toggleGroup(section.list)}
+                disabled={eligible.length === 0}
                 className={cn(
-                  "flex size-5 items-center justify-center rounded-full text-[10px] font-semibold text-white",
-                  PLATFORM_COLORS[platform],
+                  "flex w-full items-center gap-3 px-4 py-2.5 text-left transition",
+                  eligible.length === 0
+                    ? "cursor-not-allowed opacity-60"
+                    : "hover:bg-accent/30",
                 )}
               >
-                {platform.charAt(0)}
-              </div>
-              <h3 className="text-sm font-medium">{platform}</h3>
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = partial;
+                  }}
+                  readOnly
+                  disabled={eligible.length === 0}
+                  className="size-4 pointer-events-none"
+                />
+                <p className="flex-1 text-sm font-semibold">
+                  {section.title}
+                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                    {selectedInGroup.length}/{eligible.length}
+                  </span>
+                </p>
+              </button>
+
+              {/* Account rows */}
+              <ul className="space-y-1 border-t bg-muted/10 px-3 py-2">
+                {section.list.map((acc) => {
+                  const checked = selectedAccountIds.includes(acc.id);
+                  const disabled = !acc.is_active;
+                  return (
+                    <li key={acc.id}>
+                      <label
+                        className={cn(
+                          "flex items-center gap-2.5 rounded px-2 py-1.5 text-sm transition",
+                          disabled
+                            ? "cursor-not-allowed opacity-50"
+                            : "cursor-pointer hover:bg-accent/40",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={(e) =>
+                            onToggle(acc.id, e.target.checked)
+                          }
+                          className="size-4"
+                        />
+                        <PlatformIcon platform={acc.platform} size={20} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium leading-tight">
+                            {acc.display_name ?? "(이름 없음)"}
+                          </p>
+                          <p className="text-[10px] leading-tight text-muted-foreground">
+                            {acc.platform}
+                          </p>
+                        </div>
+                        {disabled && (
+                          <Badge
+                            variant="destructive"
+                            className="text-[10px]"
+                          >
+                            비활성
+                          </Badge>
+                        )}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
-            <ul className="space-y-2">
-              {list.map((acc) => {
-                const checked = selectedAccountIds.includes(acc.id);
-                const disabled = !acc.is_active;
-                return (
-                  <li key={acc.id}>
-                    <label
-                      className={cn(
-                        "flex items-center gap-3 rounded-md border p-3 transition",
-                        disabled
-                          ? "cursor-not-allowed opacity-50"
-                          : "cursor-pointer hover:bg-accent/40",
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={(e) => onToggle(acc.id, e.target.checked)}
-                        className="size-4"
-                      />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">
-                          {acc.display_name ?? "(이름 없음)"}
-                        </p>
-                      </div>
-                      {!acc.is_active && (
-                        <Badge variant="destructive">비활성</Badge>
-                      )}
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+
       <div className="flex justify-end">
         <Button onClick={onNext} disabled={!canAdvance}>
           다음 단계 ({selectedAccountIds.length}개 선택)
@@ -1028,12 +1148,7 @@ function Step4Review({
             );
             return (
               <li key={acc.id} className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "inline-block size-2 rounded-full",
-                    PLATFORM_COLORS[acc.platform],
-                  )}
-                />
+                <PlatformIcon platform={acc.platform} size={14} />
                 <span>{acc.display_name ?? "(이름 없음)"}</span>
                 <span>·</span>
                 <span>{acc.platform}</span>

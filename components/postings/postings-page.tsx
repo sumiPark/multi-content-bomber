@@ -20,6 +20,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PlatformIcon } from "@/components/ui/platform-icon";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -81,11 +82,6 @@ interface PostingsPageProps {
   canManage: boolean;
 }
 
-const PLATFORM_COLORS: Record<Platform, string> = {
-  YOUTUBE: "bg-red-500",
-  INSTAGRAM: "bg-pink-500",
-  TIKTOK: "bg-zinc-900",
-};
 
 const STATUS_LABEL: Record<DisplayStatus, string> = {
   scheduled: "예약중",
@@ -661,12 +657,7 @@ function FiltersBar({
                     : "border-border bg-background text-muted-foreground hover:bg-accent/40",
                 )}
               >
-                <span
-                  className={cn(
-                    "inline-block size-2 rounded-full",
-                    PLATFORM_COLORS[p],
-                  )}
-                />
+                <PlatformIcon platform={p} size={14} />
                 {p}
               </button>
             );
@@ -959,12 +950,7 @@ function Row({
       </td>
       <td className="px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <span
-            className={cn(
-              "inline-block size-2 rounded-full",
-              PLATFORM_COLORS[item.account.platform],
-            )}
-          />
+          <PlatformIcon platform={item.account.platform} size={16} />
           <span className="text-xs">{item.account.platform}</span>
         </div>
       </td>

@@ -23,15 +23,49 @@ export default async function UploadPage() {
     .eq("id", profile.organization_id)
     .single();
 
-  const [accountsRes, presetsRes] = await Promise.all([
+  // group_id / account_groups는 0009 마이그레이션 이후. 타입 재생성 전이라 cast.
+  type AccountRow = {
+    id: string;
+    platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
+    display_name: string | null;
+    is_active: boolean;
+    token_expires_at: string | null;
+    group_id: string | null;
+  };
+  type GroupRow = {
+    id: string;
+    name: string;
+    color: string;
+  };
+
+  const untypedSupabase = supabase as unknown as {
+    from: (t: string) => {
+      select: (cols: string) => {
+        order: (
+          col: string,
+          opts: { ascending: boolean },
+        ) => Promise<{ data: GroupRow[] | null }>;
+      };
+    };
+  };
+
+  const [accountsRes, presetsRes, groupsRes] = await Promise.all([
     supabase
       .from("social_accounts")
-      .select("id, platform, display_name, is_active, token_expires_at")
-      .eq("is_active", true),
+      .select(
+        "id, platform, display_name, is_active, token_expires_at, group_id",
+      )
+      .eq("is_active", true) as unknown as Promise<{
+      data: AccountRow[] | null;
+    }>,
     supabase
       .from("caption_presets")
       .select("id, name, description")
       .order("created_at", { ascending: false }),
+    untypedSupabase
+      .from("account_groups")
+      .select("id, name, color")
+      .order("created_at", { ascending: true }),
   ]);
 
   return (
@@ -57,6 +91,7 @@ export default async function UploadPage() {
         organizationId={profile.organization_id}
         userId={user.id}
         socialAccounts={accountsRes.data ?? []}
+        accountGroups={groupsRes.data ?? []}
         presets={presetsRes.data ?? []}
       />
     </main>
