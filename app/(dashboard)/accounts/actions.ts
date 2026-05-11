@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
@@ -8,25 +9,23 @@ const disconnectSchema = z.object({
   accountId: z.string().uuid(),
 });
 
-export type DisconnectResult =
-  | { ok: true }
-  | { ok: false; error: string };
-
+// React 19 form action prop requires Promise<void>. Errors are surfaced via
+// redirect to /accounts?error=... where the page renders an inline banner.
 export async function disconnectAccountAction(
   formData: FormData,
-): Promise<DisconnectResult> {
+): Promise<void> {
   const parsed = disconnectSchema.safeParse({
     accountId: formData.get("accountId"),
   });
   if (!parsed.success) {
-    return { ok: false, error: "잘못된 입력" };
+    redirect(`/accounts?error=${encodeURIComponent("잘못된 입력")}`);
   }
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "로그인 필요" };
+  if (!user) redirect("/login");
 
   // RLS: ADMIN/MANAGER만 social_accounts 삭제 가능 (0001 정책).
   const { error } = await supabase
@@ -34,9 +33,10 @@ export async function disconnectAccountAction(
     .delete()
     .eq("id", parsed.data.accountId);
 
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    redirect(`/accounts?error=${encodeURIComponent(error.message)}`);
+  }
 
   revalidatePath("/accounts");
   revalidatePath("/");
-  return { ok: true };
 }

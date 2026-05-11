@@ -8,6 +8,7 @@ import {
   generateCaptions,
   type Captions,
 } from "@/lib/ai/caption-generator";
+import type { Json } from "@/types/database";
 
 const SIGNED_URL_TTL_SECONDS = 600;
 
@@ -21,7 +22,7 @@ const generateInputSchema = z.object({
     .array(z.string().min(1))
     .min(1)
     .max(10),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
   description: z.string().max(500).optional(),
   presetId: z.string().uuid().optional(),
 });
@@ -125,10 +126,14 @@ export async function generateCaptionsAction(
 
   let captions: Captions;
   try {
-    captions = await generateCaptions(signed.map((s) => s.signedUrl), {
-      description: parsed.data.description,
-      presetInstructions,
-    });
+    // `failed` check above guarantees every entry has a non-null signedUrl.
+    captions = await generateCaptions(
+      signed.map((s) => s.signedUrl as string),
+      {
+        description: parsed.data.description,
+        presetInstructions,
+      },
+    );
   } catch (err) {
     console.error("[generateCaptionsAction] OpenAI failed:", err);
     return {
@@ -145,8 +150,8 @@ export async function generateCaptionsAction(
       created_by: user.id,
       media_type: parsed.data.mediaType,
       media_urls: parsed.data.mediaPaths,
-      metadata: parsed.data.metadata,
-      ai_captions: captions,
+      metadata: parsed.data.metadata as Json,
+      ai_captions: captions as unknown as Json,
       ai_analyzed_at: new Date().toISOString(),
     })
     .select("id, updated_at")

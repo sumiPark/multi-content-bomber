@@ -66,7 +66,10 @@ export default async function DashboardPage({
         const { data: signed } = await supabase.storage
           .from("media")
           .createSignedUrls(latest.media_urls, THUMBNAIL_TTL_SECONDS);
-        const thumbnails = signed?.map((s) => s.signedUrl) ?? [];
+        const thumbnails =
+          signed
+            ?.map((s) => s.signedUrl)
+            .filter((u): u is string => Boolean(u)) ?? [];
         savedContent = {
           id: latest.id,
           captions: parsed.data,

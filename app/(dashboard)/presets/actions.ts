@@ -23,12 +23,21 @@ export type PresetActionResult =
   | { ok: true }
   | { ok: false; error: string };
 
-async function authorize() {
+type AuthContext = Awaited<ReturnType<typeof createClient>>;
+type AuthOk = {
+  ok: true;
+  supabase: AuthContext;
+  userId: string;
+  organizationId: string;
+};
+type AuthFail = { ok: false; error: string };
+
+async function authorize(): Promise<AuthOk | AuthFail> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { error: "로그인이 필요합니다." } as const;
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -36,10 +45,15 @@ async function authorize() {
     .eq("id", user.id)
     .maybeSingle();
   if (!profile?.organization_id) {
-    return { error: "소속된 조직이 없습니다." } as const;
+    return { ok: false, error: "소속된 조직이 없습니다." };
   }
 
-  return { supabase, userId: user.id, organizationId: profile.organization_id };
+  return {
+    ok: true,
+    supabase,
+    userId: user.id,
+    organizationId: profile.organization_id,
+  };
 }
 
 export async function createPresetAction(
@@ -51,7 +65,7 @@ export async function createPresetAction(
   }
 
   const auth = await authorize();
-  if ("error" in auth) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error };
 
   const { error } = await auth.supabase.from("caption_presets").insert({
     organization_id: auth.organizationId,
@@ -77,7 +91,7 @@ export async function updatePresetAction(
   }
 
   const auth = await authorize();
-  if ("error" in auth) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error };
 
   const { error } = await auth.supabase
     .from("caption_presets")
@@ -104,7 +118,7 @@ export async function deletePresetAction(
   }
 
   const auth = await authorize();
-  if ("error" in auth) return { ok: false, error: auth.error };
+  if (!auth.ok) return { ok: false, error: auth.error };
 
   const { error } = await auth.supabase
     .from("caption_presets")
