@@ -16,6 +16,11 @@ export const metadata: Metadata = {
   title: "Multi-Content Bomber",
   description:
     "AI 멀티 채널 콘텐츠 배포 시스템 — 한 번의 업로드로 YouTube, Instagram, TikTok에 일괄 배포",
+  icons: {
+    icon: "/logos/favicon.svg",
+    shortcut: "/logos/favicon.svg",
+    apple: "/logos/favicon.svg",
+  },
 };
 
 export default function RootLayout({
