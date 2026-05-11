@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { openai } from "@/lib/openai";
+import { getOpenAI } from "@/lib/openai";
 
 // Schema (zod) for validating both AI responses AND existing DB rows.
 // New fields are optional so older `contents.ai_captions` rows still parse.
@@ -119,7 +119,7 @@ export async function generateCaptions(
     .filter(Boolean)
     .join("\n\n");
 
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAI().chat.completions.create({
     model: "gpt-4o",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
