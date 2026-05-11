@@ -43,11 +43,19 @@ type AccountStatus = {
   variant: "secondary" | "destructive" | "outline";
 };
 
+// TikTok/YouTube는 access_token이 짧지만 refresh_token으로 자동 갱신되므로
+// access_token 만료 시간을 사용자에게 노출하지 않음. refresh_token 자체의
+// 만료/회수는 별도 모니터링이 필요(Phase 4c 자동 갱신 작업에서 처리).
+const PLATFORMS_WITH_REFRESH = new Set(["TIKTOK", "YOUTUBE"]);
+
 function getStatus(
   isActive: boolean,
   expiresAt: string | null,
+  platform: string,
 ): AccountStatus {
   if (!isActive) return { label: "비활성", variant: "destructive" };
+  if (PLATFORMS_WITH_REFRESH.has(platform))
+    return { label: "활성", variant: "secondary" };
   if (!expiresAt) return { label: "활성", variant: "secondary" };
   const expires = new Date(expiresAt).getTime();
   const now = Date.now();
@@ -117,7 +125,11 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
           ) : (
             <ul className="space-y-2">
               {list.map((acc) => {
-                const status = getStatus(acc.is_active, acc.token_expires_at);
+                const status = getStatus(
+                  acc.is_active,
+                  acc.token_expires_at,
+                  acc.platform,
+                );
                 const platform = PLATFORMS.find((p) => p.id === acc.platform);
                 return (
                   <li key={acc.id}>
