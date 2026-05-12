@@ -1,0 +1,4 @@
+# Phase 4b BullMQ Worker는 Railway 상주 프로세스로 배포된다 (CLAUDE.md 참조).
+# Vercel은 Next.js 앱만 빌드/배포하므로 worker 소스는 업로드 대상에서 제외한다.
+# 이로써 Vercel 빌드 시간 단축 + 워커 의존성이 Next 번들에 섞이지 않도록 차단.
+worker/
