@@ -1,23 +1,23 @@
 // .env.local 로드는 다른 어떤 import보다 먼저. Redis URL 등 환경변수가 module init에 쓰임.
 import "./load-env";
 
-import { Worker, type Job } from "bullmq";
+import { Worker } from "bullmq";
 import {
   PUBLISH_QUEUE_NAME,
   type PublishJobData,
 } from "@/lib/queue/publish-queue";
 import { connection } from "./redis";
+import { processPublishJob } from "./processors/publish-processor";
 
-// Phase 4b ① 슬라이스 골격.
-// 실제 게시 처리(④ 플랫폼 어댑터 호출, status 머신)는 다음 슬라이스에서 채운다.
+// Phase 4b ③ — processor는 publish_jobs 상태 머신 + status_history 기록까지 담당.
+// 실제 게시는 processor 내부 stubPublish가 ④에서 lib/platforms 어댑터로 교체된다.
 const worker = new Worker<PublishJobData>(
   PUBLISH_QUEUE_NAME,
-  async (job: Job<PublishJobData>) => {
+  async (job) => {
     console.log(
-      `[worker] job ${job.id} received | publishJobId=${job.data.publishJobId} | attempt=${job.attemptsMade + 1}/${job.opts.attempts}`,
+      `[worker] job ${job.id} pickup | attempt=${job.attemptsMade + 1}/${job.opts.attempts}`,
     );
-    // TODO(slice ③④): publish_jobs 상태 머신 + 플랫폼 어댑터 publish() 호출.
-    return { received: true };
+    return processPublishJob(job);
   },
   {
     connection,
