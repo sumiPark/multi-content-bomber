@@ -8,6 +8,7 @@ import {
   generateCaptions,
   type Captions,
 } from "@/lib/ai/caption-generator";
+import { enqueuePublishJobs } from "@/lib/queue/publish-queue";
 import type { Json } from "@/types/database";
 
 const SIGNED_URL_TTL_SECONDS = 600;
@@ -593,8 +594,28 @@ export async function createPublishJobsAction(
     is_ai_generated: true,
   }));
 
-  const { error } = await supabase.from("publish_jobs").insert(jobs);
+  const { data: insertedJobs, error } = await supabase
+    .from("publish_jobs")
+    .insert(jobs)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+
+  const jobIds = (insertedJobs ?? []).map((j) => j.id);
+
+  // BullMQ enqueue. 한 콘텐츠 → N개 계정 fan-out이므로 addBulk로 묶어 전송.
+  // jobId를 publish_jobs.id로 고정해 중복 enqueue를 BullMQ가 자동 방지.
+  // 실패 시 DB rollback은 하지 않는다 — publish_jobs는 PENDING으로 남고,
+  // 사용자가 배포 관리에서 재시도하거나 후속 cron(Phase 4c)이 미등록 PENDING을 자동 복구한다.
+  try {
+    await enqueuePublishJobs(jobIds.map((id) => ({ data: { publishJobId: id } })));
+  } catch (queueError) {
+    console.error("[createPublishJobs] enqueue 실패:", queueError);
+    return {
+      ok: false,
+      error:
+        "DB에는 저장됐지만 작업 큐 등록에 실패했습니다. 배포 관리에서 재시도해주세요.",
+    };
+  }
 
   revalidatePath("/");
   revalidatePath("/postings");
