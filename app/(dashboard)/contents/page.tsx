@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { RelativeTime } from "@/components/ui/relative-time";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  ContentsLibrary,
+  type ContentItem,
+} from "@/components/contents/contents-library";
 import { captionsSchema } from "@/lib/ai/caption-generator";
 import { createClient } from "@/lib/supabase/server";
 
@@ -46,18 +46,38 @@ export default async function ContentsPage() {
     .order("created_at", { ascending: false })
     .limit(PAGE_LIMIT)) as unknown as { data: ContentRow[] | null };
 
-  const list = contents ?? [];
+  const rows = contents ?? [];
+  // ai_captions 파싱은 server-only인 captionsSchema를 쓰므로 여기서 처리해
+  // 클라이언트 컴포넌트로는 문자열 preview만 넘긴다.
+  const list: ContentItem[] = rows.map((c) => {
+    const parsed = captionsSchema.safeParse(c.ai_captions);
+    const preview = parsed.success
+      ? (parsed.data.youtube?.title ??
+        parsed.data.instagram?.caption ??
+        parsed.data.tiktok?.caption ??
+        "")
+      : "";
+    return {
+      id: c.id,
+      media_urls: c.media_urls,
+      caption_preview: preview,
+      updated_at: c.updated_at,
+      created_by: c.created_by,
+      internal_title: c.internal_title,
+    };
+  });
+
   const firstPaths = list
     .map((c) => c.media_urls[0])
     .filter((p): p is string => Boolean(p));
 
-  const thumbsByPath = new Map<string, string>();
+  const thumbsByPath: Record<string, string> = {};
   if (firstPaths.length > 0) {
     const { data: signed } = await supabase.storage
       .from("media")
       .createSignedUrls(firstPaths, THUMB_TTL_SECONDS);
     signed?.forEach((s) => {
-      if (s.path && s.signedUrl) thumbsByPath.set(s.path, s.signedUrl);
+      if (s.path && s.signedUrl) thumbsByPath[s.path] = s.signedUrl;
     });
   }
 
@@ -79,90 +99,12 @@ export default async function ContentsPage() {
         </Link>
       </header>
 
-      {list.length === 0 ? (
-        <Card>
-          <CardContent className="py-16 text-center text-muted-foreground">
-            아직 만든 콘텐츠가 없어요.
-            <br />
-            대시보드에서 첫 콘텐츠를 만들어보세요.
-          </CardContent>
-        </Card>
-      ) : (
-        <ScrollArea className="h-[calc(100vh-220px)] rounded-md">
-          <ul className="space-y-3 pr-3">
-            {list.map((c) => {
-              const captionsResult = captionsSchema.safeParse(c.ai_captions);
-              const captionPreview = captionsResult.success
-                ? (captionsResult.data.youtube?.title ??
-                  captionsResult.data.instagram?.caption ??
-                  captionsResult.data.tiktok?.caption ??
-                  "")
-                : "";
-              const internal = c.internal_title;
-              const thumbUrl = c.media_urls[0]
-                ? thumbsByPath.get(c.media_urls[0])
-                : undefined;
-              const isMine = c.created_by === user.id;
-
-              return (
-                <li key={c.id}>
-                  <Link href={`/?content=${c.id}`} className="block">
-                    <Card className="transition hover:bg-accent/40">
-                      <CardContent className="flex gap-4 p-4">
-                        <div className="relative size-24 shrink-0 overflow-hidden rounded-md border bg-muted">
-                          {thumbUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={thumbUrl}
-                              alt=""
-                              className="size-full object-cover"
-                            />
-                          ) : null}
-                          {c.media_urls.length > 1 && (
-                            <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">
-                              +{c.media_urls.length - 1}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex min-w-0 flex-1 flex-col justify-between">
-                          <div className="space-y-1">
-                            {internal ? (
-                              <p className="line-clamp-1 text-sm font-medium">
-                                {internal}
-                              </p>
-                            ) : null}
-                            <p
-                              className={
-                                internal
-                                  ? "line-clamp-1 text-xs text-muted-foreground"
-                                  : "line-clamp-2 text-sm"
-                              }
-                            >
-                              {captionPreview || (
-                                <span className="text-muted-foreground">
-                                  (캡션 없음)
-                                </span>
-                              )}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <RelativeTime iso={c.updated_at} />
-                            {!isMine && (
-                              <Badge variant="outline" className="font-normal">
-                                다른 멤버
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </ScrollArea>
-      )}
+      <ContentsLibrary
+        items={list}
+        thumbsByPath={thumbsByPath}
+        currentUserId={user.id}
+        pageLimit={PAGE_LIMIT}
+      />
     </main>
   );
 }

@@ -73,6 +73,14 @@ const updateInternalTitleSchema = z.object({
   internalTitle: z.string().max(200),
 });
 
+const deleteContentsInputSchema = z.object({
+  contentIds: z.array(z.string().uuid()).min(1).max(200),
+});
+
+export type DeleteContentsResult =
+  | { ok: true; deleted: number }
+  | { ok: false; error: string };
+
 export type GenerateCaptionsResult =
   | {
       ok: true;
@@ -469,6 +477,72 @@ export async function createBlankContentAction(
     savedAt: content.updated_at,
     thumbnailUrls,
   };
+}
+
+export async function deleteContentsAction(
+  input: z.infer<typeof deleteContentsInputSchema>,
+): Promise<DeleteContentsResult> {
+  const parsed = deleteContentsInputSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  // RLS가 권한 없는 행을 자동 차단 — 우선 삭제 대상의 미디어 경로를 수집한다.
+  const { data: targets, error: selectError } = await supabase
+    .from("contents")
+    .select("id, media_urls")
+    .in("id", parsed.data.contentIds);
+
+  if (selectError) {
+    return { ok: false, error: `조회 실패: ${selectError.message}` };
+  }
+  if (!targets || targets.length === 0) {
+    return { ok: false, error: "삭제할 콘텐츠를 찾을 수 없거나 권한이 없습니다." };
+  }
+
+  const deletableIds = targets.map((t) => t.id);
+  const storagePaths = Array.from(
+    new Set(
+      targets.flatMap((t) => t.media_urls).filter((p): p is string => Boolean(p)),
+    ),
+  );
+
+  // DB 먼저 삭제 (publish_jobs는 cascade). RLS가 권한 없는 id는 통과시키지 않으므로
+  // 위에서 select된 deletableIds만 대상으로 한다.
+  const { error: deleteError, count } = await supabase
+    .from("contents")
+    .delete({ count: "exact" })
+    .in("id", deletableIds);
+
+  if (deleteError) {
+    return { ok: false, error: `삭제 실패: ${deleteError.message}` };
+  }
+
+  // Storage 파일 제거 — DB 삭제 후 best-effort. 실패해도 본 응답은 ok 처리하되 로그.
+  if (storagePaths.length > 0) {
+    const { error: storageError } = await supabase.storage
+      .from("media")
+      .remove(storagePaths);
+    if (storageError) {
+      console.warn(
+        "[deleteContentsAction] storage cleanup failed:",
+        storageError.message,
+      );
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/contents");
+  revalidatePath("/postings");
+  revalidatePath("/uploads");
+
+  return { ok: true, deleted: count ?? deletableIds.length };
 }
 
 export async function createPublishJobsAction(
