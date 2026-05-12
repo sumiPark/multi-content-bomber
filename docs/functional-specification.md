@@ -549,7 +549,7 @@ posting_metrics (
 
 **① 헤더 영역**
 - 좌측: "대시보드" 타이틀 + 서브텍스트 (오늘 요약 한 줄, 예: "오늘 예약된 콘텐츠 3건, 실패 1건")
-- 우측: "배포 관리" 버튼 (outline) + "새 콘텐츠" 버튼 (primary, 강조)
+- 우측: "배포 관리" 버튼 (outline) + "콘텐츠 생성" 버튼 (primary, 강조)
 
 **② 실패 알림바 (조건부 표시)**
 - 실패 건이 1개 이상일 때만 표시. 실패 건이 0이면 이 영역 자체가 숨겨짐
@@ -606,7 +606,7 @@ posting_metrics (
 - 분석 — 계정별 성과 데이터, 최적 시간 분석, 리포팅 (§7)
 
 **콘텐츠 그룹**
-- 새 콘텐츠 — 5-Step 업로드 마법사 진입 (§4.2)
+- 콘텐츠 생성 — 5-Step 업로드 마법사 진입 (§4.2)
 - 배포 관리 — 전체 포스팅 상태 조회, 필터, 일괄 작업 (§6). 실패 건이 있으면 메뉴 옆에 빨간 숫자 뱃지 표시
 - 보관함 — 생성했지만 아직 배포하지 않은 콘텐츠 임시 저장 (DRAFT 상태 `contents`)
 
@@ -624,6 +624,7 @@ posting_metrics (
 - "프리셋" → "AI 프리셋" (AI 캡션 프리셋임을 명확히)
 - "업로드 이력" → 삭제 (배포 관리에 필터로 통합)
 - "분석/리포팅" → "분석" (간결하게)
+- "새 콘텐츠" → "콘텐츠 생성" (메뉴 라벨에 동작 의도를 명시적으로)
 
 ### 9.4 뱃지 규칙
 - 배포 관리: `publish_jobs`에서 `status = 'FAILED'`이고 `deleted_at IS NULL`인 건수를 실시간 반영. 0이면 뱃지 숨김. 100 이상이면 `99+`로 축약 표시. (외부 명세에서 *upload_targets*로 부르기도 하지만 코드/마이그레이션 기준 일관된 이름은 `publish_jobs` — §6.1 참조)
@@ -636,7 +637,7 @@ posting_metrics (
 |------|------|------|
 | 대시보드 | `/` | `app/(dashboard)/page.tsx` |
 | 분석 | `/analytics` | `app/(dashboard)/analytics/page.tsx` |
-| 새 콘텐츠 | `/upload` | `app/(dashboard)/upload/page.tsx` |
+| 콘텐츠 생성 | `/upload` | `app/(dashboard)/upload/page.tsx` |
 | 배포 관리 | `/postings` | `app/(dashboard)/postings/page.tsx` |
 | 보관함 | `/contents` | `app/(dashboard)/contents/page.tsx` |
 | DM 자동 응답 | `/auto-reply` | `app/(dashboard)/auto-reply/page.tsx` (coming soon) |

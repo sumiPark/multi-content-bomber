@@ -44,7 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "콘텐츠",
     items: [
-      { href: "/upload", label: "새 콘텐츠", icon: Wand2 },
+      { href: "/upload", label: "콘텐츠 생성", icon: Wand2 },
       {
         href: "/postings",
         label: "배포 관리",

@@ -90,7 +90,7 @@ export default async function ContentsPage() {
           href="/upload"
           className={buttonVariants({ variant: "outline" })}
         >
-          <Plus className="size-4" /> 새 콘텐츠
+          <Plus className="size-4" /> 콘텐츠 생성
         </Link>
       </header>
 

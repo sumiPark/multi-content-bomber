@@ -78,10 +78,10 @@ export function DashboardHeader({ summary }: { summary: string }) {
           href="/postings"
           className={buttonVariants({ variant: "outline" })}
         >
-          <ListChecks className="size-4" /> 포스팅 관리
+          <ListChecks className="size-4" /> 배포 관리
         </Link>
         <Link href="/upload" className={buttonVariants({ variant: "default" })}>
-          <PlusCircle className="size-4" /> 새 콘텐츠
+          <PlusCircle className="size-4" /> 콘텐츠 생성
         </Link>
       </div>
     </header>

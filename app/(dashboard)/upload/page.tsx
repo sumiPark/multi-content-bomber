@@ -68,7 +68,7 @@ export default async function UploadPage() {
       <header className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            새 콘텐츠 만들기
+            콘텐츠 생성
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             이미지 1~10장 또는 영상 1개를 업로드하면 AI가 플랫폼별 캡션을

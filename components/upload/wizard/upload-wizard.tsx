@@ -423,7 +423,7 @@ export function UploadWizard({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <CardTitle>새 콘텐츠 만들기</CardTitle>
+            <CardTitle>콘텐츠 생성</CardTitle>
             <CardDescription>
               5단계로 계정 선택, 미디어 업로드, 캡션 작성, 검토, 예약을 진행합니다.
             </CardDescription>
