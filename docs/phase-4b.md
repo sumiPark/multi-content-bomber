@@ -81,6 +81,28 @@ async function stubPublish(row: PublishJobRow): Promise<PublishResult> {
 
 **플랫폼별 사양**: docs/functional-specification.md §5.
 
+### Phase 4c 매끄러움을 위해 ④에서 같이 할 일 ⭐
+
+각 플랫폼 어댑터에 `publish()` 추가할 때 **`refreshToken(account)`도 같은 파일에 함께 구현**. Phase 4c(토큰 자동 갱신 cron)가 같은 어댑터 패턴을 재사용하므로 0 비용으로 묶을 수 있고, 따로 짜면 어댑터 인터페이스를 두 번 재논의해야 함.
+
+권장 인터페이스 확장 ([lib/platforms/types.ts](../lib/platforms/types.ts)):
+
+```ts
+export interface PlatformAdapter {
+  buildAuthUrl(state: string): string;
+  exchangeCode(code: string): Promise<TokenSet>;
+  // ④ 신규
+  publish(account: SocialAccount, content: Content): Promise<PublishResult>;
+  // 4c용 — ④와 같이 추가
+  refreshToken(account: SocialAccount): Promise<TokenSet>;
+}
+```
+
+플랫폼별 refresh 주기 참고:
+- Instagram: long-lived token 60일, 만료 전 refresh API로 연장
+- TikTok: refresh_token으로 access_token 재발급, refresh_token도 주기적 갱신
+- YouTube/Google: refresh_token 영구(폐기 안 하면), access_token 1시간
+
 ## 미해결 cleanup task
 
 새 세션에서 ④ 시작 전 또는 별도 ad-hoc commit으로:
