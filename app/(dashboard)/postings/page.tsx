@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { PostingsPage } from "@/components/postings/postings-page";
 
 // 클라이언트에서 필터/검색/일괄 선택을 다루므로, 서버에서는 한 번에 충분히 큰
@@ -10,18 +10,13 @@ const WINDOW_DAYS = 90;
 const SIGNED_URL_TTL = 600;
 
 export default async function Page() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id, role")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
+
+  const supabase = await getServerSupabase();
 
   const since = new Date(
     Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000,

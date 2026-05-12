@@ -1,15 +1,12 @@
 import { SidebarShell } from "@/components/layout/sidebar-shell";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/auth";
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
 
   // No user yet (e.g. mid-redirect from a protected page) — render bare.
   if (!user) return <>{children}</>;

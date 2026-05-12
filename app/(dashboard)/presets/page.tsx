@@ -1,20 +1,15 @@
 import { redirect } from "next/navigation";
 import { PresetsManager } from "@/components/presets/presets-manager";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
 export default async function PresetsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id, role")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
+
+  const supabase = await getServerSupabase();
 
   const { data: presets } = await supabase
     .from("caption_presets")

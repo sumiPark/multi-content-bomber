@@ -1,21 +1,16 @@
 import { redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { UploadWizard } from "@/components/upload/wizard/upload-wizard";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
 export default async function UploadPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id, role")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
+
+  const supabase = await getServerSupabase();
 
   const { data: organization } = await supabase
     .from("organizations")

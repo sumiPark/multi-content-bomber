@@ -7,24 +7,19 @@ import {
   type ContentItem,
 } from "@/components/contents/contents-library";
 import { captionsSchema } from "@/lib/ai/caption-generator";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
 const THUMB_TTL_SECONDS = 3600;
 const PAGE_LIMIT = 50;
 
 export default async function ContentsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
+
+  const supabase = await getServerSupabase();
 
   // internal_title는 0008 마이그레이션 이후 추가. 타입 재생성 전이므로
   // 응답 전체를 명시 타입으로 cast (재생성 후 cast 제거).

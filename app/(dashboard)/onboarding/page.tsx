@@ -1,20 +1,12 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { AcceptInviteForm, CreateOrgForm } from "./onboarding-forms";
 
 export default async function OnboardingPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", user.id)
-    .maybeSingle();
-
+  const profile = await getCurrentProfile();
   if (profile?.organization_id) redirect("/");
 
   return (

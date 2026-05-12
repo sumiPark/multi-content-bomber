@@ -14,7 +14,7 @@ import {
   UpcomingUploads,
 } from "@/components/dashboard/dashboard-hub";
 import { captionsSchema } from "@/lib/ai/caption-generator";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
 const THUMBNAIL_TTL_SECONDS = 3600;
 const UPCOMING_LIMIT = 5;
@@ -30,18 +30,13 @@ interface DashboardPageProps {
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
   const { content: targetContentId } = await searchParams;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
+
+  const supabase = await getServerSupabase();
 
   // ── 단건 보기 분기 (보관함/마법사/이력에서 /?content=<id>로 진입) ────────────
   if (targetContentId) {
@@ -70,7 +65,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
 // 단건 보기 (보존 — 기존 링크 라우팅 유지)
 
 async function renderContentDetail(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
   contentId: string,
 ) {
   const { data: latest } = await supabase
@@ -156,7 +151,7 @@ interface AccountRow {
 }
 
 async function loadDashboardData(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
 ): Promise<DashboardData> {
   const since = new Date(
     Date.now() - STATS_WINDOW_DAYS * 24 * 60 * 60 * 1000,

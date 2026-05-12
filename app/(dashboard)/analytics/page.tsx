@@ -2,24 +2,19 @@ import { redirect } from "next/navigation";
 import { BarChart3, Clock, LineChart, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
 // Phase 1: 화면 골격 + 빈 상태. 데이터 수집 cron + posting_metrics 테이블은
 // docs/functional-specification.md §7.7 Phase 2에서 BullMQ 워커와 함께 진행.
 
 export default async function AnalyticsPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
+
+  const supabase = await getServerSupabase();
 
   // 게시 완료 건수 빠르게 카운트만 — Phase 2부터 실제 인사이트 수치로 대체.
   const { count: publishedCount } = await supabase

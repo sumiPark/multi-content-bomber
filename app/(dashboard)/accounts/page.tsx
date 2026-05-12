@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { AccountsPage } from "@/components/accounts/accounts-page";
 
 interface AccountsPageProps {
@@ -9,19 +9,13 @@ interface AccountsPageProps {
 export default async function Page({ searchParams }: AccountsPageProps) {
   const params = await searchParams;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id, role")
-    .eq("id", user.id)
-    .maybeSingle();
+  const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
 
+  const supabase = await getServerSupabase();
   const canManage =
     profile.role === "ADMIN" || profile.role === "MANAGER";
 

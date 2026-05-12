@@ -253,6 +253,7 @@ export async function generateCaptionsAction(
   }
 
   revalidatePath("/");
+  revalidatePath("/contents");
 
   return {
     ok: true,
@@ -321,6 +322,8 @@ export async function updateCaptionsAction(
   }
 
   revalidatePath("/");
+  revalidatePath("/contents");
+  revalidatePath("/postings");
 
   return { ok: true, savedAt: updated.updated_at };
 }
@@ -401,6 +404,8 @@ export async function regenerateCaptionsAction(
   }
 
   revalidatePath("/");
+  revalidatePath("/contents");
+  revalidatePath("/postings");
 
   return {
     ok: true,
@@ -469,6 +474,7 @@ export async function createBlankContentAction(
       .filter((u): u is string => typeof u === "string" && u.length > 0) ?? [];
 
   revalidatePath("/");
+  revalidatePath("/contents");
 
   return {
     ok: true,
@@ -590,6 +596,8 @@ export async function createPublishJobsAction(
   const { error } = await supabase.from("publish_jobs").insert(jobs);
   if (error) return { ok: false, error: error.message };
 
+  revalidatePath("/");
+  revalidatePath("/postings");
   revalidatePath("/uploads");
   return { ok: true, count: jobs.length };
 }
