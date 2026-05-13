@@ -10,9 +10,9 @@
 | ② | Server Action enqueue 연결 (`enqueuePublishJobs`) | ✅ 완료 | `cd1f868` |
 | ③ | Worker processor 상태 머신 + status_history + 멱등성 | ✅ 완료 | `80a1bf5` |
 | ④ | YouTube `publish()` 어댑터 + 토큰 자동 refresh | ✅ 완료 | `4cd92af` |
-| ⑤-a | Railway 배포 설정 (railway.json, package.json engines, tsx→deps) | ✅ 완료 | (이 커밋) |
-| ⑤-b | Phase 4c 토큰 갱신 cron (BullMQ repeatable) | ⏳ 다음 | — |
-| 후속 | Instagram / TikTok `publish()` 구현 | ⏳ 추후 | — |
+| ⑤-a | Railway 배포 설정 (railway.json, package.json engines, tsx→deps) | ✅ 완료 | `60c50cf` |
+| ⑤-b | Phase 4c 토큰 갱신 cron (BullMQ Job Scheduler) | ✅ 완료 | (이 커밋) |
+| 후속 | Instagram / TikTok `publish()` / `refreshToken()` 구현 | ⏳ 추후 | — |
 
 ## 핵심 설계 결정 (확정)
 
@@ -109,36 +109,41 @@ Railway 배포 준비:
 - Vercel과 Railway가 **같은 Upstash Redis**를 봐야 큐가 통한다. 다른 인스턴스 쓰면 무한 PENDING.
 - `ENCRYPTION_KEY`는 prod와 dev가 **같은 값**이어야 토큰 복호화 가능. Railway에 다른 값 넣으면 모든 토큰 unrecoverable.
 
-## ⑤-b 진입 가이드 (Phase 4c — 토큰 갱신 cron)
+## ⑤-b 완료 요약 (이 커밋)
 
-**목표**: 만료 임박한 access_token을 미리 자동 refresh해서, 실제 publish 시점에 만료된 토큰으로 실패하는 케이스를 줄인다.
+만료 임박 access_token을 30분 주기로 일괄 refresh하는 BullMQ Job Scheduler.
 
-**전략**: BullMQ **repeatable job**으로 매 N분마다 만료 임박 계정을 일괄 refresh.
+- `lib/queue/token-refresh-queue.ts` — 큐 이름 `mcb-token-refresh`, 주기 30분, scheduler ID `token-refresh-sweep`. publish 큐와 분리 (페이로드/동시성 정책이 완전히 다름).
+- `worker/processors/token-refresh-processor.ts` — `social_accounts`에서 `token_expires_at < now + 1h AND is_active = true AND refresh_token_encrypted IS NOT NULL`인 행 최대 100개를 조회해 직렬로 `adapter.refreshToken()` 호출. 성공 시 새 토큰을 암호화해 DB 업데이트. `TokenExpiredError`(invalid_grant)면 `is_active=false`로 마킹.
+- `worker/index.ts` — 두 번째 `Worker(TOKEN_REFRESH_QUEUE_NAME, …, { concurrency: 1 })` 추가 + `setupSchedulers()`에서 `queue.upsertJobScheduler()`로 idempotent 등록. shutdown은 두 워커 동시에 drain.
 
-**작업 분해**:
-1. 새 큐 `mcb-token-refresh` (또는 같은 워커에서 별도 processor) 정의
-2. Repeatable job 등록: 워커 부팅 시 `queue.add(..., { repeat: { every: 30 * 60 * 1000 } })` — 30분 주기
-3. Processor: `social_accounts`에서 `token_expires_at < now + 1h AND is_active = true AND refresh_token_encrypted IS NOT NULL` 일괄 조회 → 각각 `adapter.refreshToken()` 호출 → DB 업데이트
-4. `TokenExpiredError`(invalid_grant) 받은 계정은 `is_active=false`로 마킹
-5. 같은 어댑터 인터페이스 재사용 — ④에서 이미 refreshToken을 같이 구현했으므로 추가 어댑터 수정 없음 ⭐
+운영 디버그용 — 특정 계정만 강제 refresh: `TokenRefreshJobData.accountIds`에 ID 배열을 넣고 `queue.add()`로 1회성 등록. sweep 본래 로직(만료 임박 필터)을 우회한다.
 
-**참고 — 플랫폼별 refresh 주기**:
+**플랫폼별 refresh 주기**:
 - YouTube/Google: refresh_token 영구(폐기 안 하면), access_token 1시간
 - TikTok: refresh_token으로 access_token 재발급, refresh_token도 주기적 갱신
-- Instagram: long-lived token 60일, 만료 전 refresh API로 연장 (단 refreshToken stub 아직 미구현)
+- Instagram: long-lived token 60일, 만료 전 refresh API로 연장 (refreshToken stub 아직 미구현)
 
 ## 다음 세션 시작 체크리스트
 
-새 세션이 ⑤-b(Phase 4c cron)로 진입하기 전:
+Phase 4b 코어 슬라이스(①~⑤-b)는 모두 완료. 새 세션 진입 시점에 따라:
 
-- [ ] `git log --oneline -5`로 현재 위치 확인 (`4cd92af` 또는 이후)
-- [ ] `.env.local`에 `REDIS_URL=rediss://...` 있는지 (없으면 Upstash 콘솔에서 다시)
-- [ ] **좀비 워커 정리**: 이전 세션의 워커 process가 살아있을 수 있음
-  ```powershell
-  Get-WmiObject Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match "worker/index\.ts" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-  ```
-- [ ] Upstash 콘솔에서 `bull:mcb-publish:*` 키 정리할지 결정 (이전 검증 잔재). 필요 시 `FLUSHDB`로 큐 초기화 — 다만 운영 데이터 없으므로 안전
-- [ ] Railway가 이미 배포 중이면 — 새 큐 추가 시 같은 워커 프로세스에서 처리할지(권장) 별도 서비스로 분리할지 결정
+**Railway 배포 / e2e 검증으로 진입할 때**
+- [ ] `git log --oneline -5`로 현재 위치 확인
+- [ ] Railway 콘솔에서 GitHub 연결 + Variables 입력 (.env.example 하단 참조)
+- [ ] Deploy 후 Logs에 `[publish] ready` + `[token-refresh] ready` + `[token-refresh] scheduler upserted` 세 줄 확인
+- [ ] 첫 30분 뒤 `[token-refresh] sweep start` 로그가 뜨는지 (없으면 scheduler 미등록)
+
+**Instagram / TikTok publish 후속 슬라이스로 진입할 때**
+- [ ] `lib/platforms/{instagram,tiktok}.ts`의 `publish()` stub 자리 교체. PlatformAdapter 인터페이스는 이미 정의됨
+- [ ] Instagram: container 생성 → publish 2단계, business 계정 검증 필요
+- [ ] TikTok: PULL_FROM_URL 흐름 — Storage 서명 URL을 그대로 넘기면 TikTok이 fetch
+- [ ] 어댑터 추가 후 `refreshToken()`도 동시에 구현 — sweep이 자동으로 잡아줌
+
+**좀비 워커 정리** (로컬에서 worker 재시작 전):
+```powershell
+Get-WmiObject Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match "worker/index\.ts" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
 
 ## 트러블슈팅 노트 (이번 세션에서 발견·해결)
 
