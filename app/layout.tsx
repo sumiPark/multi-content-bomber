@@ -21,6 +21,13 @@ export const metadata: Metadata = {
     shortcut: "/logos/favicon.svg",
     apple: "/logos/favicon.svg",
   },
+  // 플랫폼별 도메인 소유 verify 태그. Next.js가 <head>에 <meta name="..." content="...">로 자동 렌더링.
+  // - facebook-domain-verification: Meta Business Verification (Instagram App Review 전제 조건)
+  verification: {
+    other: {
+      "facebook-domain-verification": "r1chnaigo6uwlsb5954foezifbc9qv",
+    },
+  },
 };
 
 export default function RootLayout({
