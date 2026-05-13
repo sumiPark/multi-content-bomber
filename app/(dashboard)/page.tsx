@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CaptionResult } from "@/components/ai/caption-result";
 import {
@@ -31,7 +32,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const { content: targetContentId } = await searchParams;
 
   const user = await getSessionUser();
-  if (!user) redirect("/login");
+  // 비로그인 사용자에겐 redirect 대신 server-rendered landing을 반환. 이유:
+  //   Meta/Google/TikTok 도메인 verification crawler는 root URL이 3xx redirect를
+  //   주면 meta tag를 못 보고 verify 실패. landing HTML 응답에 root layout의
+  //   facebook-domain-verification 등이 함께 실려 가게 한다.
+  if (!user) return <LandingHero />;
 
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
@@ -57,6 +62,39 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       <UpcomingUploads items={data.upcoming} />
       <LinkedAccounts summaries={data.accounts} />
       <QuickActions />
+    </main>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 비로그인 사용자용 landing. 도메인 verify crawler가 root layout의 meta tag를
+// 같은 응답에서 받게 하기 위함 + 일반 사용자에겐 깔끔한 진입점.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function LandingHero() {
+  return (
+    <main className="flex min-h-[100dvh] flex-col items-center justify-center gap-6 px-6 text-center">
+      <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+        Multi-Content Bomber
+      </h1>
+      <p className="max-w-xl text-balance text-base text-muted-foreground sm:text-lg">
+        한 번의 업로드로 YouTube · Instagram · TikTok에 동시 배포. AI가 플랫폼별
+        캡션을 자동 생성하고, 워커가 예약 시각에 게시합니다.
+      </p>
+      <div className="flex gap-3">
+        <Link
+          href="/login"
+          className="inline-flex h-11 items-center justify-center rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+        >
+          로그인
+        </Link>
+        <Link
+          href="/signup"
+          className="inline-flex h-11 items-center justify-center rounded-md border border-input bg-background px-6 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+        >
+          회원가입
+        </Link>
+      </div>
     </main>
   );
 }
