@@ -1,6 +1,6 @@
 # Phase 4b — BullMQ Worker 구축 진행 상황
 
-이 문서는 새 세션이 빠르게 컨텍스트를 잡을 수 있도록 작성. 마지막 업데이트 2026-05-12.
+이 문서는 새 세션이 빠르게 컨텍스트를 잡을 수 있도록 작성. 마지막 업데이트 2026-05-13.
 
 ## 슬라이스 진행 상태
 
@@ -9,8 +9,10 @@
 | ① | 인프라 + Worker 골격 (Upstash, BullMQ, redis/queue/index) | ✅ 완료 | `1fd146c` |
 | ② | Server Action enqueue 연결 (`enqueuePublishJobs`) | ✅ 완료 | `cd1f868` |
 | ③ | Worker processor 상태 머신 + status_history + 멱등성 | ✅ 완료 | `80a1bf5` |
-| ④ | 플랫폼별 `publish()` 어댑터 — `stubPublish` 교체 | ⏳ 다음 | — |
-| ⑤ | Railway 배포 + Phase 4c 토큰 갱신 cron | ⏳ 추후 | — |
+| ④ | YouTube `publish()` 어댑터 + 토큰 자동 refresh | ✅ 완료 | `4cd92af` |
+| ⑤-a | Railway 배포 설정 (railway.json, package.json engines, tsx→deps) | ✅ 완료 | (이 커밋) |
+| ⑤-b | Phase 4c 토큰 갱신 cron (BullMQ repeatable) | ⏳ 다음 | — |
+| 후속 | Instagram / TikTok `publish()` 구현 | ⏳ 추후 | — |
 
 ## 핵심 설계 결정 (확정)
 
@@ -55,77 +57,88 @@ npm run worker:enqueue
 
 성공 path 검증은 실제 `publish_jobs` row가 있어야 함 — 마법사로 콘텐츠 만들 때 자연스럽게 검증되거나, ④ 어댑터 완성 후 별도 e2e.
 
-## ④ 슬라이스 진입 가이드
+## ④ 완료 요약 (commit `4cd92af`)
 
-**목표**: `worker/processors/publish-processor.ts`의 `stubPublish()`를 실제 플랫폼 어댑터 호출로 교체.
-
-**현재 stub** ([worker/processors/publish-processor.ts:166](../worker/processors/publish-processor.ts#L166)):
+`lib/platforms/types.ts`에 인터페이스 확장:
 ```ts
-async function stubPublish(row: PublishJobRow): Promise<PublishResult> {
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  return {
-    platformPostId: `stub-${row.id.slice(0, 8)}-${Date.now()}`,
-    platformPostUrl: `https://example.com/stub/${row.id}`,
-  };
+interface PlatformAdapter {
+  buildAuthUrl(state, redirectUri): string;
+  exchangeCode(code, redirectUri): Promise<OAuthTokens>;
+  publish(ctx: PublishContext, accessToken: string): Promise<PublishResult>;
+  refreshToken(refreshTokenPlain: string): Promise<RefreshedTokens>;
 }
 ```
+
+어댑터는 plain text만 다루고 **암복호화는 워커가 책임**. 에러 분류 클래스 4개(`TokenExpiredError` / `RateLimitedError` / `MediaError` / `PublishError`)로 워커가 instanceof 분기.
+
+- **YouTube** (`lib/platforms/youtube.ts`): videos.insert multipart upload + oauth2/token refresh_token grant. HTTP 401/403 quotaExceeded/429 → 우리 에러 매핑. invalid_grant는 TokenExpired로 분류.
+- **Instagram / TikTok**: 후속 슬라이스 stub (`throw new PublishError("…")`).
+- **server-only 제거**: lib/platforms/*는 워커가 import해야 하는데 server-only가 tsx에서 throw. `lib/platforms/server-guard.ts`의 `typeof window` 가드로 대체.
+- **워커 processor**: `social_accounts`/`contents` 조회 + 만료 1분 전 자동 refresh + DB 재암호화 + Storage 단기 서명 URL(10분) + `ai_captions`(jsonb)에서 플랫폼별 필드 추출. TokenExpired 시 `is_active=false` 마킹.
+
+### e2e 검증 절차 (사용자 환경)
+
+타입 검증은 통과했지만 실제 업로드 검증은 사용자 환경에서만 가능:
+
+1. Google Cloud Console에서 OAuth 클라이언트 발급 + YouTube Data API v3 활성화
+2. `.env.local`에 `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET` 입력
+3. 앱에서 YouTube 계정 연동 (`/accounts`)
+4. `/upload`에서 영상 콘텐츠 마법사 진행 → YouTube 채널 선택 → 게시
+5. Vercel function이 `publish_jobs` row INSERT + `enqueuePublishJobs` 호출
+6. Railway 워커가 pickup → 멀티파트 업로드 → `https://www.youtube.com/watch?v=<id>` 반환
+7. UI `/postings`에서 status_history 확인
+
+## ⑤-a 완료 요약 (이 커밋)
+
+Railway 배포 준비:
+- `railway.json` — Nixpacks 빌드 + `startCommand: npm run worker` + ON_FAILURE 재시작(10회)
+- `package.json` — `engines.node: ">=20.0.0"`, **tsx를 dependencies로 이동** (Railway는 NODE_ENV=production에서 devDeps 미설치 → `npm run worker`가 tsx 찾지 못함)
+- `.env.example` — Railway env 명세 + AES-256-GCM 오기를 CBC로 정정 (`lib/crypto.ts`와 일치)
+
+### 사용자 콘솔 작업 (Railway)
+
+1. https://railway.app 가입 + GitHub repo 연결
+2. New Project → Deploy from GitHub repo → `multi-content-bomber` 선택
+3. Service Settings → 자동 감지(Nixpacks) + railway.json의 startCommand 사용 확인
+4. Variables 탭에 prod env 입력 (`.env.example` 하단 명세 참조)
+5. Deploy 트리거 → Logs에서 `[redis] connecting` + `[worker] ready` 두 줄 확인
+6. Upstash 콘솔에서 동일 Redis URL 사용 — Vercel(producer)과 Railway(consumer)가 같은 큐 공유
+
+### 주의
+
+- Vercel과 Railway가 **같은 Upstash Redis**를 봐야 큐가 통한다. 다른 인스턴스 쓰면 무한 PENDING.
+- `ENCRYPTION_KEY`는 prod와 dev가 **같은 값**이어야 토큰 복호화 가능. Railway에 다른 값 넣으면 모든 토큰 unrecoverable.
+
+## ⑤-b 진입 가이드 (Phase 4c — 토큰 갱신 cron)
+
+**목표**: 만료 임박한 access_token을 미리 자동 refresh해서, 실제 publish 시점에 만료된 토큰으로 실패하는 케이스를 줄인다.
+
+**전략**: BullMQ **repeatable job**으로 매 N분마다 만료 임박 계정을 일괄 refresh.
 
 **작업 분해**:
-1. `publish-processor`에서 `row.social_account_id`로 `social_accounts` 조회 → `platform`, 토큰(`access_token_encrypted` 복호화) 확보
-2. `contents` 조회 → `media_urls`, `ai_captions`(jsonb) 확보. `media_urls`는 Supabase Storage 경로 → 단기 서명 URL 생성 필요 (Instagram이 cURL로 가져감)
-3. `lib/platforms/{platform}.ts`에 `publish(account, content)` 메소드 추가 — 현재 OAuth 어댑터에 buildAuthUrl/exchangeCode만 있음
-4. `processPublishJob` 안에서 platform 분기로 어댑터 호출 → `{platformPostId, platformPostUrl}` 반환
-5. 에러 분류 — rate limit(재시도 가치 있음) vs 토큰 만료(즉시 FAILED, social_accounts.is_active=false) vs 기타
+1. 새 큐 `mcb-token-refresh` (또는 같은 워커에서 별도 processor) 정의
+2. Repeatable job 등록: 워커 부팅 시 `queue.add(..., { repeat: { every: 30 * 60 * 1000 } })` — 30분 주기
+3. Processor: `social_accounts`에서 `token_expires_at < now + 1h AND is_active = true AND refresh_token_encrypted IS NOT NULL` 일괄 조회 → 각각 `adapter.refreshToken()` 호출 → DB 업데이트
+4. `TokenExpiredError`(invalid_grant) 받은 계정은 `is_active=false`로 마킹
+5. 같은 어댑터 인터페이스 재사용 — ④에서 이미 refreshToken을 같이 구현했으므로 추가 어댑터 수정 없음 ⭐
 
-**첫 타깃 플랫폼 추천**: **YouTube** — `lib/platforms/youtube.ts` OAuth는 Phase 4a에서 완성 (`d7e9046`), 콘솔 가입이 가장 빠르고 할당량 명확 (10k units/day, 1.6k units/upload).
-
-**플랫폼별 사양**: docs/functional-specification.md §5.
-
-### Phase 4c 매끄러움을 위해 ④에서 같이 할 일 ⭐
-
-각 플랫폼 어댑터에 `publish()` 추가할 때 **`refreshToken(account)`도 같은 파일에 함께 구현**. Phase 4c(토큰 자동 갱신 cron)가 같은 어댑터 패턴을 재사용하므로 0 비용으로 묶을 수 있고, 따로 짜면 어댑터 인터페이스를 두 번 재논의해야 함.
-
-권장 인터페이스 확장 ([lib/platforms/types.ts](../lib/platforms/types.ts)):
-
-```ts
-export interface PlatformAdapter {
-  buildAuthUrl(state: string): string;
-  exchangeCode(code: string): Promise<TokenSet>;
-  // ④ 신규
-  publish(account: SocialAccount, content: Content): Promise<PublishResult>;
-  // 4c용 — ④와 같이 추가
-  refreshToken(account: SocialAccount): Promise<TokenSet>;
-}
-```
-
-플랫폼별 refresh 주기 참고:
-- Instagram: long-lived token 60일, 만료 전 refresh API로 연장
-- TikTok: refresh_token으로 access_token 재발급, refresh_token도 주기적 갱신
+**참고 — 플랫폼별 refresh 주기**:
 - YouTube/Google: refresh_token 영구(폐기 안 하면), access_token 1시간
-
-## 미해결 cleanup task
-
-새 세션에서 ④ 시작 전 또는 별도 ad-hoc commit으로:
-
-1. **`server-only` 패키지 제거** — Phase 4b ③에서 `lib/supabase/service.ts`가 더 이상 import하지 않음
-   ```
-   npm uninstall server-only
-   ```
-2. **`worker/processors/publish-processor.ts`의 untyped SupabaseClient cast 제거** — types/database.ts가 0007 컬럼을 반영하므로 cast 불필요. [publish-processor.ts:55](../worker/processors/publish-processor.ts#L55) 라인의 `as unknown as SupabaseClient` 제거하고 정상 generic client로 복귀.
-3. **`npm audit` 경고** — next 16.2.5 → 16.2.6 권장 (postcss XSS, middleware bypass). 본 작업과 무관.
+- TikTok: refresh_token으로 access_token 재발급, refresh_token도 주기적 갱신
+- Instagram: long-lived token 60일, 만료 전 refresh API로 연장 (단 refreshToken stub 아직 미구현)
 
 ## 다음 세션 시작 체크리스트
 
-새 세션이 ④로 진입하기 전:
+새 세션이 ⑤-b(Phase 4c cron)로 진입하기 전:
 
-- [ ] `git log --oneline -5`로 현재 위치 확인 (`80a1bf5` 또는 이후)
+- [ ] `git log --oneline -5`로 현재 위치 확인 (`4cd92af` 또는 이후)
 - [ ] `.env.local`에 `REDIS_URL=rediss://...` 있는지 (없으면 Upstash 콘솔에서 다시)
 - [ ] **좀비 워커 정리**: 이전 세션의 워커 process가 살아있을 수 있음
   ```powershell
   Get-WmiObject Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match "worker/index\.ts" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
   ```
 - [ ] Upstash 콘솔에서 `bull:mcb-publish:*` 키 정리할지 결정 (이전 검증 잔재). 필요 시 `FLUSHDB`로 큐 초기화 — 다만 운영 데이터 없으므로 안전
-- [ ] `lib/platforms/youtube.ts` (또는 첫 타깃 플랫폼)의 OAuth 어댑터 점검 — `publish()` 메소드를 어디 추가할지
+- [ ] Railway가 이미 배포 중이면 — 새 큐 추가 시 같은 워커 프로세스에서 처리할지(권장) 별도 서비스로 분리할지 결정
 
 ## 트러블슈팅 노트 (이번 세션에서 발견·해결)
 
