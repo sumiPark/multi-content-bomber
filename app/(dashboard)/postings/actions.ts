@@ -166,9 +166,7 @@ export async function cancelPostingsAction(
   const { error } = await service
     .from("publish_jobs")
     .update({
-      // 0007 이후 enum에 CANCELLED 추가됨. 타입 재생성 전이므로 cast.
-      status: "CANCELLED" as never,
-      // @ts-expect-error cancelled_at은 0007 마이그레이션 이후 추가
+      status: "CANCELLED",
       cancelled_at: nowIso,
     })
     .in("id", ids);
@@ -203,7 +201,6 @@ export async function deletePostingsAction(
   const { error } = await service
     .from("publish_jobs")
     .update({
-      // @ts-expect-error deleted_at은 0007 마이그레이션 이후 추가
       deleted_at: new Date().toISOString(),
     })
     .in("id", ids);

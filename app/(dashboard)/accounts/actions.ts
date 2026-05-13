@@ -230,11 +230,9 @@ export async function assignAccountsToGroupAction(
 
   const supabase = await createClient();
   // RLS: social_accounts UPDATE는 ADMIN/MANAGER 정책 (기존 0001 정책).
-  // group_id가 0009 마이그레이션 이후 추가됨 — 타입 재생성 전이라 cast.
   const { error } = await supabase
     .from("social_accounts")
     .update({
-      // @ts-expect-error group_id는 0009 마이그레이션 이후 추가
       group_id: parsed.data.groupId,
     })
     .in("id", parsed.data.accountIds);

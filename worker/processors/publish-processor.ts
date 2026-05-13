@@ -1,15 +1,17 @@
 import type { Job } from "bullmq";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { type PublishJobData } from "@/lib/queue/publish-queue";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
 // publish_jobs.status_history는 jsonb. 워커가 쓰는 항목 형태.
 // (DB 컬럼 정의: docs/functional-specification.md §6.8, migration 0007)
+// index signature는 `Json` 타입과의 구조적 호환을 위해 필요 — jsonb 컬럼에
+// 그대로 update하려면 `{ [key: string]: Json | undefined }`를 만족해야 한다.
 interface StatusHistoryEntry {
   status: string;
   timestamp: string;
   message?: string;
+  [key: string]: Json | undefined;
 }
 
 interface PublishJobRow {
@@ -42,15 +44,9 @@ interface PublishResult {
  *   - processor 내부에서 throw → BullMQ가 attempt++ 후 backoff 후 재호출.
  *   - 우리는 매 호출 시 attempts 컬럼과 status_history를 갱신.
  *   - 마지막 시도까지 실패하면 status=FAILED + completed_at 기록.
- *
- * 타입 캐스트 이유:
- *   - types/database.ts가 마이그레이션 0007 (status_history, cancelled_at, deleted_at)
- *     적용 후 재생성되지 않은 stale 상태. `npx supabase gen types`로 정정될 때까지
- *     untyped SupabaseClient로 캐스트해 update 인자의 새 컬럼 접근을 허용한다.
- *     select 결과는 `.returns<T>()`로 명시해 타입 안전성을 부분적으로 유지.
  */
 export async function processPublishJob(job: Job<PublishJobData>) {
-  const supabase = createServiceClient() as unknown as SupabaseClient;
+  const supabase = createServiceClient();
   const { publishJobId } = job.data;
   const attemptNumber = job.attemptsMade + 1;
   const maxAttempts = job.opts.attempts ?? 1;

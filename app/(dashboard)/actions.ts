@@ -240,7 +240,6 @@ export async function generateCaptionsAction(
       metadata: parsed.data.metadata as Json,
       ai_captions: captions as unknown as Json,
       ai_analyzed_at: new Date().toISOString(),
-      // @ts-expect-error internal_title은 0008 마이그레이션 이후 추가
       internal_title: internalTitle,
     })
     .select("id, updated_at")
@@ -281,7 +280,6 @@ export async function updateInternalTitleAction(
   const { data: updated, error } = await supabase
     .from("contents")
     .update({
-      // @ts-expect-error internal_title은 0008 마이그레이션 이후 추가
       internal_title: parsed.data.internalTitle.trim() || null,
     })
     .eq("id", parsed.data.contentId)
@@ -453,7 +451,6 @@ export async function createBlankContentAction(
       metadata: parsed.data.metadata as Json,
       ai_captions: blank as unknown as Json,
       ai_analyzed_at: null,
-      // @ts-expect-error internal_title은 0008 마이그레이션 이후 추가
       internal_title: internalTitle,
     })
     .select("id, updated_at")
