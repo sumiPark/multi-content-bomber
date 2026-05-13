@@ -1,10 +1,23 @@
-import "server-only";
+import "./server-guard";
 import { instagram } from "./instagram";
 import { tiktok } from "./tiktok";
 import { youtube } from "./youtube";
 import type { Platform, PlatformAdapter } from "./types";
 
-export type { Platform, PlatformAdapter, OAuthTokens } from "./types";
+export type {
+  Platform,
+  PlatformAdapter,
+  OAuthTokens,
+  PublishContext,
+  PublishResult,
+  RefreshedTokens,
+} from "./types";
+export {
+  MediaError,
+  PublishError,
+  RateLimitedError,
+  TokenExpiredError,
+} from "./types";
 
 const ADAPTERS: Partial<Record<Platform, PlatformAdapter>> = {
   INSTAGRAM: instagram,

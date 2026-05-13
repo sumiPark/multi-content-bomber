@@ -1,6 +1,17 @@
 import type { Job } from "bullmq";
 import { type PublishJobData } from "@/lib/queue/publish-queue";
 import { createServiceClient } from "@/lib/supabase/service";
+import { decryptToken, encryptToken } from "@/lib/crypto";
+import {
+  getAdapter,
+  MediaError,
+  PublishError,
+  RateLimitedError,
+  TokenExpiredError,
+  type Platform,
+  type PublishContext,
+  type RefreshedTokens,
+} from "@/lib/platforms";
 import type { Json } from "@/types/database";
 
 // publish_jobs.status_history는 jsonb. 워커가 쓰는 항목 형태.
@@ -23,10 +34,27 @@ interface PublishJobRow {
   status_history: Json | null;
 }
 
-interface PublishResult {
-  platformPostId: string;
-  platformPostUrl: string;
+interface AccountRow {
+  id: string;
+  platform: Platform;
+  is_active: boolean;
+  access_token_encrypted: string | null;
+  refresh_token_encrypted: string | null;
+  token_expires_at: string | null;
 }
+
+interface ContentRow {
+  id: string;
+  media_type: "VIDEO" | "PHOTO";
+  media_urls: string[];
+  title: string | null;
+  internal_title: string | null;
+  ai_captions: Json | null;
+}
+
+const MEDIA_BUCKET = "media";
+const SIGNED_URL_TTL_SEC = 600; // 10분 — YouTube 업로드 한 번에 끝나기 충분
+const TOKEN_REFRESH_BUFFER_MS = 60_000; // 만료 1분 전부터 미리 갱신
 
 /**
  * BullMQ processor — publish_jobs 상태 머신.
@@ -44,6 +72,11 @@ interface PublishResult {
  *   - processor 내부에서 throw → BullMQ가 attempt++ 후 backoff 후 재호출.
  *   - 우리는 매 호출 시 attempts 컬럼과 status_history를 갱신.
  *   - 마지막 시도까지 실패하면 status=FAILED + completed_at 기록.
+ *
+ * 에러 분기 (Phase 4b ④):
+ *   - TokenExpiredError → social_accounts.is_active=false 마킹 후 throw (BullMQ 재시도하지만
+ *     마지막 시도에서 FAILED로 안착; 어차피 같은 토큰으로 재시도해도 의미 없음).
+ *   - RateLimitedError / MediaError / PublishError → throw로 재시도 위임.
  */
 export async function processPublishJob(job: Job<PublishJobData>) {
   const supabase = createServiceClient();
@@ -51,7 +84,7 @@ export async function processPublishJob(job: Job<PublishJobData>) {
   const attemptNumber = job.attemptsMade + 1;
   const maxAttempts = job.opts.attempts ?? 1;
 
-  // 1. DB row 조회 (service_role — RLS 우회)
+  // 1. publish_jobs row 조회 (service_role — RLS 우회)
   const { data: row, error: fetchError } = await supabase
     .from("publish_jobs")
     .select(
@@ -105,8 +138,8 @@ export async function processPublishJob(job: Job<PublishJobData>) {
   }
 
   try {
-    // 3. 실제 게시 — Phase 4b ④에서 lib/platforms 어댑터 호출로 교체.
-    const result = await stubPublish(row);
+    // 3. social_accounts + contents 조회 → 어댑터로 게시
+    const result = await runPublish(supabase, row);
 
     // 4. SUCCESS 마킹
     const successHistory: StatusHistoryEntry[] = [
@@ -141,9 +174,22 @@ export async function processPublishJob(job: Job<PublishJobData>) {
     const isLastAttempt = attemptNumber >= maxAttempts;
     const nextStatus = isLastAttempt ? "FAILED" : "RETRYING";
 
+    // 토큰 만료 / revoke는 계정 자체가 죽은 상태 — 같은 토큰으로 재시도 의미 없음.
+    // social_accounts.is_active=false로 마킹해 UI/스케줄러가 재시도 안 하게.
+    if (err instanceof TokenExpiredError) {
+      await supabase
+        .from("social_accounts")
+        .update({ is_active: false, updated_at: nowIso() })
+        .eq("id", row.social_account_id);
+    }
+
     const failureHistory: StatusHistoryEntry[] = [
       ...processingHistory,
-      { status: nextStatus, timestamp: nowIso(), message: errorMsg },
+      {
+        status: nextStatus,
+        timestamp: nowIso(),
+        message: `${classifyError(err)}: ${errorMsg}`,
+      },
     ];
 
     await supabase
@@ -162,15 +208,238 @@ export async function processPublishJob(job: Job<PublishJobData>) {
   }
 }
 
-/**
- * 임시 stub. Phase 4b ④에서 lib/platforms/{youtube,instagram,tiktok}.ts의
- * publish() 어댑터 호출로 교체된다. 지금은 happy path만 검증하기 위한 mock.
- */
-async function stubPublish(row: PublishJobRow): Promise<PublishResult> {
-  // 가짜 API latency
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  return {
-    platformPostId: `stub-${row.id.slice(0, 8)}-${Date.now()}`,
-    platformPostUrl: `https://example.com/stub/${row.id}`,
+// ─────────────────────────────────────────────────────────────────────────────
+// 실제 게시 흐름. 외부 호출(어댑터/Storage) 전부 이 함수 안. 실패는 던지면
+// 위 try/catch가 status_history에 기록.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runPublish(
+  supabase: ReturnType<typeof createServiceClient>,
+  row: PublishJobRow,
+) {
+  // 3a. social_accounts 조회 (토큰 컬럼 포함 — service_role 필수)
+  const { data: account, error: accountError } = await supabase
+    .from("social_accounts")
+    .select(
+      "id, platform, is_active, access_token_encrypted, refresh_token_encrypted, token_expires_at",
+    )
+    .eq("id", row.social_account_id)
+    .maybeSingle<AccountRow>();
+
+  if (accountError || !account) {
+    throw new PublishError(
+      `social_accounts 조회 실패: ${accountError?.message ?? "row 없음"}`,
+    );
+  }
+  if (!account.is_active) {
+    throw new TokenExpiredError(
+      `social_account가 비활성 상태입니다 (id=${account.id})`,
+    );
+  }
+  if (!account.access_token_encrypted) {
+    throw new TokenExpiredError(
+      `access_token이 없습니다 (id=${account.id}) — 재연동 필요`,
+    );
+  }
+
+  // 3b. contents 조회
+  const { data: content, error: contentError } = await supabase
+    .from("contents")
+    .select("id, media_type, media_urls, title, internal_title, ai_captions")
+    .eq("id", row.content_id)
+    .maybeSingle<ContentRow>();
+
+  if (contentError || !content) {
+    throw new PublishError(
+      `contents 조회 실패: ${contentError?.message ?? "row 없음"}`,
+    );
+  }
+
+  // 3c. adapter 선택
+  const adapter = getAdapter(account.platform);
+  if (!adapter) {
+    throw new PublishError(`지원하지 않는 플랫폼: ${account.platform}`);
+  }
+
+  // 3d. 토큰 — 만료 임박이면 refresh
+  const accessToken = await ensureFreshToken(supabase, account, adapter);
+
+  // 3e. Storage 단기 서명 URL
+  const mediaSignedUrls = await signMedia(supabase, content.media_urls);
+
+  // 3f. 캡션 컨텍스트 조립 + 미디어 URL 주입
+  const publishCtx: PublishContext = {
+    ...buildPublishContext(content, account.platform),
+    mediaSignedUrls,
   };
+
+  // 3g. 게시
+  return await adapter.publish(publishCtx, accessToken);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 토큰 정책: 만료까지 1분 미만이면 refresh를 시도. refresh_token이 없으면 그대로
+// 현재 토큰 사용 (Instagram short-lived처럼 refresh API가 없는 케이스).
+// 새 토큰은 즉시 암호화해서 DB 저장 — 같은 워커 인스턴스가 다음 job에서도 신선한
+// 토큰을 쓰도록.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function ensureFreshToken(
+  supabase: ReturnType<typeof createServiceClient>,
+  account: AccountRow,
+  adapter: ReturnType<typeof getAdapter>,
+): Promise<string> {
+  if (!adapter) throw new PublishError("adapter가 null");
+  if (!account.access_token_encrypted) {
+    throw new TokenExpiredError("access_token_encrypted가 비어있습니다");
+  }
+
+  const accessToken = decryptToken(account.access_token_encrypted);
+  const expiresAt = account.token_expires_at
+    ? new Date(account.token_expires_at).getTime()
+    : null;
+  const needsRefresh =
+    expiresAt !== null && expiresAt - Date.now() < TOKEN_REFRESH_BUFFER_MS;
+
+  if (!needsRefresh) return accessToken;
+  if (!account.refresh_token_encrypted) {
+    // 만료됐지만 refresh 수단이 없으면 일단 access_token으로 시도. 어댑터가
+    // 401을 받으면 TokenExpiredError로 위에서 처리됨.
+    return accessToken;
+  }
+
+  const refreshTokenPlain = decryptToken(account.refresh_token_encrypted);
+
+  let refreshed: RefreshedTokens;
+  try {
+    refreshed = await adapter.refreshToken(refreshTokenPlain);
+  } catch (err) {
+    // refresh가 TokenExpiredError를 던지면 그대로 위로 — 계정 비활성 처리됨.
+    throw err;
+  }
+
+  // 새 토큰 암호화 저장. refresh_token이 응답에 있으면 갱신, 없으면 기존 유지.
+  const newAccessEncrypted = encryptToken(refreshed.accessToken);
+  const newRefreshEncrypted = refreshed.refreshToken
+    ? encryptToken(refreshed.refreshToken)
+    : account.refresh_token_encrypted;
+  const newExpiresAt = refreshed.expiresAt
+    ? refreshed.expiresAt.toISOString()
+    : null;
+
+  const { error: updateError } = await supabase
+    .from("social_accounts")
+    .update({
+      access_token_encrypted: newAccessEncrypted,
+      refresh_token_encrypted: newRefreshEncrypted,
+      token_expires_at: newExpiresAt,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", account.id);
+
+  if (updateError) {
+    // 외부에선 새 토큰 발급됐지만 DB 저장 실패. 다음 job에서 또 refresh됨 — idempotent.
+    console.error(
+      `[publish-processor] 새 토큰 DB 저장 실패 (id=${account.id}): ${updateError.message}`,
+    );
+  }
+
+  return refreshed.accessToken;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Storage 서명 URL. media_urls는 "userId/uuid.mp4" 같은 경로 배열.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function signMedia(
+  supabase: ReturnType<typeof createServiceClient>,
+  paths: string[],
+): Promise<string[]> {
+  if (paths.length === 0) {
+    throw new MediaError("contents.media_urls가 비어있습니다");
+  }
+  const { data, error } = await supabase.storage
+    .from(MEDIA_BUCKET)
+    .createSignedUrls(paths, SIGNED_URL_TTL_SEC);
+  if (error) {
+    throw new MediaError(`Storage 서명 URL 생성 실패: ${error.message}`);
+  }
+  const urls: string[] = [];
+  for (const item of data ?? []) {
+    if (item.error || !item.signedUrl) {
+      throw new MediaError(`서명 URL 항목 실패: ${item.error ?? "no url"}`);
+    }
+    urls.push(item.signedUrl);
+  }
+  return urls;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ai_captions(jsonb)에서 플랫폼별 필드를 풀어 PublishContext에 채운다.
+// captions schema는 lib/ai/caption-generator.ts와 동기화:
+//   youtube   { title, description, hashtags, category? }
+//   instagram { caption, hashtags, cover_text? }
+//   tiktok    { caption, hashtags }
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildPublishContext(
+  content: ContentRow,
+  platform: Platform,
+): PublishContext {
+  const captions = (content.ai_captions ?? {}) as Record<string, unknown>;
+
+  const empty: PublishContext = {
+    contentId: content.id,
+    mediaType: content.media_type,
+    mediaSignedUrls: [],
+    title: null,
+    description: null,
+    caption: null,
+    hashtags: [],
+  };
+
+  if (platform === "YOUTUBE") {
+    const yt = (captions.youtube ?? {}) as {
+      title?: string;
+      description?: string;
+      hashtags?: string[];
+    };
+    return {
+      ...empty,
+      title: yt.title ?? content.internal_title ?? content.title ?? null,
+      description: yt.description ?? null,
+      hashtags: Array.isArray(yt.hashtags) ? yt.hashtags : [],
+    };
+  }
+
+  if (platform === "INSTAGRAM") {
+    const ig = (captions.instagram ?? {}) as {
+      caption?: string;
+      hashtags?: string[];
+    };
+    return {
+      ...empty,
+      caption: ig.caption ?? null,
+      hashtags: Array.isArray(ig.hashtags) ? ig.hashtags : [],
+    };
+  }
+
+  // TIKTOK
+  const tt = (captions.tiktok ?? {}) as {
+    caption?: string;
+    hashtags?: string[];
+  };
+  return {
+    ...empty,
+    caption: tt.caption ?? null,
+    hashtags: Array.isArray(tt.hashtags) ? tt.hashtags : [],
+  };
+}
+
+function classifyError(err: unknown): string {
+  if (err instanceof TokenExpiredError) return "TOKEN_EXPIRED";
+  if (err instanceof RateLimitedError) return "RATE_LIMITED";
+  if (err instanceof MediaError) return "MEDIA_ERROR";
+  if (err instanceof PublishError) return "PUBLISH_ERROR";
+  return "UNKNOWN";
 }

@@ -1,5 +1,12 @@
-import "server-only";
-import type { OAuthTokens, PlatformAdapter } from "./types";
+import "./server-guard";
+import {
+  PublishError,
+  type OAuthTokens,
+  type PlatformAdapter,
+  type PublishContext,
+  type PublishResult,
+  type RefreshedTokens,
+} from "./types";
 
 // TikTok Login Kit + Content Posting API. https://developers.tiktok.com
 // Content Posting API는 별도 승인 필요(승인 난이도 높음).
@@ -95,5 +102,23 @@ export const tiktok: PlatformAdapter = {
         avatarUrl,
       },
     };
+  },
+
+  // Phase 4b 후속 슬라이스. TikTok Content Posting API의 PULL_FROM_URL 흐름으로
+  // 구현 예정 — Storage 서명 URL을 TikTok에 직접 fetch하게 만든다.
+  async publish(
+    _ctx: PublishContext,
+    _accessToken: string,
+  ): Promise<PublishResult> {
+    throw new PublishError(
+      "TikTok publish는 Phase 4b 후속 슬라이스에서 구현됩니다.",
+    );
+  },
+
+  // TikTok refresh_token grant. Phase 4c에서 구현.
+  async refreshToken(_refresh: string): Promise<RefreshedTokens> {
+    throw new PublishError(
+      "TikTok refreshToken은 Phase 4c에서 구현됩니다.",
+    );
   },
 };

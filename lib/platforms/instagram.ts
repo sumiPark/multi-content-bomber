@@ -1,5 +1,12 @@
-import "server-only";
-import type { OAuthTokens, PlatformAdapter } from "./types";
+import "./server-guard";
+import {
+  PublishError,
+  type OAuthTokens,
+  type PlatformAdapter,
+  type PublishContext,
+  type PublishResult,
+  type RefreshedTokens,
+} from "./types";
 
 // Instagram Login (Instagram Graph API용). Meta 개발자 콘솔에서 앱 생성 후
 // "Instagram > API setup with Instagram login" 흐름을 따름.
@@ -82,5 +89,23 @@ export const instagram: PlatformAdapter = {
         avatarUrl: null,
       },
     };
+  },
+
+  // Phase 4b 후속 슬라이스. Instagram Graph API의 container 생성 → publish
+  // 2단계 흐름 구현 예정. 지금은 YouTube만 우선 동작.
+  async publish(
+    _ctx: PublishContext,
+    _accessToken: string,
+  ): Promise<PublishResult> {
+    throw new PublishError(
+      "Instagram publish는 Phase 4b 후속 슬라이스에서 구현됩니다.",
+    );
+  },
+
+  // Instagram long-lived token refresh (60일 만료 전 연장). Phase 4c에서 구현.
+  async refreshToken(_refresh: string): Promise<RefreshedTokens> {
+    throw new PublishError(
+      "Instagram refreshToken은 Phase 4c에서 구현됩니다.",
+    );
   },
 };
