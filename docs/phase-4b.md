@@ -12,8 +12,10 @@
 | ④ | YouTube `publish()` 어댑터 + 토큰 자동 refresh | ✅ 완료 | `4cd92af` |
 | ⑤-a | Railway 배포 설정 (railway.json, package.json engines, tsx→deps) | ✅ 완료 | `60c50cf` |
 | ⑤-b | Phase 4c 토큰 갱신 cron (BullMQ Job Scheduler) | ✅ 완료 | `99d034e` |
-| 후속-a | Instagram `publish()` / `refreshToken()` 구현 | ✅ 완료 | (이 커밋) |
-| 후속-b | TikTok `publish()` / `refreshToken()` 구현 | ⏳ 추후 | — |
+| 후속-a | Instagram `publish()` / `refreshToken()` 구현 | ✅ 완료 | `de0faed` |
+| 후속-b | TikTok `publish()` / `refreshToken()` 구현 (PULL_FROM_URL) | ✅ 완료 | (이 커밋) |
+
+**Phase 4b 종결.** Phase 5 후보: 캐러셀(Instagram/TikTok 다중 미디어), 분석 페이지 실데이터, DM 자동 응답, 예약 규칙.
 
 ## 핵심 설계 결정 (확정)
 
