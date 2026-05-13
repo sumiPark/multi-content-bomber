@@ -23,9 +23,11 @@ export const metadata: Metadata = {
   },
   // 플랫폼별 도메인 소유 verify 태그. Next.js가 <head>에 <meta name="..." content="...">로 자동 렌더링.
   // - facebook-domain-verification: Meta Business Verification (Instagram App Review 전제 조건)
+  // ⚠️ Next.js 16의 verification.other는 값을 iterable로 처리하므로 string이 아닌 배열로 넘겨야 한다
+  // (string을 그대로 넘기면 글자 단위로 iterate되어 깨짐 — node_modules/next/dist/lib/metadata/metadata.js:615).
   verification: {
     other: {
-      "facebook-domain-verification": "r1chnaigo6uwlsb5954foezifbc9qv",
+      "facebook-domain-verification": ["r1chnaigo6uwlsb5954foezifbc9qv"],
     },
   },
 };
