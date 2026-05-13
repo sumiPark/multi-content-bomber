@@ -22,6 +22,10 @@ export interface RefreshedTokens {
 // 어댑터에 전달하는 게시 컨텍스트. 워커가 DB/Storage에서 미리 조합해 넘긴다.
 export interface PublishContext {
   contentId: string;
+  // 어댑터가 플랫폼 API 호출 시 user/channel/open_id를 URL path에 박아야 하는 경우.
+  // YouTube는 access_token으로 자동 자기 채널 식별이라 사용하지 않지만, Instagram
+  // Graph API는 `/{ig-user-id}/media` 형태로 path에 ID가 들어간다.
+  platformAccountId: string;
   mediaType: "VIDEO" | "PHOTO";
   // Storage 단기 서명 URL 배열. 어댑터가 cURL/fetch로 가져갈 수 있는 형태.
   mediaSignedUrls: string[];

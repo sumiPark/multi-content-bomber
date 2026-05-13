@@ -37,6 +37,7 @@ interface PublishJobRow {
 interface AccountRow {
   id: string;
   platform: Platform;
+  platform_account_id: string;
   is_active: boolean;
   access_token_encrypted: string | null;
   refresh_token_encrypted: string | null;
@@ -221,7 +222,7 @@ async function runPublish(
   const { data: account, error: accountError } = await supabase
     .from("social_accounts")
     .select(
-      "id, platform, is_active, access_token_encrypted, refresh_token_encrypted, token_expires_at",
+      "id, platform, platform_account_id, is_active, access_token_encrypted, refresh_token_encrypted, token_expires_at",
     )
     .eq("id", row.social_account_id)
     .maybeSingle<AccountRow>();
@@ -267,9 +268,10 @@ async function runPublish(
   // 3e. Storage 단기 서명 URL
   const mediaSignedUrls = await signMedia(supabase, content.media_urls);
 
-  // 3f. 캡션 컨텍스트 조립 + 미디어 URL 주입
+  // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID 주입
   const publishCtx: PublishContext = {
     ...buildPublishContext(content, account.platform),
+    platformAccountId: account.platform_account_id,
     mediaSignedUrls,
   };
 
@@ -390,6 +392,8 @@ function buildPublishContext(
 
   const empty: PublishContext = {
     contentId: content.id,
+    // platformAccountId / mediaSignedUrls는 runPublish가 spread로 주입.
+    platformAccountId: "",
     mediaType: content.media_type,
     mediaSignedUrls: [],
     title: null,

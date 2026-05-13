@@ -11,8 +11,9 @@
 | ③ | Worker processor 상태 머신 + status_history + 멱등성 | ✅ 완료 | `80a1bf5` |
 | ④ | YouTube `publish()` 어댑터 + 토큰 자동 refresh | ✅ 완료 | `4cd92af` |
 | ⑤-a | Railway 배포 설정 (railway.json, package.json engines, tsx→deps) | ✅ 완료 | `60c50cf` |
-| ⑤-b | Phase 4c 토큰 갱신 cron (BullMQ Job Scheduler) | ✅ 완료 | (이 커밋) |
-| 후속 | Instagram / TikTok `publish()` / `refreshToken()` 구현 | ⏳ 추후 | — |
+| ⑤-b | Phase 4c 토큰 갱신 cron (BullMQ Job Scheduler) | ✅ 완료 | `99d034e` |
+| 후속-a | Instagram `publish()` / `refreshToken()` 구현 | ✅ 완료 | (이 커밋) |
+| 후속-b | TikTok `publish()` / `refreshToken()` 구현 | ⏳ 추후 | — |
 
 ## 핵심 설계 결정 (확정)
 
