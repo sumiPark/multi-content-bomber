@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "데이터 삭제 안내 | MCB",
+  title: "데이터 삭제 안내 / Data Deletion Instructions | MCB",
   description:
-    "MCB(Multi-Content Bomber)에 저장된 사용자 데이터를 삭제하는 방법을 안내합니다. SNS 연동 해제, 콘텐츠 삭제, 계정 삭제 절차를 단계별로 설명합니다.",
+    "Data Deletion Instructions for Multi-Content Bomber (MCB). Learn how to delete your user data, disconnect SNS accounts, and request full account deletion. MCB(Multi-Content Bomber)에 저장된 사용자 데이터를 삭제하는 방법을 안내합니다.",
 };
 
 const LAST_UPDATED = "2026-05-13";
@@ -17,13 +17,23 @@ export default function DataDeletionPage() {
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
           데이터 삭제 안내
         </h1>
+        <p className="mt-1 text-base font-medium text-muted-foreground">
+          Data Deletion Instructions for Multi-Content Bomber (MCB)
+        </p>
         <p className="mt-2 text-sm text-muted-foreground">
-          마지막 업데이트: {LAST_UPDATED}
+          마지막 업데이트 / Last updated: {LAST_UPDATED}
         </p>
         <p className="mt-4 text-sm leading-relaxed">
           MCB(Multi-Content Bomber)는 사용자가 자신의 데이터를 언제든지 삭제할 수
           있도록 세 가지 경로를 제공합니다. 항목별로 필요한 만큼 부분 삭제할 수
           있고, 전체 계정 삭제도 가능합니다.
+        </p>
+        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+          MCB provides three ways for users to request data deletion at any
+          time: disconnecting individual SNS accounts (immediately deletes
+          stored OAuth tokens), deleting uploaded content from the library, or
+          requesting full account deletion via email. Detailed steps are
+          described in each section below.
         </p>
       </header>
 
