@@ -211,15 +211,22 @@ export const tiktok: PlatformAdapter = {
   },
 
   // ───────────────────────────────────────────────────────────────────────────
-  // TikTok Content Posting API — PULL_FROM_URL 흐름:
-  //   1. POST /v2/post/publish/video/init/   → publish_id 반환
-  //      TikTok이 video_url을 자기 서버로 가져가 인코딩/검증. 호출 즉시 반환.
-  //   2. POST /v2/post/publish/status/fetch/ → 폴링, PUBLISH_COMPLETE 대기
-  //   3. publicly_available_post_id로 URL 조립
+  // TikTok Content Posting API — FILE_UPLOAD 흐름:
+  //   1. signed URL로 영상 바이트를 워커 메모리에 가져옴
+  //   2. POST /v2/post/publish/video/init/ (source=FILE_UPLOAD, video_size, chunk_size, total_chunk_count)
+  //      → publish_id + upload_url 반환
+  //   3. PUT upload_url (Content-Type: video/mp4, Content-Range)로 영상 바이트 전송
+  //   4. POST /v2/post/publish/status/fetch/ 폴링 → PUBLISH_COMPLETE 대기
   //
-  // ⚠️ 중요: TikTok 개발자 콘솔의 "URL Properties"에서 video_url 호스트(예:
-  // `<project>.supabase.co`)를 verify해야 PULL_FROM_URL이 동작한다. 미verify면
-  // `url_ownership_unverified` 코드로 fail — MediaError로 분류.
+  // PULL_FROM_URL 대신 FILE_UPLOAD를 쓰는 이유:
+  //   - PULL_FROM_URL은 video_url 호스트가 TikTok 콘솔의 URL Properties에 verify돼야 함
+  //   - 우리는 Supabase Storage 호스트(`<project>.supabase.co`)를 verify할 수 없음
+  //     (도메인 소유 증명 불가) → `url_ownership_unverified` 영구 실패
+  //   - FILE_UPLOAD는 워커가 영상을 직접 multipart PUT — URL verify 자체가 불필요
+  //
+  // 영상 크기 제약 (TikTok 문서):
+  //   - 단일 chunk 흐름은 video_size ≤ 64MB. 그 이상이면 multi-chunk 분할 필요.
+  //   - 본 어댑터는 검수 데모 / 짧은 Shorts 길이 위주이므로 single chunk만 구현.
   //
   // privacy_level: SELF_ONLY로 시작 (앱 테스트 단계 기본). Production에서 PUBLIC_TO_EVERYONE
   // 가려면 콘솔 승인 필요. 후속 슬라이스에서 사용자 설정으로 노출.
@@ -235,9 +242,28 @@ export const tiktok: PlatformAdapter = {
       throw new MediaError("TikTok publish: 미디어 서명 URL이 비어있습니다");
     }
 
+    // 1. signed URL에서 영상 바이트 fetch
+    const videoRes = await fetch(signedUrl);
+    if (!videoRes.ok) {
+      throw new MediaError(
+        `TikTok publish: signed URL fetch 실패 (${videoRes.status})`,
+      );
+    }
+    const videoBuf = Buffer.from(await videoRes.arrayBuffer());
+    const videoSize = videoBuf.length;
+    if (videoSize === 0) {
+      throw new MediaError("TikTok publish: 영상 바이트가 0");
+    }
+    if (videoSize > 64 * 1024 * 1024) {
+      // 64MB 초과면 multi-chunk 분할 필요 — 후속 슬라이스에서 구현.
+      throw new MediaError(
+        `TikTok publish: 영상 크기 ${videoSize}바이트가 단일 chunk 한도(64MB)를 초과 — multi-chunk 미구현`,
+      );
+    }
+
     const caption = buildTikTokCaption(ctx);
 
-    // 1. init — publish_id 발급
+    // 2. init — publish_id + upload_url 발급
     const initBody = {
       post_info: {
         title: caption.slice(0, 2200), // 제목/캡션 통합, 최대 2200자
@@ -248,8 +274,10 @@ export const tiktok: PlatformAdapter = {
         video_cover_timestamp_ms: 1000,
       },
       source_info: {
-        source: "PULL_FROM_URL" as const,
-        video_url: signedUrl,
+        source: "FILE_UPLOAD" as const,
+        video_size: videoSize,
+        chunk_size: videoSize,
+        total_chunk_count: 1,
       },
     };
 
@@ -257,17 +285,37 @@ export const tiktok: PlatformAdapter = {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
       jsonBody: initBody,
-    })) as { data?: { publish_id?: string } };
+    })) as { data?: { publish_id?: string; upload_url?: string } };
 
     const publishId = initResp.data?.publish_id;
-    if (!publishId) {
-      throw new PublishError("TikTok init 응답에 publish_id 없음");
+    const uploadUrl = initResp.data?.upload_url;
+    if (!publishId || !uploadUrl) {
+      throw new PublishError(
+        "TikTok init 응답에 publish_id 또는 upload_url 없음",
+      );
     }
 
-    // 2. 상태 폴링
+    // 3. PUT 영상 바이트 → upload_url (Content-Range 필수)
+    const putRes = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "video/mp4",
+        "Content-Length": String(videoSize),
+        "Content-Range": `bytes 0-${videoSize - 1}/${videoSize}`,
+      },
+      body: videoBuf,
+    });
+    if (!putRes.ok) {
+      const text = await putRes.text().catch(() => "");
+      throw new MediaError(
+        `TikTok upload PUT 실패 (${putRes.status}): ${text.slice(0, 200)}`,
+      );
+    }
+
+    // 4. 상태 폴링
     const finalStatus = await pollTikTokStatus(publishId, accessToken);
 
-    // 3. URL 조립. publicly_available_post_id가 없으면(비공개/광고 정책 등) post_id만 반환.
+    // 5. URL 조립. publicly_available_post_id가 없으면(비공개/광고 정책 등) post_id만 반환.
     const postId = finalStatus.publicly_available_post_id?.[0] ?? publishId;
     const url = finalStatus.publicly_available_post_id?.[0]
       ? `https://www.tiktok.com/video/${finalStatus.publicly_available_post_id[0]}`
