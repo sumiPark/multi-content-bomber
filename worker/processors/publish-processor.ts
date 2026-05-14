@@ -408,9 +408,15 @@ function buildPublishContext(
       description?: string;
       hashtags?: string[];
     };
+    // YouTube는 title 필수. ?? 만 쓰면 빈 문자열("")도 통과해버려 어댑터에서
+    // throw — trim 후 truthy인 첫 값을 고른다. 최종 fallback은 콘텐츠 id로.
+    const pick = (...vals: Array<string | null | undefined>) =>
+      vals.find((v) => v && v.trim().length > 0)?.trim();
     return {
       ...empty,
-      title: yt.title ?? content.internal_title ?? content.title ?? null,
+      title:
+        pick(yt.title, content.internal_title, content.title) ??
+        `MCB upload ${content.id.slice(0, 8)}`,
       description: yt.description ?? null,
       hashtags: Array.isArray(yt.hashtags) ? yt.hashtags : [],
     };
