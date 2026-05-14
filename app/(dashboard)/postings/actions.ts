@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { requeuePublishJobs } from "@/lib/queue/publish-queue";
 
 // publish_jobs UPDATE/DELETE 정책이 authenticated에 없으므로 서버 액션에서
 // service_role 키로 처리한다. 권한 검증은 직접 수행: caller의 organization_id와
@@ -130,6 +131,7 @@ export async function retryPostingsAction(
       status: "PENDING",
       last_error: null,
       attempts: 0,
+      completed_at: null,
     })
     .in("id", ids);
   if (error) return { ok: false, error: error.message };
@@ -138,6 +140,20 @@ export async function retryPostingsAction(
     status: "PENDING",
     message: "사용자 재시도 요청",
   });
+
+  // DB row만 PENDING으로 되돌리면 Worker는 모름 — BullMQ 큐에 다시 enqueue 필수.
+  // 기존 jobId(= publish_jobs.id)가 큐에 남아있으면 BullMQ가 중복 add를 무시하므로
+  // requeue 헬퍼가 명시적으로 제거 후 add 한다.
+  try {
+    await requeuePublishJobs(ids);
+  } catch (queueError) {
+    console.error("[retryPostingsAction] requeue 실패:", queueError);
+    return {
+      ok: false,
+      error:
+        "상태는 되돌렸지만 작업 큐 등록에 실패했습니다. 잠시 후 다시 시도해주세요.",
+    };
+  }
 
   revalidatePath("/postings");
   return { ok: true, affected: ids.length };

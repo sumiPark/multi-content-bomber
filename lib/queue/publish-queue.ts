@@ -76,3 +76,60 @@ export async function enqueuePublishJobs(items: EnqueueItem[]): Promise<string[]
     await connection.quit();
   }
 }
+
+/**
+ * 실패/완료 처리된 publish_jobs를 다시 큐에 올린다.
+ *
+ * jobId가 publish_jobs.id로 고정돼 있으므로, BullMQ에 같은 jobId가 이미 있으면
+ * `addBulk`는 조용히 무시한다 (removeOnFail age 7일 동안 남아있음).
+ * → 재시도하려면 기존 잡을 명시적으로 제거하고 새로 add 해야 한다.
+ */
+export async function requeuePublishJobs(jobIds: string[]): Promise<string[]> {
+  if (jobIds.length === 0) return [];
+
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) {
+    throw new Error("REDIS_URL 환경변수가 없습니다.");
+  }
+
+  const connection = new IORedis(redisUrl, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+  });
+
+  const queue = new Queue<PublishJobData>(PUBLISH_QUEUE_NAME, {
+    connection,
+    defaultJobOptions: PUBLISH_DEFAULT_JOB_OPTIONS,
+  });
+
+  try {
+    await Promise.all(
+      jobIds.map(async (id) => {
+        const existing = await queue.getJob(id);
+        if (existing) {
+          // remove()는 active(처리 중) 잡에 대해 throw. 우리는 FAILED/완료 잡만
+          // 재시도 대상이므로 정상 케이스에선 throw 없음. 그래도 안전하게 swallow.
+          try {
+            await existing.remove();
+          } catch (e) {
+            console.warn(
+              `[requeuePublishJobs] 기존 잡 제거 실패 id=${id}: ${(e as Error).message}`,
+            );
+          }
+        }
+      }),
+    );
+
+    const jobs = await queue.addBulk(
+      jobIds.map((id) => ({
+        name: "publish",
+        data: { publishJobId: id },
+        opts: { jobId: id },
+      })),
+    );
+    return jobs.map((j) => j.id ?? "");
+  } finally {
+    await queue.close();
+    await connection.quit();
+  }
+}
