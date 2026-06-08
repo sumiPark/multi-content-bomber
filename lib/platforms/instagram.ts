@@ -136,18 +136,34 @@ export const instagram: PlatformAdapter = {
       );
     }
 
-    const tokenData = (await tokenRes.json()) as {
+    // Instagram API with Instagram Login은 short-lived 응답을 { data: [ {...} ] }로
+    // 감싸서 보낸다(구 Basic Display는 최상위). 둘 다 안전하게 꺼낸다. 잘못 꺼내면
+    // access_token이 undefined로 long-lived URL에 실려, Graph가 노드를 못 찾고
+    // "Unsupported request - method type: get" (code 100) 일반 에러를 뱉는다.
+    type ShortLivedToken = {
       access_token: string;
       user_id?: string | number;
-      permissions?: string;
+      permissions?: string | string[];
     };
+    const tokenData = (await tokenRes.json()) as
+      | ShortLivedToken
+      | { data: ShortLivedToken[] };
+    const shortLived: ShortLivedToken | undefined =
+      "data" in tokenData && Array.isArray(tokenData.data)
+        ? tokenData.data[0]
+        : (tokenData as ShortLivedToken);
+    if (!shortLived?.access_token) {
+      throw new Error(
+        `Instagram short-lived 토큰 파싱 실패 — 응답에 access_token 없음: ${JSON.stringify(tokenData).slice(0, 200)}`,
+      );
+    }
 
     // ⭐ 1차 응답은 short-lived(1시간). publish/refresh가 의미를 가지려면 long-lived(60일)로
     // 즉시 교환. 한 번 long-lived가 되면 그 토큰을 ig_refresh_token grant로 무한 연장 가능.
     const longLivedUrl = new URL(LONG_LIVED_URL);
     longLivedUrl.searchParams.set("grant_type", "ig_exchange_token");
     longLivedUrl.searchParams.set("client_secret", clientSecret);
-    longLivedUrl.searchParams.set("access_token", tokenData.access_token);
+    longLivedUrl.searchParams.set("access_token", shortLived.access_token);
     const longRes = await fetch(longLivedUrl);
     if (!longRes.ok) {
       const text = await longRes.text();
