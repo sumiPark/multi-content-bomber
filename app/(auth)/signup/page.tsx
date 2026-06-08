@@ -23,7 +23,7 @@ export default async function SignupPage() {
       <CardHeader>
         <CardTitle>회원가입</CardTitle>
         <CardDescription>
-          가입 후 워크스페이스를 만들거나 초대 토큰으로 합류하세요.
+          가입하면 공유 워크스페이스에 바로 합류합니다.
         </CardDescription>
       </CardHeader>
       <CardContent>
