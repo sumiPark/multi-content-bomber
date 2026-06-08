@@ -28,7 +28,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22 필수 — @supabase/realtime-js가 네이티브 WebSocket을 요구하며,
+          # WebSocket은 Node 22부터 전역 제공된다. 20에선 createClient가 즉시 throw.
+          node-version: 22
           cache: npm
       - run: npm ci
       - name: Process due publish jobs
