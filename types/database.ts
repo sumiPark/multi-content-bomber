@@ -433,6 +433,14 @@ export type Database = {
     }
     Functions: {
       accept_invitation: { Args: { p_token: string }; Returns: string }
+      claim_due_publish_jobs: {
+        Args: {
+          p_limit?: number
+          p_max_attempts?: number
+          p_stale_minutes?: number
+        }
+        Returns: Database["public"]["Tables"]["publish_jobs"]["Row"][]
+      }
       create_invitation: {
         Args: {
           p_email: string

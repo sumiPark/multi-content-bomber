@@ -1,0 +1,49 @@
+name: publish
+
+# Postgres 큐 워커(worker/process-due.ts)를 실행하는 트리거.
+# 상주 BullMQ 워커를 대체한다 — due job이 있을 때만 러너가 떠서 처리하고 종료.
+on:
+  schedule:
+    # 30분마다 — 예약 발행분 sweep. (private repo GitHub Actions 무료 분 안에서 동작:
+    # ~1,440 run/월 < 2,000분 무료) ⚠️ schedule은 best-effort라 5~30분 지연 가능 —
+    # 예약 발행에만 영향. 즉시 발행은 아래 repository_dispatch라 지연 없음.
+    - cron: "*/30 * * * *"
+  repository_dispatch:
+    # 즉시 발행 — 서버 액션 triggerPublishRun()이 이 이벤트로 깨운다(지연 없음).
+    types: [publish-now]
+  # 수동 실행(디버깅용).
+  workflow_dispatch: {}
+
+# 두 run이 겹쳐 돌지 않게 직렬화. 진행 중이면 대기(취소 안 함).
+# claim RPC의 SKIP LOCKED가 중복 처리를 막지만, 직렬화로 한 번 더 안전하게.
+concurrency:
+  group: publish-worker
+  cancel-in-progress: false
+
+jobs:
+  process-due:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Process due publish jobs
+        run: npm run worker:due
+        env:
+          # Supabase service_role — RLS 우회 + 토큰 컬럼 접근.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 토큰 AES-256-GCM 복호화 키 (Vercel과 반드시 같은 값이어야 함).
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL }}
+          # 플랫폼 OAuth — 토큰 refresh / publish에 필요.
+          INSTAGRAM_APP_ID: ${{ secrets.INSTAGRAM_APP_ID }}
+          INSTAGRAM_APP_SECRET: ${{ secrets.INSTAGRAM_APP_SECRET }}
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}

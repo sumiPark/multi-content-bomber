@@ -8,7 +8,7 @@ import {
   generateCaptions,
   type Captions,
 } from "@/lib/ai/caption-generator";
-import { enqueuePublishJobs } from "@/lib/queue/publish-queue";
+import { triggerPublishRun } from "@/lib/github-dispatch";
 import type { Json } from "@/types/database";
 
 const SIGNED_URL_TTL_SECONDS = 600;
@@ -97,7 +97,7 @@ export type UpdateCaptionsResult =
   | { ok: false; error: string };
 
 export type CreatePublishJobsResult =
-  | { ok: true; count: number }
+  | { ok: true; count: number; note?: string }
   | { ok: false; error: string };
 
 export type CreateBlankContentResult =
@@ -591,31 +591,32 @@ export async function createPublishJobsAction(
     is_ai_generated: true,
   }));
 
-  const { data: insertedJobs, error } = await supabase
-    .from("publish_jobs")
-    .insert(jobs)
-    .select("id");
+  const { error } = await supabase.from("publish_jobs").insert(jobs);
   if (error) return { ok: false, error: error.message };
 
-  const jobIds = (insertedJobs ?? []).map((j) => j.id);
-
-  // BullMQ enqueue. 한 콘텐츠 → N개 계정 fan-out이므로 addBulk로 묶어 전송.
-  // jobId를 publish_jobs.id로 고정해 중복 enqueue를 BullMQ가 자동 방지.
-  // 실패 시 DB rollback은 하지 않는다 — publish_jobs는 PENDING으로 남고,
-  // 사용자가 배포 관리에서 재시도하거나 후속 cron(Phase 4c)이 미등록 PENDING을 자동 복구한다.
-  try {
-    await enqueuePublishJobs(jobIds.map((id) => ({ data: { publishJobId: id } })));
-  } catch (queueError) {
-    console.error("[createPublishJobs] enqueue 실패:", queueError);
-    return {
-      ok: false,
-      error:
-        "DB에는 저장됐지만 작업 큐 등록에 실패했습니다. 배포 관리에서 재시도해주세요.",
-    };
-  }
+  // 즉시 발행이면 GitHub Actions를 그 자리에서 깨운다(repository_dispatch → process-due).
+  // 예약 발행이면 트리거하지 않는다 — 30분 cron sweep이 scheduled_for를 보고 처리한다.
+  // dispatch 실패는 비치명적: PENDING으로 남은 job을 다음 cron sweep이 ≤30분 내 집어간다.
+  const isImmediate =
+    !parsed.data.scheduledFor ||
+    new Date(parsed.data.scheduledFor) <= new Date();
 
   revalidatePath("/");
   revalidatePath("/postings");
   revalidatePath("/uploads");
+
+  if (isImmediate) {
+    try {
+      await triggerPublishRun(`content:${parsed.data.contentId}`);
+    } catch (dispatchError) {
+      console.error("[createPublishJobs] dispatch 실패:", dispatchError);
+      return {
+        ok: true,
+        count: jobs.length,
+        note: "발행 작업을 등록했어요. 즉시 실행 트리거에 실패해 잠시 후(최대 30분) 자동으로 게시됩니다.",
+      };
+    }
+  }
+
   return { ok: true, count: jobs.length };
 }

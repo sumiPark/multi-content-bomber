@@ -13,8 +13,8 @@ OpenAI GPT-4o로 플랫폼별 캡션을 자동 생성하고, 최적 시간에 �
 - **상태관리:** React useState/useReducer 기본 — 글로벌 상태가 필요해지면 Zustand 도입 검토
 - **UI:** Tailwind CSS v4 (config-less) + shadcn/ui (base-nova) + framer-motion
 - **AI:** OpenAI GPT-4o API (Vision + JSON Schema strict mode)
-- **큐:** BullMQ + Upstash Redis (Phase 4b — 구현 중)
-- **배포:** Vercel (프론트, 서버리스) + Railway (Worker, 상주 프로세스 — Phase 4b)
+- **큐:** Postgres(publish_jobs 테이블) + `claim_due_publish_jobs` RPC(FOR UPDATE SKIP LOCKED) — BullMQ/Redis 제거
+- **배포:** Vercel (프론트, 서버리스) + GitHub Actions (워커 — cron 30분 sweep + repository_dispatch 즉시)
 
 ## ⚠️ Next.js 16 차이점 (자주 틀리는 지점)
 - `middleware.ts` → **`proxy.ts`** (이름 변경, 함수명도 `proxy`)
@@ -111,7 +111,10 @@ multi-content-bomber/
 │       ├── 0009_account_groups.sql     # 계정 그룹 (1:N)
 │       └── 0010_dashboard_partial_indexes.sql
 │
-└── worker/                             # BullMQ Worker (Phase 4b — 구축 예정, Railway 호스팅)
+└── worker/                             # Postgres 큐 워커 (process-due.ts — GitHub Actions가 실행)
+    ├── load-env.ts                     # dev .env.local 로드 (Actions/prod에선 no-op)
+    ├── process-due.ts                  # 엔트리: claim_due_publish_jobs → 처리 → 토큰 sweep → exit
+    └── processors/                     # publish / token-refresh 코어 (BullMQ-free)
 ```
 
 ## 코딩 컨벤션
@@ -157,4 +160,9 @@ multi-content-bomber/
 - YouTube API 일일 할당량(10,000 units) 고려한 업로드 수 제한
 - Instagram API는 비즈니스/크리에이터 계정만 지원
 - TikTok API 승인 난이도 높음 — Buffer/Hootsuite 우회 옵션 검토
-- **Worker 호스팅 결정 (Phase 4b):** BullMQ Worker는 Vercel에서 못 돈다 — 서버리스라 상주 프로세스가 안 되고 함수 timeout(Pro 60초)에 묶임. QStash + Vercel function 같은 서버리스 큐 패턴도 검토했으나, 한 콘텐츠 → 다수 SNS 채널 **fan-out 규모**가 크고 플랫폼별 **rate limit 제어**가 BullMQ의 `concurrency` / `rate limiter`에 의존하므로 **Railway 상주 워커**로 확정. Worker는 `worker/` 서브디렉토리(같은 repo, 별도 entry point, monorepo 도구 없이 직접 import)에 두고 공유 코드(`lib/crypto.ts`, supabase service client, `lib/platforms/*` 어댑터)를 재사용한다. Upstash Redis는 BullMQ broker, Railway는 Worker 호스팅 — 인프라 두 곳.
+- **Worker 호스팅 결정 (Phase 4b — 갱신됨):** 원래 BullMQ + Upstash Redis + Railway 상주 워커로 설계했으나, **상주 워커가 Redis를 24/7 폴링해 Upstash 무료 50만 커맨드/월을 며칠 만에 소진**(실제로 한도 초과로 발행 전체가 막힘)하고 Railway($5/월)+Upstash 비용이 이중으로 드는 문제로 **Postgres 큐 + GitHub Actions**로 전환했다.
+  - **큐 = `publish_jobs` 테이블.** `claim_due_publish_jobs` RPC가 `FOR UPDATE SKIP LOCKED`로 due job(예약 시각 지난 PENDING/RETRYING + stale PROCESSING 회수)을 원자적으로 선점 → 동시 실행해도 중복 처리 없음. fan-out·동시성은 워커 스크립트(`process-due.ts`)가 `CONCURRENCY`로 제어, rate limit은 플랫폼 어댑터에서.
+  - **실행 = GitHub Actions** (`.github/workflows/publish.yml`). `schedule` cron 30분(예약 발행 sweep) + `repository_dispatch`(즉시 발행 — 서버 액션 `lib/github-dispatch.ts`의 `triggerPublishRun()`이 깸, 지연 없음). 상주 프로세스 없음 → **Upstash·Railway 비용 0.** private repo도 ~1,440 run/월로 무료 2,000분 안.
+  - **재시도:** BullMQ backoff 대신, 실패 시 row를 RETRYING으로 남기면 다음 sweep이 다시 claim. `attempts < 3` 동안 반복.
+  - **트레이드오프:** 예약 발행은 cron best-effort라 5~30분 지연 가능(즉시 발행은 dispatch라 무관). 신뢰성이 더 필요하면 cron만 Railway Cron($5)으로 승격 — `process-due.ts`는 그대로 재사용.
+  - **⚠️ GitHub Actions 함정:** `schedule` 워크플로는 repo가 **60일 무커밋이면 자동 비활성화**된다. 또 처리 단계는 **Vercel 함수(60초 timeout)에서 절대 돌리면 안 됨** — 긴 영상 업로드(IG 컨테이너 폴링 등)는 timeout 없는 Actions 러너에서만.

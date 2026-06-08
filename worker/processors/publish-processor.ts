@@ -1,5 +1,3 @@
-import type { Job } from "bullmq";
-import { type PublishJobData } from "@/lib/queue/publish-queue";
 import { createServiceClient } from "@/lib/supabase/service";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import {
@@ -61,52 +59,30 @@ const TOKEN_REFRESH_BUFFER_MS = 60_000; // 만료 1분 전부터 미리 갱신
  * BullMQ processor — publish_jobs 상태 머신.
  *
  * 흐름:
- *   PENDING → (워커 pickup) → PROCESSING → SUCCESS
- *                                       ↘ (throw, 아직 재시도 남음) → RETRYING → (BullMQ backoff) → PROCESSING …
+ *   PENDING → (claim RPC가 PROCESSING으로 선점) → 처리 → SUCCESS
+ *                                       ↘ (throw, 아직 재시도 남음) → RETRYING → (다음 cron/dispatch) → PROCESSING …
  *                                       ↘ (마지막 시도 실패) → FAILED
  *
- * 멱등성:
- *   - 이미 SUCCESS/CANCELLED인 row가 들어오면 skip. BullMQ가 같은 jobId 중복 처리
- *     하거나, 외부에서 row 상태가 먼저 바뀐 경우(예: 사용자가 CANCEL) 안전.
- *
- * 재시도:
- *   - processor 내부에서 throw → BullMQ가 attempt++ 후 backoff 후 재호출.
- *   - 우리는 매 호출 시 attempts 컬럼과 status_history를 갱신.
- *   - 마지막 시도까지 실패하면 status=FAILED + completed_at 기록.
+ * 큐 모델 (Phase 4b — Postgres 큐):
+ *   - BullMQ 대신 claim_due_publish_jobs RPC가 FOR UPDATE SKIP LOCKED로 due job을
+ *     선점(status=PROCESSING)한 뒤 이 함수에 그 row를 넘긴다.
+ *   - 재시도는 BullMQ backoff가 아니라, 실패 시 status=RETRYING으로 남기면 다음 cron
+ *     sweep(또는 dispatch)이 다시 claim해 처리한다. attempts < maxAttempts 동안 반복.
+ *   - 처리 중 워커가 크래시하면 PROCESSING으로 멈추지만, claim RPC가 stale PROCESSING
+ *     (updated_at 오래됨)을 회수하므로 유실되지 않는다.
  *
  * 에러 분기 (Phase 4b ④):
- *   - TokenExpiredError → social_accounts.is_active=false 마킹 후 throw (BullMQ 재시도하지만
- *     마지막 시도에서 FAILED로 안착; 어차피 같은 토큰으로 재시도해도 의미 없음).
- *   - RateLimitedError / MediaError / PublishError → throw로 재시도 위임.
+ *   - TokenExpiredError → social_accounts.is_active=false 마킹 후 throw (재시도해도
+ *     같은 토큰이라 의미 없음 — 마지막 시도에서 FAILED로 안착).
+ *   - RateLimitedError / MediaError / PublishError → throw → RETRYING으로 다음 sweep 위임.
  */
-export async function processPublishJob(job: Job<PublishJobData>) {
-  const supabase = createServiceClient();
-  const { publishJobId } = job.data;
-  const attemptNumber = job.attemptsMade + 1;
-  const maxAttempts = job.opts.attempts ?? 1;
-
-  // 1. publish_jobs row 조회 (service_role — RLS 우회)
-  const { data: row, error: fetchError } = await supabase
-    .from("publish_jobs")
-    .select(
-      "id, content_id, social_account_id, status, attempts, status_history",
-    )
-    .eq("id", publishJobId)
-    .maybeSingle<PublishJobRow>();
-
-  if (fetchError) {
-    throw new Error(`publish_jobs fetch 실패: ${fetchError.message}`);
-  }
-  if (!row) {
-    // BullMQ에 재시도해도 의미 없는 영구 실패. 다만 throw하면 재시도가 발동한다.
-    // 추후 cron 정합성 작업에서 처리할 일이므로 일단 throw.
-    throw new Error(`publish_jobs row가 없습니다: ${publishJobId}`);
-  }
-
-  // 멱등성 가드
-  if (row.status === "SUCCESS" || row.status === "CANCELLED") {
-    return { skipped: true, reason: `이미 ${row.status} 상태` };
-  }
+export async function processClaimedPublishJob(
+  supabase: ReturnType<typeof createServiceClient>,
+  row: PublishJobRow,
+  maxAttempts: number,
+) {
+  const publishJobId = row.id;
+  const attemptNumber = row.attempts + 1;
 
   const baseHistory: StatusHistoryEntry[] = Array.isArray(row.status_history)
     ? (row.status_history as unknown as StatusHistoryEntry[])
@@ -114,7 +90,8 @@ export async function processPublishJob(job: Job<PublishJobData>) {
 
   const nowIso = () => new Date().toISOString();
 
-  // 2. PROCESSING으로 전환 + history 기록
+  // status=PROCESSING은 claim_due_publish_jobs RPC가 이미 원자적으로 선점했다.
+  // 여기서는 attempts 증가 + history 기록만 한다.
   const processingHistory: StatusHistoryEntry[] = [
     ...baseHistory,
     {
@@ -127,7 +104,6 @@ export async function processPublishJob(job: Job<PublishJobData>) {
   const { error: lockError } = await supabase
     .from("publish_jobs")
     .update({
-      status: "PROCESSING",
       attempts: attemptNumber,
       status_history: processingHistory,
       updated_at: nowIso(),
@@ -204,7 +180,8 @@ export async function processPublishJob(job: Job<PublishJobData>) {
       })
       .eq("id", publishJobId);
 
-    // BullMQ에 throw 다시 — 재시도 메커니즘(또는 최종 failed 이벤트) 발동.
+    // status는 위에서 이미 RETRYING/FAILED로 기록됨. 호출측(process-due)이 job별로
+    // catch해 로그만 남긴다 — 재시도는 RETRYING row를 다음 sweep이 다시 claim.
     throw err;
   }
 }

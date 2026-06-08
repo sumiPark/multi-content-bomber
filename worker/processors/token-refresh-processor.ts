@@ -1,5 +1,3 @@
-import type { Job } from "bullmq";
-import { type TokenRefreshJobData } from "@/lib/queue/token-refresh-queue";
 import { createServiceClient } from "@/lib/supabase/service";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import {
@@ -12,8 +10,8 @@ import {
 // 1시간 짜리라 1시간 윈도우면 30분 주기 sweep과 합쳐 적어도 한 번은 잡힌다.
 const REFRESH_THRESHOLD_MS = 60 * 60 * 1000;
 
-// 한 번 sweep에서 처리할 최대 계정 수. 만료가 동시에 몰려도 ioredis blocking + 외부
-// API 호출이 너무 길어지지 않게. 못 잡힌 잔여는 다음 30분 주기에 자연스럽게 처리.
+// 한 번 sweep에서 처리할 최대 계정 수. 만료가 동시에 몰려도 외부 API 호출이 너무
+// 길어지지 않게. 못 잡힌 잔여는 다음 30분 cron sweep에서 자연스럽게 처리.
 const BATCH_LIMIT = 100;
 
 interface AccountRow {
@@ -32,8 +30,8 @@ interface SweepStats {
 }
 
 /**
- * 만료 임박 토큰 sweep. publish processor와 달리 row 하나가 실패해도 sweep job
- * 자체는 성공으로 끝낸다 (BullMQ가 30분 주기로 다시 불러줄 거니까).
+ * 만료 임박 토큰 sweep. publish processor와 달리 row 하나가 실패해도 sweep
+ * 자체는 성공으로 끝낸다 (cron이 30분 주기로 다시 불러줄 거니까).
  *
  * 정책:
  *   - TokenExpiredError (invalid_grant) → social_accounts.is_active=false
@@ -42,7 +40,7 @@ interface SweepStats {
  * accountIds가 명시되면 만료 여부 무관하게 그 계정들만 강제 refresh — 운영 디버깅용.
  */
 export async function processTokenRefreshSweep(
-  job: Job<TokenRefreshJobData>,
+  accountIds?: string[],
 ): Promise<SweepStats> {
   const supabase = createServiceClient();
   const now = new Date();
@@ -57,9 +55,8 @@ export async function processTokenRefreshSweep(
     .eq("is_active", true)
     .not("refresh_token_encrypted", "is", null);
 
-  const targetIds = job.data.accountIds;
-  if (targetIds && targetIds.length > 0) {
-    query = query.in("id", targetIds);
+  if (accountIds && accountIds.length > 0) {
+    query = query.in("id", accountIds);
   } else {
     // 만료까지 1시간 미만 남은 것들. token_expires_at IS NULL은 영구 토큰
     // (Instagram 비즈니스 long-lived 등)이거나 만료 시각 미상 — sweep 대상 아님.
