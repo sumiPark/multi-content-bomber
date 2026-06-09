@@ -42,7 +42,7 @@ export const PLATFORM_PROMPTS: Record<Platform, string> = {
 - hashtags (최대 15개): 핵심 3~5 + 카테고리 3~5 + 롱테일 5. 검색 SEO 중심 (실제 검색되는 키워드).
 - category: "교육", "엔터테인먼트", "라이프스타일", "뷰티/패션", "테크" 등 1개.`,
   INSTAGRAM: `Instagram Reels / Feed
-- caption (2200자 이내, 권장 300~800자): 구조 = ①**First-Line Hook** 필수: 첫 줄에 강한 감정/질문/숫자, 마침표 없이 "..." 또는 단절로 더보기 클릭 유도 → ②스토리텔링 본문, 가운데점(·) 또는 줄바꿈으로 호흡, 이모지 1~3개/문단 → ③**Question-Driven CTA** 답하기 쉬운 폐쇄형 질문 → ④해시태그 블록(본문 끝, 줄바꿈 후 정렬). **Save-Worthy Framing** 자연 활용 ("저장해두고 다시 보세요" 같은). 감성적 대화체.
+- caption (2200자 이내, 권장 300~800자): 구조 = ①**First-Line Hook** 필수: 첫 줄에 강한 감정/질문/숫자, 마침표 없이 "..." 또는 단절로 더보기 클릭 유도 → ②스토리텔링 본문, 가운데점(·) 또는 줄바꿈으로 호흡, 이모지 1~3개/문단 → ③**Question-Driven CTA** 답하기 쉬운 폐쇄형 질문. **Save-Worthy Framing** 자연 활용 ("저장해두고 다시 보세요" 같은). 감성적 대화체. **해시태그는 caption 본문에 절대 넣지 말 것** — 게시 시 아래 hashtags 배열이 본문 뒤에 자동으로 붙으므로, 본문에도 넣으면 해시태그가 두 번 노출된다. 해시태그는 hashtags 배열로만 반환한다.
 - hashtags (최대 20개): 대형(100만+) 3~5 + 중형(1~100만) 5~8 + 소형/니치(<1만) 5~7. 한/영 혼합. 다양한 크기 믹스가 발견 알고리즘에 유리.
 - cover_text (최대 50자): 릴스 커버에 들어갈 임팩트 한 줄. **Pattern Interruption** 또는 **Curiosity Gap** 활용. 이미지 게시면 빈 문자열로 응답.`,
   TIKTOK: `TikTok

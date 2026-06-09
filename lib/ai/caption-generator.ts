@@ -233,6 +233,13 @@ function extractInlineHashtags(text: string): string[] {
   return matches ?? [];
 }
 
+// Instagram 안전망: 해시태그는 hashtags 배열이 단일 출처이고 게시 시 본문 뒤에
+// 자동으로 붙는다(lib/platforms/instagram.ts). 모델이 프롬프트를 어기고 본문 끝에
+// 해시태그 블록을 넣으면 중복 노출되므로, 본문 말미의 해시태그 묶음을 제거한다.
+function stripTrailingHashtags(text: string): string {
+  return text.replace(/(?:\s*#[^\s#]+)+\s*$/u, "").trimEnd();
+}
+
 function postProcessYoutube(
   c: NonNullable<Captions["youtube"]>,
 ): NonNullable<Captions["youtube"]> {
@@ -248,7 +255,10 @@ function postProcessInstagram(
   c: NonNullable<Captions["instagram"]>,
 ): NonNullable<Captions["instagram"]> {
   return {
-    caption: trimByParagraph(c.caption, LIMITS.instagram.caption),
+    caption: trimByParagraph(
+      stripTrailingHashtags(c.caption),
+      LIMITS.instagram.caption,
+    ),
     hashtags: ensureHash(c.hashtags).slice(0, LIMITS.instagram.hashtags),
     cover_text: c.cover_text
       ? c.cover_text.length <= LIMITS.instagram.coverText
