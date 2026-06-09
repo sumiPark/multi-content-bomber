@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Check, Pencil, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +42,14 @@ interface CaptionResultProps {
   initialEditing?: boolean;
   /** 저장 성공 시 부모에게 최신 캡션/저장시각을 알린다 (업로드 마법사 상태 동기화용). */
   onSaved?: (captions: Captions, savedAt: string) => void;
+}
+
+export interface CaptionResultHandle {
+  /**
+   * 미저장 편집이 있으면 저장하고 성공 여부를 반환한다. 변경분이 없으면 true.
+   * 마법사가 "다음 단계"로 넘어가기 전에 직접 작성 초안을 확정 저장하는 용도.
+   */
+  commit: () => Promise<boolean>;
 }
 
 type YoutubeDraft = {
@@ -123,19 +139,30 @@ function fromDraft(d: DraftCaptions): Captions {
   };
 }
 
-export function CaptionResult({
-  contentId,
-  captions,
-  savedAt,
-  thumbnails,
-  initialEditing = false,
-  onSaved,
-}: CaptionResultProps) {
+export const CaptionResult = forwardRef<
+  CaptionResultHandle,
+  CaptionResultProps
+>(function CaptionResult(
+  {
+    contentId,
+    captions,
+    savedAt,
+    thumbnails,
+    initialEditing = false,
+    onSaved,
+  },
+  ref,
+) {
   const [isEditing, setIsEditing] = useState(initialEditing);
   const [draft, setDraft] = useState<DraftCaptions>(() => toDraft(captions));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState(savedAt);
+
+  // 마지막으로 저장된(또는 외부에서 받은) 초안 스냅샷 — dirty 판정 기준.
+  const [baseline, setBaseline] = useState(() =>
+    JSON.stringify(toDraft(captions)),
+  );
 
   // 외부에서 captions가 교체되면(재생성 등) 편집 초안을 새 값으로 다시 동기화한다.
   // 마운트 시점 prop은 useState 초기화로 이미 반영됐으므로, 이후 변경분만 따라간다.
@@ -143,9 +170,16 @@ export function CaptionResult({
   useEffect(() => {
     if (captions !== lastCaptionsRef.current) {
       lastCaptionsRef.current = captions;
-      setDraft(toDraft(captions));
+      const synced = toDraft(captions);
+      setBaseline(JSON.stringify(synced));
+      setDraft(synced);
     }
   }, [captions]);
+
+  const dirty = useMemo(
+    () => JSON.stringify(draft) !== baseline,
+    [draft, baseline],
+  );
 
   const activeTabs = useMemo(() => {
     const tabs: Array<"youtube" | "instagram" | "tiktok"> = [];
@@ -155,7 +189,8 @@ export function CaptionResult({
     return tabs;
   }, [draft]);
 
-  async function handleSave() {
+  // 실제 저장 로직 — 성공 여부 반환. 버튼/commit() 양쪽에서 재사용.
+  const persist = useCallback(async (): Promise<boolean> => {
     setSaving(true);
     setError(null);
     const next = fromDraft(draft);
@@ -166,13 +201,31 @@ export function CaptionResult({
     setSaving(false);
     if (!result.ok) {
       setError(result.error);
-      return;
+      return false;
     }
     setLastSaved(result.savedAt);
     setIsEditing(false);
-    // 부모가 들고 있는 캡션 상태(예: 업로드 마법사)도 갱신해 검토 단계·단계 재진입 시 수정본이 유지되게 한다.
+    // 저장값으로 초안/기준선을 정규화해 dirty를 해제한다.
+    const normalized = toDraft(next);
     lastCaptionsRef.current = next;
+    setBaseline(JSON.stringify(normalized));
+    setDraft(normalized);
+    // 부모가 들고 있는 캡션 상태(예: 업로드 마법사)도 갱신해 검토 단계·단계 재진입 시 수정본이 유지되게 한다.
     onSaved?.(next, result.savedAt);
+    return true;
+  }, [draft, contentId, onSaved]);
+
+  // 마법사가 단계를 넘기기 전 호출 — 미저장 편집이 있을 때만 저장한다.
+  useImperativeHandle(
+    ref,
+    () => ({
+      commit: async () => (dirty ? persist() : true),
+    }),
+    [dirty, persist],
+  );
+
+  function handleSave() {
+    void persist();
   }
 
   function handleCancel() {
@@ -434,7 +487,7 @@ export function CaptionResult({
       </CardContent>
     </Card>
   );
-}
+});
 
 function Field({
   label,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -10,7 +10,10 @@ import {
   Pencil,
   Sparkles,
 } from "lucide-react";
-import { CaptionResult } from "@/components/ai/caption-result";
+import {
+  CaptionResult,
+  type CaptionResultHandle,
+} from "@/components/ai/caption-result";
 import { ImageDropzone } from "@/components/upload/image-dropzone";
 import { VideoDropzone } from "@/components/upload/video-dropzone";
 import { Badge } from "@/components/ui/badge";
@@ -125,6 +128,9 @@ export function UploadWizard({
   const [scheduledAt, setScheduledAt] = useState("");
   const [completing, setCompleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 직접 작성 모드 등에서 카드 안의 "저장"을 누르지 않고 "다음 단계"로 넘어가도
+  // 미저장 초안이 확정 저장되도록 CaptionResult에 imperative 접근한다.
+  const captionRef = useRef<CaptionResultHandle>(null);
 
   const selectedPreset = useMemo(
     () => presets.find((p) => p.id === presetId),
@@ -381,6 +387,15 @@ export function UploadWizard({
     }
   }
 
+  // 3단계(캡션) → 4단계로 넘어가기 전, 미저장 편집을 먼저 확정 저장한다.
+  async function advanceFromStep3() {
+    if (captionRef.current) {
+      const ok = await captionRef.current.commit();
+      if (!ok) return; // 저장 실패 시 CaptionResult가 에러를 표시하므로 멈춘다.
+    }
+    setStep(4);
+  }
+
   function handleSwitchCaptionMode(next: CaptionMode) {
     if (next === captionMode) return;
     if (captions) {
@@ -510,8 +525,9 @@ export function UploadWizard({
             onRegenerate={handleRegenerate}
             onCaptionsSaved={setCaptions}
             onSavedAtChange={setSavedAt}
+            captionRef={captionRef}
             onPrev={() => setStep(2)}
-            onNext={() => setStep(4)}
+            onNext={advanceFromStep3}
             canAdvance={canAdvanceStep3}
           />
         )}
@@ -954,6 +970,7 @@ function Step3Caption({
   onRegenerate,
   onCaptionsSaved,
   onSavedAtChange,
+  captionRef,
   onPrev,
   onNext,
   canAdvance,
@@ -976,6 +993,7 @@ function Step3Caption({
   onRegenerate: () => void;
   onCaptionsSaved: (captions: Captions) => void;
   onSavedAtChange: (savedAt: string) => void;
+  captionRef: React.RefObject<CaptionResultHandle | null>;
   onPrev: () => void;
   onNext: () => void;
   canAdvance: boolean;
@@ -1064,6 +1082,7 @@ function Step3Caption({
         savedAt && (
           <>
             <CaptionResult
+              ref={captionRef}
               contentId={contentId}
               captions={captions}
               savedAt={savedAt}
