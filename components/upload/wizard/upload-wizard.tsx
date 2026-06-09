@@ -508,6 +508,8 @@ export function UploadWizard({
             onGenerate={handleGenerate}
             onStartManual={handleStartManual}
             onRegenerate={handleRegenerate}
+            onCaptionsSaved={setCaptions}
+            onSavedAtChange={setSavedAt}
             onPrev={() => setStep(2)}
             onNext={() => setStep(4)}
             canAdvance={canAdvanceStep3}
@@ -950,6 +952,8 @@ function Step3Caption({
   onGenerate,
   onStartManual,
   onRegenerate,
+  onCaptionsSaved,
+  onSavedAtChange,
   onPrev,
   onNext,
   canAdvance,
@@ -970,6 +974,8 @@ function Step3Caption({
   onGenerate: () => void;
   onStartManual: () => void;
   onRegenerate: () => void;
+  onCaptionsSaved: (captions: Captions) => void;
+  onSavedAtChange: (savedAt: string) => void;
   onPrev: () => void;
   onNext: () => void;
   canAdvance: boolean;
@@ -1063,6 +1069,10 @@ function Step3Caption({
               savedAt={savedAt}
               thumbnails={thumbnailUrls}
               initialEditing={captionMode === "manual"}
+              onSaved={(c, at) => {
+                onCaptionsSaved(c);
+                onSavedAtChange(at);
+              }}
             />
             {captionMode === "ai" && (
               <Button

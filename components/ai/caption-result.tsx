@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Pencil, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,8 @@ interface CaptionResultProps {
   savedAt: string;
   thumbnails: string[];
   initialEditing?: boolean;
+  /** 저장 성공 시 부모에게 최신 캡션/저장시각을 알린다 (업로드 마법사 상태 동기화용). */
+  onSaved?: (captions: Captions, savedAt: string) => void;
 }
 
 type YoutubeDraft = {
@@ -127,12 +129,23 @@ export function CaptionResult({
   savedAt,
   thumbnails,
   initialEditing = false,
+  onSaved,
 }: CaptionResultProps) {
   const [isEditing, setIsEditing] = useState(initialEditing);
   const [draft, setDraft] = useState<DraftCaptions>(() => toDraft(captions));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState(savedAt);
+
+  // 외부에서 captions가 교체되면(재생성 등) 편집 초안을 새 값으로 다시 동기화한다.
+  // 마운트 시점 prop은 useState 초기화로 이미 반영됐으므로, 이후 변경분만 따라간다.
+  const lastCaptionsRef = useRef(captions);
+  useEffect(() => {
+    if (captions !== lastCaptionsRef.current) {
+      lastCaptionsRef.current = captions;
+      setDraft(toDraft(captions));
+    }
+  }, [captions]);
 
   const activeTabs = useMemo(() => {
     const tabs: Array<"youtube" | "instagram" | "tiktok"> = [];
@@ -145,9 +158,10 @@ export function CaptionResult({
   async function handleSave() {
     setSaving(true);
     setError(null);
+    const next = fromDraft(draft);
     const result: UpdateCaptionsResult = await updateCaptionsAction({
       contentId,
-      captions: fromDraft(draft),
+      captions: next,
     });
     setSaving(false);
     if (!result.ok) {
@@ -156,6 +170,9 @@ export function CaptionResult({
     }
     setLastSaved(result.savedAt);
     setIsEditing(false);
+    // 부모가 들고 있는 캡션 상태(예: 업로드 마법사)도 갱신해 검토 단계·단계 재진입 시 수정본이 유지되게 한다.
+    lastCaptionsRef.current = next;
+    onSaved?.(next, result.savedAt);
   }
 
   function handleCancel() {
