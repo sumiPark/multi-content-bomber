@@ -357,7 +357,7 @@ async function signMedia(
 // ai_captions(jsonb)에서 플랫폼별 필드를 풀어 PublishContext에 채운다.
 // captions schema는 lib/ai/caption-generator.ts와 동기화:
 //   youtube   { title, description, hashtags, category? }
-//   instagram { caption, hashtags, cover_text? }
+//   instagram { caption, hashtags }
 //   tiktok    { caption, hashtags }
 // ─────────────────────────────────────────────────────────────────────────────
 

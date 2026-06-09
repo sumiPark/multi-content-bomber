@@ -61,7 +61,6 @@ type YoutubeDraft = {
 type InstagramDraft = {
   caption: string;
   hashtagsText: string;
-  cover_text: string;
 };
 type TiktokDraft = {
   caption: string;
@@ -100,7 +99,6 @@ function toDraft(c: Captions): DraftCaptions {
       ? {
           caption: c.instagram.caption,
           hashtagsText: c.instagram.hashtags.join(" "),
-          cover_text: c.instagram.cover_text ?? "",
         }
       : undefined,
     tiktok: c.tiktok
@@ -127,7 +125,6 @@ function fromDraft(d: DraftCaptions): Captions {
       ? {
           caption: d.instagram.caption.trim(),
           hashtags: splitHashtags(d.instagram.hashtagsText),
-          cover_text: d.instagram.cover_text.trim(),
         }
       : undefined,
     tiktok: d.tiktok
@@ -402,18 +399,6 @@ export const CaptionResult = forwardRef<
               <div className="grid gap-6 lg:grid-cols-[1fr_240px]">
                 <div className="space-y-4">
                   <Field
-                    label="릴스 커버 텍스트"
-                    value={draft.instagram.cover_text}
-                    readOnly={!isEditing}
-                    rows={1}
-                    onChange={(v) =>
-                      setDraft({
-                        ...draft,
-                        instagram: { ...draft.instagram!, cover_text: v },
-                      })
-                    }
-                  />
-                  <Field
                     label="캡션 (2200자 이내)"
                     value={draft.instagram.caption}
                     readOnly={!isEditing}
@@ -441,7 +426,6 @@ export const CaptionResult = forwardRef<
                 <div className="lg:sticky lg:top-4 lg:self-start">
                   <InstagramPreview
                     caption={draft.instagram.caption}
-                    coverText={draft.instagram.cover_text}
                     hashtags={draft.instagram.hashtagsText
                       .trim()
                       .split(/\s+/)

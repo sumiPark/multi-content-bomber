@@ -1091,7 +1091,6 @@ function DetailDialog({
             description?: string;
             caption?: string;
             hashtags?: string[];
-            cover_text?: string;
           }
         | undefined
       >
@@ -1196,7 +1195,7 @@ function DetailDialog({
               {captions.instagram && (
                 <CaptionBlock
                   title="Instagram"
-                  primary={captions.instagram.cover_text ?? ""}
+                  primary=""
                   body={captions.instagram.caption ?? ""}
                   tags={captions.instagram.hashtags ?? []}
                 />

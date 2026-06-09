@@ -52,19 +52,18 @@ export function YoutubeShortsPreview({
   description: string;
   hashtags: string[];
 }) {
-  const firstLine = description.split("\n").find((l) => l.trim()) ?? "";
   return (
     <div className="space-y-2">
       <PreviewLabel>YouTube Shorts</PreviewLabel>
       <PhoneFrame thumbnailUrl={thumbnailUrl}>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 space-y-1 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-3">
           <p className="text-[10px] font-medium opacity-90">@channel · 구독</p>
-          <p className="line-clamp-2 text-xs font-bold leading-tight">
+          <p className="line-clamp-2 whitespace-pre-line text-xs font-bold leading-tight">
             {title || "제목을 입력하세요"}
           </p>
-          {firstLine && (
-            <p className="line-clamp-1 text-[10px] text-white/80">
-              {firstLine}
+          {description.trim() && (
+            <p className="line-clamp-3 whitespace-pre-line text-[10px] text-white/80">
+              {description}
             </p>
           )}
           {hashtags.length > 0 && (
@@ -86,27 +85,18 @@ export function YoutubeShortsPreview({
 export function InstagramPreview({
   caption,
   hashtags,
-  coverText,
   thumbnailUrl,
 }: BasePreviewProps & {
   caption: string;
   hashtags: string[];
-  coverText: string;
 }) {
   return (
     <div className="space-y-2">
       <PreviewLabel>Instagram Reels</PreviewLabel>
       <PhoneFrame thumbnailUrl={thumbnailUrl}>
-        {coverText && (
-          <div className="pointer-events-none absolute inset-x-0 top-0 p-3">
-            <p className="line-clamp-2 text-center text-sm font-bold drop-shadow-md">
-              {coverText}
-            </p>
-          </div>
-        )}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 space-y-1 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-3">
           <p className="text-[10px] font-medium">@username · 팔로우</p>
-          <p className="line-clamp-3 text-[10px]">
+          <p className="line-clamp-4 whitespace-pre-line text-[10px]">
             {caption || "캡션을 입력하세요"}
           </p>
           {hashtags.length > 0 && (

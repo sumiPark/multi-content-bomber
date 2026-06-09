@@ -22,7 +22,6 @@ export const captionsSchema = z.object({
     .object({
       caption: z.string(),
       hashtags: z.array(z.string()),
-      cover_text: z.string().optional(),
     })
     .optional(),
   tiktok: z
@@ -38,7 +37,7 @@ export type Captions = z.infer<typeof captionsSchema>;
 // 글자수 / 해시태그 한도. docs/caption-engine.md와 동기화.
 const LIMITS = {
   youtube: { title: 100, description: 5000, hashtags: 15 },
-  instagram: { caption: 2200, coverText: 50, hashtags: 20 },
+  instagram: { caption: 2200, hashtags: 20 },
   tiktok: { caption: 300, hashtags: 5 },
 } as const;
 
@@ -63,11 +62,10 @@ const PROPERTY_DEFS = {
   instagram: {
     type: "object" as const,
     additionalProperties: false,
-    required: ["caption", "hashtags", "cover_text"],
+    required: ["caption", "hashtags"],
     properties: {
       caption: { type: "string" as const },
       hashtags: { type: "array" as const, items: { type: "string" as const } },
-      cover_text: { type: "string" as const },
     },
   },
   tiktok: {
@@ -260,11 +258,6 @@ function postProcessInstagram(
       LIMITS.instagram.caption,
     ),
     hashtags: ensureHash(c.hashtags).slice(0, LIMITS.instagram.hashtags),
-    cover_text: c.cover_text
-      ? c.cover_text.length <= LIMITS.instagram.coverText
-        ? c.cover_text
-        : c.cover_text.slice(0, LIMITS.instagram.coverText)
-      : undefined,
   };
 }
 

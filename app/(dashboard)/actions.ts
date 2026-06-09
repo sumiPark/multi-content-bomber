@@ -129,7 +129,7 @@ function buildBlankCaptions(platforms: Platform[]): Captions {
       ? { title: "", description: "", hashtags: [], category: "" }
       : undefined,
     instagram: platforms.includes("INSTAGRAM")
-      ? { caption: "", hashtags: [], cover_text: "" }
+      ? { caption: "", hashtags: [] }
       : undefined,
     tiktok: platforms.includes("TIKTOK")
       ? { caption: "", hashtags: [] }
