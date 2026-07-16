@@ -57,8 +57,15 @@ export default function DataDeletionPage() {
       <Section title="2. 업로드 콘텐츠 삭제하기">
         <p>업로드한 이미지·동영상과 AI 캡션을 항목별로 삭제할 수 있습니다.</p>
         <ol className="mt-3 list-decimal space-y-2 pl-6">
-          <li>로그인 후 좌측 사이드바의 <strong>보관함</strong> 메뉴 클릭</li>
-          <li>삭제하려는 콘텐츠 항목의 <strong>삭제</strong> 옵션 선택</li>
+          <li>
+            로그인 후 좌측 사이드바에서 <strong>배포 관리</strong>(발행한 콘텐츠)
+            또는 <strong>보관함</strong>(발행하지 않은 콘텐츠) 메뉴 클릭
+          </li>
+          <li>
+            삭제하려는 콘텐츠 선택 — 배포 관리에서는 항목을 클릭해 상세를 연 뒤{" "}
+            <strong>콘텐츠 삭제</strong>, 보관함에서는 항목의{" "}
+            <strong>삭제</strong> 옵션 선택
+          </li>
           <li>확인 후 삭제</li>
         </ol>
         <p className="mt-3">

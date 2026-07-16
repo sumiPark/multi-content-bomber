@@ -121,8 +121,9 @@ export default function PrivacyPage() {
             disconnect)하면 즉시 데이터베이스에서 삭제됩니다.
           </li>
           <li>
-            <strong>업로드 콘텐츠·캡션</strong>: 사용자가 보관함에서 삭제할 때까지
-            보관. 삭제 요청 시 Storage 및 데이터베이스에서 즉시 제거.
+            <strong>업로드 콘텐츠·캡션</strong>: 사용자가 삭제할 때까지 보관
+            (배포 관리 또는 보관함). 삭제 요청 시 Storage 및 데이터베이스에서
+            즉시 제거.
           </li>
           <li>
             <strong>계정 정보</strong>: 회원 탈퇴 요청 시 30일 이내 모든 개인정보가
@@ -139,7 +140,7 @@ export default function PrivacyPage() {
         <ul className="list-disc space-y-2 pl-6">
           <li>본인의 개인정보 열람·정정·삭제·처리정지를 요청할 권리</li>
           <li>SNS 연동을 언제든지 해제할 권리(/accounts 페이지)</li>
-          <li>업로드 콘텐츠를 언제든지 삭제할 권리(보관함)</li>
+          <li>업로드 콘텐츠를 언제든지 삭제할 권리(배포 관리 · 보관함)</li>
           <li>
             계정 자체의 삭제는{" "}
             <Link href="/data-deletion" className="underline">

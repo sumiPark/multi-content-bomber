@@ -57,9 +57,12 @@ export function ContentsLibrary({
     );
   }
 
-  function runDelete(ids: string[], confirmMessage: string) {
+  // 여기 오는 항목은 전부 초안(발행 잡 없음)이라 이력 손실 우려가 없다.
+  // 발행된 콘텐츠의 삭제는 배포 관리의 포스팅 상세에서 처리한다.
+  function runDelete(ids: string[]) {
     if (ids.length === 0) return;
-    if (!window.confirm(confirmMessage)) return;
+    const message = `${ids.length}건을 삭제할까요? 미디어 파일도 함께 삭제되며 되돌릴 수 없습니다.`;
+    if (!window.confirm(message)) return;
     startTransition(async () => {
       setActionMessage(null);
       const result = await deleteContentsAction({ contentIds: ids });
@@ -77,9 +80,9 @@ export function ContentsLibrary({
     return (
       <Card>
         <CardContent className="py-16 text-center text-muted-foreground">
-          아직 만든 콘텐츠가 없어요.
+          발행을 기다리는 초안이 없어요.
           <br />
-          대시보드에서 첫 콘텐츠를 만들어보세요.
+          발행한 콘텐츠는 배포 관리에서 볼 수 있어요.
         </CardContent>
       </Card>
     );
@@ -125,12 +128,7 @@ export function ContentsLibrary({
           <Button
             variant="outline"
             size="sm"
-            onClick={() =>
-              runDelete(
-                Array.from(selected),
-                `선택한 ${selected.size}건을 삭제할까요? 미디어 파일도 함께 삭제되며 되돌릴 수 없습니다.`,
-              )
-            }
+            onClick={() => runDelete(Array.from(selected))}
             disabled={selected.size === 0 || isPending}
             className="text-destructive hover:text-destructive"
           >
@@ -139,12 +137,7 @@ export function ContentsLibrary({
           <Button
             variant="outline"
             size="sm"
-            onClick={() =>
-              runDelete(
-                allIds,
-                `전체 ${allIds.length}건을 삭제할까요? 미디어 파일도 함께 삭제되며 되돌릴 수 없습니다.`,
-              )
-            }
+            onClick={() => runDelete(allIds)}
             disabled={allIds.length === 0 || isPending}
             className="text-destructive hover:text-destructive"
           >
@@ -239,12 +232,7 @@ export function ContentsLibrary({
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        onClick={() =>
-                          runDelete(
-                            [c.id],
-                            "이 콘텐츠를 삭제할까요? 미디어 파일도 함께 삭제되며 되돌릴 수 없습니다.",
-                          )
-                        }
+                        onClick={() => runDelete([c.id])}
                         disabled={isPending}
                         className="text-muted-foreground hover:text-destructive"
                         title="삭제"

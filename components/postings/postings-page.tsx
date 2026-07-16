@@ -30,6 +30,7 @@ import {
   retryPostingsAction,
   type PostingActionResult,
 } from "@/app/(dashboard)/postings/actions";
+import { deleteContentsAction } from "@/app/(dashboard)/actions";
 
 type PublishStatus =
   | "PENDING"
@@ -201,6 +202,24 @@ export function PostingsPage({
   const [detailItem, setDetailItem] = useState<PostingItem | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // 콘텐츠 완전 삭제 — 목록에서 숨기는 deletePostingsAction과 다르다.
+  // 콘텐츠 행·미디어 파일·해당 콘텐츠의 모든 발행 이력이 함께 사라진다.
+  function runDeleteContent(contentId: string, label: string) {
+    const message = `'${label}'을(를) 완전히 삭제할까요?\n\n업로드한 미디어 파일과 이 콘텐츠의 모든 발행 이력이 삭제되며 되돌릴 수 없습니다.\n(이미 SNS에 게시된 게시물은 각 플랫폼에서 별도로 삭제해야 합니다.)`;
+    if (!window.confirm(message)) return;
+    startTransition(async () => {
+      setActionMessage(null);
+      const result = await deleteContentsAction({ contentIds: [contentId] });
+      if (result.ok) {
+        setDetailItem(null);
+        setActionMessage("콘텐츠를 삭제했습니다.");
+        router.refresh();
+      } else {
+        setActionMessage(result.error);
+      }
+    });
+  }
 
   // 검색 디바운스 300ms
   useEffect(() => {
@@ -470,7 +489,7 @@ export function PostingsPage({
               deletePostingsAction,
               selectedItems.map((p) => p.id),
               "삭제(soft)",
-              `${selected.size}건을 보관함에서 숨길까요? (실제 삭제 아님)`,
+              `${selected.size}건을 배포 관리 목록에서 숨길까요? 콘텐츠와 SNS 게시물은 삭제되지 않습니다.`,
             )
           }
           onClear={() => setSelected(new Set())}
@@ -501,13 +520,14 @@ export function PostingsPage({
             deletePostingsAction,
             [id],
             "삭제(soft)",
-            "이 포스팅을 보관함에서 숨길까요? (실제 삭제 아님)",
+            "이 포스팅을 배포 관리 목록에서 숨길까요? 콘텐츠와 SNS 게시물은 삭제되지 않습니다.",
           )
         }
       />
 
       {detailItem && (
         <DetailDialog
+          onDeleteContent={runDeleteContent}
           item={detailItem}
           canManage={canManage}
           isPending={isPending}
@@ -1064,6 +1084,7 @@ function DetailDialog({
   onClose,
   onRetry,
   onCancel,
+  onDeleteContent,
 }: {
   item: PostingItem;
   canManage: boolean;
@@ -1071,6 +1092,7 @@ function DetailDialog({
   onClose: () => void;
   onRetry: (id: string) => void;
   onCancel: (id: string) => void;
+  onDeleteContent: (contentId: string, label: string) => void;
 }) {
   const displayStatus = getDisplayStatus(item.status, item.scheduledFor);
 
@@ -1212,7 +1234,24 @@ function DetailDialog({
           )}
 
           {canManage && (
-            <div className="flex justify-end gap-2 border-t pt-4">
+            <div className="flex items-center justify-between gap-2 border-t pt-4">
+              {/* 콘텐츠 완전 삭제 — 이 콘텐츠의 모든 포스팅에 영향을 주므로
+                  포스팅 단위 액션(재시도/취소)과 시각적으로 분리한다. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  onDeleteContent(
+                    item.contentId,
+                    item.internalTitle?.trim() || "이 콘텐츠",
+                  )
+                }
+                disabled={isPending}
+                className="text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="size-3.5" /> 콘텐츠 삭제
+              </Button>
+              <div className="flex gap-2">
               {displayStatus === "failed" && (
                 <Button
                   variant="outline"
@@ -1240,6 +1279,7 @@ function DetailDialog({
                   <X className="size-3.5" /> 예약 취소
                 </Button>
               )}
+              </div>
             </div>
           )}
         </div>
