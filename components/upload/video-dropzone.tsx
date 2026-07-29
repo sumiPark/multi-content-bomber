@@ -99,7 +99,14 @@ export function VideoDropzone({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(v, 0, 0, w, h);
-    const seconds = v.currentTime;
+    // 커버 시점은 영상 길이 안으로 클램프한다. 재생이 끝나면 currentTime이
+    // duration과 같아지는데, TikTok(video_cover_timestamp_ms)·Instagram(thumb_offset)은
+    // 길이를 벗어난 값을 거부하거나 무시해 커버 지정이 통째로 날아간다.
+    const dur = v.duration;
+    const seconds =
+      Number.isFinite(dur) && dur > 0
+        ? Math.min(Math.max(0, v.currentTime), Math.max(0, dur - 0.05))
+        : Math.max(0, v.currentTime);
     const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
     setCoverPreview(dataUrl);
     canvas.toBlob(
