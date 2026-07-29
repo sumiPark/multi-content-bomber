@@ -578,8 +578,31 @@ export async function createPublishJobsAction(
     return { ok: false, error: "계정 조회 실패" };
   }
 
+  // 중복 발행 가드 — 같은 콘텐츠에 대해 아직 처리가 안 끝난 job이 있는 계정은 제외한다.
+  // (마법사 '완료'가 두 번 눌리면 5초 간격으로 같은 배치가 두 번 등록돼 릴스가 2개씩
+  //  올라갔다. 클라이언트 잠금은 upload-wizard에서, 최종 방어선은 0013 unique index.)
+  const { data: liveJobs } = await supabase
+    .from("publish_jobs")
+    .select("social_account_id")
+    .eq("content_id", parsed.data.contentId)
+    .in("status", ["PENDING", "PROCESSING", "RETRYING"])
+    .is("deleted_at", null);
+
+  const queuedAccountIds = new Set(
+    (liveJobs ?? []).map((j) => j.social_account_id),
+  );
+  const targets = accounts.filter((a) => !queuedAccountIds.has(a.id));
+
+  if (targets.length === 0) {
+    return {
+      ok: false,
+      error:
+        "이미 등록된 발행 작업이 있어요. 배포 관리에서 진행 상황을 확인해주세요.",
+    };
+  }
+
   const mediaCount = content.media_urls.length;
-  const jobs = accounts.map((a) => ({
+  const jobs = targets.map((a) => ({
     content_id: parsed.data.contentId,
     social_account_id: a.id,
     post_type: pickPostType(
@@ -592,7 +615,18 @@ export async function createPublishJobsAction(
   }));
 
   const { error } = await supabase.from("publish_jobs").insert(jobs);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    // 23505 = unique_violation. 위 가드와 insert 사이에 같은 요청이 한 번 더 들어온
+    // 경합 상황 — 먼저 들어간 배치가 이미 유효하므로 실패가 아니라 "추가 안 함"으로 본다.
+    if (error.code === "23505") {
+      return {
+        ok: true,
+        count: 0,
+        note: "이미 등록된 발행 작업이 있어 추가로 등록하지 않았어요.",
+      };
+    }
+    return { ok: false, error: error.message };
+  }
 
   // 즉시 발행이면 GitHub Actions를 그 자리에서 깨운다(repository_dispatch → process-due).
   // 예약 발행이면 트리거하지 않는다 — 30분 cron sweep이 scheduled_for를 보고 처리한다.

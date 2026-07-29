@@ -127,6 +127,9 @@ export function UploadWizard({
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("now");
   const [scheduledAt, setScheduledAt] = useState("");
   const [completing, setCompleting] = useState(false);
+  // '완료' 재진입 잠금 — state 반영(다음 렌더)보다 먼저 걸린다. 성공하면 페이지를
+  // 벗어날 때까지 잠긴 채로 둔다(실패 시에만 해제).
+  const completingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   // 직접 작성 모드 등에서 카드 안의 "저장"을 누르지 않고 "다음 단계"로 넘어가도
   // 미저장 초안이 확정 저장되도록 CaptionResult에 imperative 접근한다.
@@ -414,6 +417,10 @@ export function UploadWizard({
   async function handleComplete() {
     setError(null);
     if (!contentId || selectedAccountIds.length === 0) return;
+    // completingRef는 state보다 먼저 잠긴다 — setCompleting은 다음 렌더에야 버튼에
+    // 반영되므로, 같은 tick에 두 번 눌리는 경우는 ref로 막는다.
+    if (completingRef.current) return;
+    completingRef.current = true;
     setCompleting(true);
     const scheduledFor =
       scheduleMode === "scheduled" && scheduledAt
@@ -424,11 +431,15 @@ export function UploadWizard({
       accountIds: selectedAccountIds,
       scheduledFor,
     });
-    setCompleting(false);
     if (!result.ok) {
+      completingRef.current = false;
+      setCompleting(false);
       setError(result.error);
       return;
     }
+    // 성공 시엔 잠금을 풀지 않는다. router.push는 즉시 화면이 바뀌지 않아서,
+    // 여기서 completing을 false로 되돌리면 이동 대기 중에 '완료' 버튼이 되살아나고
+    // 한 번 더 눌려 같은 배치가 두 번 등록됐다(계정당 릴스 2개 발행의 원인).
     router.push(`/?content=${contentId}`);
     router.refresh();
   }

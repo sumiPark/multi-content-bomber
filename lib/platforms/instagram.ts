@@ -28,8 +28,11 @@ const REFRESH_URL = "https://graph.instagram.com/refresh_access_token";
 const GRAPH_API_BASE = "https://graph.instagram.com/v23.0";
 
 // Container 상태 폴링 — 영상 업로드는 IG 서버가 처리하는 데 시간이 걸린다.
+// 60초(30회)로는 릴스 인코딩이 자주 못 끝나서 실제 발행 대부분이 타임아웃 → RETRYING으로
+// 떨어지고 재시도 3회 중 1~2회를 그냥 소모했다. 3분으로 늘린다. (워커는 GitHub Actions
+// 러너라 Vercel 60초 제한과 무관하고, job timeout은 50분.)
 const POLL_INTERVAL_MS = 2000;
-const POLL_MAX_ATTEMPTS = 30; // 약 60초
+const POLL_MAX_ATTEMPTS = 90; // 약 3분
 
 // Meta Graph API 에러 응답.
 //   { error: { message, type, code, error_subcode, fbtrace_id } }
