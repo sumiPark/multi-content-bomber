@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MCB 기업부설연구소 연구노트 - 2026</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --line: #333;
+    --line-soft: #999;
+    --accent: #c0392b;
+    --box-bg: #fafafa;
+    --mono: "D2Coding", "Consolas", "Menlo", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font-family: "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", sans-serif;
+    color: var(--ink);
+    line-height: 1.75;
+    margin: 0;
+    background: #e8e8e8;
+    font-size: 10.5pt;
+  }
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    margin: 12mm auto;
+    padding: 18mm 16mm;
+    background: #fff;
+    box-shadow: 0 2px 12px rgba(0,0,0,.18);
+  }
+  .page + .page { page-break-before: always; }
+
+  .letterhead {
+    font-size: 10pt;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    margin: 0 0 10px;
+  }
+  table.meta {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 8px;
+  }
+  table.meta td {
+    border: 1px solid var(--line);
+    padding: 7px 10px;
+    vertical-align: middle;
+  }
+  table.meta td.label {
+    background: #f2f2f2;
+    font-weight: 700;
+    white-space: nowrap;
+    width: 92px;
+    text-align: center;
+  }
+  .serial { color: var(--accent); font-weight: 700; }
+
+  .body-box {
+    border: 1px solid var(--line);
+    padding: 16px 18px 22px;
+    margin-top: 6px;
+  }
+  h2.sec {
+    font-size: 11pt;
+    margin: 20px 0 6px;
+    padding-bottom: 2px;
+    border-bottom: 1.5px solid var(--ink);
+  }
+  h2.sec:first-of-type { margin-top: 2px; }
+  p { margin: 6px 0; }
+  ul, ol { margin: 6px 0 6px 4px; padding-left: 20px; }
+  li { margin: 3px 0; }
+  li::marker { color: var(--line-soft); }
+  b, strong { color: #000; }
+  .muted { color: #555; }
+
+  code, .mono {
+    font-family: var(--mono);
+    font-size: 9.2pt;
+    background: #f0f0f0;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  pre {
+    font-family: var(--mono);
+    font-size: 9pt;
+    background: #1e1e2a;
+    color: #e6e6ea;
+    padding: 12px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    line-height: 1.5;
+    margin: 8px 0;
+  }
+  pre .k { color: #c792ea; }
+  pre .s { color: #c3e88d; }
+  pre .c { color: #6c7086; }
+
+  .diagram {
+    background: #0f1420;
+    border-radius: 8px;
+    padding: 18px 14px;
+    margin: 10px 0 4px;
+    color: #cdd6f4;
+  }
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    justify-content: center;
+    gap: 8px;
+  }
+  .node {
+    background: #1b2233;
+    border: 1px solid #313a52;
+    border-radius: 7px;
+    padding: 9px 12px;
+    min-width: 92px;
+    text-align: center;
+    font-size: 8.6pt;
+    line-height: 1.35;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .node .t { font-weight: 700; color: #89b4fa; font-size: 8.8pt; }
+  .node .d { color: #a6adc8; margin-top: 2px; }
+  .node.accent .t { color: #f38ba8; }
+  .node.ok .t { color: #a6e3a1; }
+  .node.warn .t { color: #f9e2af; }
+  .arrow { align-self: center; color: #585b70; font-weight: 700; font-size: 12pt; padding: 0 1px; }
+  .flow-caption { text-align: center; color: #7f849c; font-size: 8pt; margin-top: 10px; }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: #fdf3f2;
+    padding: 8px 12px;
+    margin: 10px 0;
+    font-size: 9.8pt;
+  }
+  .callout .tag { font-weight: 700; color: var(--accent); }
+
+  table.data {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 9.3pt;
+  }
+  table.data th, table.data td {
+    border: 1px solid var(--line-soft);
+    padding: 5px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  table.data th { background: #f2f2f2; font-weight: 700; }
+
+  table.sign {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 18px;
+  }
+  table.sign td {
+    border: 1px solid var(--line);
+    padding: 12px 10px;
+    width: 50%;
+    height: 42px;
+    vertical-align: top;
+    font-size: 9.5pt;
+  }
+
+  .toc-list { list-style: none; padding-left: 0; }
+  .toc-list li {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px dotted #bbb;
+    padding: 8px 2px;
+  }
+  .toc-list .no { color: var(--accent); font-weight: 700; margin-right: 10px; }
+  .cover-title {
+    text-align: center;
+    margin: 40mm 0 20px;
+  }
+  .cover-title .big { font-size: 26pt; font-weight: 800; letter-spacing: -1px; }
+  .cover-title .sub { font-size: 12pt; color: #555; margin-top: 8px; }
+  .cover-meta { margin: 24px auto; width: 70%; }
+
+  @media print {
+    body { background: #fff; }
+    .page { margin: 0; box-shadow: none; width: auto; min-height: auto; }
+    .noprint { display: none; }
+  }
+  @page { size: A4; margin: 14mm; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════ 표지 ══════════════════ -->
+<section class="page">
+  <p class="letterhead">[(주)한국유기농 기업부설연구소 연구노트]</p>
+  <div class="cover-title">
+    <div class="big">AI 멀티 채널 콘텐츠 배포 시스템<br />(MCB) 연구노트</div>
+    <div class="sub">다중 채널 콘텐츠 배포 시스템 - 2026년도 연구개발 기록</div>
+  </div>
+
+  <table class="meta cover-meta">
+    <tr><td class="label">연구과제</td><td>하나의 미디어를 YouTube·Instagram·TikTok에 플랫폼별로 최적화하여 일괄 배포하는 AI 기반 SaaS 개발</td></tr>
+    <tr><td class="label">연구기간</td><td>2026.05.01 ~ 2026.06.23</td></tr>
+    <tr><td class="label">참여연구자</td><td>박수미</td></tr>
+    <tr><td class="label">기술 스택</td><td>Next.js 16 (App Router) · TypeScript · Supabase(Auth/PostgreSQL/Storage) · OpenAI GPT-4o · GitHub Actions</td></tr>
+  </table>
+
+  <h2 class="sec">수록 연구 목록</h2>
+  <ul class="toc-list">
+    <li><span><span class="no">001</span>AI 비전 기반 플랫폼별 캡션 자동 생성 엔진 연구</span><span class="muted">2026.05.01 ~ 05.15</span></li>
+    <li><span><span class="no">002</span>AI 콘텐츠 자동 발행 파이프라인 및 큐 인프라 신뢰성 연구</span><span class="muted">2026.05.18 ~ 06.23</span></li>
+  </ul>
+</section>
+
+<!-- ══════════════════ 001 캡션 엔진 ══════════════════ -->
+<section class="page">
+  <p class="letterhead">[(주)한국유기농 기업부설연구소 연구노트]</p>
+  <table class="meta">
+    <tr>
+      <td class="label">연구제목</td>
+      <td>AI 비전 기반 플랫폼별 캡션 자동 생성 엔진 연구</td>
+      <td class="label">일련번호</td>
+      <td style="width:60px; text-align:center;" class="serial">001</td>
+    </tr>
+    <tr>
+      <td class="label">연구목적</td>
+      <td colspan="3">하나의 미디어(영상 또는 다중 이미지)에서 YouTube·Instagram·TikTok 각 플랫폼의 추천 알고리즘이 우대하는 행동(클릭·체류·저장·댓글)을 유도하는 캡션을 자동 생성하는 것을 목적으로 한다. GPT-4o Vision과 JSON Schema strict 모드를 결합하여 메시지 일관성·재현성·비용 효율을 동시에 확보한다.</td>
+    </tr>
+  </table>
+  <table class="meta">
+    <tr><td class="label">연구기간</td><td>2026.05.01 ~ 2026.05.15</td></tr>
+    <tr><td class="label">참여연구자</td><td>박수미</td></tr>
+  </table>
+
+  <div class="body-box">
+    <h2 class="sec">1. 목표 및 배경</h2>
+    <p>SNS 마케팅에서 동일한 콘텐츠라도 플랫폼마다 문법이 다르다. YouTube는 검색 SEO와 시청 완료율, Instagram은 체류시간(Engaged Time)과 저장, TikTok은 1초 안에 시청 여부가 결정되는 훅(hook)이 핵심 신호다. 사람이 이 세 톤을 각각 작성하면 시간이 많이 들고 품질 편차가 크다. 본 연구는 <b>한 번의 API 호출로 선택된 플랫폼 전체의 캡션을 동시 생성</b>하여, 핵심 메시지는 유지하되 플랫폼별 톤·길이·해시태그 전략만 달라지도록 설계하는 것을 목표로 한다.</p>
+
+    <h2 class="sec">2. 기술 개요 - 카피라이팅 8원칙의 프롬프트 주입</h2>
+    <p>캡션은 정보 전달이 아니라 사용자의 다음 행동(스크롤 멈춤 → 시청 → 저장/댓글)을 설계하는 도구로 정의한다. 인지심리학·행동경제학 근거를 가진 8개 원칙을 시스템 프롬프트에 명시적으로 주입한다.</p>
+    <ul>
+      <li><b>Curiosity Gap</b> - 결과·숫자는 노출하되 방법은 숨긴다. (Loewenstein, 1994)</li>
+      <li><b>Specificity Bias</b> - "큰 절약" 대신 "287만원 절약"처럼 구체적 숫자로 신뢰·기억률 상승.</li>
+      <li><b>Loss Aversion</b> - 손실 강조가 이득 강조보다 행동 유도력이 약 2배. (Kahneman &amp; Tversky, 1979)</li>
+      <li><b>Pattern Interruption</b> - 예측을 깨는 표현으로 자동 주의 유발. TikTok 훅의 최우선 원칙.</li>
+      <li><b>Open Loop / Zeigarnik</b> - 미완성 정보가 시청 지속률에 직접 기여.</li>
+      <li><b>First-Line Hook</b> - Instagram "더보기" 유도로 체류시간 확대.</li>
+      <li><b>Question-Driven CTA</b> - 질문형 마무리가 평서형 대비 댓글률 1.5~2배.</li>
+      <li><b>Save-Worthy Framing</b> - 저장은 좋아요보다 알고리즘 가중치가 높음.</li>
+    </ul>
+
+    <h2 class="sec">3. 시스템 아키텍처 - 4계층 프롬프트</h2>
+    <div class="diagram">
+      <div class="flow">
+        <div class="node accent"><span class="t">System Prompt</span><span class="d">고정 역할 + 8원칙</span></div>
+        <span class="arrow">→</span>
+        <div class="node"><span class="t">Platform Prompt</span><span class="d">선택 플랫폼만<br/>동적 조립</span></div>
+        <span class="arrow">→</span>
+        <div class="node"><span class="t">User Context</span><span class="d">description·프리셋<br/>+ 미디어 분석</span></div>
+        <span class="arrow">→</span>
+        <div class="node ok"><span class="t">JSON Schema</span><span class="d">strict mode<br/>선택 플랫폼만 required</span></div>
+      </div>
+      <div class="flow-caption">4계층 프롬프트 - API 1회 호출로 선택 플랫폼 전체 캡션 동시 생성 (메시지 일관성 + 비용 절감)</div>
+    </div>
+    <p>이미지는 vision content로 함께 전달하되 <code>detail: low</code>로 비용을 절감한다. 영상은 GPT-4o Vision이 직접 지원하지 않으므로, 브라우저에서 대표 프레임을 JPEG로 추출해 이미지처럼 전달한다(무거운 미디어 연산은 서버 부하를 피해 클라이언트에서 수행).</p>
+
+    <h2 class="sec">4. 구현 과정</h2>
+    <p>단일 출처 설계서 <code>docs/caption-engine.md</code>를 기준으로 <code>lib/ai/caption-generator.ts</code>·<code>lib/ai/prompts.ts</code>를 구현했다. GPT-4o 호출 파라미터와 출력 스키마는 다음과 같다.</p>
+    <pre><span class="c">// 선택된 플랫폼만 required로 동적 구성</span>
+{
+  youtube?:   { title, description, hashtags[], category }
+  instagram?: { caption, hashtags[], cover_text }
+  tiktok?:    { caption, hashtags[] }
+}
+<span class="c">// 호출: temperature 0.7(재생성 0.85), response_format: json_schema(strict)</span></pre>
+    <ul>
+      <li><b>플랫폼별 글자수 후처리 안전망</b> - AI가 한도를 어겨도 코드에서 단어 경계 트리밍, <code>#</code> 누락 태그 자동 prepend, TikTok은 caption 본문에서 정규식으로 해시태그를 추출해 메타데이터와 동기화.</li>
+      <li><b>프리셋 오버라이드</b> - 제품 리뷰형·튜토리얼형·이벤트 홍보형 등 톤 지침을 <code>[캡션 스타일 가이드]</code> 블록으로 system/platform 프롬프트 위에 우선 삽입.</li>
+      <li><b>재생성</b> - 이전 응답을 assistant 메시지로 넣고 "다른 hook 전략으로" 요청, 같은 콘텐츠의 <code>ai_captions</code> 컬럼을 UPDATE(신규 row 미생성 → dangling row 방지).</li>
+    </ul>
+
+    <h2 class="sec">5. 문제 해결 및 최적화</h2>
+    <ul>
+      <li><b>클릭베이트 처벌 회피</b> - CTR만 높고 시청 완료율이 낮으면 알고리즘이 오히려 처벌한다. 시스템 프롬프트에 거짓 약속·과장 표현 금지를 명시하고, Loss Aversion은 실제 한정성·시즌성일 때만 허용하도록 제약.</li>
+      <li><b>N회 호출 → 1회 호출</b> - 초기엔 플랫폼별 개별 호출을 검토했으나, 메시지 일관성 저하와 비용 증가로 기각. 선택 플랫폼을 하나의 스키마 <code>required</code>로 묶어 단일 호출로 통합.</li>
+      <li><b>zod 이중 검증</b> - strict JSON Schema 통과 후에도 zod로 재검증하여 런타임 타입 안전성 확보.</li>
+    </ul>
+
+    <h2 class="sec">6. 결과 및 평가</h2>
+    <p>선택 플랫폼 3종의 캡션을 단일 호출로 일관되게 생성하는 엔진을 완성했다. 플랫폼별 톤·해시태그 전략이 명확히 분기되면서도 핵심 메시지가 유지되어, 수동 작성 대비 작성 시간을 대폭 단축했다. 8원칙의 명시적 주입으로 "번역체·광고문구체" 산출물이 크게 줄었고, 후처리 안전망 덕분에 글자수 초과로 인한 게시 실패를 원천 차단했다. 향후 플랫폼 개별 재생성, 성과 데이터 기반 원칙 가중치 튜닝을 과제로 남긴다.</p>
+  </div>
+
+  <table class="sign">
+    <tr><td>작성자 (서명 및 날인)</td><td>책임자 (서명 및 날인)</td></tr>
+    <tr><td>일자</td><td>일자</td></tr>
+  </table>
+</section>
+
+<!-- ══════════════════ 002 발행 파이프라인 + 인프라 ══════════════════ -->
+<section class="page">
+  <p class="letterhead">[(주)한국유기농 기업부설연구소 연구노트]</p>
+  <table class="meta">
+    <tr>
+      <td class="label">연구제목</td>
+      <td>AI 콘텐츠 자동 발행 파이프라인 및 큐 인프라 신뢰성 연구</td>
+      <td class="label">일련번호</td>
+      <td style="width:60px; text-align:center;" class="serial">002</td>
+    </tr>
+    <tr>
+      <td class="label">연구목적</td>
+      <td colspan="3">하나의 콘텐츠를 N개 SNS 채널로 fan-out 발행하는 백그라운드 파이프라인을 구축한다. 멱등성·부분 실패 격리·자동 재시도로 발행 신뢰성을 확보하고, 상주 워커와 외부 큐(Redis)에 의존하던 초기 구조가 유발한 비용·장애 문제를 해결하기 위해, <b>별도 큐 인프라 없이 Postgres만으로 동시성·중복 방지·장애 복구를 보장하는 발행 구조</b>를 설계·검증하는 것을 목적으로 한다. 상시 운영비 제거는 이 구조 도출에 따른 부수 성과로 기대한다.</td>
+    </tr>
+  </table>
+  <table class="meta">
+    <tr><td class="label">연구기간</td><td>2026.05.18 ~ 2026.06.23</td></tr>
+    <tr><td class="label">참여연구자</td><td>박수미</td></tr>
+  </table>
+
+  <div class="body-box">
+    <h2 class="sec">1. 발생 문제</h2>
+    <p>SNS 업로드는 느리고(Instagram 컨테이너 폴링, 대용량 영상 멀티파트) 실패가 잦다(토큰 만료·rate limit·미디어 규격). 한 채널의 실패가 다른 채널을 막으면 안 되고, 같은 job이 중복 게시되어도 안 된다. 초기에는 <b>BullMQ + Upstash Redis + Railway 상주 워커</b>로 구성했으나, <b>상주 워커가 Redis를 24/7 폴링</b>하여 Upstash 무료 50만 커맨드/월을 며칠 만에 소진(실제 한도 초과로 발행 전체가 마비)했고, 상주 프로세스 관리 부담(좀비 워커 누적)과 이중 인프라 의존이 드러났다.</p>
+    <p>이 파이프라인은 단순 API 호출의 나열이 아니라, ① 여러 워커가 동시에 실행돼도 같은 발행 건을 <b>중복 처리하지 않을 것</b>, ② 처리 도중 프로세스가 크래시해도 <b>유실 없이 복구할 것</b>, ③ 상주 프로세스·외부 큐 없이도 위 두 보장을 유지할 것이라는 <b>상충하는 요구</b>를 동시에 만족해야 했다. 정해진 정답이 없어 여러 실행 모델을 시제작·비교하는 과정이 필요했고, 이 <b>기술적 불확실성의 해소</b>가 본 연구의 핵심이다.</p>
+
+    <h2 class="sec">2. 기술 개요 - 발행 상태 머신</h2>
+    <p>발행 1건을 <code>publish_jobs</code> 테이블의 한 행으로 두고, 명시적 상태 전이로 관리한다. 모든 전이는 <code>status_history</code>(jsonb)에 timestamp·message로 append하여 감사 로그로 남긴다.</p>
+    <div class="diagram">
+      <div class="flow">
+        <div class="node"><span class="t">PENDING</span><span class="d">발행 요청 직후</span></div>
+        <span class="arrow">→</span>
+        <div class="node accent"><span class="t">PROCESSING</span><span class="d">claim이 원자적 선점</span></div>
+        <span class="arrow">→</span>
+        <div class="node ok"><span class="t">SUCCESS</span><span class="d">post_url 기록</span></div>
+        <span class="arrow">·</span>
+        <div class="node warn"><span class="t">RETRYING</span><span class="d">실패·재시도 남음<br/>→ 다음 sweep 재처리</span></div>
+        <span class="arrow">·</span>
+        <div class="node accent"><span class="t">FAILED</span><span class="d">최종 실패</span></div>
+      </div>
+      <div class="flow-caption">채널별 독립 상태 - 한 계정 실패가 다른 계정 발행을 막지 않음</div>
+    </div>
+    <ul>
+      <li><b>멱등성</b> - jobId = <code>publish_jobs.id</code>(UUID)로 중복 발행을 차단. 외부 게시는 성공했는데 DB 기록만 실패하면 재게시(중복) 대신 경고 로그 후 정합성 sweep에 위임.</li>
+      <li><b>부분 실패 격리</b> - 한 채널 실패 시 해당 건만 RETRYING으로 남고 나머지는 정상 진행. <code>attempts &lt; 3</code> 동안 재시도.</li>
+      <li><b>토큰 자동 갱신 통합</b> - 발행 직전 만료 임박 토큰은 즉시 refresh 후 재암호화 저장. 토큰이 폐기된(invalid_grant) 계정은 <code>is_active=false</code>로 마킹해 헛된 재시도를 차단.</li>
+    </ul>
+
+    <h2 class="sec">3. 시스템 아키텍처 - Postgres 큐 + GitHub Actions</h2>
+    <p>큐를 별도 인프라 없이 <code>publish_jobs</code> 테이블 자체로 대체한다. 핵심은 <code>claim_due_publish_jobs</code> RPC다.</p>
+    <div class="callout">
+      <span class="tag">핵심 RPC</span> - <code>FOR UPDATE SKIP LOCKED</code>로 due job(예약 시각 지난 PENDING/RETRYING + stale PROCESSING 회수)을 <b>원자적으로 선점</b>. 여러 워커가 동시 실행해도 같은 job을 두 번 잡지 않는다.
+    </div>
+    <p style="margin-top:10px;">실행 기반은 다음 대안을 시제작·검토한 끝에 결정했다. 단순히 저렴한 안을 고른 것이 아니라, 신뢰성 요구(중복 방지·긴 처리 시간·장애 복구)를 충족하는 안을 가려낸 것이다.</p>
+    <table class="data">
+      <tr><th>설계 대안</th><th>검토 결과</th></tr>
+      <tr><td>QStash + Vercel 함수</td><td>기각 - Vercel 60초 timeout으로 긴 영상 업로드·IG 컨테이너 폴링 처리 불가</td></tr>
+      <tr><td>Railway Cron (상주)</td><td>보류 - 신뢰성은 높으나 상시 비용 발생, 현 트래픽 규모엔 과투자</td></tr>
+      <tr><td>Postgres 큐 + GitHub Actions</td><td><b>채택</b> - SKIP LOCKED로 동시성·중복 방지, timeout 없는 러너, 상주 프로세스 불필요</td></tr>
+    </table>
+    <div class="diagram">
+      <div class="flow">
+        <div class="node"><span class="t">서버 액션</span><span class="d">즉시발행<br/>repository_dispatch</span></div>
+        <span class="arrow">↘</span>
+        <div class="node accent"><span class="t">GitHub Actions</span><span class="d">cron 30분 sweep<br/>+ dispatch 즉시</span></div>
+        <span class="arrow">→</span>
+        <div class="node"><span class="t">claim RPC</span><span class="d">SKIP LOCKED<br/>due job 선점</span></div>
+        <span class="arrow">→</span>
+        <div class="node ok"><span class="t">process-due</span><span class="d">발행 + 토큰 sweep<br/>→ exit</span></div>
+      </div>
+      <div class="flow-caption">.github/workflows/publish.yml - 상주 프로세스·외부 큐 불필요 → 상시 운영비 제거</div>
+    </div>
+    <p>예약 발행은 <code>schedule</code> cron(30분)이, 즉시 발행은 <code>triggerPublishRun()</code>의 <code>repository_dispatch</code>가 워크플로를 즉시 깨운다(지연 없음). private repo도 월 약 1,440 run으로 무료 2,000분 안에 든다.</p>
+
+    <h2 class="sec">4. 구현 과정</h2>
+    <ul>
+      <li><code>worker/process-due.ts</code> - 엔트리: claim → 처리 → 토큰 sweep → exit. 상주 loop 제거, BullMQ·ioredis 의존성 삭제.</li>
+      <li>기존 발행 상태 머신(<code>publish-processor.ts</code>)은 그대로 재사용 - 큐 모델만 교체하고 처리 로직은 보존.</li>
+      <li>재시도는 BullMQ backoff 대신, 실패 시 row를 RETRYING으로 남기면 다음 sweep이 다시 claim. 워커가 처리 중 크래시해도 claim RPC가 stale PROCESSING을 회수하여 유실 방지.</li>
+      <li>동시성은 워커 스크립트가 <code>CONCURRENCY</code>로 제어, rate limit은 플랫폼 어댑터에서 처리.</li>
+    </ul>
+
+    <h2 class="sec">5. 문제 해결 및 트레이드오프</h2>
+    <table class="data">
+      <tr><th>항목</th><th>변경 전 (BullMQ + Redis)</th><th>변경 후 (Postgres 큐)</th></tr>
+      <tr><td>인프라 운영비</td><td>Railway $5/월 + Upstash</td><td><b>0원</b> (Actions 무료분)</td></tr>
+      <tr><td>상주 프로세스</td><td>필요 (좀비 워커 이슈)</td><td>없음 (run 후 exit)</td></tr>
+      <tr><td>즉시 발행</td><td>enqueue 즉시</td><td>dispatch 즉시 (동일)</td></tr>
+      <tr><td>예약 발행</td><td>정시</td><td>cron best-effort (5~30분 지연 가능)</td></tr>
+    </table>
+    <div class="callout">
+      <span class="tag">⚠ 운영 함정</span> - <code>schedule</code> 워크플로는 repo가 <b>60일 무커밋이면 자동 비활성화</b>된다. 또 처리 단계는 Vercel 함수(60초 timeout)에서 절대 돌리면 안 되고 timeout 없는 Actions 러너에서만 실행한다.
+    </div>
+
+    <h2 class="sec">6. 결과 및 평가</h2>
+    <p>본 연구의 핵심 성과는 <b>별도 큐 인프라 없이도 동시성·멱등성·장애 복구를 보장하는 발행 구조를 도출·검증</b>한 것이다. 발행 1건을 명시적 상태 머신으로 관리해 부분 실패 격리·감사 로그를 확보했고, <code>FOR UPDATE SKIP LOCKED</code> 기반 원자적 선점으로 여러 워커 동시 실행 시에도 중복 처리·유실이 없음을 확인했다. 여러 실행 모델을 비교·시제작한 끝에 도달한 이 구조는, 부수적으로 상주 프로세스·외부 큐를 제거해 <b>상시 운영비까지 0으로</b> 낮췄다. 즉시 발행은 dispatch로 지연이 없고, 예약 발행만 cron best-effort로 5~30분 지연을 감수하되, 신뢰성이 더 필요하면 <code>process-due.ts</code>를 그대로 재사용해 유료 스케줄러로 승격할 수 있다. 실제 겪은 한도 초과·발행 마비를 임시방편이 아니라 <b>구조 재설계로 근본 해결</b>한 점에서 연구적 의의가 있다.</p>
+
+    <div class="callout">
+      <span class="tag">발행 대상 현황</span> - YouTube·Instagram은 실계정 발행을 검증했고, TikTok은 발행 어댑터(Direct Post / PULL_FROM_URL)까지 구현했으나 <b>TikTok 앱 심사 승인 전이라 현재는 샌드박스(테스트) 계정 발행만 가능</b>하다. 승인 시 코드 변경 없이 동일 어댑터로 프로덕션 발행에 편입되며, 이는 본 파이프라인이 어댑터 인터페이스로 플랫폼을 추상화한 설계의 이점이다. (캡션 자동 생성(연구 001)은 승인과 무관하게 3개 플랫폼 모두 동작한다.)
+    </div>
+  </div>
+
+  <table class="sign">
+    <tr><td>작성자 (서명 및 날인)</td><td>책임자 (서명 및 날인)</td></tr>
+    <tr><td>일자</td><td>일자</td></tr>
+  </table>
+</section>
+
+</body>
+</html>

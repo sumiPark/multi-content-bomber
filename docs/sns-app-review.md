@@ -111,10 +111,23 @@ Vercel preview/production 도메인은 우리가 DNS 통제권이 없어 일부 
 **일정**: 보통 **4~6주**, 거절 시 +4주.
 
 **우리가 쓰는 스코프** (`lib/platforms/youtube.ts`):
-- `https://www.googleapis.com/auth/youtube.upload` — **Restricted Scope**
+- `https://www.googleapis.com/auth/youtube.upload` — **Sensitive Scope**
 - `https://www.googleapis.com/auth/youtube.readonly` — **Sensitive Scope**
 
-Restricted가 가장 까다롭다 — 그리고 우리는 `youtube.upload`를 쓰므로 이 카테고리.
+> ⚠️ 일부 옛날 Google 문서는 `youtube.upload`를 Restricted로 분류한다. 2026-05 시점 실제 콘솔 "데이터 액세스 요약" 화면에서는 **둘 다 "민감한 범위(Sensitive)"** 섹션에 노출되고 "제한된 범위(Restricted)"는 비어있다. Restricted가 아니면 **CASA Tier 2 보안 평가 불필요** — Sensitive scope verification만 받으면 된다 (§1.4 참조).
+
+### 1.0 검수 회피 옵션 (가능하면 이쪽이 압도적으로 유리)
+
+**Google Workspace Internal 모드**로 운영 가능하면 verification 자체가 면제된다.
+
+- 조건: 회사가 Google Workspace 도메인을 소유하고, 모든 사용자가 같은 Workspace 도메인 계정만 씀 (`you@회사도메인.com`)
+- 설정: OAuth 동의 화면 → **사용자 유형(User type)을 "내부(Internal)"로 전환**
+- 효과: sensitive scope 그대로 사용 가능, 100명 한도 없음, "Unverified app" 경고 화면 없음, 데모 영상/justification 작성 불필요
+- 한계: Workspace 도메인 밖 계정(개인 gmail 포함)은 절대 못 씀
+
+회사 도메인이 Workspace 가입돼있는지 모르면: **Admin Console**(`admin.google.com`) 접근이 되면 OK. 안 되면 External로 가야 함.
+
+External 운영이 필수면 아래 1.1~1.5 그대로 진행.
 
 ### 1.1 콘솔 작업 — 메뉴 경로 단위
 
@@ -165,15 +178,23 @@ Restricted가 가장 까다롭다 — 그리고 우리는 `youtube.upload`를 �
 
 #### D. Verification (Production 전환) 신청
 
+> ⚠️ **Brand verification(브랜딩 인증)과 Scope verification(범위 검증)은 별도 단계**다. 브랜딩이 "인증됨 / 사용자에게 표시되고 있습니다"로 통과돼도 scope는 ⚠️ 노란 경고 그대로 남아있다 — 둘 다 통과해야 끝.
+
 1. **OAuth consent screen** 화면 상단 **PUBLISH APP** 클릭 → 확인 다이얼로그 → **CONFIRM**
 2. Publishing status가 "In production"으로 바뀌면서 즉시 노란색 박스 "Your app requires verification" 노출
 3. 박스 안의 **PREPARE FOR VERIFICATION** 클릭 → 검증 위저드 시작
 4. 위저드 단계:
-   - **Brand verification**: 위에서 입력한 App name / logo / homepage 그대로 검토 → Next
-   - **Scope verification**: 각 sensitive/restricted scope마다 "How will the scopes be used?" 영문 답변 작성 — [1.3 견본](#13-신청서-영문-견본) 그대로 복붙
-   - **Demo video**: YouTube unlisted 영상 URL 입력
+   - **Brand verification**: App name / logo / homepage / privacy / terms 검토. 통과 시 별도 알림 + "사용자에게 표시되고 있습니다" 상태로 전환. 여기까지는 빠름 (수 일).
+   - **사전 분기 질문 — "애플리케이션이 WordPress 사이트 관리자만 사용하는 Gmail SMTP 플러그인인가요?"** → **아니오(No)** 선택. "예"로 답하면 잘못된 간소화 트랙으로 들어가 즉시 거절됨.
+   - **Scope verification ("데이터 액세스")**: 콘솔이 위저드를 바꿔서 **scope별 개별 입력란이 아니라 한 입력칸에 sensitive scope 전체 정당화를 합쳐서** 작성하게 한다.
+     - 입력 필드: "범위가 어떤 방식으로 사용되나요?" — **1000자 제한**
+     - 본문은 [1.3 견본](#13-신청서-영문-견본)의 통합본(989자) 그대로 복붙
+   - **Demo video**: **YouTube 링크만 허용** (Drive/Vimeo 거절). **Unlisted**로 올리면 충분 (Public 불필요)
    - **Submit**
-5. 이메일로 진행 상황 통보. 보통 첫 응답 3~7일, 통과까지 4~6주.
+5. 제출 후 좌측 ⚠️ 노란 경고 → 🔵 **검토 중(In review)** 으로 바뀌고 `tjdwnd1004@gmail.com`으로 접수 메일 도착해야 정상.
+6. 이메일로 진행 상황 통보. 보통 첫 응답 3~7일, 통과까지 4~6주.
+
+> 입력만 하고 "저장"만 누르면 임시 저장 상태 — 페이지 하단 **"확인을 위해 제출(Submit for verification)"** 버튼까지 눌러야 검토 큐에 들어간다.
 
 ### 1.2 검증 요구 항목 (Google이 자동 안내)
 
@@ -186,33 +207,48 @@ Restricted가 가장 까다롭다 — 그리고 우리는 `youtube.upload`를 �
 
 ### 1.3 신청서 영문 견본
 
-**Why does your project need to request access to the youtube.upload scope?**
+**"범위가 어떤 방식으로 사용되나요?" 통합 입력칸 (1000자 제한, 한 단락, 줄바꿈 없음, 실제 제출본 989자)** ⭐
 
-> Our application, MCB, is a multi-channel content broadcasting tool. The youtube.upload scope is required so that users can publish a video they have created (or that has been generated/edited within our app) directly to their own YouTube channel, without leaving our interface. Users explicitly initiate each upload through the publish workflow; we never upload content without an explicit user-triggered publish action. The uploaded videos are produced or owned by the user themselves.
+> MCB (Multi-Content Bomber) is a content distribution tool that lets creators publish one piece of media to YouTube, Instagram, and TikTok from a single interface. We request two scopes. youtube.upload is required to call videos.insert so the authenticated user can upload their own videos (including Shorts) to their own YouTube channel from our app. We never publish without an explicit user-triggered Publish click. Titles, descriptions, and hashtags can be drafted by AI but are always reviewed and approved by the user before the publish call is made. youtube.readonly is used only to call channels.list?mine=true once during account connection, to show which channel the user just linked (channel ID, title, thumbnail). Many users own multiple Google accounts and need to confirm the correct channel is connected. We do not read videos, analytics, or comments. OAuth tokens are encrypted at rest with AES-256-GCM and never shared with third parties. A narrower scope is not available.
 
-**Why does your project need to request access to the youtube.readonly scope?**
+위 본문의 핵심 키워드 — 검토자가 거절 안 하는 데 필요한 단어:
+- **user-triggered** / **reviewed and approved by the user** — 자동 publish 아님을 명시
+- API 엔드포인트명 (`videos.insert`, `channels.list?mine=true`) — 검토자가 코드와 매칭 가능
+- **encrypted at rest with AES-256-GCM** — 보안 처리 명시
+- **A narrower scope is not available** — narrower 검토 사유 차단
 
-> The youtube.readonly scope is used only during the initial account connection step, to read the user's channel id, channel title, and thumbnail (via `channels.list?part=snippet&mine=true`). This is required so we can display which channel they have connected and route subsequent upload calls to the correct channel. We do not read viewer-side data, subscriptions, watch history, or analytics.
+**구버전 — scope별 분리 입력 화면이 다시 나오는 경우** (드물지만 백업용):
 
-**How will the scopes be used?** (필드가 따로 있다면)
+> youtube.upload: Required so the authenticated user can upload their own videos to their own YouTube channel via videos.insert, triggered by an explicit user click in our publish workflow. Captions are AI-drafted but user-approved.
+>
+> youtube.readonly: Used once during account connection to call channels.list?mine=true and confirm which channel the user just linked. We do not read videos, analytics, or comments.
 
-> When a user selects YouTube as a target during the publish workflow, the worker calls `videos.insert` (multipart upload, parts=snippet,status) with the user's access token, using AI-generated title/description/tags that the user has reviewed and approved. Tokens are refreshed via the standard `oauth2/token` endpoint with `grant_type=refresh_token` from a background worker; refresh failures (`invalid_grant`) mark the account as inactive and require user re-consent.
+### 1.3-1 데모 영상 — YouTube 필수 장면
+
+**일부공개(Unlisted)**로 업로드. Private 금지. 길이는 2~5분 충분.
+
+1. **첫 5초 — OAuth Client ID 클로즈업**: Google Cloud Console → 사용자 인증 정보 → 검증 중인 OAuth 클라이언트 상세 페이지(`*.apps.googleusercontent.com` 형식 ID가 보이는 화면). 검토자가 영상과 신청서 매칭 확인용
+2. https://mcb.cuma.co.kr → 로그인
+3. **계정 → YouTube 연동 클릭 → Google 동의 화면**을 **천천히** (권한 목록 "YouTube 동영상 관리", "YouTube 계정 보기" + 앱 이름 + 홈페이지/Privacy 링크 모두 명확히 보이게)
+4. `youtube.readonly` 실사용: 연동 직후 채널명/썸네일이 우리 앱에 표시
+5. `youtube.upload` 실사용: 콘텐츠 업로드 → 캡션 검토 → **사용자가 명시적으로 "게시" 클릭** → youtube.com에서 영상 게시 확인
+6. (권장) 계정 disconnect 흐름
+
+영상 description에 한 줄: *"OAuth verification demo for Multi-Content Bomber (client ID: ...). Demonstrates youtube.upload and youtube.readonly usage."*
 
 ### 1.4 보안 평가 (CASA Tier 2)
 
-Restricted Scope는 일반적으로 **Cloud Application Security Assessment (CASA) Tier 2** 통과를 요구한다. 다만:
-
-- **MAU < 100명**이거나
-- **테스트 사용자만 100명 이하**로 운영하면 면제 가능 (Testing 상태 유지)
-
-Production으로 가려면 CASA 자체 평가지(Self-Assessment Questionnaire)를 채워 제출. 보통 비용 0원, 외부 감사인 없이 가능. 자세히는 Google이 검증 도중에 안내해줌.
+CASA는 **Restricted Scope에만** 적용된다. 현재 우리 scope는 둘 다 Sensitive로 분류돼있어 **CASA 불필요**. 만약 향후 `youtube.force-ssl`이나 `youtube` 같은 Restricted scope를 추가하면 그때 CASA Tier 2 자체 평가지(Self-Assessment Questionnaire) 제출 필요.
 
 ### 1.5 흔한 거절 사유
 
-- 데모 영상에서 "사용자가 OAuth 동의 화면을 명확히 보는 장면"이 없음
+- 데모 영상에서 "사용자가 OAuth 동의 화면을 명확히 보는 장면"이 없음 (너무 빠르게 넘김)
+- 데모 영상에 **OAuth Client ID가 나오지 않음** — 검토자가 신청서와 영상을 매칭 못 함
 - Privacy Policy에 "YouTube API Services를 사용한다"는 문구 누락 (YouTube API Services Terms of Service 동의 의무)
-- Authorized domain 중 하나가 verify 안 됨
+- Authorized domain 중 하나가 Search Console verify 안 됨
 - 로고가 너무 일반적이거나 placeholder
+- justification 1000자에 끼워 맞추느라 "user-triggered" / "user reviews and approves" 문구가 빠짐 — 자동 publish로 오해받음
+- "WordPress Gmail SMTP 플러그인인가요?"에 잘못 "예" 선택 → 다른 트랙으로 분류돼 즉시 거절
 
 ## 2. Instagram — Meta App Review
 
@@ -326,9 +362,19 @@ Meta 리뷰어는 영상에서 다음을 확인한다:
 **일정**: **2~3주**. 거절 빈도 높음.
 
 **우리가 쓰는 스코프** (`lib/platforms/tiktok.ts`):
-- `user.info.basic`
-- `video.upload`
-- `video.publish` ⭐
+- `user.info.basic` — 기본 제공 (audit 불필요)
+- `video.upload` — **audit 필수**
+- `video.publish` ⭐ — **audit 필수** (가장 까다로움)
+
+### 3.0 검수 회피 불가 ⚠️
+
+YouTube와 달리 TikTok은 **검수 회피 옵션 없음**:
+
+- "Internal" / "Workspace" 같은 조직 한정 모드 자체가 없음
+- Sandbox 한도 매우 작고 (테스터 **10명**) Sandbox에선 게시가 **항상 SELF_ONLY**(본인 피드에 비공개)로 강제됨 → 회사 5~10명 내부 운영조차 사실상 불가
+- Audit 통과 전엔 `video.publish` 호출이 **403** 반환
+
+회사 사람만 쓴다 해도 결국 audit 통과 필수.
 
 ### 3.1 콘솔 작업 — 메뉴 경로 단위
 
@@ -339,7 +385,7 @@ Meta 리뷰어는 영상에서 다음을 확인한다:
 1. **Manage apps** → 우측 **Connect an app** 또는 카드형 화면의 **+** 버튼
 2. **App Details** 폼:
    - **App icon**: 정사각 PNG (512×512 이상)
-   - **App name**: `MCB` (영문, 변경 어려움)
+   - **App name**: `MCB` (영문, 변경 어려움) — ⚠️ **TikTok 정책상 앱 이름에 "TikTok" / "Tik Tok" / "TT" 단어 절대 금지**. 들어가면 audit 자동 거절. 현재 "Multi-Content Bomber"는 OK.
    - **App description**: 영문 한 문단 — [0.4 영문 Use Case](#04-영문-use-case-description-신청서-본문) 복붙
    - **Category**: Tools / Productivity
    - **App platform**: Web 선택 (체크박스)
@@ -394,9 +440,9 @@ Meta 리뷰어는 영상에서 다음을 확인한다:
 
 1. 앱 상세 페이지 상단 토글 또는 사이드바 — **Sandbox** 모드 (검수 전 기본값)
 2. 사이드바 → **Manage** → **Target users** (또는 Sandbox 화면 안의 "Add testers")
-3. **+ Add** → 테스트할 TikTok username (`@` 빼고) 입력 → **Add**
+3. **+ Add** → 테스트할 TikTok username (`@` 빼고) 입력 → **Add** (본인 포함 **최대 10명**)
 4. 추가된 사용자에게 TikTok 알림 — 사용자가 수락해야 OAuth 가능
-5. Sandbox에선 모든 publish가 **SELF_ONLY 강제** — [lib/platforms/tiktok.ts](../lib/platforms/tiktok.ts)가 이미 SELF_ONLY로 보내고 있음
+5. Sandbox에선 모든 publish가 **SELF_ONLY 강제** — [lib/platforms/tiktok.ts](../lib/platforms/tiktok.ts)가 이미 SELF_ONLY로 보내고 있음. 영상은 본인 피드에만 비공개로 올라감 → 검수 데모로 "공개 게시"를 보여주는 건 Sandbox에서 불가
 
 #### G. Production Audit 신청
 
@@ -414,7 +460,7 @@ Meta 리뷰어는 영상에서 다음을 확인한다:
 
 ### 3.2 Sandbox 모드 (검수 전 테스트)
 
-Audit 통과 전에는 **Target Users**에 추가한 본인 + 최대 9명까지만 OAuth 가능. 그 안에서 publish 흐름 검증 가능.
+Audit 통과 전에는 **Target Users**에 추가한 사용자(본인 포함 최대 10명)만 OAuth 가능. 그 안에서 publish 흐름 검증 가능.
 
 - App 페이지 → Manage → **Target Users** → TikTok 사용자명 추가
 - 추가된 사용자의 게시는 **항상 privacy_level=SELF_ONLY**로 강제됨 ([lib/platforms/tiktok.ts](../lib/platforms/tiktok.ts)에서 이미 SELF_ONLY로 설정 — Audit 통과 후 PUBLIC_TO_EVERYONE 옵션 노출하는 별도 슬라이스 필요)
@@ -427,18 +473,32 @@ Audit 통과 전에는 **Target Users**에 추가한 본인 + 최대 9명까지�
 
 **`video.upload` — Justification**
 
-> Required as a prerequisite to `video.publish` for users who prefer to save drafts in their TikTok inbox before posting. The same publish workflow uses this scope when the user selects "Save as draft" instead of "Publish now". (선택 — draft 기능 안 쓰면 이 항목은 생략 가능)
+> Used when the user chooses to send the prepared video to their TikTok inbox as a draft rather than publishing immediately. The user reviews the draft inside the TikTok app before deciding to post. Same explicit user-triggered flow inside MCB. (※ `video.publish`의 prerequisite은 아님 — 둘은 독립적인 엔드포인트. inbox 흐름을 안 쓸 거면 이 scope 자체를 제거하고 신청에서 빼는 게 거절 위험을 줄임)
 
 **`user.info.basic` — Justification**
 
 > Used only during account connection to display the connected username and avatar inside MCB so the user can confirm which TikTok account is linked. We do not read followers, following, or any other social graph data.
 
-### 3.4 흔한 거절 사유
+### 3.4 데모 영상 — TikTok 가이드
+
+TikTok 검토는 Google보다 데모 영상 비중이 크다. **8분 이상 권장** (Google 2~5분과 다름) — 흐름을 충분히 보여줘야 통과율이 오름.
+
+필수 장면:
+1. https://mcb.cuma.co.kr 로그인
+2. 계정 → TikTok 연동 → **TikTok OAuth 동의 화면** (권한 목록 — video.upload, video.publish, user.info.basic — 명확히 노출)
+3. 콘텐츠 업로드 → AI 캡션 검토/수정 → **사용자가 "게시" 클릭**
+4. **TikTok 앱/웹에서 실제로 게시된 결과**를 직접 보여줌 (mockup 절대 안 됨)
+5. (권장) 계정 disconnect 흐름
+
+### 3.5 흔한 거절 사유
 
 - `video_url` 호스트 verify 실패 → URL Properties 통과 못 함
+- 데모 영상이 mockup 또는 너무 짧음 (8분 미만은 거절률 높아짐)
 - 데모 영상에 SELF_ONLY가 아닌 모드를 보여줌 (Sandbox에선 불가능한데도 시연 시도)
-- Privacy Policy에 "TikTok 데이터를 어떻게 다루는지" 누락
+- Privacy Policy에 "TikTok에서 받은 데이터를 어떻게 다루는지" **별도 조항** 누락 (다른 플랫폼과 묶어서 한 줄로 처리하면 거절)
+- 앱 이름에 "TikTok" / "TT" 단어 포함 → 정책 위반 자동 거절
 - 신청자 계정 자체가 TikTok Community Guidelines 위반 이력 있음
+- `video.upload`를 신청하면서 draft 흐름이 실제 앱에 구현 안 됨 → "쓰지도 않는 scope 요청"으로 거절. 안 쓸 거면 scope에서 빼고 신청
 
 ## 4. 검수 통과 후 코드/env 작업
 

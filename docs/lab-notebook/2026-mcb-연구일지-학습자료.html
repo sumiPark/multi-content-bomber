@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MCB 연구일지 설명 준비 자료</title>
+</head>
+<body>
+<style>
+  :root {
+    color-scheme: light dark;
+    --paper: #f6f2ea;
+    --card: #fffdf8;
+    --ink: #23201b;
+    --ink-soft: #5c564c;
+    --line: #e2daca;
+    --accent: #b23b2e;
+    --highlight: #f2c14e;
+    --answer: #2c7a57;
+    --answer-bg: #e8f3ec;
+    --hi-bg: #fbf0d3;
+    --q-bg: #f6ece9;
+    --chip-bg: #efe8d8;
+    --shadow: 0 1px 2px rgba(40,30,10,.06), 0 8px 24px rgba(40,30,10,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #17150f; --card: #201d16; --ink: #ece6d8; --ink-soft: #a49d8c;
+      --line: #332f24; --accent: #e07a5f; --highlight: #f2c14e; --answer: #6bcaa0;
+      --answer-bg: #16261e; --hi-bg: #2a2413; --q-bg: #271b18; --chip-bg: #2c281e;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #f6f2ea; --card: #fffdf8; --ink: #23201b; --ink-soft: #5c564c;
+    --line: #e2daca; --accent: #b23b2e; --highlight: #f2c14e; --answer: #2c7a57;
+    --answer-bg: #e8f3ec; --hi-bg: #fbf0d3; --q-bg: #f6ece9; --chip-bg: #efe8d8;
+    --shadow: 0 1px 2px rgba(40,30,10,.06), 0 8px 24px rgba(40,30,10,.05);
+  }
+  :root[data-theme="dark"] {
+    --paper: #17150f; --card: #201d16; --ink: #ece6d8; --ink-soft: #a49d8c;
+    --line: #332f24; --accent: #e07a5f; --highlight: #f2c14e; --answer: #6bcaa0;
+    --answer-bg: #16261e; --hi-bg: #2a2413; --q-bg: #271b18; --chip-bg: #2c281e;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  .wrap {
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", system-ui, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.7;
+    margin: 0;
+    padding: 0 20px 80px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 820px; margin: 0 auto; }
+
+  header.top {
+    padding: 46px 0 26px;
+    border-bottom: 2px solid var(--ink);
+    margin-bottom: 8px;
+  }
+  .eyebrow {
+    font-size: 12px; letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--accent); font-weight: 700; margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 5vw, 38px); line-height: 1.2; margin: 0 0 12px; text-wrap: balance; letter-spacing: -.5px; }
+  .lede { font-size: 16px; color: var(--ink-soft); margin: 0; max-width: 62ch; }
+  .how-to {
+    margin-top: 20px; background: var(--hi-bg); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 18px; font-size: 14.5px;
+  }
+  .how-to b { color: var(--accent); }
+
+  nav.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 34px; }
+  nav.chips a {
+    font-size: 13px; text-decoration: none; color: var(--ink);
+    background: var(--chip-bg); border: 1px solid var(--line);
+    padding: 6px 12px; border-radius: 999px; transition: .15s;
+  }
+  nav.chips a:hover { border-color: var(--accent); color: var(--accent); }
+  nav.chips a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  section { margin: 0 0 40px; scroll-margin-top: 20px; }
+  h2.sec {
+    font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--ink-soft); font-weight: 700; margin: 0 0 16px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  }
+
+  .flow {
+    display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px; box-shadow: var(--shadow);
+  }
+  .step {
+    flex: 1 1 120px; text-align: center; padding: 12px 8px;
+    border-radius: 10px; background: var(--paper); border: 1px solid var(--line);
+  }
+  .step .n { font-size: 11px; font-weight: 800; color: var(--accent); }
+  .step .t { font-weight: 700; font-size: 14px; margin-top: 3px; }
+  .step .d { font-size: 12px; color: var(--ink-soft); margin-top: 3px; }
+  .flow .sep { align-self: center; color: var(--accent); font-weight: 800; font-size: 18px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 24px 24px 20px; box-shadow: var(--shadow); margin-bottom: 20px;
+  }
+  .card .badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 800; letter-spacing: 1px; color: var(--accent);
+    background: var(--q-bg); border: 1px solid var(--line);
+    padding: 4px 11px; border-radius: 999px; margin-bottom: 12px;
+  }
+  .card h3 { font-size: 21px; margin: 0 0 6px; letter-spacing: -.3px; text-wrap: balance; }
+  .oneline { font-size: 15.5px; color: var(--ink); margin: 0 0 18px; font-weight: 600; }
+
+  .block { margin: 14px 0; }
+  .block .label {
+    display: inline-block; font-size: 11.5px; font-weight: 800; letter-spacing: .5px;
+    text-transform: uppercase; margin-bottom: 5px;
+  }
+  .analogy { background: var(--hi-bg); border-radius: 12px; padding: 13px 16px; border: 1px solid var(--line); }
+  :root[data-theme="dark"] .analogy .label { color: var(--highlight); }
+  :root[data-theme="light"] .analogy .label { color: #9a6b12; }
+  @media (prefers-color-scheme: dark){ .analogy .label { color: var(--highlight); } }
+  @media (prefers-color-scheme: light){ .analogy .label { color: #9a6b12; } }
+  .analogy p { margin: 0; font-size: 15px; }
+  .analogy .em { text-decoration: underline; text-decoration-color: var(--highlight); text-decoration-thickness: 3px; text-underline-offset: 2px; font-weight: 700; }
+
+  .why .label { color: var(--accent); }
+  .why p { margin: 0; font-size: 14.5px; color: var(--ink); }
+
+  .three { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 8px; }
+  .three li {
+    display: flex; gap: 10px; align-items: flex-start; font-size: 14.5px;
+    background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px;
+  }
+  .three .tag {
+    flex: none; font-size: 11px; font-weight: 800; color: #fff; background: var(--accent);
+    border-radius: 6px; padding: 3px 8px; margin-top: 1px; white-space: nowrap;
+  }
+  .three .em { font-weight: 700; text-decoration: underline; text-decoration-color: var(--highlight); text-decoration-thickness: 3px; text-underline-offset: 2px; }
+
+  .terms { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .term {
+    font-size: 13px; background: var(--chip-bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 11px;
+  }
+  .term b { color: var(--accent); }
+
+  .qa { border-top: 1px dashed var(--line); margin-top: 18px; padding-top: 16px; }
+  .qa .q { display: flex; gap: 10px; font-weight: 700; font-size: 15px; margin: 0 0 8px; }
+  .qa .q .mark { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 800; display: grid; place-items: center; }
+  .qa .a { display: flex; gap: 10px; background: var(--answer-bg); border: 1px solid var(--line); border-left: 3px solid var(--answer); border-radius: 10px; padding: 12px 14px; font-size: 14.5px; }
+  .qa .a .mark { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--answer); color: #fff; font-size: 13px; font-weight: 800; display: grid; place-items: center; }
+  .qa .a p { margin: 0; }
+  .qa + .qa { margin-top: 14px; }
+
+  dl.glossary {
+    display: grid; grid-template-columns: minmax(120px, 180px) 1fr; gap: 0;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    overflow: hidden; box-shadow: var(--shadow);
+  }
+  dl.glossary dt { font-weight: 700; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--paper); color: var(--accent); font-size: 14px; }
+  dl.glossary dd { margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 14px; color: var(--ink); }
+  dl.glossary dt:last-of-type, dl.glossary dd:last-of-type { border-bottom: none; }
+
+  .script { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; box-shadow: var(--shadow); margin-bottom: 16px; }
+  .script h4 { margin: 0 0 8px; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .script h4 .time { font-size: 12px; font-weight: 800; color: #fff; background: var(--accent); padding: 2px 9px; border-radius: 999px; }
+  .script p { margin: 0; font-size: 15px; line-height: 1.75; }
+  .script .hl { background: var(--hi-bg); padding: 0 3px; border-radius: 3px; }
+
+  footer.foot { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-soft); }
+
+  @media (max-width: 560px) {
+    dl.glossary { grid-template-columns: 1fr; }
+    dl.glossary dt { border-bottom: none; padding-bottom: 2px; }
+    .flow .sep { display: none; }
+  }
+</style>
+
+<div class="wrap">
+<div class="container">
+
+  <header class="top">
+    <p class="eyebrow">MCB 연구일지 · 설명 준비 자료</p>
+    <h1>내가 만든 연구를 막힘없이 설명하기 위한 노트</h1>
+    <p class="lede">2026년 MCB 연구노트 <b>2건</b>을, 심사원·동료 누가 물어봐도 쉽게 설명할 수 있도록 정리했습니다. 각 연구는 <b>비유 → 왜 했나 → 핵심 용어 → 예상 질문</b> 순서로 읽으면 머릿속에 그림이 그려집니다.</p>
+    <div class="how-to">
+      <b>설명의 황금 공식</b> - "그냥 개발했다"가 아니라 <b>문제 → 시도 → 해결 → 결과</b> 4단으로 말하세요. 연구노트는 "무엇을 만들었나"가 아니라 <b>"어떤 문제를 어떻게 풀었나"</b>를 증명하는 문서입니다.
+    </div>
+  </header>
+
+  <nav class="chips" aria-label="목차">
+    <a href="#big">전체 그림</a>
+    <a href="#r1">001 캡션 엔진</a>
+    <a href="#r2">002 발행 파이프라인</a>
+    <a href="#glossary">용어 사전</a>
+    <a href="#scripts">발표 스크립트</a>
+  </nav>
+
+  <!-- 전체 그림 -->
+  <section id="big">
+    <h2 class="sec">먼저 · 30초 한 문장 요약</h2>
+    <div class="card" style="margin-bottom:18px;">
+      <p class="oneline" style="margin-bottom:0;">MCB는 <span style="color:var(--accent)">영상·이미지 하나를 올리면, AI가 유튜브·인스타그램·틱톡용 문구를 각각 자동으로 만들어 주고, 정해둔 시간에 세 곳에 알아서 올려주는 서비스</span>입니다.</p>
+    </div>
+    <h2 class="sec">두 연구가 전체에서 맡는 자리</h2>
+    <div class="flow">
+      <div class="step"><div class="n">STEP 1</div><div class="t">업로드</div><div class="d">영상 1개 또는<br>이미지 1~10장</div></div>
+      <div class="sep">→</div>
+      <div class="step"><div class="n">연구 001</div><div class="t">AI 캡션</div><div class="d">플랫폼별 문구<br>자동 생성</div></div>
+      <div class="sep">→</div>
+      <div class="step"><div class="n">STEP 3</div><div class="t">계정·시간</div><div class="d">올릴 곳 선택<br>즉시/예약</div></div>
+      <div class="sep">→</div>
+      <div class="step"><div class="n">연구 002</div><div class="t">자동 발행</div><div class="d">안정적·저비용<br>백그라운드 게시</div></div>
+    </div>
+    <p style="font-size:14px;color:var(--ink-soft);margin-top:12px;">연구는 두 축입니다 - <b>앞단의 "AI가 문구를 만든다"(001)</b>, <b>뒷단의 "안정적이고 싸게 자동 발행한다"(002)</b>. "이 연구가 전체에서 어디에 해당하나?"를 먼저 말하면 설명이 훨씬 잘 통합니다.</p>
+  </section>
+
+  <!-- 001 -->
+  <section id="r1">
+    <h2 class="sec">연구 001 · AI 캡션 자동 생성 엔진</h2>
+    <div class="card">
+      <span class="badge">일련번호 001 · 2026.05.01~05.15</span>
+      <h3>콘텐츠 하나로, 세 플랫폼 문구를 한 번에</h3>
+      <p class="oneline">같은 콘텐츠라도 유튜브·인스타·틱톡은 잘 먹히는 문구가 다릅니다. AI가 세 가지를 한 번에, 각 플랫폼 성격에 맞게 만들어 줍니다.</p>
+
+      <div class="block analogy">
+        <span class="label">🟡 이렇게 비유하세요</span>
+        <p>같은 요리를 <span class="em">세 나라 손님</span> 입맛에 맞게 통역해 주는 카피라이터입니다. 요리(핵심 메시지)는 똑같고, 말투와 양념(플랫폼별 톤·해시태그)만 다르게 냅니다.</p>
+      </div>
+
+      <div class="block why">
+        <span class="label">왜 필요했나</span>
+        <p>유튜브는 <b>검색</b>, 인스타는 <b>체류·저장</b>, 틱톡은 <b>1초 안의 훅(hook)</b>이 핵심입니다. 사람이 세 번 따로 쓰면 느리고 품질 편차가 큽니다.</p>
+      </div>
+
+      <div class="block">
+        <span class="label" style="color:var(--ink-soft)">꼭 기억할 용어 3개</span>
+        <div class="terms">
+          <span class="term"><b>GPT-4o Vision</b> 이미지를 보고 이해하는 AI</span>
+          <span class="term"><b>JSON Schema strict</b> 정해진 칸에만 답을 채우게 강제</span>
+          <span class="term"><b>카피 8원칙</b> 심리학 기반 문구 규칙</span>
+        </div>
+      </div>
+
+      <div class="qa">
+        <div class="qa">
+          <p class="q"><span class="mark">Q</span>"그냥 챗GPT에 물어본 거랑 뭐가 다른가요? 이게 왜 연구인가요?"</p>
+          <div class="a"><span class="mark">A</span><p>단순 호출이 아닙니다. ① 클릭·체류·저장을 유도하는 <b>심리학 8원칙을 프롬프트에 주입</b>했고, ② AI가 글자수·해시태그 규칙을 어겨도 코드가 자동 교정하는 <b>후처리 안전망</b>을 넣었고, ③ 한 번의 호출로 3종을 동시에 만들어 <b>메시지 일관성과 비용</b>을 동시에 잡도록 설계한 것이 연구의 핵심입니다.</p></div>
+        </div>
+        <div class="qa">
+          <p class="q"><span class="mark">Q</span>"영상은 AI가 어떻게 이해하나요?"</p>
+          <div class="a"><span class="mark">A</span><p>AI는 영상을 직접 못 봅니다. 그래서 <b>영상에서 대표 사진(프레임) 한 장을 뽑아</b> 사진처럼 넣어 줍니다. 이때 서버가 아니라 <b>사용자 브라우저에서 직접 추출</b>해 서버 부담을 0으로 만든 것도 이 연구의 최적화 포인트입니다.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 002 -->
+  <section id="r2">
+    <h2 class="sec">연구 002 · 자동 발행 파이프라인 & 저비용 인프라</h2>
+    <div class="card">
+      <span class="badge">일련번호 002 · 2026.05.18~06.23</span>
+      <h3>여러 SNS에 안정적으로 자동 발행 (+ 운영비까지 절감)</h3>
+      <p class="oneline">콘텐츠를 여러 채널에 자동으로 올리는 '뒷단(백엔드)' 전체입니다. 핵심은 <b>하나가 실패해도 안전하고 중복 없이 발행하는 신뢰성</b>이고, 운영비 0은 그 구조를 잘 설계해서 따라온 결과입니다.</p>
+
+      <div class="block analogy">
+        <span class="label">🟡 이렇게 비유하세요</span>
+        <p>여러 택배를 <span class="em">송장</span>으로 각각 추적하듯, 각 발행을 상태로 관리합니다. 그리고 24시간 상주 <span class="em">경비원(월급+대기 비용)</span>을 필요할 때만 부르는 <span class="em">알바</span>로 바꾸듯, 별도 대기줄 서버 대신 <b>이미 있는 데이터베이스를 대기표(큐)로 재활용</b>해 운영비를 없앴습니다.</p>
+      </div>
+
+      <div class="block" style="background:var(--q-bg);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:12px 14px;">
+        <span class="label" style="color:var(--accent)">⚠️ 발표할 때 이 톤 주의 (세액공제 관점)</span>
+        <p style="margin:0;font-size:14px;">"공짜로 쉽게 했다"로 말하면 <b>연구의 난이도가 낮아 보여</b> 손해입니다. 대신 <b>"여러 대안을 시제작·비교하며 신뢰성을 검증한 끝에, 운영비 없이도 동시성·복구를 보장하는 구조를 도출했다"</b>로 말하세요. 세액공제는 <b>연구원 인건비</b> 기준이라 운영비 0이 공제를 줄이지 않습니다 — 다만 "쉬웠다"는 인상만 주지 않으면 됩니다.</p>
+      </div>
+
+      <div class="block">
+        <span class="label" style="color:var(--ink-soft)">이 연구는 세 가지를 한 번에 풉니다</span>
+        <ul class="three">
+          <li><span class="tag">안정성</span><span><b class="em">택배 송장</b>처럼 각 발행을 상태(접수→처리→성공/실패/재시도)로 추적. 하나 실패해도 나머지는 발송되고, 실패는 자동 재시도(3회), 같은 걸 두 번 올리는 중복도 없음.</span></li>
+          <li><span class="tag">보안</span><span>계정 접근 열쇠(토큰)를 <b class="em">금고(암호화)</b>에 보관하고, 만료되기 전에 자동으로 새 열쇠로 교체.</span></li>
+          <li><span class="tag">운영비</span><span>상주 서버 없이 <b class="em">필요할 때만 실행</b>(GitHub Actions)하도록 설계해, 상시 운영비를 0으로 (신뢰성 확보의 부수 성과).</span></li>
+        </ul>
+      </div>
+
+      <div class="block why">
+        <span class="label">왜 필요했나 (실제 사고)</span>
+        <p>처음엔 상주 서버를 24시간 켜뒀는데, 그 서버가 대기줄(Redis)을 <b>쉬지 않고 확인</b>하는 바람에 무료 사용량을 며칠 만에 소진 → <b>발행 전체가 마비</b>됐습니다. 게다가 서버·대기줄 <b>비용이 이중</b>으로 들었습니다. 이 사고가 재설계의 출발점입니다.</p>
+      </div>
+
+      <div class="block">
+        <span class="label" style="color:var(--ink-soft)">꼭 기억할 용어 4개</span>
+        <div class="terms">
+          <span class="term"><b>publish_jobs</b> 발행 한 건 = 한 줄(송장)</span>
+          <span class="term"><b>멱등성</b> 두 번 실행돼도 결과는 한 번</span>
+          <span class="term"><b>SKIP LOCKED</b> 같은 건 두 번 안 잡는 DB 기법</span>
+          <span class="term"><b>GitHub Actions / cron</b> 예약·자동 실행</span>
+        </div>
+      </div>
+
+      <div class="qa">
+        <div class="qa">
+          <p class="q"><span class="mark">Q</span>"이게 왜 연구인가요? 그냥 서버에 올리는 배포 아닌가요?"</p>
+          <div class="a"><span class="mark">A</span><p>단순 배포가 아니라 <b>실제 장애를 겪고 구조를 재설계</b>한 연구입니다. 여러 워커가 동시에 돌아도 중복이 없어야 하고(SKIP LOCKED), 처리 중 죽어도 복구돼야 하고, 상주 서버 없이 이를 유지해야 하는 <b>상충하는 요구</b>가 있었습니다. QStash·Railway Cron 등 대안을 시제작·비교한 끝에 <b>데이터베이스를 대기줄로 재활용하는 구조</b>를 도출해 중복·유실 없이 해결했고, 운영비 0은 그 결과로 따라온 것입니다. 문제 발견 → 대안 비교 → 재설계 → 검증이 모두 담긴 게 핵심입니다.</p></div>
+        </div>
+        <div class="qa">
+          <p class="q"><span class="mark">Q</span>"한 채널이 실패하면 전부 취소되나요?"</p>
+          <div class="a"><span class="mark">A</span><p>아니요. <b>채널마다 독립</b>입니다. 실패한 건만 재시도하고, 이미 성공한 건은 그대로 둡니다. 처리 도중 서버가 죽어도 '처리 중'에 멈춘 건을 다음 실행이 회수해 다시 처리하므로 유실도 중복도 없습니다.</p></div>
+        </div>
+        <div class="qa">
+          <p class="q"><span class="mark">Q</span>"계정 토큰을 그냥 저장하면 안 되나요?"</p>
+          <div class="a"><span class="mark">A</span><p>유출되면 곧바로 계정 도용입니다. 그래서 앱 안에서 <b>암호화해 저장</b>하고, 관리자 권한으로만 열람하며, 일반 접근은 DB 보안 규칙(RLS)으로 막습니다. 만료 임박 토큰은 발행 직전·주기적으로 자동 갱신합니다.</p></div>
+        </div>
+        <div class="qa">
+          <p class="q"><span class="mark">Q</span>"그럼 예약 발행 시간이 정확한가요?"</p>
+          <div class="a"><span class="mark">A</span><p><b>즉시 발행은 지연이 없습니다.</b> 예약 발행만 30분 주기라 5~30분 오차가 생길 수 있는데, 그 대가로 운영비 0과 운영 단순화를 얻었습니다. 더 정밀해야 하면 유료 스케줄러로 승격만 하면 되고 코드는 그대로 재사용합니다.</p></div>
+        </div>
+        <div class="qa">
+          <p class="q"><span class="mark">Q</span>"세 플랫폼 다 실제로 올라가나요? (틱톡 포함)"</p>
+          <div class="a"><span class="mark">A</span><p>정직하게 답하세요. <b>캡션 생성(001)은 유튜브·인스타·틱톡 3개 모두 동작</b>합니다. 발행(002)은 <b>유튜브·인스타는 실계정 발행을 검증</b>했고, <b>틱톡은 발행 어댑터까지 구현했지만 틱톡 앱 심사 승인 전이라 현재는 테스트(샌드박스) 계정만 가능</b>합니다. 다만 어댑터 구조로 만들어서 <b>승인되면 코드 변경 없이 바로 프로덕션에 편입</b>되도록 설계했다 — 이렇게 말하면 "외부 승인 대기"라는 한계가 오히려 좋은 설계 근거가 됩니다.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 용어 사전 -->
+  <section id="glossary">
+    <h2 class="sec">막히면 여기 · 쉬운 말 용어 사전</h2>
+    <dl class="glossary">
+      <dt>API</dt><dd>다른 서비스에 "이거 해줘"라고 요청하는 창구.</dd>
+      <dt>GPT-4o</dt><dd>글과 이미지를 이해하는 OpenAI의 AI 모델.</dd>
+      <dt>캡션</dt><dd>게시물에 붙는 제목·설명·해시태그 같은 문구.</dd>
+      <dt>OAuth / 토큰</dt><dd>비밀번호 대신 계정 접근을 허용하는 임시 열쇠.</dd>
+      <dt>암호화</dt><dd>내용을 열쇠 없이는 못 읽게 뒤섞어 저장하는 것.</dd>
+      <dt>큐(Queue)</dt><dd>처리할 일을 순서대로 세워 두는 대기줄.</dd>
+      <dt>워커(Worker)</dt><dd>대기줄의 일을 실제로 처리하는 실행 프로그램.</dd>
+      <dt>서버리스</dt><dd>서버를 상시 켜두지 않고 필요할 때만 실행하는 방식(예: Vercel).</dd>
+      <dt>멱등성</dt><dd>같은 작업을 여러 번 해도 결과가 한 번 한 것과 같음.</dd>
+      <dt>RLS</dt><dd>데이터베이스에서 행 단위로 접근을 막는 보안 규칙.</dd>
+      <dt>cron</dt><dd>"매 30분마다"처럼 정해진 주기로 자동 실행.</dd>
+      <dt>fan-out</dt><dd>하나의 입력을 여러 대상(채널)으로 퍼뜨려 처리.</dd>
+    </dl>
+  </section>
+
+  <!-- 스크립트 -->
+  <section id="scripts">
+    <h2 class="sec">그대로 외워도 되는 발표 스크립트</h2>
+
+    <div class="script">
+      <h4><span class="time">30초</span> 프로젝트가 뭐냐고 물으면</h4>
+      <p>"MCB는 <span class="hl">영상이나 이미지 하나를 올리면, AI가 유튜브·인스타그램·틱톡용 문구를 각각 자동으로 만들고, 정해둔 시간에 세 곳에 알아서 올려주는 서비스</span>입니다. 저는 크게 두 가지, <span class="hl">AI 캡션 생성 엔진</span>과 <span class="hl">안정적인 자동 발행 구조(운영비까지 절감)</span>를 연구했습니다."</p>
+    </div>
+
+    <div class="script">
+      <h4><span class="time">2분</span> 연구 내용을 설명하라고 하면</h4>
+      <p>"두 축입니다. <b>첫째, AI 캡션 엔진(001)</b> - 플랫폼마다 잘 먹히는 문구가 달라서, 심리학 8원칙을 넣은 프롬프트로 <span class="hl">세 플랫폼 문구를 한 번에 생성</span>합니다. 영상은 AI가 직접 못 보니 <span class="hl">브라우저에서 대표 프레임을 뽑아</span> 서버 부담 없이 분석에 씁니다. <b>둘째, 자동 발행 파이프라인(002)</b> - 여러 채널 발행을 <span class="hl">택배 송장처럼 상태로 추적</span>해 하나가 실패해도 안전하고 중복이 없게 했고, 계정 토큰은 <span class="hl">암호화 저장·자동 갱신</span>합니다. 특히 상주 서버가 무료 한도를 소진해 발행이 마비된 실제 사고를 겪고, 여러 대안을 시제작·비교한 끝에 <span class="hl">데이터베이스를 대기줄로 재활용하는 구조</span>를 도출해 <span class="hl">중복·유실 없이(운영비까지 0으로)</span> 해결했습니다. 두 연구 모두 <b>실제 겪은 문제를 설계로 풀어낸 것</b>이 핵심입니다."</p>
+    </div>
+
+    <div class="script">
+      <h4><span class="time">비상용</span> "가장 자랑할 만한 성과는?"</h4>
+      <p>"상주 서버가 대기줄을 계속 확인해 <span class="hl">무료 한도를 소진하고 발행이 마비된 실제 사고</span>를, 여러 대안을 검증한 끝에 <span class="hl">동시성·복구를 보장하면서 운영비 없이 돌아가는 구조</span>로 재설계해 해결한 것입니다. 문제 발견부터 대안 비교·재설계까지 직접 한 연구라 가장 기억에 남습니다."</p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    이 자료는 발표·심사 대비용 개인 학습 노트입니다. 원본 연구노트(2건 구성): <b>docs/lab-notebook/2026-mcb-연구일지.html</b> · 참여연구자 박수미
+  </footer>
+
+</div>
+</div>
+</body>
+</html>
