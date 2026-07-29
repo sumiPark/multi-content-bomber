@@ -6,10 +6,17 @@ export interface ExtractedFrame {
 }
 
 /**
- * Browser-only. Decodes the video's first frame onto a canvas and exports it
- * as a JPEG blob. Used to feed GPT-4o Vision (which doesn't accept video).
+ * Browser-only. Decodes a single video frame onto a canvas and exports it as a
+ * JPEG blob.
+ *
+ * `resolveTime(duration)`가 어느 시점(초)을 디코드할지 결정한다. 호출 측이
+ * duration을 모를 수 있으므로(메타데이터 로드 전), 콜백으로 받아 onloadedmetadata
+ * 시점에 계산한다. 반환 시점은 [0, duration) 범위로 클램프된다.
  */
-export async function extractFirstFrame(file: File): Promise<ExtractedFrame> {
+function extractFrame(
+  file: File,
+  resolveTime: (duration: number) => number,
+): Promise<ExtractedFrame> {
   return new Promise<ExtractedFrame>((resolve, reject) => {
     const video = document.createElement("video");
     video.preload = "metadata";
@@ -35,8 +42,11 @@ export async function extractFirstFrame(file: File): Promise<ExtractedFrame> {
     video.onerror = () => fail(new Error("영상 메타데이터를 읽지 못했습니다."));
 
     video.onloadedmetadata = () => {
-      // Seek slightly past 0 so a real frame is decoded (not the black frame).
-      video.currentTime = Math.min(0.1, Math.max(0, video.duration / 2));
+      const duration = video.duration;
+      const want = resolveTime(duration);
+      // 마지막 프레임 직전까지만 — duration 정확히는 seek가 안 끝날 수 있음.
+      const safeMax = Number.isFinite(duration) ? Math.max(0, duration - 0.05) : 0;
+      video.currentTime = Math.min(Math.max(0, want), safeMax);
     };
 
     video.onseeked = () => {
@@ -71,4 +81,24 @@ export async function extractFirstFrame(file: File): Promise<ExtractedFrame> {
 
     video.src = url;
   });
+}
+
+/**
+ * 영상의 대표 프레임(앞부분)을 JPEG로 추출. GPT-4o Vision(영상 미지원) 분석 입력용.
+ * 검은 첫 프레임을 피하려고 0.1초 또는 절반 지점 중 작은 값을 쓴다.
+ */
+export function extractFirstFrame(file: File): Promise<ExtractedFrame> {
+  return extractFrame(file, (duration) =>
+    Math.min(0.1, Math.max(0, duration / 2)),
+  );
+}
+
+/**
+ * 사용자가 고른 시점(초)의 프레임을 JPEG로 추출. 게시 커버(YouTube 썸네일)용.
+ */
+export function extractFrameAt(
+  file: File,
+  atSeconds: number,
+): Promise<ExtractedFrame> {
+  return extractFrame(file, () => atSeconds);
 }

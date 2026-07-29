@@ -35,6 +35,14 @@ export interface PublishContext {
   description: string | null;
   caption: string | null;
   hashtags: string[];
+  // 커버(썸네일) — 영상 한정. 사용자가 마법사에서 고른 프레임 한 시점이 출처.
+  //   coverTimestampMs: 영상 내 프레임 오프셋(ms). TikTok=video_cover_timestamp_ms,
+  //                     Instagram(REELS)=thumb_offset 로 그대로 전달.
+  //   coverSignedUrl:   그 프레임을 이미지로 추출해 Storage에 올린 파일의 서명 URL.
+  //                     YouTube는 프레임 타임스탬프 API가 없어 thumbnails.set에 이 이미지를 업로드.
+  // 둘 다 null이면 커버 미지정(어댑터 기본 동작).
+  coverTimestampMs: number | null;
+  coverSignedUrl: string | null;
 }
 
 export interface PublishResult {

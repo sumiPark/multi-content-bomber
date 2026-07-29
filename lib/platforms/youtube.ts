@@ -29,6 +29,10 @@ const CHANNEL_URL =
   "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true";
 const VIDEOS_INSERT_URL =
   "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status";
+// 커스텀 썸네일 업로드. videoId 쿼리에 박고 이미지 바이트를 그대로 보낸다.
+// ⚠️ 채널이 전화 인증(verified)된 경우에만 동작 — 미인증이면 403.
+const THUMBNAIL_SET_URL =
+  "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?uploadType=media";
 
 // YouTube videos.insert에 multipart/related로 보낼 때 사용하는 boundary 접두사.
 // 매 요청마다 랜덤 suffix를 붙여 body 안의 문자열과 충돌하지 않게 한다.
@@ -256,6 +260,13 @@ export const youtube: PlatformAdapter = {
       throw new PublishError("YouTube 응답에 video id가 없습니다");
     }
 
+    // 5. 커스텀 썸네일(커버) — 사용자가 고른 프레임을 이미지로 추출해 올려둔 것.
+    //    best-effort: 영상 업로드는 이미 성공했으므로 실패해도 throw하지 않는다.
+    //    미인증 채널(403)·일시 오류 등은 경고만 남기고 영상 게시는 성공 처리.
+    if (ctx.coverSignedUrl) {
+      await setThumbnail(uploaded.id, ctx.coverSignedUrl, accessToken);
+    }
+
     return {
       platformPostId: uploaded.id,
       platformPostUrl: `https://www.youtube.com/watch?v=${uploaded.id}`,
@@ -312,3 +323,47 @@ export const youtube: PlatformAdapter = {
     };
   },
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 커스텀 썸네일 업로드 (best-effort). 커버 이미지를 Storage에서 가져와 그대로
+// thumbnails.set에 PUT한다. 영상 게시는 이미 끝났으므로 실패해도 throw하지 않고
+// 경고만 남긴다 — 미인증 채널이면 403(youtubeSignupRequired 등)이 흔하다.
+// ─────────────────────────────────────────────────────────────────────────────
+async function setThumbnail(
+  videoId: string,
+  coverSignedUrl: string,
+  accessToken: string,
+): Promise<void> {
+  try {
+    const imgRes = await fetch(coverSignedUrl);
+    if (!imgRes.ok) {
+      console.warn(
+        `[youtube] 커버 이미지 fetch 실패 (${imgRes.status}) — 썸네일 건너뜀`,
+      );
+      return;
+    }
+    const imgBytes = Buffer.from(await imgRes.arrayBuffer());
+    const contentType = imgRes.headers.get("content-type") ?? "image/jpeg";
+
+    const res = await fetch(`${THUMBNAIL_SET_URL}&videoId=${videoId}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": contentType,
+      },
+      body: imgBytes,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(
+        `[youtube] 썸네일 set 실패 (${res.status}) — 영상 게시는 완료됨. ` +
+          `미인증 채널이면 채널 전화 인증 필요. ${text.slice(0, 200)}`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      "[youtube] 썸네일 set 중 예외 — 영상 게시는 완료됨:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}

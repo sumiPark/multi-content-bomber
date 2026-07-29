@@ -49,6 +49,8 @@ interface ContentRow {
   title: string | null;
   internal_title: string | null;
   ai_captions: Json | null;
+  // 마법사가 채우는 jsonb. 커버 관련 키: cover_ms(number), cover_path(string).
+  metadata: Json | null;
 }
 
 const MEDIA_BUCKET = "media";
@@ -223,7 +225,9 @@ async function runPublish(
   // 3b. contents 조회
   const { data: content, error: contentError } = await supabase
     .from("contents")
-    .select("id, media_type, media_urls, title, internal_title, ai_captions")
+    .select(
+      "id, media_type, media_urls, title, internal_title, ai_captions, metadata",
+    )
     .eq("id", row.content_id)
     .maybeSingle<ContentRow>();
 
@@ -245,11 +249,21 @@ async function runPublish(
   // 3e. Storage 단기 서명 URL
   const mediaSignedUrls = await signMedia(supabase, content.media_urls);
 
-  // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID 주입
+  // 3e-2. 커버(썸네일) — 사용자가 마법사에서 고른 프레임. metadata에서 추출.
+  //   cover_ms:   TikTok/Instagram에 프레임 오프셋(ms)으로 전달.
+  //   cover_path: YouTube용으로 추출해둔 커버 이미지. 있으면 서명해서 넘긴다.
+  const cover = extractCover(content.metadata);
+  const coverSignedUrl = cover.path
+    ? await signCover(supabase, cover.path)
+    : null;
+
+  // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID/커버 주입
   const publishCtx: PublishContext = {
     ...buildPublishContext(content, account.platform),
     platformAccountId: account.platform_account_id,
     mediaSignedUrls,
+    coverTimestampMs: cover.ms,
+    coverSignedUrl,
   };
 
   // 3g. 게시
@@ -354,6 +368,45 @@ async function signMedia(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 커버(썸네일) — contents.metadata(jsonb)에서 cover_ms / cover_path를 안전하게 꺼낸다.
+// 마법사가 영상 모드에서 사용자가 고른 프레임 시점을 cover_ms로, (YouTube가 선택된
+// 경우) 그 프레임 이미지 경로를 cover_path로 저장한다. 둘 다 없으면 미지정.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function extractCover(metadata: Json | null): {
+  ms: number | null;
+  path: string | null;
+} {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return { ms: null, path: null };
+  }
+  const m = metadata as Record<string, unknown>;
+  const ms = typeof m.cover_ms === "number" ? m.cover_ms : null;
+  const path =
+    typeof m.cover_path === "string" && m.cover_path.length > 0
+      ? m.cover_path
+      : null;
+  return { ms, path };
+}
+
+async function signCover(
+  supabase: ReturnType<typeof createServiceClient>,
+  path: string,
+): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(MEDIA_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SEC);
+  if (error || !data?.signedUrl) {
+    // 커버는 부가 기능 — 서명 실패해도 게시는 진행. 경고만.
+    console.warn(
+      `[publish-processor] 커버 이미지 서명 실패 (path=${path}): ${error?.message ?? "no url"}`,
+    );
+    return null;
+  }
+  return data.signedUrl;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ai_captions(jsonb)에서 플랫폼별 필드를 풀어 PublishContext에 채운다.
 // captions schema는 lib/ai/caption-generator.ts와 동기화:
 //   youtube   { title, description, hashtags, category? }
@@ -377,6 +430,9 @@ function buildPublishContext(
     description: null,
     caption: null,
     hashtags: [],
+    // runPublish가 metadata에서 풀어 spread로 주입.
+    coverTimestampMs: null,
+    coverSignedUrl: null,
   };
 
   if (platform === "YOUTUBE") {

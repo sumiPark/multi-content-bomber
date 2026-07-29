@@ -242,6 +242,14 @@ export const instagram: PlatformAdapter = {
     if (ctx.mediaType === "VIDEO") {
       containerUrl.searchParams.set("media_type", "REELS");
       containerUrl.searchParams.set("video_url", signedUrl);
+      // 커버 프레임: 사용자가 고른 시점(ms)을 thumb_offset으로 전달. Reels는 영상
+      // 내 한 프레임을 커버로 지정 가능(별도 이미지 업로드 없이). 미지정이면 IG 기본.
+      if (ctx.coverTimestampMs != null) {
+        containerUrl.searchParams.set(
+          "thumb_offset",
+          String(ctx.coverTimestampMs),
+        );
+      }
     } else {
       containerUrl.searchParams.set("image_url", signedUrl);
     }

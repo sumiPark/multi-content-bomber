@@ -108,6 +108,10 @@ export function UploadWizard({
   const [mediaType, setMediaType] = useState<MediaType>("IMAGE");
   const [files, setFiles] = useState<File[]>([]);
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  // 사용자가 고른 커버 프레임 시점(초). null이면 미지정. 영상 모드에서만 사용.
+  const [coverSeconds, setCoverSeconds] = useState<number | null>(null);
+  // 고른 프레임을 캡처한 JPEG. YouTube 썸네일 업로드용 (TikTok/IG는 시점 ms만 사용).
+  const [coverBlob, setCoverBlob] = useState<Blob | null>(null);
   const [mediaPaths, setMediaPaths] = useState<string[]>([]);
   const [analyzePaths, setAnalyzePaths] = useState<string[]>([]);
   const [mediaMetadata, setMediaMetadata] = useState<Record<string, unknown>>(
@@ -248,10 +252,25 @@ export function UploadWizard({
     setMediaType(next);
     setFiles([]);
     setVideoFile(null);
+    setCoverSeconds(null);
+    setCoverBlob(null);
     setMediaPaths([]);
     setAnalyzePaths([]);
     setMediaMetadata({});
     setError(null);
+  }
+
+  // 영상 파일이 바뀌면 이전에 고른 커버는 무의미해지므로 초기화.
+  function handleChangeVideo(file: File | null) {
+    setVideoFile(file);
+    setCoverSeconds(null);
+    setCoverBlob(null);
+  }
+
+  // 미리보기에서 캡처한 커버 프레임 — 시점(초)과 JPEG blob을 함께 받는다.
+  function handleCoverChange(seconds: number, blob: Blob | null) {
+    setCoverSeconds(seconds);
+    setCoverBlob(blob);
   }
 
   function toggleAccount(id: string, checked: boolean) {
@@ -295,6 +314,26 @@ export function UploadWizard({
         ]);
         setMediaPaths([videoUpload.path]);
         setAnalyzePaths([thumbUpload.path]);
+
+        // 커버 프레임: 사용자가 미리보기에서 캡처한 시점이 있으면 metadata에 ms로 기록.
+        //  - TikTok/Instagram은 이 ms(cover_ms)만 있으면 됨(워커가 그대로 전달).
+        //  - YouTube는 프레임 타임스탬프 API가 없어, 캡처해둔 그 프레임 이미지(coverBlob)를
+        //    업로드(cover_path)하고 워커가 thumbnails.set으로 올린다. 유튜브가 선택된
+        //    경우에만 이미지를 올린다(불필요한 업로드 방지).
+        const coverMeta: Record<string, unknown> = {};
+        if (coverSeconds !== null) {
+          coverMeta.cover_ms = Math.round(coverSeconds * 1000);
+          if (coverBlob && selectedPlatforms.includes("YOUTUBE")) {
+            const coverUpload = await uploadOne({
+              file: coverBlob,
+              contentType: "image/jpeg",
+              organizationId,
+              userId,
+            });
+            coverMeta.cover_path = coverUpload.path;
+          }
+        }
+
         setMediaMetadata({
           thumbnail_path: thumbUpload.path,
           duration_seconds: frame.durationSeconds,
@@ -302,6 +341,7 @@ export function UploadWizard({
           height: frame.height,
           original_size_bytes: videoFile.size,
           original_mime: videoFile.type,
+          ...coverMeta,
         });
       }
       setStep(3);
@@ -507,9 +547,11 @@ export function UploadWizard({
             validation={validation}
             selectedPlatforms={selectedPlatforms}
             includesTiktok={includesTiktok}
+            coverSeconds={coverSeconds}
+            onChangeCover={handleCoverChange}
             onSwitchType={switchMediaType}
             onChangeFiles={setFiles}
-            onChangeVideo={setVideoFile}
+            onChangeVideo={handleChangeVideo}
             onPrev={() => setStep(1)}
             onNext={advanceFromStep2}
             canAdvance={canAdvanceStep2}
@@ -816,6 +858,8 @@ function Step2Media({
   validation,
   selectedPlatforms,
   includesTiktok,
+  coverSeconds,
+  onChangeCover,
   onSwitchType,
   onChangeFiles,
   onChangeVideo,
@@ -830,6 +874,8 @@ function Step2Media({
   validation: ValidationResult | null;
   selectedPlatforms: Platform[];
   includesTiktok: boolean;
+  coverSeconds: number | null;
+  onChangeCover: (seconds: number, blob: Blob | null) => void;
   onSwitchType: (t: MediaType) => void;
   onChangeFiles: (f: File[]) => void;
   onChangeVideo: (f: File | null) => void;
@@ -869,7 +915,11 @@ function Step2Media({
       {mediaType === "IMAGE" ? (
         <ImageDropzone onChange={onChangeFiles} />
       ) : (
-        <VideoDropzone onChange={onChangeVideo} />
+        <VideoDropzone
+          onChange={onChangeVideo}
+          coverSeconds={coverSeconds}
+          onCoverChange={onChangeCover}
+        />
       )}
       {validation && (
         <ValidationPanel

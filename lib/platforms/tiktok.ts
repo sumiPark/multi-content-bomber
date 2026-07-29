@@ -271,7 +271,8 @@ export const tiktok: PlatformAdapter = {
         disable_duet: false,
         disable_comment: false,
         disable_stitch: false,
-        video_cover_timestamp_ms: 1000,
+        // 커버 프레임: 사용자가 마법사에서 고른 시점(ms). 미지정이면 1초 프레임 기본.
+        video_cover_timestamp_ms: ctx.coverTimestampMs ?? 1000,
       },
       source_info: {
         source: "FILE_UPLOAD" as const,
