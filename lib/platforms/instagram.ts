@@ -34,6 +34,16 @@ const GRAPH_API_BASE = "https://graph.instagram.com/v23.0";
 const POLL_INTERVAL_MS = 2000;
 const POLL_MAX_ATTEMPTS = 90; // 약 3분
 
+// 캐러셀 자식(이미지) 컨테이너는 인코딩이 없어 보통 몇 초 내 FINISHED. 여기에 3분
+// 상한을 그대로 쓰면 10장 × 3분 = 30분이라 서명 URL TTL(워커 10분)을 넘겨버린다.
+const CHILD_POLL_MAX_ATTEMPTS = 15; // 약 30초
+
+// 캐러셀 1포스트당 아이템 수 제한 (Instagram 규격: 2~10장).
+// 업로드 마법사(lib/upload/validation.ts)도 10장에서 막지만, 워커는 DB를 직접 읽으므로
+// 어댑터에서도 방어한다.
+const CAROUSEL_MIN_ITEMS = 2;
+const CAROUSEL_MAX_ITEMS = 10;
+
 // Meta Graph API 에러 응답.
 //   { error: { message, type, code, error_subcode, fbtrace_id } }
 // code/subcode 매핑: https://developers.facebook.com/docs/graph-api/guides/error-handling/
@@ -218,52 +228,48 @@ export const instagram: PlatformAdapter = {
   //   3. POST /{ig-user-id}/media_publish?creation_id=...  → 발행, media-id 반환
   //   4. GET  /{media-id}?fields=permalink  → 게시 URL
   //
-  // 캐러셀(여러 이미지 한 포스트)은 미지원 — 후속에서 carousel_container로 확장.
+  // 캐러셀(이미지 2~10장 한 포스트)은 1단계가 2겹으로 늘어난다:
+  //   1a. 장마다 POST /media (image_url + is_carousel_item=true) → 자식 container N개
+  //       ⚠️ 자식엔 caption을 넣지 않는다. 캡션은 부모 컨테이너에만.
+  //   1b. 자식이 전부 FINISHED 된 뒤 POST /media (media_type=CAROUSEL&children=id,id,...)
+  //       → 부모 container. 이후 2~4단계는 single-media와 동일.
   // ───────────────────────────────────────────────────────────────────────────
   async publish(ctx, accessToken): Promise<PublishResult> {
     if (!ctx.platformAccountId) {
       throw new PublishError("Instagram publish: platformAccountId(IG user id) 누락");
     }
-    const signedUrl = ctx.mediaSignedUrls[0];
+    const signedUrls = ctx.mediaSignedUrls;
+    const signedUrl = signedUrls[0];
     if (!signedUrl) {
       throw new MediaError("Instagram publish: 미디어 서명 URL이 비어있습니다");
     }
-    if (ctx.mediaSignedUrls.length > 1) {
-      // 후속 캐러셀 슬라이스에서 처리
-      console.warn(
-        "[instagram] 첫 미디어만 사용 — 캐러셀 미지원 (현재 슬라이스).",
-      );
-    }
 
     const caption = buildInstagramCaption(ctx);
+    // 영상은 media_urls가 항상 1개(DB 제약). 2장 이상 이미지 = 캐러셀.
+    const isCarousel = ctx.mediaType !== "VIDEO" && signedUrls.length > 1;
 
     // 1. Container 생성
-    const containerUrl = new URL(`${GRAPH_API_BASE}/${ctx.platformAccountId}/media`);
-    if (ctx.mediaType === "VIDEO") {
-      containerUrl.searchParams.set("media_type", "REELS");
-      containerUrl.searchParams.set("video_url", signedUrl);
-      // 커버 프레임: 사용자가 고른 시점(ms)을 thumb_offset으로 전달. Reels는 영상
-      // 내 한 프레임을 커버로 지정 가능(별도 이미지 업로드 없이). 미지정이면 IG 기본.
-      if (ctx.coverTimestampMs != null) {
-        containerUrl.searchParams.set(
-          "thumb_offset",
-          String(ctx.coverTimestampMs),
-        );
-      }
-    } else {
-      containerUrl.searchParams.set("image_url", signedUrl);
-    }
-    if (caption) containerUrl.searchParams.set("caption", caption);
-    containerUrl.searchParams.set("access_token", accessToken);
-
-    const containerRes = (await callGraphApi(containerUrl.toString(), {
-      method: "POST",
-    })) as { id?: string };
-
-    if (!containerRes.id) {
-      throw new PublishError("Instagram container 응답에 id 없음");
-    }
-    const containerId = containerRes.id;
+    const containerId = isCarousel
+      ? await createCarouselContainer(
+          ctx.platformAccountId,
+          accessToken,
+          signedUrls,
+          caption,
+        )
+      : await createMediaContainer(ctx.platformAccountId, accessToken, {
+          ...(ctx.mediaType === "VIDEO"
+            ? {
+                media_type: "REELS",
+                video_url: signedUrl,
+                // 커버 프레임: 사용자가 고른 시점(ms)을 thumb_offset으로 전달. Reels는 영상
+                // 내 한 프레임을 커버로 지정 가능(별도 이미지 업로드 없이). 미지정이면 IG 기본.
+                ...(ctx.coverTimestampMs != null
+                  ? { thumb_offset: String(ctx.coverTimestampMs) }
+                  : {}),
+              }
+            : { image_url: signedUrl }),
+          ...(caption ? { caption } : {}),
+        });
 
     // 2. Container 상태 폴링
     await pollContainerReady(containerId, accessToken);
@@ -349,11 +355,78 @@ export const instagram: PlatformAdapter = {
   },
 };
 
+// POST /{ig-user-id}/media — 파라미터만 다르고 형태는 항상 같아서 한 곳으로 모은다.
+// (자식/부모/단일 컨테이너 모두 이 엔드포인트)
+async function createMediaContainer(
+  igUserId: string,
+  accessToken: string,
+  params: Record<string, string>,
+): Promise<string> {
+  const url = new URL(`${GRAPH_API_BASE}/${igUserId}/media`);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  url.searchParams.set("access_token", accessToken);
+
+  const res = (await callGraphApi(url.toString(), { method: "POST" })) as {
+    id?: string;
+  };
+  if (!res.id) {
+    throw new PublishError("Instagram container 응답에 id 없음");
+  }
+  return res.id;
+}
+
+// 캐러셀: 자식 컨테이너 N개 → 전부 준비될 때까지 대기 → 부모 컨테이너 id 반환.
+// 자식 생성을 병렬로 던지지 않는 이유: IG는 계정 단위 호출 한도(code 4/17/32)가 빡세서
+// 10장을 동시에 쏘면 rate limit에 걸리기 쉽다. 순차 생성해도 자식은 이미지라 금방 끝난다.
+async function createCarouselContainer(
+  igUserId: string,
+  accessToken: string,
+  signedUrls: string[],
+  caption: string,
+): Promise<string> {
+  if (signedUrls.length > CAROUSEL_MAX_ITEMS) {
+    throw new MediaError(
+      `Instagram 캐러셀은 최대 ${CAROUSEL_MAX_ITEMS}장까지 가능합니다 (현재 ${signedUrls.length}장)`,
+    );
+  }
+  if (signedUrls.length < CAROUSEL_MIN_ITEMS) {
+    throw new MediaError(
+      `Instagram 캐러셀은 최소 ${CAROUSEL_MIN_ITEMS}장이 필요합니다 (현재 ${signedUrls.length}장)`,
+    );
+  }
+
+  const childIds: string[] = [];
+  for (const url of signedUrls) {
+    childIds.push(
+      await createMediaContainer(igUserId, accessToken, {
+        image_url: url,
+        is_carousel_item: "true",
+      }),
+    );
+  }
+
+  // 자식이 FINISHED가 아닌 채로 부모를 만들면 IG가 부모 컨테이너를 ERROR로 떨군다.
+  for (const childId of childIds) {
+    await pollContainerReady(childId, accessToken, CHILD_POLL_MAX_ATTEMPTS);
+  }
+
+  // children 순서 = 캐러셀 슬라이드 순서. media_urls 배열 순서를 그대로 유지한다
+  // (마법사의 드래그 정렬 결과가 그대로 반영되도록).
+  return await createMediaContainer(igUserId, accessToken, {
+    media_type: "CAROUSEL",
+    children: childIds.join(","),
+    ...(caption ? { caption } : {}),
+  });
+}
+
 async function pollContainerReady(
   containerId: string,
   accessToken: string,
+  maxAttempts: number = POLL_MAX_ATTEMPTS,
 ): Promise<void> {
-  for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
+  for (let i = 0; i < maxAttempts; i++) {
     const url = new URL(`${GRAPH_API_BASE}/${containerId}`);
     url.searchParams.set("fields", "status_code,status");
     url.searchParams.set("access_token", accessToken);
@@ -383,6 +456,6 @@ async function pollContainerReady(
     }
   }
   throw new PublishError(
-    `Instagram container 폴링 타임아웃 (${POLL_MAX_ATTEMPTS}회 * ${POLL_INTERVAL_MS}ms)`,
+    `Instagram container 폴링 타임아웃 (${maxAttempts}회 * ${POLL_INTERVAL_MS}ms)`,
   );
 }

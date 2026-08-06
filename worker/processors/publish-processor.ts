@@ -44,7 +44,7 @@ interface AccountRow {
 
 interface ContentRow {
   id: string;
-  media_type: "VIDEO" | "PHOTO";
+  media_type: "VIDEO" | "IMAGE";
   media_urls: string[];
   title: string | null;
   internal_title: string | null;

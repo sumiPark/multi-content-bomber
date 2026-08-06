@@ -26,7 +26,8 @@ export interface PublishContext {
   // YouTube는 access_token으로 자동 자기 채널 식별이라 사용하지 않지만, Instagram
   // Graph API는 `/{ig-user-id}/media` 형태로 path에 ID가 들어간다.
   platformAccountId: string;
-  mediaType: "VIDEO" | "PHOTO";
+  // DB contents.media_type enum과 같은 값. ("PHOTO"가 아니다 — 실제 값은 "IMAGE")
+  mediaType: "VIDEO" | "IMAGE";
   // Storage 단기 서명 URL 배열. 어댑터가 cURL/fetch로 가져갈 수 있는 형태.
   mediaSignedUrls: string[];
   // 플랫폼별 캡션 필드를 워커가 풀어서 전달. YouTube=title/description/tags,
