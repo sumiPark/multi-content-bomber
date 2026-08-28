@@ -36,6 +36,10 @@ interface PlatformConstraints {
   supportsVideo: boolean;
   maxImagesPerPost: number;
   maxFileSizeBytes: number;
+  // 플랫폼 공식 한도(maxFileSizeBytes)보다 낮은 우리 구현상의 한도.
+  // 초과해도 막지는 않고 경고만 — 다른 플랫폼 발행은 정상 진행된다.
+  warnFileSizeBytes?: number;
+  warnFileSizeNote?: string;
   maxVideoDurationSec: number;
   imageMimes: string[];
   videoMimes: string[];
@@ -76,6 +80,9 @@ const CONSTRAINTS: Record<Platform, PlatformConstraints> = {
     supportsVideo: true,
     maxImagesPerPost: 0,
     maxFileSizeBytes: 287 * MB,
+    // 어댑터가 single chunk 업로드만 구현 — lib/platforms/tiktok.ts 참고.
+    warnFileSizeBytes: 64 * MB,
+    warnFileSizeNote: "발행 시 실패할 수 있어요 (분할 업로드 미지원).",
     maxVideoDurationSec: 60 * 60,
     imageMimes: [],
     videoMimes: ["video/mp4", "video/quicktime"],
@@ -135,6 +142,21 @@ function evaluatePlatform(
         platform,
         code: "mime_unsupported",
         message: `${platform}은 ${item.file.type || "알 수 없는 포맷"}을 지원하지 않습니다 (${item.file.name}).`,
+      });
+    }
+
+    if (
+      item.file.size <= c.maxFileSizeBytes &&
+      c.warnFileSizeBytes !== undefined &&
+      item.file.size > c.warnFileSizeBytes
+    ) {
+      const warnMB = Math.floor(c.warnFileSizeBytes / MB);
+      const fileMB = (item.file.size / MB).toFixed(1);
+      issues.push({
+        severity: "warning",
+        platform,
+        code: "file_over_supported_size",
+        message: `${platform}은 ${warnMB}MB 이하만 지원합니다 (${item.file.name}: ${fileMB}MB). ${c.warnFileSizeNote ?? ""}`.trim(),
       });
     }
 
