@@ -122,13 +122,41 @@ const PERIOD_LABEL: Record<PeriodPreset, string> = {
   all: "전체",
 };
 
-type SortKey = "scheduled" | "created" | "status";
+type SortKey = "published" | "created" | "status";
 
 const SORT_LABEL: Record<SortKey, string> = {
-  scheduled: "예약 시간순",
+  published: "게시 시간순",
   created: "생성 시간순",
   status: "상태순",
 };
+
+// 게시 시간순 정렬의 1차 키. 아직 게시되지 않은 건(예약·대기·업로드중·실패)을
+// 위로 올리고, 조치가 끝난 취소는 맨 아래로 내린다. 실패는 재시도 대상이라
+// 미게시와 같은 그룹에 둔다.
+const PUBLISH_GROUP_RANK: Record<DisplayStatus, number> = {
+  failed: 0,
+  uploading: 0,
+  scheduled: 0,
+  pending: 0,
+  completed: 1,
+  cancelled: 2,
+};
+
+// 그룹 안에서 비교할 "발행 시각". 게시 완료는 실제 게시된 시각, 나머지는 게시될
+// 예정 시각을 쓴다. 즉시 발행은 scheduled_for가 null이므로 등록 시각을 예정 시각으로
+// 본다 — 이게 없으면 즉시 발행분이 전부 0(1970년)이 되어 목록 맨 아래로 가라앉는다.
+function publishTimeMs(p: {
+  displayStatus: DisplayStatus;
+  scheduledFor: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}): number {
+  const iso =
+    p.displayStatus === "completed"
+      ? (p.completedAt ?? p.createdAt)
+      : (p.scheduledFor ?? p.createdAt);
+  return new Date(iso).getTime();
+}
 
 const SORT_PRIORITY: Record<DisplayStatus, number> = {
   failed: 0,
@@ -197,7 +225,7 @@ export function PostingsPage({
   const [period, setPeriod] = useState<PeriodPreset>("7d");
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("scheduled");
+  const [sortKey, setSortKey] = useState<SortKey>("published");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detailItem, setDetailItem] = useState<PostingItem | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -283,11 +311,15 @@ export function PostingsPage({
       return true;
     });
 
-    if (sortKey === "scheduled") {
+    if (sortKey === "published") {
+      // 미래 → 현재 → 과거로 이어지는 한 줄 타임라인.
+      // 미게시(가장 나중에 게시될 예정이 위) → 게시 완료(최신순) → 취소.
       list = [...list].sort((a, b) => {
-        const av = a.scheduledFor ? new Date(a.scheduledFor).getTime() : 0;
-        const bv = b.scheduledFor ? new Date(b.scheduledFor).getTime() : 0;
-        return bv - av;
+        const group =
+          PUBLISH_GROUP_RANK[a.displayStatus] -
+          PUBLISH_GROUP_RANK[b.displayStatus];
+        if (group !== 0) return group;
+        return publishTimeMs(b) - publishTimeMs(a);
       });
     } else if (sortKey === "created") {
       list = [...list].sort(
