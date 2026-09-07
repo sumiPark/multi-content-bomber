@@ -40,6 +40,14 @@ function makeBoundary(): string {
   return `mcb-yt-${randomUUID()}`;
 }
 
+// YouTube는 title·description·tags에 꺾쇠(< >)가 들어가면 400을 던진다
+// (invalidTitle / invalidDescription / invalidTags). 한국어 캡션에서 <제목>처럼
+// 인용부호로 자주 쓰여 실제로 발행이 통째로 막혔다. 거부 대신 대괄호로 치환해
+// 의미를 살린 채 올린다 — 대괄호는 YouTube 제한 문자가 아니다([MV], [4K] 등).
+function replaceAngleBrackets(text: string): string {
+  return text.replace(/</g, "[").replace(/>/g, "]");
+}
+
 // Google API JSON 에러 형태. error.code(HTTP), error.errors[].reason으로
 // 토큰 만료(invalidCredentials) / 쿼터 초과(quotaExceeded) 등을 분기.
 interface GoogleApiError {
@@ -207,16 +215,18 @@ export const youtube: PlatformAdapter = {
 
     // 2. snippet/status JSON 조립
     const hashtagText = ctx.hashtags.length > 0 ? ctx.hashtags.join(" ") : "";
-    const description = [ctx.description, hashtagText]
-      .filter((s) => s && s.trim())
-      .join("\n\n");
+    const description = replaceAngleBrackets(
+      [ctx.description, hashtagText].filter((s) => s && s.trim()).join("\n\n"),
+    );
 
     const meta = {
       snippet: {
-        title: ctx.title,
+        title: replaceAngleBrackets(ctx.title),
         description,
         // YouTube tags는 # 없이 키워드만. hashtags는 사용자가 #포함으로 저장하므로 strip.
-        tags: ctx.hashtags.map((t) => t.replace(/^#/, "")).slice(0, 15),
+        tags: ctx.hashtags
+          .map((t) => replaceAngleBrackets(t.replace(/^#/, "")))
+          .slice(0, 15),
       },
       status: {
         privacyStatus: "public" as const,
