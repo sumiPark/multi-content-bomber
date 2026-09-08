@@ -67,7 +67,9 @@ const CONSTRAINTS: Record<Platform, PlatformConstraints> = {
     supportsImage: true,
     supportsVideo: true,
     maxImagesPerPost: 10,
-    maxFileSizeBytes: 4 * 1024 * MB,
+    // 릴스 공식 한도는 1GB. 예전엔 4GB로 잡혀 있었는데 그건 피드 영상 기준이라
+    // 큰 릴스가 워커까지 갔다가 실패했다.
+    maxFileSizeBytes: 1024 * MB,
     maxVideoDurationSec: 15 * 60,
     imageMimes: ["image/jpeg", "image/png"],
     videoMimes: ["video/mp4", "video/quicktime"],

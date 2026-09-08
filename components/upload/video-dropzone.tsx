@@ -17,11 +17,14 @@ const ACCEPT = {
   "video/mp4": [".mp4"],
   "video/quicktime": [".mov"],
 };
-const MAX_SIZE = 100 * 1024 * 1024;
+// 800MB. 인스타 릴스 공식 한도가 1GB라 그 아래로 잡았다.
+// Supabase 버킷 한도(마이그레이션 0014)와 프로젝트 전역 한도(대시보드)가
+// 모두 이 값 이상이어야 실제로 통과한다 — 셋 중 가장 낮은 값이 이긴다.
+const MAX_SIZE = 800 * 1024 * 1024;
 
 const REJECT_MESSAGES: Record<string, string> = {
   "file-invalid-type": "MP4 또는 MOV 파일만 가능합니다.",
-  "file-too-large": "영상은 100MB 이하여야 합니다.",
+  "file-too-large": "영상은 800MB 이하여야 합니다.",
 };
 
 interface VideoDropzoneProps {
@@ -227,7 +230,7 @@ export function VideoDropzone({
           {isDragActive ? "여기에 놓으세요" : "영상을 드래그하거나 클릭하여 업로드"}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          MP4 / MOV · 최대 100MB · 9:16 권장
+          MP4 / MOV · 최대 800MB · 9:16 권장
         </p>
       </div>
       {error && (

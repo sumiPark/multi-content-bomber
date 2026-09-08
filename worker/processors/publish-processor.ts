@@ -54,7 +54,10 @@ interface ContentRow {
 }
 
 const MEDIA_BUCKET = "media";
-const SIGNED_URL_TTL_SEC = 600; // 10분 — YouTube 업로드 한 번에 끝나기 충분
+// 60분. 800MB 영상은 (a) 워커가 청크로 나눠 받아 YouTube에 올리는 시간과
+// (b) Instagram이 이 URL로 직접 원본을 받아가 인코딩하는 시간을 모두 견뎌야 한다.
+// 10분이던 시절엔 큰 영상에서 URL이 먼저 죽었다.
+const SIGNED_URL_TTL_SEC = 3600;
 const TOKEN_REFRESH_BUFFER_MS = 60_000; // 만료 1분 전부터 미리 갱신
 
 /**

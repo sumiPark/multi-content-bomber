@@ -32,7 +32,7 @@ const GRAPH_API_BASE = "https://graph.instagram.com/v23.0";
 // 떨어지고 재시도 3회 중 1~2회를 그냥 소모했다. 3분으로 늘린다. (워커는 GitHub Actions
 // 러너라 Vercel 60초 제한과 무관하고, job timeout은 50분.)
 const POLL_INTERVAL_MS = 2000;
-const POLL_MAX_ATTEMPTS = 90; // 약 3분
+const POLL_MAX_ATTEMPTS = 300; // 약 10분 — 800MB 릴스는 3분 안에 인코딩이 안 끝난다
 
 // 캐러셀 자식(이미지) 컨테이너는 인코딩이 없어 보통 몇 초 내 FINISHED. 여기에 3분
 // 상한을 그대로 쓰면 10장 × 3분 = 30분이라 서명 URL TTL(워커 10분)을 넘겨버린다.

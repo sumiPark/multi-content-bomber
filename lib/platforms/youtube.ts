@@ -1,5 +1,4 @@
 import "./server-guard";
-import { randomUUID } from "crypto";
 import {
   MediaError,
   PublishError,
@@ -27,18 +26,22 @@ const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const CHANNEL_URL =
   "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true";
-const VIDEOS_INSERT_URL =
-  "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status";
+const VIDEOS_RESUMABLE_URL =
+  "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status";
 // 커스텀 썸네일 업로드. videoId 쿼리에 박고 이미지 바이트를 그대로 보낸다.
 // ⚠️ 채널이 전화 인증(verified)된 경우에만 동작 — 미인증이면 403.
 const THUMBNAIL_SET_URL =
   "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?uploadType=media";
 
-// YouTube videos.insert에 multipart/related로 보낼 때 사용하는 boundary 접두사.
-// 매 요청마다 랜덤 suffix를 붙여 body 안의 문자열과 충돌하지 않게 한다.
-function makeBoundary(): string {
-  return `mcb-yt-${randomUUID()}`;
-}
+// resumable 업로드 청크 크기.
+// ⚠️ Google 규격: 마지막 청크를 제외한 모든 청크는 256KB의 배수여야 한다.
+// 16MB면 800MB 영상이 50청크 — 메모리는 청크 하나(16MB)만 점유하고,
+// 중간에 끊겨도 그 청크만 다시 보내면 된다.
+const UPLOAD_CHUNK_SIZE = 16 * 1024 * 1024;
+
+// 5xx/네트워크 오류로 한 청크가 실패했을 때 같은 지점을 다시 시도하는 횟수.
+// 이걸 넘기면 job 자체를 RETRYING으로 떨어뜨려 다음 sweep에 맡긴다.
+const CHUNK_MAX_RETRIES = 3;
 
 // YouTube는 title·description·tags에 꺾쇠(< >)가 들어가면 400을 던진다
 // (invalidTitle / invalidDescription / invalidTags). 한국어 캡션에서 <제목>처럼
@@ -82,6 +85,231 @@ function mapYoutubeError(status: number, body: string): never {
     throw new RateLimitedError(`YouTube 일일 쿼터 초과: ${message}`);
   }
   throw new PublishError(`YouTube API 오류 (${status}): ${message}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resumable 업로드 헬퍼
+//
+// 예전엔 영상 전체를 arrayBuffer → Buffer → multipart concat으로 세 벌 복사한 뒤
+// 단일 요청으로 보냈다. 100MB까진 버텼지만 800MB에선 피크 메모리가 2.4GB로 뛰고,
+// 업로드 도중 한 번만 끊겨도 처음부터 다시 올려야 했다.
+//
+// 지금은 Storage에서 Range 요청으로 청크만 잘라 와 resumable 세션에 이어 붙인다.
+// 메모리는 청크 하나(16MB)로 고정되고, 끊기면 그 지점부터 재개한다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface MediaProbe {
+  size: number;
+  contentType: string;
+  supportsRange: boolean;
+}
+
+interface UploadedVideo {
+  id?: string;
+  snippet?: { channelId?: string };
+}
+
+type ResumeState =
+  | { done: true; video: UploadedVideo }
+  | { done: false; offset: number };
+
+// 1바이트 Range 요청으로 전체 크기·타입·Range 지원 여부를 한 번에 확인한다.
+// 본문은 즉시 취소 — probe 하나 때문에 800MB를 통째로 받아버리면 의미가 없다.
+async function probeMedia(signedUrl: string): Promise<MediaProbe> {
+  const res = await fetch(signedUrl, { headers: { Range: "bytes=0-0" } });
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new MediaError(`YouTube publish: 미디어 probe 실패 (${res.status})`);
+  }
+
+  const contentType = res.headers.get("content-type") ?? "video/mp4";
+  let size: number | null = null;
+  let supportsRange = false;
+
+  if (res.status === 206) {
+    // "bytes 0-0/812345678" 의 마지막 숫자가 전체 크기.
+    supportsRange = true;
+    const m = /\/(\d+)\s*$/.exec(res.headers.get("content-range") ?? "");
+    if (m) size = Number(m[1]);
+  } else {
+    const cl = res.headers.get("content-length");
+    if (cl) size = Number(cl);
+  }
+  await res.body?.cancel();
+
+  if (size === null || !Number.isFinite(size) || size <= 0) {
+    throw new MediaError("YouTube publish: 미디어 크기를 확인할 수 없습니다");
+  }
+  return { size, contentType, supportsRange };
+}
+
+async function fetchRange(
+  signedUrl: string,
+  start: number,
+  end: number,
+): Promise<Buffer<ArrayBuffer>> {
+  const res = await fetch(signedUrl, {
+    headers: { Range: `bytes=${start}-${end}` },
+  });
+  if (res.status !== 206) {
+    await res.body?.cancel();
+    throw new MediaError(
+      `YouTube publish: 청크 fetch 실패 (${res.status}, bytes ${start}-${end})`,
+    );
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+async function fetchWhole(signedUrl: string): Promise<Buffer<ArrayBuffer>> {
+  const res = await fetch(signedUrl);
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new MediaError(
+      `YouTube publish: 미디어 fetch 실패 (${res.status})`,
+    );
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// 업로드 세션을 연다. 실제 바이트는 응답의 Location(세션 URI)으로 보낸다.
+async function startResumableSession(
+  meta: unknown,
+  probe: MediaProbe,
+  accessToken: string,
+): Promise<string> {
+  const res = await fetch(VIDEOS_RESUMABLE_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json; charset=UTF-8",
+      "X-Upload-Content-Length": String(probe.size),
+      "X-Upload-Content-Type": probe.contentType,
+    },
+    body: JSON.stringify(meta),
+  });
+  if (!res.ok) {
+    mapYoutubeError(res.status, await res.text());
+  }
+  const sessionUri = res.headers.get("location");
+  if (!sessionUri) {
+    throw new PublishError("YouTube resumable 세션 URI(Location)가 없습니다");
+  }
+  return sessionUri;
+}
+
+// 308 응답의 Range 헤더("bytes=0-262143")는 서버가 실제로 받은 마지막 바이트다.
+// 다음에 보낼 offset은 그 +1. 헤더가 없으면 아직 아무것도 못 받은 것.
+function parseNextOffset(range: string | null): number | null {
+  if (!range) return null;
+  const m = /bytes=0-(\d+)/.exec(range);
+  return m ? Number(m[1]) + 1 : null;
+}
+
+// 청크 전송이 끊겼을 때 서버가 어디까지 받았는지 물어본다.
+// Content-Range: bytes */total + 빈 본문 = Google이 정의한 상태 조회.
+async function queryResumeState(
+  sessionUri: string,
+  size: number,
+  accessToken: string,
+): Promise<ResumeState> {
+  const res = await fetch(sessionUri, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Range": `bytes */${size}`,
+    },
+  });
+  if (res.status === 200 || res.status === 201) {
+    return { done: true, video: (await res.json()) as UploadedVideo };
+  }
+  if (res.status === 308) {
+    await res.body?.cancel();
+    return {
+      done: false,
+      offset: parseNextOffset(res.headers.get("range")) ?? 0,
+    };
+  }
+  mapYoutubeError(res.status, await res.text());
+}
+
+async function uploadResumable(
+  sessionUri: string,
+  signedUrl: string,
+  probe: MediaProbe,
+  accessToken: string,
+): Promise<UploadedVideo> {
+  // Range 미지원 Storage — 예전처럼 전체를 한 번에 보낸다. Supabase Storage는
+  // Range를 지원하므로 여기 오는 건 예외적인 경우다.
+  if (!probe.supportsRange) {
+    const whole = await fetchWhole(signedUrl);
+    const res = await fetch(sessionUri, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": probe.contentType,
+        "Content-Range": `bytes 0-${probe.size - 1}/${probe.size}`,
+      },
+      body: whole,
+    });
+    if (res.status === 200 || res.status === 201) {
+      return (await res.json()) as UploadedVideo;
+    }
+    mapYoutubeError(res.status, await res.text());
+  }
+
+  let offset = 0;
+  let retries = 0;
+
+  while (offset < probe.size) {
+    const end = Math.min(offset + UPLOAD_CHUNK_SIZE, probe.size) - 1;
+    const chunk = await fetchRange(signedUrl, offset, end);
+
+    let res: Response;
+    try {
+      res = await fetch(sessionUri, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": probe.contentType,
+          "Content-Range": `bytes ${offset}-${end}/${probe.size}`,
+        },
+        body: chunk,
+      });
+    } catch (err) {
+      // 네트워크 단절. 서버가 어디까지 받았는지 확인하고 그 지점부터 재개.
+      if (retries >= CHUNK_MAX_RETRIES) throw err;
+      retries += 1;
+      const state = await queryResumeState(sessionUri, probe.size, accessToken);
+      if (state.done) return state.video;
+      offset = state.offset;
+      continue;
+    }
+
+    if (res.status === 200 || res.status === 201) {
+      return (await res.json()) as UploadedVideo;
+    }
+    if (res.status === 308) {
+      // 정상 — 다음 청크로. 서버가 알려준 offset을 신뢰한다.
+      await res.body?.cancel();
+      offset = parseNextOffset(res.headers.get("range")) ?? end + 1;
+      retries = 0;
+      continue;
+    }
+    if (res.status >= 500 && retries < CHUNK_MAX_RETRIES) {
+      await res.body?.cancel();
+      retries += 1;
+      const state = await queryResumeState(sessionUri, probe.size, accessToken);
+      if (state.done) return state.video;
+      offset = state.offset;
+      continue;
+    }
+    mapYoutubeError(res.status, await res.text());
+  }
+
+  // 마지막 청크까지 보냈는데 완료 응답을 못 받은 경우 — 한 번 더 확인.
+  const state = await queryResumeState(sessionUri, probe.size, accessToken);
+  if (state.done) return state.video;
+  throw new PublishError("YouTube resumable 업로드가 완료 응답 없이 끝났습니다");
 }
 
 export const youtube: PlatformAdapter = {
@@ -176,9 +404,9 @@ export const youtube: PlatformAdapter = {
   },
 
   // ───────────────────────────────────────────────────────────────────────────
-  // Phase 4b ④: YouTube Data API v3 videos.insert (multipart upload).
-  // 큰 파일은 resumable upload가 정석이지만 1차 슬라이스에선 멀티파트로 단순화.
-  // Shorts 60초 / ~100MB 정도는 안정. 대용량으로 가면 resumable로 교체 필요.
+  // YouTube Data API v3 videos.insert (resumable upload).
+  // Storage에서 16MB씩 잘라 와 이어 올린다 — 800MB급도 메모리 16MB로 처리하고,
+  // 끊기면 그 지점부터 재개한다. 자세한 배경은 위 헬퍼 블록 주석 참고.
   //
   // 캡션 매핑:
   //   title       → snippet.title (필수)
@@ -202,16 +430,8 @@ export const youtube: PlatformAdapter = {
       throw new PublishError("YouTube publish: title 누락");
     }
 
-    // 1. Storage에서 비디오 바이너리 fetch
-    const videoRes = await fetch(signedUrl);
-    if (!videoRes.ok) {
-      throw new MediaError(
-        `YouTube publish: 미디어 fetch 실패 (${videoRes.status})`,
-      );
-    }
-    const videoBytes = Buffer.from(await videoRes.arrayBuffer());
-    const videoContentType =
-      videoRes.headers.get("content-type") ?? "video/mp4";
+    // 1. Storage 미디어 크기·타입 확인 (본문은 받지 않는다)
+    const probe = await probeMedia(signedUrl);
 
     // 2. snippet/status JSON 조립
     const hashtagText = ctx.hashtags.length > 0 ? ctx.hashtags.join(" ") : "";
@@ -234,43 +454,20 @@ export const youtube: PlatformAdapter = {
       },
     };
 
-    // 3. multipart/related body 직접 조립.
-    //    fetch가 Buffer를 그대로 받으므로 Content-Length 자동.
-    const boundary = makeBoundary();
-    const metaPart = Buffer.from(
-      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n`,
-      "utf8",
+    // 3. resumable 세션을 열고 청크로 이어 올린다
+    const sessionUri = await startResumableSession(meta, probe, accessToken);
+    const uploaded = await uploadResumable(
+      sessionUri,
+      signedUrl,
+      probe,
+      accessToken,
     );
-    const videoHeader = Buffer.from(
-      `--${boundary}\r\nContent-Type: ${videoContentType}\r\n\r\n`,
-      "utf8",
-    );
-    const videoFooter = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
-    const body = Buffer.concat([metaPart, videoHeader, videoBytes, videoFooter]);
 
-    // 4. videos.insert 호출
-    const uploadRes = await fetch(VIDEOS_INSERT_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": `multipart/related; boundary=${boundary}`,
-      },
-      body,
-    });
-
-    if (!uploadRes.ok) {
-      mapYoutubeError(uploadRes.status, await uploadRes.text());
-    }
-
-    const uploaded = (await uploadRes.json()) as {
-      id?: string;
-      snippet?: { channelId?: string };
-    };
     if (!uploaded.id) {
       throw new PublishError("YouTube 응답에 video id가 없습니다");
     }
 
-    // 5. 커스텀 썸네일(커버) — 사용자가 고른 프레임을 이미지로 추출해 올려둔 것.
+    // 4. 커스텀 썸네일(커버) — 사용자가 고른 프레임을 이미지로 추출해 올려둔 것.
     //    best-effort: 영상 업로드는 이미 성공했으므로 실패해도 throw하지 않는다.
     //    미인증 채널(403)·일시 오류 등은 경고만 남기고 영상 게시는 성공 처리.
     if (ctx.coverSignedUrl) {
