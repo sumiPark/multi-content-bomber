@@ -291,6 +291,7 @@ export type Database = {
           platform_post_id: string | null
           platform_post_url: string | null
           post_type: Database["public"]["Enums"]["post_type"]
+          resume_state: Json | null
           scheduled_for: string | null
           social_account_id: string
           status: Database["public"]["Enums"]["publish_status"]
@@ -311,6 +312,7 @@ export type Database = {
           platform_post_id?: string | null
           platform_post_url?: string | null
           post_type: Database["public"]["Enums"]["post_type"]
+          resume_state?: Json | null
           scheduled_for?: string | null
           social_account_id: string
           status?: Database["public"]["Enums"]["publish_status"]
@@ -331,6 +333,7 @@ export type Database = {
           platform_post_id?: string | null
           platform_post_url?: string | null
           post_type?: Database["public"]["Enums"]["post_type"]
+          resume_state?: Json | null
           scheduled_for?: string | null
           social_account_id?: string
           status?: Database["public"]["Enums"]["publish_status"]

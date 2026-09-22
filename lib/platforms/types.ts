@@ -1,3 +1,5 @@
+import type { Json } from "@/types/database";
+
 export type Platform = "INSTAGRAM" | "TIKTOK" | "YOUTUBE";
 
 export interface OAuthTokens {
@@ -44,6 +46,20 @@ export interface PublishContext {
   // 둘 다 null이면 커버 미지정(어댑터 기본 동작).
   coverTimestampMs: number | null;
   coverSignedUrl: string | null;
+  // ── 재시도 이어받기 ──
+  // 플랫폼이 서버에서 오래 처리하는 작업(Instagram 컨테이너 인코딩 등)은 한 시도의
+  // 폴링 상한 안에 안 끝날 수 있다. 그때 진행분을 버리지 않도록, 어댑터가 다음 시도가
+  // 이어받을 상태를 job(publish_jobs.resume_state)에 남기고 다음 시도가 읽는다.
+  //   resumeState:     이전 시도가 남긴 상태. 첫 시도거나 없으면 null. 형식은 어댑터
+  //                    자유 — 자기 것이 맞는지(같은 콘텐츠·캡션인지) 어댑터가 검증한다.
+  //   saveResumeState: 이어받을 상태가 생긴 즉시(예: 컨테이너 생성 직후) 호출.
+  //                    best-effort — 저장 실패는 워커가 경고만 남기고 발행은 계속.
+  //   deadlineAt:      이 시도가 폴링을 포기해야 하는 시각(epoch ms). 워커 run의 시간
+  //                    예산에서 온다 — GitHub Actions job timeout에 죽어 PROCESSING으로
+  //                    굳기 전에 RETRYING으로 내려놓기 위함. null이면 어댑터 상한만.
+  resumeState: Json | null;
+  saveResumeState: (state: Json) => Promise<void>;
+  deadlineAt: number | null;
 }
 
 export interface PublishResult {

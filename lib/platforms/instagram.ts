@@ -1,4 +1,5 @@
 import "./server-guard";
+import { createHash } from "crypto";
 import {
   MediaError,
   PublishError,
@@ -10,6 +11,7 @@ import {
   type PublishResult,
   type RefreshedTokens,
 } from "./types";
+import type { Json } from "@/types/database";
 
 // Instagram Login (Instagram Graph API용). Meta 개발자 콘솔에서 앱 생성 후
 // "Instagram > API setup with Instagram login" 흐름을 따름.
@@ -27,16 +29,23 @@ const LONG_LIVED_URL = "https://graph.instagram.com/access_token";
 const REFRESH_URL = "https://graph.instagram.com/refresh_access_token";
 const GRAPH_API_BASE = "https://graph.instagram.com/v23.0";
 
-// Container 상태 폴링 — 영상 업로드는 IG 서버가 처리하는 데 시간이 걸린다.
-// 60초(30회)로는 릴스 인코딩이 자주 못 끝나서 실제 발행 대부분이 타임아웃 → RETRYING으로
-// 떨어지고 재시도 3회 중 1~2회를 그냥 소모했다. 3분으로 늘린다. (워커는 GitHub Actions
-// 러너라 Vercel 60초 제한과 무관하고, job timeout은 50분.)
+// Container 상태 폴링 — 영상은 IG 서버가 원본을 받아가 자기 쪽에서 인코딩하므로
+// 시간이 걸린다. 상한은 파일 크기에 비례: 기본 10분 + 100MB당 5분, 최대 40분.
+// (10분 고정이던 시절 818MB·10분짜리 60fps HEVC 릴스가 두 시도 연속 타임아웃 —
+// IG가 818MB를 받고 인코딩을 끝내는 데 그보다 오래 걸린다.) 워커는 GitHub Actions
+// 러너라 Vercel 60초 제한과 무관하고, run 전체 예산은 ctx.deadlineAt으로 따로 들어온다.
+//
+// 상한을 넘겨도 컨테이너는 버리지 않는다 — id를 resume_state에 남겨 다음 시도가
+// 이어서 폴링한다(IG 컨테이너는 24시간 유효). 시도마다 새 컨테이너를 만들면 앞
+// 시도의 진행분이 버려지고, IG 쪽엔 같은 영상 컨테이너가 시도 수만큼 쌓여 서로 느려진다.
 const POLL_INTERVAL_MS = 2000;
-const POLL_MAX_ATTEMPTS = 300; // 약 10분 — 800MB 릴스는 3분 안에 인코딩이 안 끝난다
+const POLL_BASE_MS = 10 * 60_000;
+const POLL_PER_100MB_MS = 5 * 60_000;
+const POLL_MAX_MS = 40 * 60_000;
 
-// 캐러셀 자식(이미지) 컨테이너는 인코딩이 없어 보통 몇 초 내 FINISHED. 여기에 3분
-// 상한을 그대로 쓰면 10장 × 3분 = 30분이라 서명 URL TTL(워커 10분)을 넘겨버린다.
-const CHILD_POLL_MAX_ATTEMPTS = 15; // 약 30초
+// 캐러셀 자식(이미지) 컨테이너는 인코딩이 없어 보통 몇 초 내 FINISHED. 여기에 영상
+// 상한을 그대로 쓰면 10장 × 10분이라 서명 URL TTL을 넘겨버린다.
+const CHILD_POLL_MAX_MS = 30_000;
 
 // 캐러셀 1포스트당 아이템 수 제한 (Instagram 규격: 2~10장).
 // 업로드 마법사(lib/upload/validation.ts)도 10장에서 막지만, 워커는 DB를 직접 읽으므로
@@ -247,32 +256,52 @@ export const instagram: PlatformAdapter = {
     const caption = buildInstagramCaption(ctx);
     // 영상은 media_urls가 항상 1개(DB 제약). 2장 이상 이미지 = 캐러셀.
     const isCarousel = ctx.mediaType !== "VIDEO" && signedUrls.length > 1;
+    const fingerprint = buildFingerprint(ctx, caption);
 
-    // 1. Container 생성
-    const containerId = isCarousel
-      ? await createCarouselContainer(
-          ctx.platformAccountId,
-          accessToken,
-          signedUrls,
-          caption,
-        )
-      : await createMediaContainer(ctx.platformAccountId, accessToken, {
-          ...(ctx.mediaType === "VIDEO"
-            ? {
-                media_type: "REELS",
-                video_url: signedUrl,
-                // 커버 프레임: 사용자가 고른 시점(ms)을 thumb_offset으로 전달. Reels는 영상
-                // 내 한 프레임을 커버로 지정 가능(별도 이미지 업로드 없이). 미지정이면 IG 기본.
-                ...(ctx.coverTimestampMs != null
-                  ? { thumb_offset: String(ctx.coverTimestampMs) }
-                  : {}),
-              }
-            : { image_url: signedUrl }),
-          ...(caption ? { caption } : {}),
-        });
+    // 1. Container 확보 — 이전 시도가 남긴 컨테이너가 살아있으면 이어받고, 아니면
+    //    새로 만든 뒤 즉시 resume_state에 남긴다(이번 시도가 타임아웃돼도 다음이 이어받게).
+    let containerId = await resumePreviousContainer(
+      ctx,
+      accessToken,
+      fingerprint,
+    );
+    if (!containerId) {
+      containerId = isCarousel
+        ? await createCarouselContainer(
+            ctx.platformAccountId,
+            accessToken,
+            signedUrls,
+            caption,
+            ctx.deadlineAt,
+          )
+        : await createMediaContainer(ctx.platformAccountId, accessToken, {
+            ...(ctx.mediaType === "VIDEO"
+              ? {
+                  media_type: "REELS",
+                  video_url: signedUrl,
+                  // 커버 프레임: 사용자가 고른 시점(ms)을 thumb_offset으로 전달. Reels는 영상
+                  // 내 한 프레임을 커버로 지정 가능(별도 이미지 업로드 없이). 미지정이면 IG 기본.
+                  ...(ctx.coverTimestampMs != null
+                    ? { thumb_offset: String(ctx.coverTimestampMs) }
+                    : {}),
+                }
+              : { image_url: signedUrl }),
+            ...(caption ? { caption } : {}),
+          });
+      await ctx.saveResumeState({
+        containerId,
+        fingerprint,
+        createdAt: new Date().toISOString(),
+      });
+    }
 
-    // 2. Container 상태 폴링
-    await pollContainerReady(containerId, accessToken);
+    // 2. Container 상태 폴링 — 상한은 파일 크기 비례(영상만; 이미지는 인코딩이 없다).
+    const sizeBytes =
+      ctx.mediaType === "VIDEO" ? await probeContentLength(signedUrl) : null;
+    await pollContainerReady(containerId, accessToken, {
+      maxWaitMs: pollBudgetMs(sizeBytes),
+      deadlineAt: ctx.deadlineAt,
+    });
 
     // 3. Publish
     const publishUrl = new URL(
@@ -385,6 +414,7 @@ async function createCarouselContainer(
   accessToken: string,
   signedUrls: string[],
   caption: string,
+  deadlineAt: number | null,
 ): Promise<string> {
   if (signedUrls.length > CAROUSEL_MAX_ITEMS) {
     throw new MediaError(
@@ -409,7 +439,10 @@ async function createCarouselContainer(
 
   // 자식이 FINISHED가 아닌 채로 부모를 만들면 IG가 부모 컨테이너를 ERROR로 떨군다.
   for (const childId of childIds) {
-    await pollContainerReady(childId, accessToken, CHILD_POLL_MAX_ATTEMPTS);
+    await pollContainerReady(childId, accessToken, {
+      maxWaitMs: CHILD_POLL_MAX_MS,
+      deadlineAt,
+    });
   }
 
   // children 순서 = 캐러셀 슬라이드 순서. media_urls 배열 순서를 그대로 유지한다
@@ -421,41 +454,174 @@ async function createCarouselContainer(
   });
 }
 
+interface ContainerStatus {
+  status_code?: string;
+  status?: string;
+}
+
+async function getContainerStatus(
+  containerId: string,
+  accessToken: string,
+): Promise<ContainerStatus> {
+  const url = new URL(`${GRAPH_API_BASE}/${containerId}`);
+  url.searchParams.set("fields", "status_code,status");
+  url.searchParams.set("access_token", accessToken);
+  return (await callGraphApi(url.toString())) as ContainerStatus;
+}
+
+// FINISHED 될 때까지 대기. maxWaitMs와 deadlineAt 중 이른 쪽까지 못 끝나면
+// PublishError — 컨테이너 자체는 IG에 살아있으므로 호출측이 resume_state로 남긴
+// id를 다음 시도가 이어받는다.
 async function pollContainerReady(
   containerId: string,
   accessToken: string,
-  maxAttempts: number = POLL_MAX_ATTEMPTS,
+  opts: { maxWaitMs: number; deadlineAt: number | null },
 ): Promise<void> {
-  for (let i = 0; i < maxAttempts; i++) {
-    const url = new URL(`${GRAPH_API_BASE}/${containerId}`);
-    url.searchParams.set("fields", "status_code,status");
-    url.searchParams.set("access_token", accessToken);
+  const startedAt = Date.now();
+  const giveUpAt = Math.min(
+    startedAt + opts.maxWaitMs,
+    opts.deadlineAt ?? Number.POSITIVE_INFINITY,
+  );
+  let last: ContainerStatus = {};
+  let lastLoggedAt = startedAt;
 
-    const res = (await callGraphApi(url.toString())) as {
-      status_code?: string;
-      status?: string;
-    };
+  for (;;) {
+    last = await getContainerStatus(containerId, accessToken);
 
-    switch (res.status_code) {
+    switch (last.status_code) {
       case "FINISHED":
+      // PUBLISHED는 비정상(이미 발행됨)이지만 어쨌든 ready. 그대로 진행.
+      case "PUBLISHED":
         return;
       case "ERROR":
         throw new PublishError(
-          `Instagram container ERROR: ${res.status ?? "(no detail)"}`,
+          `Instagram container ERROR: ${last.status ?? "(no detail)"}`,
         );
       case "EXPIRED":
         throw new MediaError(
           `Instagram container EXPIRED — 서명 URL이 IG가 fetch하기 전 만료됨`,
         );
-      case "IN_PROGRESS":
-      case "PUBLISHED":
       default:
-        // PUBLISHED는 비정상(이미 발행됨)이지만 어쨌든 ready. 그대로 진행.
-        if (res.status_code === "PUBLISHED") return;
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        // IN_PROGRESS (또는 모르는 값) — 계속 대기.
+        break;
     }
+
+    const now = Date.now();
+    if (now + POLL_INTERVAL_MS > giveUpAt) break;
+    // 긴 대기 중엔 1분마다 한 줄씩 — Actions 로그에서 진행을 볼 수 있게.
+    if (now - lastLoggedAt >= 60_000) {
+      console.log(
+        `[instagram] container ${containerId} 대기 중 ${Math.round((now - startedAt) / 60_000)}분 — ${last.status_code ?? "?"}: ${last.status ?? "-"}`,
+      );
+      lastLoggedAt = now;
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
+
+  const waitedMin = Math.round((Date.now() - startedAt) / 60_000);
+  const why =
+    opts.deadlineAt !== null && giveUpAt === opts.deadlineAt
+      ? "워커 run 시간 예산 소진"
+      : `상한 ${Math.round(opts.maxWaitMs / 60_000)}분`;
   throw new PublishError(
-    `Instagram container 폴링 타임아웃 (${maxAttempts}회 * ${POLL_INTERVAL_MS}ms)`,
+    `Instagram container 처리 대기 타임아웃 (${waitedMin}분 대기, ${why}; 마지막 상태 ${last.status_code ?? "?"}: ${last.status ?? "-"}) — 컨테이너 id=${containerId}는 다음 시도에서 이어서 확인`,
   );
+}
+
+// 폴링 상한 — 영상 크기에 비례. 크기를 모르면 기본값.
+function pollBudgetMs(sizeBytes: number | null): number {
+  if (!sizeBytes) return POLL_BASE_MS;
+  const extra = (sizeBytes / (100 * 1024 * 1024)) * POLL_PER_100MB_MS;
+  return Math.min(POLL_BASE_MS + extra, POLL_MAX_MS);
+}
+
+// 서명 URL에 HEAD로 파일 크기를 묻는다 (폴링 상한 산정용). 실패하면 null → 기본 상한.
+async function probeContentLength(url: string): Promise<number | null> {
+  try {
+    const res = await fetch(url, { method: "HEAD" });
+    const len = Number(res.headers.get("content-length"));
+    return res.ok && Number.isFinite(len) && len > 0 ? len : null;
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 재시도 이어받기 (publish_jobs.resume_state).
+//   { containerId, fingerprint, createdAt }
+// fingerprint는 "같은 콘텐츠·캡션·커버로 만든 컨테이너인지" 확인용 — 컨테이너에는
+// 캡션이 박혀 있어서, 시도 사이에 캡션을 고쳤으면 옛 컨테이너를 버리고 새로 만든다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildFingerprint(ctx: PublishContext, caption: string): string {
+  return createHash("sha1")
+    .update(
+      JSON.stringify([
+        ctx.contentId,
+        ctx.mediaType,
+        ctx.mediaSignedUrls.length,
+        caption,
+        ctx.coverTimestampMs,
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 16);
+}
+
+function parseResumeState(
+  raw: Json | null,
+): { containerId: string; fingerprint: string; createdAt: string } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.containerId !== "string" || typeof r.fingerprint !== "string") {
+    return null;
+  }
+  return {
+    containerId: r.containerId,
+    fingerprint: r.fingerprint,
+    createdAt: typeof r.createdAt === "string" ? r.createdAt : "?",
+  };
+}
+
+// 이전 시도가 남긴 컨테이너가 아직 쓸 만하면 그 id를, 아니면 null(새로 만든다).
+async function resumePreviousContainer(
+  ctx: PublishContext,
+  accessToken: string,
+  fingerprint: string,
+): Promise<string | null> {
+  const prev = parseResumeState(ctx.resumeState);
+  if (!prev) return null;
+
+  if (prev.fingerprint !== fingerprint) {
+    console.warn(
+      `[instagram] 이전 컨테이너(id=${prev.containerId})는 캡션/커버가 달라져 버림 — 새로 생성`,
+    );
+    return null;
+  }
+
+  let st: ContainerStatus;
+  try {
+    st = await getContainerStatus(prev.containerId, accessToken);
+  } catch (err) {
+    if (err instanceof TokenExpiredError || err instanceof RateLimitedError) {
+      throw err;
+    }
+    // 컨테이너가 IG에서 사라졌거나(24시간 만료) 조회 불가 — 새로 만든다.
+    console.warn(
+      `[instagram] 이전 컨테이너(id=${prev.containerId}) 조회 실패 — 새로 생성: ${err instanceof Error ? err.message : err}`,
+    );
+    return null;
+  }
+
+  if (st.status_code === "ERROR" || st.status_code === "EXPIRED") {
+    console.warn(
+      `[instagram] 이전 컨테이너(id=${prev.containerId}) ${st.status_code}: ${st.status ?? "-"} — 새로 생성`,
+    );
+    return null;
+  }
+
+  console.log(
+    `[instagram] 이전 시도 컨테이너 이어받음 (id=${prev.containerId}, 생성 ${prev.createdAt}, 상태 ${st.status_code ?? "?"})`,
+  );
+  return prev.containerId;
 }

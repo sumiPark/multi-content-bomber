@@ -30,6 +30,8 @@ interface PublishJobRow {
   status: string;
   attempts: number;
   status_history: Json | null;
+  // 0015 — 어댑터가 재시도 때 이어받는 상태. 마이그레이션 전 DB엔 컬럼이 없어 optional.
+  resume_state?: Json | null;
 }
 
 interface AccountRow {
@@ -80,11 +82,19 @@ const TOKEN_REFRESH_BUFFER_MS = 60_000; // 만료 1분 전부터 미리 갱신
  *   - TokenExpiredError → social_accounts.is_active=false 마킹 후 throw (재시도해도
  *     같은 토큰이라 의미 없음 — 마지막 시도에서 FAILED로 안착).
  *   - RateLimitedError / MediaError / PublishError → throw → RETRYING으로 다음 sweep 위임.
+ *
+ * 재시도 이어받기 (0015 resume_state):
+ *   - 플랫폼이 서버에서 오래 처리하는 작업(Instagram 컨테이너 인코딩)은 한 시도 안에
+ *     안 끝날 수 있다. 어댑터가 이어받을 상태(컨테이너 id)를 resume_state에 남기고,
+ *     다음 시도가 새로 만들지 않고 그걸 이어서 폴링한다.
+ *   - deadlineAt: 이 run이 어댑터 폴링을 끊어야 하는 시각. process-due의 시간 예산에서
+ *     온다 — Actions timeout에 죽어 PROCESSING으로 굳는 대신 RETRYING으로 내려놓는다.
  */
 export async function processClaimedPublishJob(
   supabase: ReturnType<typeof createServiceClient>,
   row: PublishJobRow,
   maxAttempts: number,
+  deadlineAt: number | null = null,
 ) {
   const publishJobId = row.id;
   const attemptNumber = row.attempts + 1;
@@ -119,9 +129,17 @@ export async function processClaimedPublishJob(
     throw new Error(`PROCESSING update 실패: ${lockError.message}`);
   }
 
+  // 어댑터가 이어받기 상태를 남기면 SUCCESS 뒤에 지워준다. claim 시점 값이 있었거나
+  // 이번 시도에서 새로 저장했을 때만 — 그 외엔 불필요한 UPDATE(및 0015 미적용 경고)를 피한다.
+  let hasResumeState = row.resume_state != null;
+  const persistResumeState = async (state: Json) => {
+    hasResumeState = true;
+    await saveResumeState(supabase, publishJobId, state);
+  };
+
   try {
     // 3. social_accounts + contents 조회 → 어댑터로 게시
-    const result = await runPublish(supabase, row);
+    const result = await runPublish(supabase, row, deadlineAt, persistResumeState);
 
     // 4. SUCCESS 마킹
     const successHistory: StatusHistoryEntry[] = [
@@ -148,6 +166,10 @@ export async function processClaimedPublishJob(
       console.error(
         `[publish-processor] SUCCESS update 실패 (외부 게시는 완료): ${successError.message}`,
       );
+    } else if (hasResumeState) {
+      // 이어받기 상태 정리. SUCCESS 업데이트와 분리한 이유: 0015 미적용 DB에서 컬럼
+      // 없음으로 SUCCESS 기록까지 같이 실패하면 stale 회수 → 재발행(중복 게시)이 난다.
+      await saveResumeState(supabase, publishJobId, null);
     }
 
     return { ok: true, ...result };
@@ -199,6 +221,8 @@ export async function processClaimedPublishJob(
 async function runPublish(
   supabase: ReturnType<typeof createServiceClient>,
   row: PublishJobRow,
+  deadlineAt: number | null,
+  saveResumeState: PublishContext["saveResumeState"],
 ) {
   // 3a. social_accounts 조회 (토큰 컬럼 포함 — service_role 필수)
   const { data: account, error: accountError } = await supabase
@@ -260,13 +284,16 @@ async function runPublish(
     ? await signCover(supabase, cover.path)
     : null;
 
-  // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID/커버 주입
+  // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID/커버/이어받기 상태 주입
   const publishCtx: PublishContext = {
     ...buildPublishContext(content, account.platform),
     platformAccountId: account.platform_account_id,
     mediaSignedUrls,
     coverTimestampMs: cover.ms,
     coverSignedUrl,
+    resumeState: row.resume_state ?? null,
+    saveResumeState,
+    deadlineAt,
   };
 
   // 3g. 게시
@@ -410,6 +437,28 @@ async function signCover(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 어댑터가 재시도 때 이어받을 상태를 남긴다 (publish_jobs.resume_state, 0015).
+// best-effort: 컬럼이 아직 없거나 쓰기가 실패해도 발행은 계속 — 이어받기만 꺼진다
+// (= 예전처럼 다음 시도가 처음부터). updated_at은 트리거가 같이 올린다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function saveResumeState(
+  supabase: ReturnType<typeof createServiceClient>,
+  publishJobId: string,
+  state: Json | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("publish_jobs")
+    .update({ resume_state: state })
+    .eq("id", publishJobId);
+  if (error) {
+    console.warn(
+      `[publish-processor] resume_state 저장 실패 (job=${publishJobId}): ${error.message} — 다음 시도가 이어받지 못함`,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ai_captions(jsonb)에서 플랫폼별 필드를 풀어 PublishContext에 채운다.
 // captions schema는 lib/ai/caption-generator.ts와 동기화:
 //   youtube   { title, description, hashtags, category? }
@@ -436,6 +485,10 @@ function buildPublishContext(
     // runPublish가 metadata에서 풀어 spread로 주입.
     coverTimestampMs: null,
     coverSignedUrl: null,
+    // runPublish가 job row / run 예산에서 주입.
+    resumeState: null,
+    saveResumeState: async () => {},
+    deadlineAt: null,
   };
 
   if (platform === "YOUTUBE") {

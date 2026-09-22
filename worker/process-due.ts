@@ -30,10 +30,19 @@ const CLAIM_BATCH = 20;
 const CONCURRENCY = 5;
 // publish_jobs.attempts 한도 — claim RPC의 p_max_attempts와 일치시켜야 한다.
 const MAX_ATTEMPTS = 3;
+// run 시간 예산 — GitHub Actions job timeout(publish.yml timeout-minutes: 50) 안에서
+// 스스로 끝나기 위한 두 선. timeout에 죽으면 진행 중 job이 PROCESSING으로 굳고,
+// attempts가 한도에 닿아 있으면 stale 회수도 안 돼 영영 "업로드중"으로 남는다.
+//   · CLAIM_CUTOFF_MS: 이 시각 이후엔 새 batch를 claim하지 않는다(다음 sweep에 넘김).
+//   · RUN_DEADLINE_MS: 어댑터의 긴 폴링(Instagram 컨테이너 등)이 이 시각에 손을 떼고
+//     RETRYING으로 내려놓는다 — 진행분은 resume_state로 다음 시도가 이어받는다.
+const CLAIM_CUTOFF_MS = 30 * 60_000;
+const RUN_DEADLINE_MS = 42 * 60_000;
 
 async function processBatch(
   supabase: ReturnType<typeof createServiceClient>,
   rows: PublishJobRow[],
+  deadlineAt: number,
 ): Promise<{ ok: number; failed: number }> {
   let ok = 0;
   let failed = 0;
@@ -42,7 +51,9 @@ async function processBatch(
   for (let i = 0; i < rows.length; i += CONCURRENCY) {
     const slice = rows.slice(i, i + CONCURRENCY);
     const results = await Promise.allSettled(
-      slice.map((row) => processClaimedPublishJob(supabase, row, MAX_ATTEMPTS)),
+      slice.map((row) =>
+        processClaimedPublishJob(supabase, row, MAX_ATTEMPTS, deadlineAt),
+      ),
     );
     for (const r of results) {
       if (r.status === "fulfilled") ok++;
@@ -62,13 +73,21 @@ async function processBatch(
 async function main() {
   const supabase = createServiceClient();
   const startedAt = Date.now();
+  const deadlineAt = startedAt + RUN_DEADLINE_MS;
 
   let totalOk = 0;
   let totalFailed = 0;
   let totalClaimed = 0;
 
   // 1. due job이 없을 때까지 claim → 처리 반복 (run당 MAX_JOBS_PER_RUN 상한).
+  //    실패한 job은 RETRYING으로 바로 due가 되므로 같은 run 안에서 다시 claim된다 —
+  //    Instagram처럼 이어받기가 있는 어댑터는 이 덕에 run 예산 끝까지 연속으로 기다린다.
+  let claimCutoffHit = false;
   while (totalClaimed < MAX_JOBS_PER_RUN) {
+    if (Date.now() - startedAt > CLAIM_CUTOFF_MS) {
+      claimCutoffHit = true;
+      break;
+    }
     const { data, error } = await supabase.rpc("claim_due_publish_jobs", {
       p_limit: Math.min(CLAIM_BATCH, MAX_JOBS_PER_RUN - totalClaimed),
       p_max_attempts: MAX_ATTEMPTS,
@@ -85,7 +104,7 @@ async function main() {
     totalClaimed += rows.length;
     console.log(`[process-due] claimed=${rows.length} (누적 ${totalClaimed})`);
 
-    const { ok, failed } = await processBatch(supabase, rows);
+    const { ok, failed } = await processBatch(supabase, rows, deadlineAt);
     totalOk += ok;
     totalFailed += failed;
   }
@@ -94,6 +113,11 @@ async function main() {
     // 상한에 걸려 남은 job이 있을 수 있음 — 다음 cron/dispatch가 이어서 처리.
     console.warn(
       `[process-due] run 상한(${MAX_JOBS_PER_RUN}) 도달 — 잔여는 다음 sweep에서 처리.`,
+    );
+  }
+  if (claimCutoffHit) {
+    console.warn(
+      `[process-due] run 시간 예산(${CLAIM_CUTOFF_MS / 60_000}분) 소진 — 잔여는 다음 sweep에서 처리.`,
     );
   }
 
