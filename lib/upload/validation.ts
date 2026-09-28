@@ -50,6 +50,12 @@ interface PlatformConstraints {
 
 const MB = 1024 * 1024;
 
+// 인스타 릴스 영상 한도. 공식 문서는 300MB(video_url 방식)지만 실측으론 446MB까지
+// 정상 발행됐다. 661MB·780MB는 컨테이너가 IN_PROGRESS에서 몇 시간째 끝나지 않은
+// 적이 있어(ERROR도 안 주고 멈춤) 300MB를 넘으면 경고만 하고, 막는 건 1GB부터.
+// 워커(lib/platforms/instagram.ts)도 같은 값으로 컨테이너를 만들기 전에 거른다.
+export const INSTAGRAM_MAX_VIDEO_BYTES = 1024 * MB;
+
 const CONSTRAINTS: Record<Platform, PlatformConstraints> = {
   YOUTUBE: {
     supportsImage: true,
@@ -67,9 +73,10 @@ const CONSTRAINTS: Record<Platform, PlatformConstraints> = {
     supportsImage: true,
     supportsVideo: true,
     maxImagesPerPost: 10,
-    // 릴스 공식 한도는 1GB. 예전엔 4GB로 잡혀 있었는데 그건 피드 영상 기준이라
-    // 큰 릴스가 워커까지 갔다가 실패했다.
-    maxFileSizeBytes: 1024 * MB,
+    // INSTAGRAM_MAX_VIDEO_BYTES 참고.
+    maxFileSizeBytes: INSTAGRAM_MAX_VIDEO_BYTES,
+    warnFileSizeBytes: 300 * MB,
+    warnFileSizeNote: "인스타 공식 한도를 넘어 처리가 오래 걸리거나 실패할 수 있어요.",
     maxVideoDurationSec: 15 * 60,
     imageMimes: ["image/jpeg", "image/png"],
     videoMimes: ["video/mp4", "video/quicktime"],

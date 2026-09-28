@@ -106,9 +106,13 @@ export class MediaError extends Error {
 
 export class PublishError extends Error {
   readonly kind = "PUBLISH_ERROR" as const;
-  constructor(message: string) {
+  // true면 재시도해도 결과가 같은 실패(예: 플랫폼 한도 초과 파일) — 남은 시도를
+  // 쓰지 않고 바로 FAILED로 끝낸다.
+  readonly permanent: boolean;
+  constructor(message: string, opts: { permanent?: boolean } = {}) {
     super(message);
     this.name = "PublishError";
+    this.permanent = opts.permanent ?? false;
   }
 }
 

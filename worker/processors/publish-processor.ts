@@ -175,7 +175,9 @@ export async function processClaimedPublishJob(
     return { ok: true, ...result };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    const isLastAttempt = attemptNumber >= maxAttempts;
+    const isLastAttempt =
+      attemptNumber >= maxAttempts ||
+      (err instanceof PublishError && err.permanent);
     const nextStatus = isLastAttempt ? "FAILED" : "RETRYING";
 
     // 토큰 만료 / revoke는 계정 자체가 죽은 상태 — 같은 토큰으로 재시도 의미 없음.

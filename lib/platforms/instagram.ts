@@ -11,6 +11,7 @@ import {
   type PublishResult,
   type RefreshedTokens,
 } from "./types";
+import { INSTAGRAM_MAX_VIDEO_BYTES } from "@/lib/upload/validation";
 import type { Json } from "@/types/database";
 
 // Instagram Login (Instagram Graph API용). Meta 개발자 콘솔에서 앱 생성 후
@@ -258,6 +259,19 @@ export const instagram: PlatformAdapter = {
     const isCarousel = ctx.mediaType !== "VIDEO" && signedUrls.length > 1;
     const fingerprint = buildFingerprint(ctx, caption);
 
+    // 0. 크기 확인 — 너무 큰 영상은 IG가 ERROR도 안 주고 컨테이너를 IN_PROGRESS에
+    //    몇 시간씩 붙잡아 둔다. 한도를 넘으면 기다리지 않고 컨테이너를 만들기 전에 거른다.
+    //    (이어받을 컨테이너가 있어도 마찬가지 — 재시도를 남기지 않고 바로 FAILED.)
+    const sizeBytes =
+      ctx.mediaType === "VIDEO" ? await probeContentLength(signedUrl) : null;
+    if (sizeBytes && sizeBytes > INSTAGRAM_MAX_VIDEO_BYTES) {
+      const mb = (n: number) => Math.round(n / (1024 * 1024));
+      throw new PublishError(
+        `Instagram 릴스 파일이 너무 큽니다 (${mb(sizeBytes)}MB, 최대 ${mb(INSTAGRAM_MAX_VIDEO_BYTES)}MB) — 인스타가 처리를 끝내지 못합니다. 해상도·fps·비트레이트를 낮춰 다시 인코딩한 뒤 올려주세요.`,
+        { permanent: true },
+      );
+    }
+
     // 1. Container 확보 — 이전 시도가 남긴 컨테이너가 살아있으면 이어받고, 아니면
     //    새로 만든 뒤 즉시 resume_state에 남긴다(이번 시도가 타임아웃돼도 다음이 이어받게).
     let containerId = await resumePreviousContainer(
@@ -296,8 +310,6 @@ export const instagram: PlatformAdapter = {
     }
 
     // 2. Container 상태 폴링 — 상한은 파일 크기 비례(영상만; 이미지는 인코딩이 없다).
-    const sizeBytes =
-      ctx.mediaType === "VIDEO" ? await probeContentLength(signedUrl) : null;
     await pollContainerReady(containerId, accessToken, {
       maxWaitMs: pollBudgetMs(sizeBytes),
       deadlineAt: ctx.deadlineAt,
