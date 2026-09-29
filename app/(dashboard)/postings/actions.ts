@@ -167,31 +167,41 @@ export async function cancelPostingsAction(
 
   const jobs = await fetchJobsByIds(parsed.data.ids);
   const owned = filterByOrg(jobs, auth.organizationId);
-  // 예약중(PENDING with future scheduled) 또는 RETRYING/PROCESSING은 대상 외 — 여기선 PENDING만 허용.
-  const targets = owned.filter((j) => j.status === "PENDING");
+  // 워커가 아직 잡지 않은 건만 — 예약/대기(PENDING)와 재시도 대기(RETRYING).
+  // PROCESSING은 워커가 처리 중이라 여기서 CANCELLED로 바꿔도 워커의 결과 기록에 덮인다.
+  const targets = owned.filter(
+    (j) => j.status === "PENDING" || j.status === "RETRYING",
+  );
   if (targets.length === 0) {
-    return { ok: false, error: "취소할 수 있는 예약 항목이 없습니다." };
+    return { ok: false, error: "취소할 수 있는 항목이 없습니다." };
   }
 
   const ids = targets.map((t) => t.id);
   const service = createServiceClient();
   const nowIso = new Date().toISOString();
-  const { error } = await service
+  const { data: cancelled, error } = await service
     .from("publish_jobs")
     .update({
       status: "CANCELLED",
       cancelled_at: nowIso,
     })
-    .in("id", ids);
+    .in("id", ids)
+    // 조회와 업데이트 사이에 워커가 claim(PROCESSING)해 간 건은 건드리지 않는다.
+    .in("status", ["PENDING", "RETRYING"])
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  const cancelledIds = (cancelled ?? []).map((r) => r.id);
+  if (cancelledIds.length === 0) {
+    return { ok: false, error: "이미 처리가 시작돼 취소할 수 없습니다." };
+  }
 
-  await appendHistory(service, ids, {
+  await appendHistory(service, cancelledIds, {
     status: "CANCELLED",
-    message: "사용자 예약 취소",
+    message: "사용자 발행 취소",
   });
 
   revalidatePath("/postings");
-  return { ok: true, affected: ids.length };
+  return { ok: true, affected: cancelledIds.length };
 }
 
 export async function deletePostingsAction(

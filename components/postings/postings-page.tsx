@@ -131,19 +131,20 @@ const SORT_LABEL: Record<SortKey, string> = {
 };
 
 // 게시 시간순 정렬의 1차 키. 아직 게시되지 않은 건(예약·대기·업로드중·실패)을
-// 위로 올리고, 조치가 끝난 취소는 맨 아래로 내린다. 실패는 재시도 대상이라
-// 미게시와 같은 그룹에 둔다.
+// 위로 올리고, 끝난 건(게시 완료·취소)은 그 아래 한 타임라인에 섞는다. 실패는
+// 재시도 대상이라 미게시와 같은 그룹에 둔다. 취소를 따로 맨 아래로 빼면 언제
+// 게시하려던 건인지 알 수 없어서, 게시하려던 시각 기준으로 완료분 사이에 끼운다.
 const PUBLISH_GROUP_RANK: Record<DisplayStatus, number> = {
   failed: 0,
   uploading: 0,
   scheduled: 0,
   pending: 0,
   completed: 1,
-  cancelled: 2,
+  cancelled: 1,
 };
 
-// 그룹 안에서 비교할 "발행 시각". 게시 완료는 실제 게시된 시각, 나머지는 게시될
-// 예정 시각을 쓴다. 즉시 발행은 scheduled_for가 null이므로 등록 시각을 예정 시각으로
+// 그룹 안에서 비교할 "발행 시각". 게시 완료는 실제 게시된 시각, 나머지(취소 포함)는
+// 게시될/게시하려던 예정 시각을 쓴다. 즉시 발행은 scheduled_for가 null이므로 등록 시각을 예정 시각으로
 // 본다 — 이게 없으면 즉시 발행분이 전부 0(1970년)이 되어 목록 맨 아래로 가라앉는다.
 function publishTimeMs(p: {
   displayStatus: DisplayStatus;
@@ -180,6 +181,19 @@ function getDisplayStatus(
     return "scheduled";
   }
   return "pending";
+}
+
+// 취소 가능: 아직 워커가 잡지 않은 건 — 예약/대기(PENDING)와 재시도 대기(RETRYING).
+// PROCESSING은 워커가 처리 중이라 취소해도 워커의 결과 기록에 덮여 막을 수 없다.
+function canCancelPosting(p: {
+  status: PublishStatus;
+  displayStatus: DisplayStatus;
+}): boolean {
+  return (
+    p.displayStatus === "scheduled" ||
+    p.displayStatus === "pending" ||
+    p.status === "RETRYING"
+  );
 }
 
 function periodToSinceMs(p: PeriodPreset): number | null {
@@ -313,7 +327,7 @@ export function PostingsPage({
 
     if (sortKey === "published") {
       // 미래 → 현재 → 과거로 이어지는 한 줄 타임라인.
-      // 미게시(가장 나중에 게시될 예정이 위) → 게시 완료(최신순) → 취소.
+      // 미게시(가장 나중에 게시될 예정이 위) → 게시 완료·취소(최신순).
       list = [...list].sort((a, b) => {
         const group =
           PUBLISH_GROUP_RANK[a.displayStatus] -
@@ -435,10 +449,7 @@ export function PostingsPage({
   const selectedFailedCount = selectedItems.filter(
     (p) => p.displayStatus === "failed",
   ).length;
-  const selectedScheduledCount = selectedItems.filter(
-    (p) =>
-      p.displayStatus === "scheduled" || p.displayStatus === "pending",
-  ).length;
+  const selectedScheduledCount = selectedItems.filter(canCancelPosting).length;
 
   return (
     <div className="space-y-6">
@@ -505,15 +516,9 @@ export function PostingsPage({
           onCancel={() =>
             runAction(
               cancelPostingsAction,
-              selectedItems
-                .filter(
-                  (p) =>
-                    p.displayStatus === "scheduled" ||
-                    p.displayStatus === "pending",
-                )
-                .map((p) => p.id),
-              "예약 취소",
-              "선택한 예약을 취소할까요? Phase 4b 워커가 활성화되면 자동 게시도 중단됩니다.",
+              selectedItems.filter(canCancelPosting).map((p) => p.id),
+              "취소",
+              "선택한 항목의 발행을 취소할까요? 이미 처리 중(업로드 진행 중)인 건은 취소되지 않습니다.",
             )
           }
           onDelete={() =>
@@ -543,8 +548,8 @@ export function PostingsPage({
           runAction(
             cancelPostingsAction,
             [id],
-            "예약 취소",
-            "이 예약을 취소할까요?",
+            "취소",
+            "이 포스팅의 발행을 취소할까요?",
           )
         }
         onDelete={(id) =>
@@ -571,8 +576,8 @@ export function PostingsPage({
             runAction(
               cancelPostingsAction,
               [id],
-              "예약 취소",
-              "이 예약을 취소할까요?",
+              "취소",
+              "이 포스팅의 발행을 취소할까요?",
             )
           }
         />
@@ -811,9 +816,9 @@ function BulkActionBar({
           size="sm"
           onClick={onCancel}
           disabled={scheduledCount === 0 || isPending}
-          title={scheduledCount === 0 ? "예약 항목이 없습니다" : undefined}
+          title={scheduledCount === 0 ? "취소할 수 있는 항목이 없습니다" : undefined}
         >
-          <X className="size-3.5" /> 예약 취소 {scheduledCount}
+          <X className="size-3.5" /> 취소 {scheduledCount}
         </Button>
         <Button
           variant="outline"
@@ -950,8 +955,7 @@ function Row({
 }) {
   const isFailed = item.displayStatus === "failed";
   const canRetry = isFailed;
-  const canCancel =
-    item.displayStatus === "pending" || item.displayStatus === "scheduled";
+  const canCancel = canCancelPosting(item);
 
   return (
     <tr
@@ -1042,7 +1046,18 @@ function Row({
         )}
       </td>
       <td className="px-3 py-2 text-xs text-muted-foreground">
-        {item.scheduledFor ? <RelativeTime iso={item.scheduledFor} /> : "즉시"}
+        {item.scheduledFor ? (
+          <RelativeTime iso={item.scheduledFor} />
+        ) : (
+          // 즉시 발행은 요청(등록) 시각이 곧 게시하려던 시각 — 취소·실패 건도 언제
+          // 올리려던 건지 알 수 있게 함께 보여준다.
+          <>
+            즉시
+            <span className="block text-[10px]">
+              <RelativeTime iso={item.createdAt} />
+            </span>
+          </>
+        )}
       </td>
       <td className="px-3 py-2 text-xs text-muted-foreground">
         {item.completedAt ? <RelativeTime iso={item.completedAt} /> : "-"}
@@ -1082,7 +1097,7 @@ function Row({
               className="h-7 px-2"
               onClick={() => onCancel(item.id)}
               disabled={isPending}
-              title="예약 취소"
+              title="발행 취소"
             >
               <X className="size-3.5" />
             </Button>
@@ -1297,8 +1312,7 @@ function DetailDialog({
                   <RefreshCw className="size-3.5" /> 재시도
                 </Button>
               )}
-              {(displayStatus === "scheduled" ||
-                displayStatus === "pending") && (
+              {canCancelPosting({ status: item.status, displayStatus }) && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -1308,7 +1322,7 @@ function DetailDialog({
                   }}
                   disabled={isPending}
                 >
-                  <X className="size-3.5" /> 예약 취소
+                  <X className="size-3.5" /> 발행 취소
                 </Button>
               )}
               </div>
