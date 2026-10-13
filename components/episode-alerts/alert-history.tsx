@@ -25,6 +25,7 @@ export interface TaskStats {
 
 export interface TaskView {
   id: string;
+  seriesId: string;
   seriesName: string;
   seriesDeleted: boolean;
   sourceEpisodeNo: number | null;
@@ -69,11 +70,11 @@ export function AlertHistory({
         <h2 id="alert-history-title" className="text-lg font-semibold">
           보낸 기록
         </h2>
-        <p className="text-xs text-muted-foreground">최근 30개 알림이에요.</p>
+        <p className="text-xs text-muted-foreground">최근 30건이에요.</p>
       </div>
       {history.length === 0 ? (
         <p className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-          아직 보낸 알림이 없어요.
+          아직 보낸 답글이 없어요.
         </p>
       ) : (
         <ul className="space-y-2">

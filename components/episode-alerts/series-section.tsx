@@ -10,15 +10,18 @@ import {
   notifyEpisodeAction,
   removeLastEpisodeAction,
   renameSeriesAction,
+  updateSeriesTemplatesAction,
 } from "@/app/(dashboard)/episode-alerts/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RelativeTime } from "@/components/ui/relative-time";
+import { DEFAULT_TEMPLATES, renderTemplate } from "@/lib/episode-alerts/templates";
 import { StatusPill, type TaskView } from "./alert-history";
 import { mediaTypeLabel } from "./labels";
 import { MediaPicker } from "./media-picker";
+import { hasTemplateErrors, TemplateEditor } from "./template-editor";
 
 export interface EpisodeView {
   id: string;
@@ -34,6 +37,8 @@ export interface EpisodeView {
 export interface SeriesView {
   id: string;
   name: string;
+  // 이 시리즈의 답글 문구 (저장된 게 없으면 기본 문구).
+  templates: string[];
   episodes: EpisodeView[];
 }
 
@@ -66,7 +71,7 @@ export function SeriesSection({
             시리즈
           </h2>
           <p className="text-xs text-muted-foreground">
-            회차를 순서대로 묶어두면, 다음 화가 올라갈 때 이전 화 댓글에 알려줘요.
+            회차를 순서대로 묶어두면, 다음 화가 올라갈 때 이전 화에 댓글 단 사람들에게 답글을 달아요.
           </p>
         </div>
         {canEdit && series.length > 0 && (
@@ -120,7 +125,7 @@ function EmptySeries({ canEdit, onCreate }: { canEdit: boolean; onCreate: () => 
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
             <span className="mr-1.5 font-semibold text-foreground">1.</span>
-            새 시리즈를 만들고, 이미 올린 회차가 있으면 1화부터 순서대로 골라주세요.
+            새 시리즈를 만들고 답글 문구를 정해요. 이미 올린 회차가 있으면 1화부터 순서대로 골라주세요.
           </li>
           <li>
             <span className="mr-1.5 font-semibold text-foreground">2.</span>
@@ -229,7 +234,7 @@ function SeriesCard({
                 onClick={() => {
                   if (
                     !window.confirm(
-                      `“${series.name}” 시리즈를 삭제할까요? 진행 중인 알림은 멈추고, 이미 보낸 기록은 남아요.`,
+                      `“${series.name}” 시리즈를 삭제할까요? 보내는 중인 답글은 멈추고, 이미 보낸 기록은 남아요.`,
                     )
                   )
                     return;
@@ -243,6 +248,7 @@ function SeriesCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        <SeriesTemplates series={series} nextEpisodeNo={lastNo + 1} canEdit={canEdit} />
         {series.episodes.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             이미 올린 1화가 있으면 아래에서 추가하고, 아직이면 업로드할 때 이 시리즈를 고르세요.
@@ -276,6 +282,103 @@ function SeriesCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// 시리즈 답글 문구 — 평소엔 첫 문구 미리보기만, "수정"을 누르면 편집기.
+function SeriesTemplates({
+  series,
+  nextEpisodeNo,
+  canEdit,
+}: {
+  series: SeriesView;
+  nextEpisodeNo: number;
+  canEdit: boolean;
+}) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(series.templates);
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  if (editing) {
+    return (
+      <div className="space-y-3 rounded-md border p-3">
+        <p className="text-sm font-medium">답글 문구</p>
+        <TemplateEditor
+          idPrefix={`series-${series.id}`}
+          value={draft}
+          onChange={setDraft}
+          disabled={isPending}
+          seriesName={series.name}
+        />
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={isPending}
+            onClick={() => {
+              setEditing(false);
+              setDraft(series.templates);
+              setError(null);
+            }}
+          >
+            취소
+          </Button>
+          <Button
+            size="sm"
+            disabled={isPending || hasTemplateErrors(draft)}
+            onClick={() => {
+              setError(null);
+              startTransition(async () => {
+                const result = await updateSeriesTemplatesAction({
+                  seriesId: series.id,
+                  templates: draft,
+                });
+                if (!result.ok) {
+                  setError(result.error);
+                  return;
+                }
+                setEditing(false);
+                router.refresh();
+              });
+            }}
+          >
+            {isPending ? "저장 중…" : "문구 저장"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const preview = renderTemplate(series.templates[0] ?? DEFAULT_TEMPLATES[0], {
+    username: "minji_daily",
+    series: series.name,
+    episode: nextEpisodeNo,
+  });
+
+  return (
+    <div className="flex flex-wrap items-start gap-x-3 gap-y-1 rounded-md bg-muted/40 px-3 py-2">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-muted-foreground">
+          답글 문구 {series.templates.length}개 · 돌려가며 써요
+        </p>
+        <p className="truncate text-sm">{preview}</p>
+      </div>
+      {canEdit && (
+        <Button
+          variant="outline"
+          size="xs"
+          onClick={() => {
+            setDraft(series.templates);
+            setEditing(true);
+          }}
+        >
+          <Pencil /> 문구 수정
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -321,12 +424,12 @@ function EpisodeRow({
             {task.stats.sent > 0 && <span className="tabular-nums">{task.stats.sent.toLocaleString()}명 보냄</span>}
           </span>
         ) : hasAlert ? (
-          <span className="text-xs text-muted-foreground">알림 기록 있음</span>
+          <span className="text-xs text-muted-foreground">답글 기록 있음</span>
         ) : (
           !isFirst &&
           canEdit && (
             <Button variant="outline" size="xs" onClick={onNotify} disabled={busy}>
-              {episode.episodeNo - 1}화 댓글에 알리기
+              {episode.episodeNo - 1}화 댓글에 답글 달기
             </Button>
           )
         )}
@@ -423,6 +526,7 @@ function CreateSeriesDialog({
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [templates, setTemplates] = useState<string[]>(DEFAULT_TEMPLATES);
   const [picked, setPicked] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -430,7 +534,7 @@ function CreateSeriesDialog({
   function submit() {
     setError(null);
     startTransition(async () => {
-      const result = await createSeriesAction({ accountId, name, mediaIds: picked });
+      const result = await createSeriesAction({ accountId, name, templates, mediaIds: picked });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -451,7 +555,7 @@ function CreateSeriesDialog({
           <Button variant="ghost" onClick={onClose} disabled={isPending}>
             취소
           </Button>
-          <Button onClick={submit} disabled={isPending || !name.trim()}>
+          <Button onClick={submit} disabled={isPending || !name.trim() || hasTemplateErrors(templates)}>
             {isPending
               ? "만드는 중…"
               : picked.length > 0
@@ -471,7 +575,21 @@ function CreateSeriesDialog({
           placeholder="예) 노을 아래서"
           autoFocus
         />
-        <p className="text-xs text-muted-foreground">답글 문구의 {"{series}"} 자리에 들어가요.</p>
+        <p className="text-xs text-muted-foreground">답글 문구의 “시리즈 이름” 자리에 들어가요.</p>
+      </div>
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium">답글 문구</p>
+        <p className="text-xs text-muted-foreground">
+          다음 화가 올라가면 이전 화에 댓글 단 사람들에게 이 문구로 답글을 달아요. 기본 문구로
+          시작해도 되고, 나중에 시리즈 카드에서 바꿀 수 있어요.
+        </p>
+        <TemplateEditor
+          idPrefix="new-series"
+          value={templates}
+          onChange={setTemplates}
+          disabled={isPending}
+          seriesName={name}
+        />
       </div>
       <div className="space-y-1.5">
         <p className="text-sm font-medium">이미 올린 회차 (선택)</p>
@@ -557,7 +675,7 @@ function AddEpisodeDialog({
             className="mt-0.5 size-4"
           />
           <span className="min-w-0">
-            <span className="block text-sm font-medium">{lastNo}화에 댓글 단 사람들에게 알리기</span>
+            <span className="block text-sm font-medium">{lastNo}화에 댓글 단 사람들에게 답글 달기</span>
             <span className="block text-xs text-muted-foreground">
               {mode === "APPROVAL"
                 ? "대상 목록이 확인 대기에 올라와요. 확인한 뒤에 보내져요."

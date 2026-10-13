@@ -422,31 +422,25 @@ export type Database = {
       episode_alert_settings: {
         Row: {
           daily_limit: number
-          enabled: boolean
           mode: "APPROVAL" | "AUTO"
           organization_id: string
           social_account_id: string
-          templates: string[]
           updated_at: string
           updated_by: string | null
         }
         Insert: {
           daily_limit?: number
-          enabled?: boolean
           mode?: "APPROVAL" | "AUTO"
           organization_id: string
           social_account_id: string
-          templates?: string[]
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
           daily_limit?: number
-          enabled?: boolean
           mode?: "APPROVAL" | "AUTO"
           organization_id?: string
           social_account_id?: string
-          templates?: string[]
           updated_at?: string
           updated_by?: string | null
         }
@@ -572,6 +566,7 @@ export type Database = {
           id: string
           name: string
           organization_id: string
+          reply_templates: string[]
           social_account_id: string
           updated_at: string
         }
@@ -582,6 +577,7 @@ export type Database = {
           id?: string
           name: string
           organization_id: string
+          reply_templates?: string[]
           social_account_id: string
           updated_at?: string
         }
@@ -592,6 +588,7 @@ export type Database = {
           id?: string
           name?: string
           organization_id?: string
+          reply_templates?: string[]
           social_account_id?: string
           updated_at?: string
         }

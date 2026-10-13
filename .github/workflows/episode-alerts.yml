@@ -1,6 +1,6 @@
 name: episode-alerts
 
-# 다음 화 알림 워커(worker/process-alerts.ts) — 직전 화 댓글 수집 + 대댓글 발송.
+# 시리즈 댓글 자동화 워커(worker/process-alerts.ts) — 직전 화 댓글 수집 + 대댓글 발송.
 # 발행 워크플로(publish.yml)와 분리: 답글은 10~20초 간격으로 보내 run이 길어서,
 # 같은 concurrency 그룹이면 그동안 즉시 발행이 줄을 선다.
 on:

@@ -11,7 +11,7 @@ import { DEFAULT_ALERT_SETTINGS } from "@/lib/episode-alerts/server";
 import { DEFAULT_TEMPLATES } from "@/lib/episode-alerts/templates";
 
 export const metadata = {
-  title: "다음 화 알림 | MCB",
+  title: "시리즈 댓글 자동화 | MCB",
 };
 
 // 확인 대기 목록에 한 번에 싣는 최대 대상 수. 넘으면 나머지는 보낼 때 그대로 포함된다.
@@ -87,12 +87,12 @@ export default async function Page({ searchParams }: PageProps) {
   const [{ data: settingsRow }, { data: seriesRows }, { data: taskRows }] = await Promise.all([
     supabase
       .from("episode_alert_settings")
-      .select("enabled, mode, templates, daily_limit")
+      .select("mode, daily_limit")
       .eq("social_account_id", selected.id)
       .maybeSingle(),
     supabase
       .from("series")
-      .select("id, name, created_at")
+      .select("id, name, reply_templates, created_at")
       .eq("social_account_id", selected.id)
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
@@ -113,7 +113,10 @@ export default async function Page({ searchParams }: PageProps) {
   const seriesIds = new Set(seriesList.map((s) => s.id));
   for (const t of tasks) seriesIds.add(t.series_id);
   const [{ data: allSeries }, { data: episodeRows }, { data: statRows }] = await Promise.all([
-    supabase.from("series").select("id, name, deleted_at").in("id", Array.from(seriesIds)),
+    supabase
+      .from("series")
+      .select("id, name, reply_templates, deleted_at")
+      .in("id", Array.from(seriesIds)),
     supabase
       .from("series_episodes")
       .select("id, series_id, episode_no, permalink, caption, media_type, posted_at, content_id")
@@ -135,6 +138,7 @@ export default async function Page({ searchParams }: PageProps) {
     const series = seriesById.get(t.series_id);
     return {
       id: t.id,
+      seriesId: t.series_id,
       seriesName: series?.name ?? "(삭제된 시리즈)",
       seriesDeleted: !!series?.deleted_at,
       sourceEpisodeNo: episodeById.get(t.source_episode_id)?.episode_no ?? null,
@@ -159,9 +163,14 @@ export default async function Page({ searchParams }: PageProps) {
     };
   });
 
+  // 시리즈 답글 문구 — 비어 있으면 기본 문구를 보여준다(보낼 때도 기본 문구를 쓴다).
+  const templatesOf = (stored: string[] | null | undefined) =>
+    stored && stored.length > 0 ? stored : DEFAULT_TEMPLATES;
+
   const series: SeriesView[] = seriesList.map((s) => ({
     id: s.id,
     name: s.name,
+    templates: templatesOf(s.reply_templates),
     episodes: (episodeRows ?? [])
       .filter((e) => e.series_id === s.id)
       .map((e) => {
@@ -192,6 +201,7 @@ export default async function Page({ searchParams }: PageProps) {
         .limit(MAX_APPROVAL_CANDIDATES);
       return {
         task,
+        templates: templatesOf(seriesById.get(task.seriesId)?.reply_templates),
         candidates: (data ?? []).map((r) => ({
           id: r.id,
           username: r.commenter_username,
@@ -203,14 +213,8 @@ export default async function Page({ searchParams }: PageProps) {
   );
 
   const settings = settingsRow
-    ? {
-        enabled: settingsRow.enabled,
-        mode: settingsRow.mode,
-        templates: settingsRow.templates.length > 0 ? settingsRow.templates : DEFAULT_TEMPLATES,
-        dailyLimit: settingsRow.daily_limit,
-        isDefault: false,
-      }
-    : { ...DEFAULT_ALERT_SETTINGS, templates: DEFAULT_TEMPLATES };
+    ? { mode: settingsRow.mode, dailyLimit: settingsRow.daily_limit, isDefault: false }
+    : DEFAULT_ALERT_SETTINGS;
 
   return (
     <EpisodeAlertsPage

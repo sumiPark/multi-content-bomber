@@ -11,7 +11,7 @@ import {
 } from "./processors/episode-alert-processor";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 다음 화 알림 워커 — "한 번 실행하고 종료"하는 배치.
+// 시리즈 댓글 자동화 워커 — "한 번 실행하고 종료"하는 배치.
 //
 // .github/workflows/episode-alerts.yml이 깨운다:
 //   · workflow_run(publish 완료)  → 발행 워커가 만든 새 알림 작업을 바로 수집

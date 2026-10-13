@@ -60,7 +60,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         href: "/episode-alerts",
-        label: "다음 화 알림",
+        label: "시리즈 댓글 자동화",
         icon: BellRing,
         badgeKind: "alerts",
       },
@@ -95,7 +95,7 @@ function isActive(pathname: string, href: string): boolean {
 interface SidebarShellProps {
   userEmail: string | null;
   failedJobCount: number;
-  // 다음 화 알림 "확인 대기" 건수.
+  // 시리즈 댓글 자동화 "확인 대기" 건수.
   alertWaitingCount: number;
   children: React.ReactNode;
 }

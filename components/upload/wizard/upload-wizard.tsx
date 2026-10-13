@@ -83,7 +83,7 @@ interface PresetSummary {
   description: string | null;
 }
 
-// 다음 화 알림(0017) — 인스타 계정의 시리즈. 고르면 발행 성공 시 다음 회차로 기록된다.
+// 시리즈 댓글 자동화(0017) — 인스타 계정의 시리즈. 고르면 발행 성공 시 다음 회차로 기록된다.
 interface SeriesOption {
   id: string;
   name: string;
@@ -1471,8 +1471,8 @@ function Step5Schedule({
           <div>
             <Label>다음 화로 올리기 (선택)</Label>
             <p className="mt-1 text-xs text-muted-foreground">
-              시리즈의 다음 화라면 골라주세요. 올라간 뒤 이전 화에 댓글 단 사람들에게 알림을 보낼 수
-              있어요.
+              시리즈의 다음 화라면 골라주세요. 올라간 뒤 이전 화에 댓글 단 사람들에게 시리즈 답글
+              문구로 대댓글을 달아요.
             </p>
           </div>
           <ul className="space-y-2">

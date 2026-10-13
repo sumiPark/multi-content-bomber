@@ -21,22 +21,22 @@ export interface CandidateView {
 
 export interface ApprovalView {
   task: TaskView;
+  // 이 작업 시리즈의 답글 문구 (미리보기용).
+  templates: string[];
   candidates: CandidateView[];
 }
 
 export function ApprovalCard({
   approval,
-  templates,
   dailyLimit,
   canManage,
 }: {
   approval: ApprovalView;
-  templates: string[];
   dailyLimit: number;
   canManage: boolean;
 }) {
   const router = useRouter();
-  const { task, candidates } = approval;
+  const { task, candidates, templates } = approval;
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -100,7 +100,7 @@ export function ApprovalCard({
   }
 
   function skip() {
-    if (!window.confirm("이번 회차는 알림을 보내지 않을까요? 대상 목록은 기록에 남아요.")) return;
+    if (!window.confirm("이번 회차는 답글을 보내지 않을까요? 대상 목록은 기록에 남아요.")) return;
     setError(null);
     startTransition(async () => {
       const result = await cancelAlertTaskAction({ taskId: task.id });
@@ -132,6 +132,9 @@ export function ApprovalCard({
         <div className="rounded-md border bg-background px-3 py-2 text-sm">
           <span className="mr-2 text-xs text-muted-foreground">이렇게 달려요</span>
           {preview}
+          <span className="mt-1 block text-[11px] text-muted-foreground">
+            “{task.seriesName}” 시리즈 문구 {templates.length}개를 돌려가며 써요. 문구는 시리즈 카드에서 바꿀 수 있어요.
+          </span>
         </div>
       )}
 

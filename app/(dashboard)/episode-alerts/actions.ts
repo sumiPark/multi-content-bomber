@@ -19,7 +19,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 
-// 다음 화 알림 서버 액션. 새 테이블은 authenticated에 쓰기 정책이 없어(0017) 모든 쓰기는
+// 시리즈 댓글 자동화 서버 액션. 새 테이블은 authenticated에 쓰기 정책이 없어(0017) 모든 쓰기는
 // service_role로 하고, 권한(ADMIN/MANAGER)과 조직 범위는 여기서 직접 검증한다.
 
 export type ActionResult<T = object> =
@@ -50,7 +50,7 @@ async function authorize(requireManage: boolean): Promise<Auth | { error: string
 
   const canManage = profile.role === "ADMIN" || profile.role === "MANAGER";
   if (requireManage && !canManage) {
-    return { error: "다음 화 알림 설정은 관리자(ADMIN/MANAGER)만 바꿀 수 있어요." };
+    return { error: "시리즈 댓글 자동화 설정은 관리자(ADMIN/MANAGER)만 바꿀 수 있어요." };
   }
   return { userId: user.id, organizationId: profile.organization_id, canManage };
 }
@@ -188,6 +188,16 @@ export async function listAccountMediaAction(input: {
 // 시리즈
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 시리즈 답글 문구 — 빈 줄은 버리고, 오류가 있으면 첫 오류를 돌려준다.
+function cleanTemplates(
+  templates: string[],
+): { ok: true; templates: string[] } | { ok: false; error: string } {
+  const cleaned = templates.map((t) => t.trim()).filter(Boolean);
+  const { errors } = validateTemplates(cleaned);
+  if (errors.length > 0) return { ok: false, error: errors[0] };
+  return { ok: true, templates: cleaned };
+}
+
 const nameSchema = z
   .string()
   .trim()
@@ -197,18 +207,22 @@ const nameSchema = z
 export async function createSeriesAction(input: {
   accountId: string;
   name: string;
+  templates: string[];
   mediaIds: string[];
 }): Promise<ActionResult<{ seriesId: string }>> {
   const parsed = z
     .object({
       accountId: z.string().uuid(),
       name: nameSchema,
+      templates: z.array(z.string()).max(20),
       mediaIds: z.array(z.string().min(1).max(64)).max(50),
     })
     .safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
   }
+  const templates = cleanTemplates(parsed.data.templates);
+  if (!templates.ok) return { ok: false, error: templates.error };
 
   const auth = await authorize(true);
   if ("error" in auth) return { ok: false, error: auth.error };
@@ -223,6 +237,7 @@ export async function createSeriesAction(input: {
         organization_id: auth.organizationId,
         social_account_id: parsed.data.accountId,
         name: parsed.data.name,
+        reply_templates: templates.templates,
         created_by: auth.userId,
       })
       .select("id")
@@ -252,6 +267,35 @@ export async function createSeriesAction(input: {
   } catch (err) {
     return { ok: false, error: toMessage(err) };
   }
+}
+
+// 시리즈별 답글 문구 저장. 보내는 중인 작업도 다음 답글부터 새 문구를 쓴다.
+export async function updateSeriesTemplatesAction(input: {
+  seriesId: string;
+  templates: string[];
+}): Promise<ActionResult> {
+  const parsed = z
+    .object({ seriesId: z.string().uuid(), templates: z.array(z.string()).max(20) })
+    .safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const templates = cleanTemplates(parsed.data.templates);
+  if (!templates.ok) return { ok: false, error: templates.error };
+
+  const auth = await authorize(true);
+  if ("error" in auth) return { ok: false, error: auth.error };
+
+  const service = createServiceClient();
+  const series = await loadSeries(service, parsed.data.seriesId, auth.organizationId);
+  if (!series) return { ok: false, error: "시리즈를 찾을 수 없어요." };
+
+  const { error } = await service
+    .from("series")
+    .update({ reply_templates: templates.templates })
+    .eq("id", series.id);
+  if (error) return { ok: false, error: error.message };
+
+  revalidate();
+  return { ok: true };
 }
 
 export async function renameSeriesAction(input: {
@@ -357,7 +401,6 @@ export async function addEpisodeAction(input: {
         organizationId: auth.organizationId,
         socialAccountId: series.social_account_id,
         createdBy: auth.userId,
-        force: true,
       });
       if (result.created) {
         alert = "created";
@@ -414,7 +457,7 @@ export async function removeLastEpisodeAction(input: {
       .in("task_id", taskIds)
       .eq("status", "SENT");
     if ((count ?? 0) > 0) {
-      return { ok: false, error: "이미 알림을 보낸 회차라 뺄 수 없어요. 기록을 지키기 위해서예요." };
+      return { ok: false, error: "이미 답글을 보낸 회차라 뺄 수 없어요. 기록을 지키기 위해서예요." };
     }
     await service.from("episode_alert_tasks").delete().in("id", taskIds);
   }
@@ -452,15 +495,14 @@ export async function notifyEpisodeAction(input: {
       organizationId: auth.organizationId,
       socialAccountId: series.social_account_id,
       createdBy: auth.userId,
-      force: true,
     });
     if (!result.created) {
       return {
         ok: false,
         error:
           result.reason === "no-previous"
-            ? "이전 회차가 없어서 알릴 대상이 없어요."
-            : "이 회차는 이미 알림이 만들어져 있어요.",
+            ? "이전 회차가 없어서 답글을 달 대상이 없어요."
+            : "이 회차는 이미 답글 작업이 만들어져 있어요.",
       };
     }
     await dispatchSoft("episode-notify");
@@ -472,32 +514,24 @@ export async function notifyEpisodeAction(input: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 계정별 설정
+// 계정별 발송 설정 (보내는 방식, 하루 최대 답글 수)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function saveAlertSettingsAction(input: {
   accountId: string;
-  enabled: boolean;
   mode: "APPROVAL" | "AUTO";
-  templates: string[];
   dailyLimit: number;
 }): Promise<ActionResult> {
   const parsed = z
     .object({
       accountId: z.string().uuid(),
-      enabled: z.boolean(),
       mode: z.enum(["APPROVAL", "AUTO"]),
-      templates: z.array(z.string()).max(20),
       dailyLimit: z.number().int().min(1, "하루 최대 답글 수는 1 이상이어야 해요.").max(1000, "하루 최대 답글 수는 1000 이하로 정해주세요."),
     })
     .safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
   }
-
-  const templates = parsed.data.templates.map((t) => t.trim()).filter(Boolean);
-  const { errors } = validateTemplates(templates);
-  if (errors.length > 0) return { ok: false, error: errors[0] };
 
   const auth = await authorize(true);
   if ("error" in auth) return { ok: false, error: auth.error };
@@ -516,9 +550,7 @@ export async function saveAlertSettingsAction(input: {
     {
       social_account_id: account.id,
       organization_id: auth.organizationId,
-      enabled: parsed.data.enabled,
       mode: parsed.data.mode,
-      templates,
       daily_limit: parsed.data.dailyLimit,
       updated_by: auth.userId,
     },
@@ -550,9 +582,9 @@ export async function approveAlertTaskAction(input: {
 
   const service = createServiceClient();
   const task = await loadTask(service, parsed.data.taskId, auth.organizationId);
-  if (!task) return { ok: false, error: "알림을 찾을 수 없어요." };
+  if (!task) return { ok: false, error: "답글 작업을 찾을 수 없어요." };
   if (task.status !== "AWAITING_APPROVAL") {
-    return { ok: false, error: "이미 처리된 알림이에요. 새로고침해주세요." };
+    return { ok: false, error: "이미 처리된 답글 작업이에요. 새로고침해주세요." };
   }
 
   if (parsed.data.excludeReplyIds.length > 0) {
@@ -591,7 +623,7 @@ export async function cancelAlertTaskAction(input: { taskId: string }): Promise<
 
   const service = createServiceClient();
   const task = await loadTask(service, parsed.data.taskId, auth.organizationId);
-  if (!task) return { ok: false, error: "알림을 찾을 수 없어요." };
+  if (!task) return { ok: false, error: "답글 작업을 찾을 수 없어요." };
 
   const { data: cancelled, error } = await service
     .from("episode_alert_tasks")
@@ -601,7 +633,7 @@ export async function cancelAlertTaskAction(input: { taskId: string }): Promise<
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!cancelled || cancelled.length === 0) {
-    return { ok: false, error: "이미 끝난 알림이에요." };
+    return { ok: false, error: "이미 끝난 답글 작업이에요." };
   }
   await excludePending(service, task.id, "보내기 중단");
 
@@ -617,8 +649,8 @@ export async function retryAlertTaskAction(input: { taskId: string }): Promise<A
 
   const service = createServiceClient();
   const task = await loadTask(service, parsed.data.taskId, auth.organizationId);
-  if (!task) return { ok: false, error: "알림을 찾을 수 없어요." };
-  if (task.status !== "FAILED") return { ok: false, error: "실패한 알림만 다시 시도할 수 있어요." };
+  if (!task) return { ok: false, error: "답글 작업을 찾을 수 없어요." };
+  if (task.status !== "FAILED") return { ok: false, error: "실패한 답글 작업만 다시 시도할 수 있어요." };
 
   try {
     // 토큰을 다시 연결했는지 먼저 확인 — 안 했으면 바로 같은 이유로 실패한다.

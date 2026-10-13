@@ -63,7 +63,7 @@ export default async function UploadPage() {
       .from("account_groups")
       .select("id, name, color")
       .order("created_at", { ascending: true }),
-    // 다음 화 알림(0017) — 마지막 단계의 "다음 화로 올리기" 선택지. 인스타 계정별 시리즈.
+    // 시리즈 댓글 자동화(0017) — 마지막 단계의 "다음 화로 올리기" 선택지. 인스타 계정별 시리즈.
     supabase
       .from("series")
       .select("id, name, social_account_id, series_episodes(episode_no)")

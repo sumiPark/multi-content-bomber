@@ -19,7 +19,7 @@ import {
 import type { Database } from "@/types/database";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 다음 화 알림 작업 처리 (episode_alert_tasks 상태 머신).
+// 시리즈 댓글 자동화 작업 처리 (episode_alert_tasks 상태 머신).
 //
 //   COLLECTING ─ 직전 화 댓글 수집 → 답글 대상(PENDING)/건너뜀(SKIPPED) 기록
 //       ├─ 확인 후 보내기(APPROVAL) → AWAITING_APPROVAL (사람이 "보내기"를 누르면 SENDING)
@@ -210,10 +210,9 @@ async function sendReplies(
   deadlineAt: number,
 ): Promise<TaskOutcome> {
   const settings = await loadAlertSettings(service, task.social_account_id);
-  const templates = effectiveTemplates(settings.templates);
 
   const [{ data: series }, { data: target }] = await Promise.all([
-    service.from("series").select("name").eq("id", task.series_id).maybeSingle(),
+    service.from("series").select("name, reply_templates").eq("id", task.series_id).maybeSingle(),
     service
       .from("series_episodes")
       .select("episode_no")
@@ -221,6 +220,8 @@ async function sendReplies(
       .maybeSingle(),
   ]);
   if (!series || !target) throw new EpisodeAlertError("시리즈 정보를 찾을 수 없어요.");
+  // 답글 문구는 시리즈별(0018). 보내는 시점의 문구를 쓴다.
+  const templates = effectiveTemplates(series.reply_templates);
 
   // 문구는 순서대로 돌려쓴다 — run이 나뉘어도 이어지게 이미 보낸 수에서 시작.
   const { count: sentSoFar } = await service

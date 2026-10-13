@@ -43,7 +43,7 @@ async function loadFailedJobCount(): Promise<number> {
   return count ?? 0;
 }
 
-// 사이드바 "다음 화 알림" 뱃지 — 사람이 확인하고 보내기를 눌러야 하는 알림 수.
+// 사이드바 "시리즈 댓글 자동화" 뱃지 — 사람이 확인하고 보내기를 눌러야 하는 알림 수.
 async function loadAlertWaitingCount(): Promise<number> {
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) return 0;

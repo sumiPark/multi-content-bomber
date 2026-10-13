@@ -1,4 +1,4 @@
-// 다음 화 알림 화면들이 같이 쓰는 상태 표기.
+// 시리즈 댓글 자동화 화면들이 같이 쓰는 상태 표기.
 
 export type TaskStatus =
   | "COLLECTING"

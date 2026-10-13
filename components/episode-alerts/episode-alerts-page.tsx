@@ -48,10 +48,10 @@ export function EpisodeAlertsPage({
   return (
     <main className="container mx-auto max-w-6xl space-y-6 px-6 py-10">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight">다음 화 알림</h1>
+        <h1 className="text-3xl font-bold tracking-tight">시리즈 댓글 자동화</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          시리즈 다음 화가 인스타에 올라가면, 이전 화에 댓글 단 사람들에게 “N화 올라왔어요” 대댓글을
-          달아드려요.
+          시리즈 다음 화가 인스타에 올라가면, 이전 화에 댓글 단 사람들에게 시리즈별로 정한 문구로
+          대댓글을 달아드려요.
         </p>
       </header>
 
@@ -60,7 +60,7 @@ export function EpisodeAlertsPage({
           <CardContent className="flex flex-col items-start gap-3 py-8">
             <p className="font-medium">연결된 인스타그램 계정이 없어요</p>
             <p className="text-sm text-muted-foreground">
-              다음 화 알림은 인스타그램 비즈니스·크리에이터 계정에서 쓸 수 있어요.
+              시리즈 댓글 자동화는 인스타그램 비즈니스·크리에이터 계정에서 쓸 수 있어요.
             </p>
             <Link href="/accounts" className={buttonVariants({ size: "sm" })}>
               계정 연동으로
@@ -75,7 +75,7 @@ export function EpisodeAlertsPage({
             <div className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
               <CircleAlert className="size-4 shrink-0" />
               <p className="min-w-0 flex-1">
-                이 계정은 토큰이 만료돼 알림을 보낼 수 없어요. 다시 연결하면 이어서 쓸 수 있어요.
+                이 계정은 토큰이 만료돼 답글을 보낼 수 없어요. 다시 연결하면 이어서 쓸 수 있어요.
               </p>
               <Link href="/accounts" className={buttonVariants({ size: "sm", variant: "outline" })}>
                 계정 연동으로
@@ -89,7 +89,6 @@ export function EpisodeAlertsPage({
                 <ApprovalCard
                   key={a.task.id}
                   approval={a}
-                  templates={settings.templates}
                   dailyLimit={settings.dailyLimit}
                   canManage={canManage}
                 />
@@ -113,7 +112,6 @@ export function EpisodeAlertsPage({
                 accountName={selected.name}
                 settings={settings}
                 canManage={canManage}
-                sampleSeriesName={series[0]?.name ?? null}
               />
             </aside>
           </div>

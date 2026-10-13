@@ -1,6 +1,6 @@
 import "./server-guard";
 
-// 다음 화 알림용 인스타 댓글 API (Instagram 로그인, graph.instagram.com).
+// 시리즈 댓글 자동화용 인스타 댓글 API (Instagram 로그인, graph.instagram.com).
 // 권한: instagram_business_basic + instagram_business_manage_comments (이미 OAuth 요청 목록에 있음).
 //
 // 발행 어댑터(instagram.ts)와 분리한 이유: 발행 에러는 Publish/RateLimited/TokenExpired

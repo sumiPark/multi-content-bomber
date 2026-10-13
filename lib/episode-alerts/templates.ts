@@ -1,4 +1,4 @@
-// 다음 화 알림 — 답글 문구 템플릿. 브라우저(설정 화면 미리보기)와 워커가 같이 쓴다.
+// 시리즈 댓글 자동화 — 답글 문구 템플릿. 브라우저(문구 편집 미리보기)와 워커가 같이 쓴다.
 // 서버 전용 import 금지.
 
 export const TEMPLATE_VARIABLES = [
@@ -10,8 +10,9 @@ export const TEMPLATE_VARIABLES = [
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number]["key"];
 export type TemplateValues = Record<TemplateVariable, string | number>;
 
-// 계정에 문구를 따로 저장하지 않았을 때 쓰는 기본 문구. 같은 문구 반복은 스팸 제한
-// 위험이 커서 3개를 돌려쓴다. 인스타 댓글 속 링크는 눌리지 않아 프로필로 유도한다.
+// 기본 문구 — 새 시리즈를 만들 때 이 문구로 채워두고, 시리즈 문구가 비어 있을 때도 쓴다.
+// 같은 문구 반복은 스팸 제한 위험이 커서 3개를 돌려쓴다. 인스타 댓글 속 링크는 눌리지
+// 않아 프로필로 유도한다.
 export const DEFAULT_TEMPLATES = [
   "@{username} {episode}화 올라왔어요! 프로필에서 바로 보실 수 있어요",
   "@{username} 기다리셨죠? {series} {episode}화 업로드됐어요",

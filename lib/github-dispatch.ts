@@ -12,7 +12,7 @@ const GITHUB_API = "https://api.github.com";
 
 // repository_dispatch의 event_type — 워크플로 on.repository_dispatch.types와 일치해야 함.
 export const PUBLISH_DISPATCH_EVENT = "publish-now";
-// 다음 화 알림 워크플로(.github/workflows/episode-alerts.yml).
+// 시리즈 댓글 자동화 워크플로(.github/workflows/episode-alerts.yml).
 export const EPISODE_ALERTS_DISPATCH_EVENT = "episode-alerts";
 
 /**
@@ -31,7 +31,7 @@ export async function triggerPublishRun(reason: string): Promise<void> {
 }
 
 /**
- * 다음 화 알림 워크플로를 즉시 실행시킨다 — 사용자가 "보내기"를 누른 직후, 또는 워커가
+ * 시리즈 댓글 자동화 워크플로를 즉시 실행시킨다 — 사용자가 "보내기"를 누른 직후, 또는 워커가
  * 시간 예산에 걸려 남은 답글을 다음 run에 넘길 때. 발행 워크플로와 concurrency 그룹이
  * 달라서 긴 답글 발송이 즉시 발행을 막지 않는다.
  *

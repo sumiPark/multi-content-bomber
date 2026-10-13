@@ -55,7 +55,7 @@ const createJobsInputSchema = z.object({
   contentId: z.string().uuid(),
   accountIds: z.array(z.string().uuid()).min(1),
   scheduledFor: z.string().nullable(),
-  // 다음 화 알림(0017) — 계정 id → 이 발행을 다음 화로 올릴 시리즈 id (인스타 계정만).
+  // 시리즈 댓글 자동화(0017) — 계정 id → 이 발행을 다음 화로 올릴 시리즈 id (인스타 계정만).
   seriesByAccount: z.record(z.string().uuid(), z.string().uuid()).optional(),
 });
 
