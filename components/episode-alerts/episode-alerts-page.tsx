@@ -173,7 +173,6 @@ function DailyLimitBar({
   dailyLimit: number;
   canManage: boolean;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(String(dailyLimit));
   const [error, setError] = useState<string | null>(null);
@@ -191,7 +190,6 @@ function DailyLimitBar({
         return;
       }
       setEditing(false);
-      router.refresh();
     });
   }
 

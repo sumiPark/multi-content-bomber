@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { ExternalLink, Pencil, Plus, Trash2, XIcon } from "lucide-react";
 import {
   addEpisodeAction,
@@ -144,7 +143,6 @@ function SeriesCard({
   canEdit: boolean;
   onAddEpisode: () => void;
 }) {
-  const router = useRouter();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(series.name);
   const [error, setError] = useState<string | null>(null);
@@ -160,7 +158,6 @@ function SeriesCard({
         return;
       }
       after?.();
-      router.refresh();
     });
   }
 
@@ -320,7 +317,6 @@ function EpisodeRow({
   isFirst: boolean;
   canEdit: boolean;
 }) {
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const status = replyStatus(episode);
@@ -335,7 +331,6 @@ function EpisodeRow({
         setError(result.error);
         return;
       }
-      router.refresh();
     });
   }
 
@@ -473,7 +468,6 @@ function SeriesTemplates({
   previewEpisodeNo: number;
   canEdit: boolean;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(series.templates);
   const [error, setError] = useState<string | null>(null);
@@ -488,7 +482,6 @@ function SeriesTemplates({
         return;
       }
       setEditing(false);
-      router.refresh();
     });
   }
 
@@ -611,7 +604,6 @@ function CreateSeriesDialog({
   accountName: string | null;
   onClose: () => void;
 }) {
-  const router = useRouter();
   const [name, setName] = useState("");
   const [templates, setTemplates] = useState<string[]>(DEFAULT_TEMPLATES);
   const [editingTemplates, setEditingTemplates] = useState(false);
@@ -627,7 +619,6 @@ function CreateSeriesDialog({
         setError(result.error);
         return;
       }
-      router.refresh();
       onClose();
     });
   }
@@ -711,7 +702,6 @@ function AddEpisodeDialog({
   series: SeriesView;
   onClose: () => void;
 }) {
-  const router = useRouter();
   const [picked, setPicked] = useState<string[]>([]);
   const nextNo = (series.episodes.at(-1)?.episodeNo ?? 0) + 1;
   const [error, setError] = useState<string | null>(null);
@@ -726,7 +716,6 @@ function AddEpisodeDialog({
         setError(result.error);
         return;
       }
-      router.refresh();
       onClose();
     });
   }

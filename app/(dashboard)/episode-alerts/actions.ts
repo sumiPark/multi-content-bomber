@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 import {
   addEpisode,
@@ -68,18 +69,24 @@ function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function dispatchSoft(reason: string) {
-  // 트리거 실패는 비치명적 — 작업은 DB에 남고 다음 publish run 완료 때 이어진다.
-  try {
-    await triggerEpisodeAlertRun(reason);
-  } catch (err) {
-    console.error("[episode-alerts] dispatch 실패:", err);
-  }
+// 답글 워크플로 깨우기. 응답을 붙잡지 않게 응답을 보낸 뒤에 실행한다(after).
+// 트리거 실패는 비치명적 — 작업은 DB에 남고 다음 publish run 완료 때 이어진다.
+function dispatchSoft(reason: string) {
+  after(async () => {
+    try {
+      await triggerEpisodeAlertRun(reason);
+    } catch (err) {
+      console.error("[episode-alerts] dispatch 실패:", err);
+    }
+  });
 }
 
+// 서버 액션에서 revalidatePath를 부르면 갱신된 화면이 액션 응답에 같이 실려 온다 —
+// 클라이언트에서 router.refresh()를 또 부를 필요가 없다.
 function revalidate() {
   revalidatePath("/episode-alerts");
-  revalidatePath("/", "layout");
+  // 업로드 마법사의 "다음 화로 올리기" 선택지(시리즈·다음 회차 번호).
+  revalidatePath("/upload");
 }
 
 async function loadSeries(service: Service, seriesId: string, organizationId: string) {
@@ -90,6 +97,23 @@ async function loadSeries(service: Service, seriesId: string, organizationId: st
     .maybeSingle();
   if (!data || data.organization_id !== organizationId || data.deleted_at) return null;
   return data;
+}
+
+// 회차 + 그 시리즈를 한 번에(DB 왕복 1번). 다른 조직이거나 지워진 시리즈면 null.
+async function loadEpisodeWithSeries(
+  service: Service,
+  episodeId: string,
+  organizationId: string,
+) {
+  const { data } = await service
+    .from("series_episodes")
+    .select("*, series!inner(id, name, organization_id, social_account_id, deleted_at)")
+    .eq("id", episodeId)
+    .maybeSingle();
+  if (!data) return null;
+  const { series, ...episode } = data;
+  if (series.organization_id !== organizationId || series.deleted_at) return null;
+  return { episode, series };
 }
 
 async function loadTask(service: Service, taskId: string, organizationId: string) {
@@ -407,30 +431,27 @@ export async function removeLastEpisodeAction(input: {
   if ("error" in auth) return { ok: false, error: auth.error };
 
   const service = createServiceClient();
-  const { data: episode } = await service
-    .from("series_episodes")
-    .select("id, series_id, episode_no")
-    .eq("id", parsed.data.episodeId)
-    .maybeSingle();
-  if (!episode) return { ok: false, error: "회차를 찾을 수 없어요." };
-  const series = await loadSeries(service, episode.series_id, auth.organizationId);
-  if (!series) return { ok: false, error: "시리즈를 찾을 수 없어요." };
+  const loaded = await loadEpisodeWithSeries(service, parsed.data.episodeId, auth.organizationId);
+  if (!loaded) return { ok: false, error: "회차를 찾을 수 없어요." };
+  const { episode, series } = loaded;
 
-  const { data: last } = await service
-    .from("series_episodes")
-    .select("id")
-    .eq("series_id", series.id)
-    .order("episode_no", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const [{ data: last }, { data: tasks }] = await Promise.all([
+    service
+      .from("series_episodes")
+      .select("id")
+      .eq("series_id", series.id)
+      .order("episode_no", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    service
+      .from("episode_alert_tasks")
+      .select("id")
+      .or(`target_episode_id.eq.${episode.id},source_episode_id.eq.${episode.id}`),
+  ]);
   if (last?.id !== episode.id) {
     return { ok: false, error: "마지막 회차만 뺄 수 있어요." };
   }
 
-  const { data: tasks } = await service
-    .from("episode_alert_tasks")
-    .select("id")
-    .or(`target_episode_id.eq.${episode.id},source_episode_id.eq.${episode.id}`);
   const taskIds = (tasks ?? []).map((t) => t.id);
   if (taskIds.length > 0) {
     const { count } = await service
@@ -466,14 +487,9 @@ export async function setEpisodeReplyAction(input: {
 
   const service = createServiceClient();
   try {
-    const { data: episode } = await service
-      .from("series_episodes")
-      .select("*")
-      .eq("id", parsed.data.episodeId)
-      .maybeSingle();
-    if (!episode) return { ok: false, error: "회차를 찾을 수 없어요." };
-    const series = await loadSeries(service, episode.series_id, auth.organizationId);
-    if (!series) return { ok: false, error: "시리즈를 찾을 수 없어요." };
+    const loaded = await loadEpisodeWithSeries(service, parsed.data.episodeId, auth.organizationId);
+    if (!loaded) return { ok: false, error: "회차를 찾을 수 없어요." };
+    const { episode, series } = loaded;
 
     if (!parsed.data.enabled) {
       await disableEpisodeReplies(service, episode.id);
@@ -492,7 +508,7 @@ export async function setEpisodeReplyAction(input: {
     if (!result.started && result.reason === "no-previous") {
       return { ok: false, error: "첫 회차는 답글을 달 이전 화가 없어요." };
     }
-    if (result.started) await dispatchSoft("episode-reply-on");
+    if (result.started) dispatchSoft("episode-reply-on");
     revalidate();
     return { ok: true };
   } catch (err) {
@@ -594,7 +610,7 @@ export async function retryAlertTaskAction(input: { taskId: string }): Promise<A
     .eq("status", "FAILED");
   if (error) return { ok: false, error: error.message };
 
-  await dispatchSoft("retry");
+  dispatchSoft("retry");
   revalidate();
   return { ok: true };
 }

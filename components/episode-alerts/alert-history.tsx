@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import {
   getTaskRepliesAction,
@@ -88,7 +87,6 @@ export function AlertHistory({
 }
 
 function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [replies, setReplies] = useState<ReplyDetail[] | null>(null);
   const [truncated, setTruncated] = useState(false);
@@ -124,7 +122,6 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
         setError(result.error);
         return;
       }
-      router.refresh();
     });
   }
 

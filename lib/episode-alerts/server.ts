@@ -133,21 +133,23 @@ export async function createAlertTask(
     createdBy: string | null;
   },
 ): Promise<CreateTaskResult> {
-  const { data: previous } = await service
-    .from("series_episodes")
-    .select("id")
-    .eq("series_id", args.episode.series_id)
-    .lt("episode_no", args.episode.episode_no)
-    .order("episode_no", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // 서로 독립이라 한 번에 묻는다(DB 왕복 줄이기).
+  const [{ data: previous }, { data: existing }] = await Promise.all([
+    service
+      .from("series_episodes")
+      .select("id")
+      .eq("series_id", args.episode.series_id)
+      .lt("episode_no", args.episode.episode_no)
+      .order("episode_no", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    service
+      .from("episode_alert_tasks")
+      .select("*")
+      .eq("target_episode_id", args.episode.id)
+      .maybeSingle(),
+  ]);
   if (!previous) return { created: false, reason: "no-previous" };
-
-  const { data: existing } = await service
-    .from("episode_alert_tasks")
-    .select("*")
-    .eq("target_episode_id", args.episode.id)
-    .maybeSingle();
   if (existing) return { created: false, reason: "exists", task: existing };
 
   const { data: task, error } = await service
