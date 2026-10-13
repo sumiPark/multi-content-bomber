@@ -34,6 +34,8 @@ export interface TaskView {
   scheduledFor: string;
   // 하루 상한·호출 한도로 다음 발송이 미래로 미뤄진 상태인지 (서버에서 계산).
   deferred: boolean;
+  // 답글이 켜져 있어 직전 화 새 댓글을 지켜보는 중인지 (켠 뒤 7일, 0020).
+  watching: boolean;
   lastError: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -169,6 +171,11 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
         </div>
       )}
 
+      {task.watching && task.status === "DONE" && (
+        <p className="text-xs text-muted-foreground">
+          새 댓글이 달리면 5분 안에 확인해서 이어서 보내요 (켠 뒤 7일 동안).
+        </p>
+      )}
       {task.deferred && (
         <p className="text-xs text-muted-foreground">
           다음 발송: <RelativeTime iso={task.scheduledFor} />

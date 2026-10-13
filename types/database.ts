@@ -461,6 +461,8 @@ export type Database = {
           created_by: string | null
           error_count: number
           id: string
+          last_checked_at: string | null
+          last_comment_count: number | null
           last_error: string | null
           locked_at: string | null
           organization_id: string
@@ -476,6 +478,7 @@ export type Database = {
             | "CANCELLED"
           target_episode_id: string
           updated_at: string
+          watch_until: string | null
         }
         Insert: {
           completed_at?: string | null
@@ -483,6 +486,8 @@ export type Database = {
           created_by?: string | null
           error_count?: number
           id?: string
+          last_checked_at?: string | null
+          last_comment_count?: number | null
           last_error?: string | null
           locked_at?: string | null
           organization_id: string
@@ -498,6 +503,7 @@ export type Database = {
             | "CANCELLED"
           target_episode_id: string
           updated_at?: string
+          watch_until?: string | null
         }
         Update: {
           completed_at?: string | null
@@ -505,6 +511,8 @@ export type Database = {
           created_by?: string | null
           error_count?: number
           id?: string
+          last_checked_at?: string | null
+          last_comment_count?: number | null
           last_error?: string | null
           locked_at?: string | null
           organization_id?: string
@@ -520,6 +528,7 @@ export type Database = {
             | "CANCELLED"
           target_episode_id?: string
           updated_at?: string
+          watch_until?: string | null
         }
         Relationships: [
           {
@@ -779,6 +788,10 @@ export type Database = {
       current_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
+      }
+      verify_episode_replies_cron_secret: {
+        Args: { p_secret: string }
+        Returns: boolean
       }
     }
     Enums: {

@@ -65,7 +65,8 @@ export function EpisodeAlertsPage({
         <h1 className="text-3xl font-bold tracking-tight">시리즈 댓글 자동화</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           회차의 답글을 켜면, 이전 화에 댓글 단 사람들에게 시리즈 문구로 바로 대댓글을 달아요.
-          새로 추가한 회차는 꺼진 상태로 시작해요.
+          켜져 있는 7일 동안은 새로 달린 댓글도 5분마다 확인해서 이어서 달아요. 새로 추가한 회차는
+          꺼진 상태로 시작해요.
         </p>
       </header>
 

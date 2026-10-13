@@ -62,7 +62,7 @@ export default async function Page({ searchParams }: PageProps) {
     supabase
       .from("episode_alert_tasks")
       .select(
-        "id, social_account_id, series_id, source_episode_id, target_episode_id, status, scheduled_for, last_error, created_at, completed_at, created_by",
+        "id, social_account_id, series_id, source_episode_id, target_episode_id, status, scheduled_for, last_error, created_at, completed_at, created_by, watch_until",
       )
       .order("created_at", { ascending: false })
       .limit(TASK_LIMIT),
@@ -123,6 +123,7 @@ export default async function Page({ searchParams }: PageProps) {
         scheduledFor: t.scheduled_for,
         deferred:
           (t.status === "SENDING" || t.status === "COLLECTING") && isFuture(t.scheduled_for),
+        watching: t.watch_until !== null && isFuture(t.watch_until),
         lastError: t.last_error,
         createdAt: t.created_at,
         completedAt: t.completed_at,

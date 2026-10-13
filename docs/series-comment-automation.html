@@ -218,7 +218,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
       <li><span class="n">3</span><div><strong>인스타 쪽 제약이 있습니다.</strong> 댓글 속 링크는 눌리지 않고, 대댓글은 최상위 댓글에만 달 수 있으며, 같은 문구를 짧은 간격으로 많이 달면 스팸으로 제한될 수 있습니다. 문구를 여러 개 돌려쓰고 등록 속도를 조절해야 합니다.</div></li>
     </ol>
     <div class="estimate">
-      <span>진행 상황 <b>1~4단계 구현 완료</b> (마이그레이션 0017·0018·0019 적용 후 배포)</span>
+      <span>진행 상황 <b>1~5단계 구현 완료</b> (마이그레이션 0017~0020 적용 후 배포)</span>
       <span>외부 계정용 검수 <b>Meta 응답 영업일 5~7일</b></span>
     </div>
   </section>
@@ -363,6 +363,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
           <li>워크플로를 나눈 이유: 답글은 10~20초 간격이라 실행이 길어서, 발행과 같은 직렬 그룹이면 그동안 즉시 발행이 줄을 섭니다.</li>
           <li>알림 워크플로는 발행 실행이 끝날 때마다 따라 돌고, “보내기”를 누르면 바로 깨어납니다. 40분 안에 못 끝내면 남은 건 다음 실행이 이어받고, 스스로 다음 실행을 깨웁니다.</li>
           <li>작업을 집어가는 방식은 발행과 같은 <code>FOR UPDATE SKIP LOCKED</code> RPC라 중복으로 보내지 않습니다.</li>
+          <li>새 댓글 확인은 GitHub 예약 실행(실측 2~5시간씩 밀림) 대신 Supabase <code>pg_cron</code>이 5분마다 앱의 <code>/api/cron/episode-replies</code>를 부릅니다. 앱은 게시물 댓글 수가 늘었을 때만 댓글을 다시 읽고, 보낼 사람이 생겼을 때만 GitHub 답글 워커를 깨웁니다. 호출 인증용 비밀값은 마이그레이션이 Vault에 직접 만들어 저장소에 남지 않습니다.</li>
         </ul>
       </div>
 
@@ -401,7 +402,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
           <tr><td class="k">내 답글이 목록에 섞여 옴</td><td>실측(댓글 653개 릴스): 문서와 달리 계정 주인의 답글도 댓글 목록에 함께 옵니다. 답글 펼치기는 작성자를 알려주지 않습니다</td><td><span class="mono">parent_id</span>로 답글을 골라내 대상에서 빼고, 새 회차 이후 내가 이미 단 답글이 있는 댓글은 건너뜁니다</td></tr>
           <tr><td class="k">최상위 댓글에만 답글</td><td>다른 댓글에 답글을 단 사람은 대상 목록에 안 잡힙니다</td><td>1차 버전은 최상위 댓글만 대상으로 합니다. 필요하면 답글 단 사람까지 멘션하는 옵션을 뒤에 추가합니다</td></tr>
           <tr><td class="k">안 보이는 댓글</td><td>제한(restrict)한 사용자, 연령 제한 게시물의 댓글은 API가 돌려주지 않습니다</td><td>자연히 대상에서 빠집니다. 따로 할 일은 없습니다</td></tr>
-          <tr><td class="k">늦게 달린 댓글</td><td>2화 발행 뒤에 1화에 달린 댓글은 처음 실행에 안 잡힙니다</td><td>1차는 발행 시점 한 번만. 2차에서 48시간 동안 다시 확인하거나 댓글 웹훅을 붙입니다</td></tr>
+          <tr><td class="k">늦게 달린 댓글</td><td>2화 발행 뒤에 1화에 달린 댓글은 처음 실행에 안 잡힙니다</td><td>답글이 켜져 있는 7일 동안 5분마다 새 댓글을 확인해 이어서 보냅니다. 이미 받은 사람은 다시 받지 않습니다. 더 빨라야 하면 댓글 웹훅(실시간)을 붙입니다</td></tr>
           <tr><td class="k">토큰 만료·연결 해제</td><td>답글 작업이 실패합니다</td><td>작업을 실패로 남기고, 계정을 다시 연결한 뒤 재시도할 수 있게 합니다</td></tr>
           <tr><td class="k">답글 수정·삭제 불가</td><td>API로 단 답글은 API로 고칠 수 없습니다</td><td>회차는 꺼진 상태로 추가되고, 켤 때 확인 창을 한 번 띄웁니다. 문구는 시리즈 카드에서 미리보기로 확인합니다</td></tr>
         </tbody>
@@ -445,10 +446,10 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
         </ul>
       </div>
       <div class="phase optional">
-        <h3>5단계 · 늦은 댓글 처리 (선택)</h3><span class="days">2~3일</span>
+        <h3>5단계 · 새 댓글 이어서 보내기</h3><span class="days">완료</span>
         <ul>
-          <li>지금은 껐다 다시 켜면 그 사이 새로 댓글 단 사람에게도 보냅니다(이미 받은 사람은 제외)</li>
-          <li>남은 것: 발행 후 48시간 자동 재확인 또는 댓글 웹훅, 비공개 답장(DM) 옵션</li>
+          <li>답글을 켠 뒤 7일 동안 5분마다 직전 화 새 댓글을 확인해서 보냄 (Supabase pg_cron, 마이그레이션 0020)</li>
+          <li>남은 것(선택): 댓글 웹훅으로 실시간 처리, 비공개 답장(DM) 옵션</li>
         </ul>
       </div>
       <div class="phase parallel">
@@ -467,7 +468,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
       <li><span class="q">어떤 계정에 쓰나요?</span><span class="rec"><b>우리 팀 계정만</b>으로 시작하면 검수 없이 바로 쓸 수 있습니다</span></li>
       <li><span class="q">자동으로 보낼까요, 확인 후 보낼까요?</span><span class="rec"><b>바로 보내기로 고정</b>. 대신 회차마다 답글 스위치가 있고 기본은 꺼짐</span></li>
       <li><span class="q">어느 회차 댓글에 알릴까요?</span><span class="rec"><b>직전 회차만</b> (2화가 나오면 1화, 3화가 나오면 2화)</span></li>
-      <li><span class="q">어떤 댓글까지 대상인가요?</span><span class="rec"><b>새 회차 발행 시점까지 달린 댓글</b>. 늦은 댓글은 5단계에서</span></li>
+      <li><span class="q">어떤 댓글까지 대상인가요?</span><span class="rec"><b>켜는 순간까지의 댓글 + 켜진 7일 동안 새로 달린 댓글</b></span></li>
       <li><span class="q">공개 대댓글과 DM 중 무엇으로?</span><span class="rec"><b>공개 대댓글</b>. 다른 사람들에게도 2화 소식이 보이는 효과가 있습니다</span></li>
       <li><span class="q">답글 문구는요?</span><span class="rec templates">
         <span><b>관리자가 시리즈마다 등록</b>합니다. 새 시리즈엔 아래 3개가 기본으로 채워져 있습니다</span>

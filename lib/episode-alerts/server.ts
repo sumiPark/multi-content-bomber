@@ -24,6 +24,13 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
 // 회차 답글을 끌 때 남은 대상에 붙이는 사유. 다시 켜면 이 사유로 빠진 대상만 되살린다.
 export const REPLY_OFF_REASON = "답글 끔";
 
+// 답글을 켠 뒤 새 댓글을 지켜보는 기간(0020). 이 동안 5분마다 직전 화 새 댓글을 확인한다.
+export const WATCH_DAYS = 7;
+
+function watchUntilFromNow(): string {
+  return new Date(Date.now() + WATCH_DAYS * 24 * 60 * 60_000).toISOString();
+}
+
 // 사용자에게 그대로 보여줄 수 있는 문구를 담은 에러.
 export class EpisodeAlertError extends Error {
   constructor(message: string) {
@@ -161,6 +168,7 @@ export async function createAlertTask(
       source_episode_id: previous.id,
       target_episode_id: args.episode.id,
       created_by: args.createdBy,
+      watch_until: watchUntilFromNow(),
     })
     .select("*")
     .single();
@@ -233,6 +241,9 @@ export async function enableEpisodeReplies(
       completed_at: null,
       locked_at: null,
       scheduled_for: new Date().toISOString(),
+      watch_until: watchUntilFromNow(),
+      last_checked_at: null,
+      last_comment_count: null,
     })
     .eq("id", task.id);
   return { started: true };
@@ -240,10 +251,16 @@ export async function enableEpisodeReplies(
 
 /**
  * 회차 답글 끄기. 보내는 중이면 멈추고 남은 대상은 빼둔다(다시 켜면 되살아남).
- * 이미 보낸 답글은 그대로다.
+ * 새 댓글 지켜보기도 멈춘다. 이미 보낸 답글은 그대로다.
  */
 export async function disableEpisodeReplies(service: Service, episodeId: string) {
-  await service.from("series_episodes").update({ reply_enabled: false }).eq("id", episodeId);
+  await Promise.all([
+    service.from("series_episodes").update({ reply_enabled: false }).eq("id", episodeId),
+    service
+      .from("episode_alert_tasks")
+      .update({ watch_until: null })
+      .eq("target_episode_id", episodeId),
+  ]);
 
   const { data: task } = await service
     .from("episode_alert_tasks")

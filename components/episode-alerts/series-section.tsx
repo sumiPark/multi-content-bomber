@@ -121,7 +121,8 @@ function EmptySeries({ canEdit, onCreate }: { canEdit: boolean; onCreate: () => 
           </li>
           <li>
             <span className="mr-1.5 font-semibold text-foreground">3.</span>
-            회차의 답글을 켜면 이전 화에 댓글 단 사람들에게 바로 답글이 달려요.
+            회차의 답글을 켜면 이전 화에 댓글 단 사람들에게 바로 답글이 달리고, 7일 동안 새로 댓글
+            단 사람에게도 이어서 달려요.
           </li>
         </ol>
         {canEdit && (
@@ -300,7 +301,9 @@ function replyStatus(episode: EpisodeView): { text: string; tone: "muted" | "act
         ? { text: `내일 이어서 · ${sent}/${toSend}`, tone: "active" }
         : { text: `보내는 중 · ${sent}/${toSend}`, tone: "active" };
     case "DONE":
-      return { text: `${sent.toLocaleString()}명에게 보냄`, tone: "done" };
+      return task.watching
+        ? { text: `${sent.toLocaleString()}명에게 보냄 · 새 댓글 확인 중`, tone: "done" }
+        : { text: `${sent.toLocaleString()}명에게 보냄`, tone: "done" };
     case "FAILED":
       return { text: "실패", tone: "error" };
     default:
