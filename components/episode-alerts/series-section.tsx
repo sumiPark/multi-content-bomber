@@ -122,7 +122,7 @@ function EmptySeries({ canEdit, onCreate }: { canEdit: boolean; onCreate: () => 
           <li>
             <span className="mr-1.5 font-semibold text-foreground">3.</span>
             회차의 답글을 켜면 이전 화에 댓글 단 사람들에게 바로 답글이 달리고, 7일 동안 새로 댓글
-            단 사람에게도 이어서 달려요.
+            단 사람에게도 이어서 달려요. 7일이 지나면 자동으로 꺼져요.
           </li>
         </ol>
         {canEdit && (
@@ -289,6 +289,9 @@ function replyStatus(episode: EpisodeView): { text: string; tone: "muted" | "act
   const task = episode.task;
   const sent = task?.stats.sent ?? 0;
   if (!episode.replyEnabled) {
+    if (task?.watchExpired) {
+      return { text: `${sent.toLocaleString()}명에게 보냄 · 7일 지나 꺼짐`, tone: "muted" };
+    }
     return { text: sent > 0 ? `꺼짐 · ${sent.toLocaleString()}명 보냄` : "꺼짐", tone: "muted" };
   }
   if (!task) return { text: "준비 중", tone: "active" };
@@ -342,7 +345,7 @@ function EpisodeRow({
     if (
       next &&
       !window.confirm(
-        `${episode.episodeNo}화 답글을 켜면 ${episode.episodeNo - 1}화에 댓글 단 사람들에게 바로 답글이 달려요. 켤까요?`,
+        `${episode.episodeNo}화 답글을 켜면 ${episode.episodeNo - 1}화에 댓글 단 사람들에게 바로 답글이 달려요. 7일 동안은 새로 단 댓글에도 이어서 달고, 그 뒤엔 자동으로 꺼져요. 켤까요?`,
       )
     ) {
       return;

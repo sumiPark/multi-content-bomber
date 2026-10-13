@@ -22,6 +22,10 @@ function isFuture(iso: string): boolean {
   return new Date(iso).getTime() > Date.now() + 60_000;
 }
 
+function isPast(iso: string): boolean {
+  return new Date(iso).getTime() <= Date.now();
+}
+
 interface PageProps {
   searchParams: Promise<{ account?: string }>;
 }
@@ -124,6 +128,8 @@ export default async function Page({ searchParams }: PageProps) {
         deferred:
           (t.status === "SENDING" || t.status === "COLLECTING") && isFuture(t.scheduled_for),
         watching: t.watch_until !== null && isFuture(t.watch_until),
+        // 손으로 끄면 watch_until이 지워지고, 7일이 지나 자동으로 꺼지면 남는다(0021).
+        watchExpired: t.watch_until !== null && isPast(t.watch_until),
         lastError: t.last_error,
         createdAt: t.created_at,
         completedAt: t.completed_at,

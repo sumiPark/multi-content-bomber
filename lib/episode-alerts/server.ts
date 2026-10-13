@@ -24,7 +24,9 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
 // 회차 답글을 끌 때 남은 대상에 붙이는 사유. 다시 켜면 이 사유로 빠진 대상만 되살린다.
 export const REPLY_OFF_REASON = "답글 끔";
 
-// 답글을 켠 뒤 새 댓글을 지켜보는 기간(0020). 이 동안 5분마다 직전 화 새 댓글을 확인한다.
+// 답글을 켠 뒤 새 댓글을 지켜보는 기간(0020). 이 동안 5분마다 직전 화 새 댓글을 확인하고,
+// 지나면 다 보낸 회차의 답글 스위치가 자동으로 꺼진다(0021, pg_cron 'episode-replies-expire').
+// 일단 고정값 — 필요해지면 계정 설정으로 뺀다.
 export const WATCH_DAYS = 7;
 
 function watchUntilFromNow(): string {

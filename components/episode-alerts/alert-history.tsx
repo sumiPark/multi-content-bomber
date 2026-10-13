@@ -36,6 +36,8 @@ export interface TaskView {
   deferred: boolean;
   // 답글이 켜져 있어 직전 화 새 댓글을 지켜보는 중인지 (켠 뒤 7일, 0020).
   watching: boolean;
+  // 7일 지켜보기가 끝났는지 — 다 보낸 회차는 이때 답글이 자동으로 꺼진다(0021).
+  watchExpired: boolean;
   lastError: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -174,6 +176,11 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
       {task.watching && task.status === "DONE" && (
         <p className="text-xs text-muted-foreground">
           새 댓글이 달리면 5분 안에 확인해서 이어서 보내요 (켠 뒤 7일 동안).
+        </p>
+      )}
+      {task.watchExpired && task.status === "DONE" && (
+        <p className="text-xs text-muted-foreground">
+          7일이 지나 새 댓글 확인을 마치고 답글을 껐어요. 다시 켜면 그 사이 새로 댓글 단 사람에게 이어서 보내요.
         </p>
       )}
       {task.deferred && (
