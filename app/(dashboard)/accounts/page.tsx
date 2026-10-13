@@ -30,11 +30,14 @@ export default async function Page({ searchParams }: AccountsPageProps) {
     group_id: string | null;
   };
 
+  // 연결 해제(0016)한 계정만 숨긴다. 토큰 만료(is_active=false)는 "비활성"으로 계속
+  // 보여야 재연결할 수 있다. 해제된 계정의 발행 이력은 배포 관리에 남는다.
   const { data: accounts } = (await supabase
     .from("social_accounts")
     .select(
       "id, platform, display_name, is_active, token_expires_at, created_at, group_id",
     )
+    .is("disconnected_at", null)
     .order("created_at", { ascending: false })) as unknown as {
     data: AccountRow[] | null;
   };

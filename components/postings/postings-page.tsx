@@ -75,6 +75,7 @@ export interface PostingItem {
     platform: Platform;
     displayName: string | null;
     avatarUrl: string | null;
+    disconnected: boolean;
   };
 }
 
@@ -1025,6 +1026,11 @@ function Row({
           <span className="truncate text-xs">
             {item.account.displayName ?? "(이름 없음)"}
           </span>
+          {item.account.disconnected && (
+            <span className="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              연결 해제됨
+            </span>
+          )}
         </div>
       </td>
       <td className="px-3 py-2">
@@ -1181,6 +1187,7 @@ function DetailDialog({
             </h2>
             <p className="text-xs text-muted-foreground">
               {item.account.platform} · {item.account.displayName}
+              {item.account.disconnected && " (연결 해제됨)"}
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose}>

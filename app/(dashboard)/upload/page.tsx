@@ -44,13 +44,15 @@ export default async function UploadPage() {
     };
   };
 
+  // 토큰 만료(is_active=false) 계정도 목록에 남겨 마법사가 "비활성"으로 회색 표시한다
+  // (선택은 불가). 연결 해제(0016)한 계정만 뺀다.
   const [accountsRes, presetsRes, groupsRes] = await Promise.all([
     supabase
       .from("social_accounts")
       .select(
         "id, platform, display_name, is_active, token_expires_at, group_id",
       )
-      .eq("is_active", true) as unknown as Promise<{
+      .is("disconnected_at", null) as unknown as Promise<{
       data: AccountRow[] | null;
     }>,
     supabase

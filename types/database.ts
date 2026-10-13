@@ -363,6 +363,7 @@ export type Database = {
           avatar_url: string | null
           connected_by: string | null
           created_at: string
+          disconnected_at: string | null
           display_name: string | null
           group_id: string | null
           id: string
@@ -379,6 +380,7 @@ export type Database = {
           avatar_url?: string | null
           connected_by?: string | null
           created_at?: string
+          disconnected_at?: string | null
           display_name?: string | null
           group_id?: string | null
           id?: string
@@ -395,6 +397,7 @@ export type Database = {
           avatar_url?: string | null
           connected_by?: string | null
           created_at?: string
+          disconnected_at?: string | null
           display_name?: string | null
           group_id?: string | null
           id?: string

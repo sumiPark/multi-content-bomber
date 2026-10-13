@@ -570,10 +570,12 @@ export async function createPublishJobsAction(
     .maybeSingle();
   if (!content) return { ok: false, error: "콘텐츠를 찾을 수 없습니다." };
 
+  // 연결 해제(0016)된 계정으로는 새 발행을 만들지 않는다 — 토큰이 없어 실패만 쌓인다.
   const { data: accounts } = await supabase
     .from("social_accounts")
     .select("id, platform")
-    .in("id", parsed.data.accountIds);
+    .in("id", parsed.data.accountIds)
+    .is("disconnected_at", null);
   if (!accounts || accounts.length === 0) {
     return { ok: false, error: "계정 조회 실패" };
   }

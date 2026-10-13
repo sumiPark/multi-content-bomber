@@ -85,6 +85,8 @@ export async function GET(
       : null;
 
     // Use service role: token columns are revoked from `authenticated`.
+    // 연결 해제(0016 소프트 삭제)했던 계정을 다시 연결하면 unique 키로 같은 행이 잡혀
+    // disconnected_at이 풀리고, 예전 발행 이력이 그대로 이어진다.
     const service = createServiceClient();
     const { error } = await service.from("social_accounts").upsert(
       {
@@ -98,6 +100,7 @@ export async function GET(
         refresh_token_encrypted: refreshEnc,
         token_expires_at: tokens.expiresAt?.toISOString() ?? null,
         is_active: true,
+        disconnected_at: null,
       },
       { onConflict: "organization_id,platform,platform_account_id" },
     );

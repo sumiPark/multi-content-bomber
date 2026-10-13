@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { appendPublishHistory } from "@/lib/publish-history";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { triggerPublishRun } from "@/lib/github-dispatch";
@@ -54,49 +55,25 @@ interface JobOwnership {
   id: string;
   status: string;
   organization_id: string;
+  account_disconnected: boolean;
 }
 
 async function fetchJobsByIds(ids: string[]): Promise<JobOwnership[]> {
   const service = createServiceClient();
   const { data } = await service
     .from("publish_jobs")
-    .select("id, status, contents!inner ( organization_id )")
+    .select(
+      "id, status, contents!inner ( organization_id ), social_accounts!inner ( disconnected_at )",
+    )
     .in("id", ids);
   return (data ?? []).map((r) => ({
     id: r.id,
     status: r.status,
     organization_id: (r.contents as { organization_id: string }).organization_id,
+    account_disconnected:
+      (r.social_accounts as { disconnected_at: string | null })
+        .disconnected_at !== null,
   }));
-}
-
-function appendHistory(
-  service: ReturnType<typeof createServiceClient>,
-  ids: string[],
-  entry: { status: string; message?: string },
-) {
-  // status_history는 jsonb 배열이라 RPC 없이 일괄 append 어려움. 단건으로 처리.
-  // 사용자 액션이라 동시성 거의 없음. race risk는 의식적으로 무시.
-  return Promise.all(
-    ids.map(async (id) => {
-      const { data } = await service
-        .from("publish_jobs")
-        .select("status_history")
-        .eq("id", id)
-        .maybeSingle<{ status_history: unknown }>();
-      const prev = Array.isArray(data?.status_history)
-        ? (data.status_history as unknown[])
-        : [];
-      const next = [
-        ...prev,
-        { ...entry, timestamp: new Date().toISOString() },
-      ];
-      await service
-        .from("publish_jobs")
-        // @ts-expect-error status_history는 0007 마이그레이션 이후 추가
-        .update({ status_history: next })
-        .eq("id", id);
-    }),
-  );
 }
 
 function filterByOrg<T extends { organization_id: string }>(
@@ -118,9 +95,18 @@ export async function retryPostingsAction(
   const jobs = await fetchJobsByIds(parsed.data.ids);
   const owned = filterByOrg(jobs, auth.organizationId);
   // 실패 상태만 대상.
-  const targets = owned.filter((j) => j.status === "FAILED");
+  const failed = owned.filter((j) => j.status === "FAILED");
+  // 연결 해제된 계정은 토큰이 없어 재시도해도 바로 실패한다. 재연결하면 같은 계정 행이
+  // 되살아나(disconnected_at NULL) 그때부터 재시도 가능.
+  const targets = failed.filter((j) => !j.account_disconnected);
   if (targets.length === 0) {
-    return { ok: false, error: "재시도할 수 있는 항목이 없습니다." };
+    return {
+      ok: false,
+      error:
+        failed.length > 0
+          ? "연결 해제된 계정의 발행 건이에요. 계정을 다시 연결한 뒤 재시도해주세요."
+          : "재시도할 수 있는 항목이 없습니다.",
+    };
   }
 
   const ids = targets.map((t) => t.id);
@@ -136,7 +122,7 @@ export async function retryPostingsAction(
     .in("id", ids);
   if (error) return { ok: false, error: error.message };
 
-  await appendHistory(service, ids, {
+  await appendPublishHistory(service, ids, {
     status: "PENDING",
     message: "사용자 재시도 요청",
   });
@@ -195,7 +181,7 @@ export async function cancelPostingsAction(
     return { ok: false, error: "이미 처리가 시작돼 취소할 수 없습니다." };
   }
 
-  await appendHistory(service, cancelledIds, {
+  await appendPublishHistory(service, cancelledIds, {
     status: "CANCELLED",
     message: "사용자 발행 취소",
   });

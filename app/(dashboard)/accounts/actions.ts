@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { appendPublishHistory } from "@/lib/publish-history";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 
 const disconnectSchema = z.object({
   accountId: z.string().uuid(),
@@ -11,6 +13,10 @@ const disconnectSchema = z.object({
 
 // React 19 form action prop requires Promise<void>. Errors are surfaced via
 // redirect to /accounts?error=... where the page renders an inline banner.
+//
+// 연결 해제는 소프트 삭제다 (0016). 행을 지우면 발행 이력이 같이 사라지므로
+// disconnected_at만 기록하고 토큰은 즉시 비운다 (개인정보처리방침의 "해제 시 토큰 즉시
+// 삭제" 약속). 같은 계정을 다시 연결하면 OAuth 콜백 upsert가 같은 행을 되살린다.
 export async function disconnectAccountAction(
   formData: FormData,
 ): Promise<void> {
@@ -21,24 +27,60 @@ export async function disconnectAccountAction(
     redirect(`/accounts?error=${encodeURIComponent("잘못된 입력")}`);
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
+  const auth = await authorize();
+  if (!auth.ok) {
+    redirect(`/accounts?error=${encodeURIComponent(auth.error)}`);
+  }
 
-  // RLS: ADMIN/MANAGER만 social_accounts 삭제 가능 (0001 정책).
-  const { error } = await supabase
+  // 토큰 컬럼은 authenticated에서 UPDATE가 revoke돼 있어 service_role로 처리.
+  // 권한은 위 authorize()에서, 조직 범위는 organization_id 조건으로 직접 건다.
+  const service = createServiceClient();
+  const nowIso = new Date().toISOString();
+  const { data: disconnected, error } = await service
     .from("social_accounts")
-    .delete()
-    .eq("id", parsed.data.accountId);
+    .update({
+      disconnected_at: nowIso,
+      is_active: false,
+      access_token_encrypted: null,
+      refresh_token_encrypted: null,
+      token_expires_at: null,
+    })
+    .eq("id", parsed.data.accountId)
+    .eq("organization_id", auth.organizationId)
+    .is("disconnected_at", null)
+    .select("id");
 
   if (error) {
     redirect(`/accounts?error=${encodeURIComponent(error.message)}`);
   }
+  if (!disconnected || disconnected.length === 0) {
+    redirect(
+      `/accounts?error=${encodeURIComponent("이미 해제됐거나 찾을 수 없는 계정입니다.")}`,
+    );
+  }
+
+  // 워커가 아직 잡지 않은 발행 건(예약/대기·재시도 대기)은 취소로 남긴다. 그대로 두면
+  // 토큰이 없어 시도마다 실패만 쌓인다. PROCESSING은 워커 결과 기록에 덮이므로 건드리지 않음.
+  const { data: cancelled } = await service
+    .from("publish_jobs")
+    .update({ status: "CANCELLED", cancelled_at: nowIso })
+    .eq("social_account_id", parsed.data.accountId)
+    .in("status", ["PENDING", "RETRYING"])
+    .is("deleted_at", null)
+    .select("id");
+
+  const cancelledIds = (cancelled ?? []).map((r) => r.id);
+  if (cancelledIds.length > 0) {
+    await appendPublishHistory(service, cancelledIds, {
+      status: "CANCELLED",
+      message: "계정 연결 해제로 발행 취소",
+    });
+  }
 
   revalidatePath("/accounts");
   revalidatePath("/");
+  revalidatePath("/postings");
+  revalidatePath("/upload");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,7 +142,7 @@ async function authorize(): Promise<AuthCtx | { ok: false; error: string }> {
     return { ok: false, error: "소속된 조직이 없습니다." };
   }
   if (profile.role !== "ADMIN" && profile.role !== "MANAGER") {
-    return { ok: false, error: "그룹 관리 권한이 없습니다." };
+    return { ok: false, error: "계정 관리 권한이 없습니다." };
   }
   return {
     ok: true,

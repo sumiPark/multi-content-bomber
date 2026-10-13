@@ -663,7 +663,17 @@ function AccountItem({
               </option>
             ))}
           </select>
-          <form action={disconnectAccountAction}>
+          <form
+            action={disconnectAccountAction}
+            onSubmit={(e) => {
+              if (
+                !window.confirm(
+                  `“${account.display_name ?? account.platform}” 계정 연결을 해제할까요? 예약·대기 중인 발행은 취소되고, 지난 발행 이력은 배포 관리에 그대로 남습니다. 다시 연결하면 이력이 이어집니다.`,
+                )
+              )
+                e.preventDefault();
+            }}
+          >
             <input type="hidden" name="accountId" value={account.id} />
             <button
               type="submit"

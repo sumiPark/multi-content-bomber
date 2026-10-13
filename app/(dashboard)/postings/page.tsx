@@ -53,6 +53,7 @@ export default async function Page() {
       platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
       display_name: string | null;
       avatar_url: string | null;
+      disconnected_at: string | null;
     };
   };
 
@@ -64,7 +65,7 @@ export default async function Page() {
       attempts, last_error, platform_post_id, platform_post_url,
       created_at, updated_at, completed_at,
       contents!inner ( id, media_type, media_urls, ai_captions, metadata, internal_title, created_at ),
-      social_accounts!inner ( id, platform, display_name, avatar_url )
+      social_accounts!inner ( id, platform, display_name, avatar_url, disconnected_at )
       `,
     )
     .is("deleted_at", null)
@@ -145,6 +146,8 @@ export default async function Page() {
         platform: r.social_accounts.platform,
         displayName: r.social_accounts.display_name,
         avatarUrl: r.social_accounts.avatar_url,
+        // 연결 해제(0016)돼도 이력은 남는다 — 목록에서 "연결 해제됨"으로 표시.
+        disconnected: r.social_accounts.disconnected_at !== null,
       },
     };
   });

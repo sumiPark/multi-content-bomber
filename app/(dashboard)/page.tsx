@@ -214,9 +214,11 @@ async function loadDashboardData(
       data: JobRow[] | null;
     }>,
 
+    // 연결 해제(0016)한 계정은 연동 현황에서 뺀다. 발행 통계는 위 조인으로 그대로 집계.
     supabase
       .from("social_accounts")
-      .select("is_active, token_expires_at, platform") as unknown as Promise<{
+      .select("is_active, token_expires_at, platform")
+      .is("disconnected_at", null) as unknown as Promise<{
       data: AccountRow[] | null;
     }>,
   ]);
