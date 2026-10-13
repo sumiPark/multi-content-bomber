@@ -29,6 +29,9 @@ export interface AlertAccountView {
 // 있으면 이 간격으로 새로고침해 진행 상황을 보여준다.
 const LIVE_REFRESH_MS = 15_000;
 
+// 인스타 댓글 제한 실무 관찰치(하루 150~200개)의 안전한 쪽. 넘기면 경고만 띄운다.
+const SAFE_DAILY_LIMIT = 150;
+
 const HOW_IT_WORKS = [
   "켜는 즉시 보내기 시작",
   "7일 동안 새 댓글도 5분마다 확인",
@@ -378,9 +381,14 @@ function AccountHeader({
           </p>
         )}
         {editing && invalid && <p className="text-xs text-destructive">1~1000 사이로 정해주세요.</p>}
+        {editing && !invalid && n > SAFE_DAILY_LIMIT && (
+          <p className="max-w-xs text-xs text-amber-700 dark:text-amber-300">
+            하루 {SAFE_DAILY_LIMIT}개를 넘기면 인스타가 댓글 활동을 잠시 제한할 수 있어요.
+          </p>
+        )}
         {error && <p className="text-xs text-destructive">{error}</p>}
         {!editing && (
-          <p className="text-xs text-muted-foreground">넘치면 다음 날 이어서 보내요 · 10~20초 간격</p>
+          <p className="text-xs text-muted-foreground">1~2분 간격으로 하나씩 · 넘치면 다음 날 이어서</p>
         )}
       </div>
     </div>

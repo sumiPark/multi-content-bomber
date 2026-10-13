@@ -1,7 +1,8 @@
 "use client";
 
-import { Fragment, useRef } from "react";
-import { Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Fragment, useRef, useState, useTransition } from "react";
+import { Loader2, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
+import { generateReplyTemplatesAction } from "@/app/(dashboard)/episode-alerts/actions";
 import { Button } from "@/components/ui/button";
 import {
   DEFAULT_TEMPLATES,
@@ -113,8 +114,25 @@ export function TemplateEditor({
   const inputRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
   // 문구 칸마다 마지막 커서 위치. 변수 넣기 버튼은 그 자리에 넣는다(없으면 끝에).
   const carets = useRef<Record<number, number>>({});
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [generating, startGenerating] = useTransition();
 
   const { errors, warnings } = validateTemplates(value);
+  const busy = disabled || generating;
+
+  // 누를 때마다 지금 문구를 피해서 새 묶음으로 바꾼다. 저장은 사람이 "저장"을 눌러야.
+  function generate() {
+    setAiError(null);
+    startGenerating(async () => {
+      const result = await generateReplyTemplatesAction({ seriesName, current: value });
+      if (!result.ok) {
+        setAiError(result.error);
+        return;
+      }
+      carets.current = {};
+      onChange(result.templates);
+    });
+  }
 
   function update(index: number, text: string) {
     onChange(value.map((t, i) => (i === index ? text : t)));
@@ -137,7 +155,19 @@ export function TemplateEditor({
 
   return (
     <div className="space-y-3">
-      <ul className="space-y-2.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5">
+        <Button size="sm" onClick={generate} disabled={busy}>
+          {generating ? <Loader2 className="animate-spin" /> : <Sparkles />}
+          {generating ? "만드는 중…" : "AI로 새로 만들기"}
+        </Button>
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          누를 때마다 친근한 말투의 새 문구 5개로 바뀌어요. 인스타 스팸에 걸리기 쉬운 링크·해시태그·홍보성
+          단어는 빼고 만들어요.
+        </p>
+        {aiError && <p className="w-full text-xs text-destructive">{aiError}</p>}
+      </div>
+
+      <ul className={cn("space-y-2.5", generating && "opacity-50")}>
         {value.map((t, i) => (
           <li
             key={i}
@@ -153,7 +183,7 @@ export function TemplateEditor({
                 value={t}
                 rows={2}
                 maxLength={TEMPLATE_MAX_LENGTH}
-                disabled={disabled}
+                disabled={busy}
                 placeholder="예) {username} 다음 화 올라왔어요!"
                 onChange={(e) => {
                   update(i, e.target.value);
@@ -169,7 +199,7 @@ export function TemplateEditor({
                 size="icon-sm"
                 title="이 문구 지우기"
                 aria-label={`답글 문구 ${i + 1} 지우기`}
-                disabled={disabled || value.length <= 1}
+                disabled={busy || value.length <= 1}
                 onClick={() => onChange(value.filter((_, j) => j !== i))}
               >
                 <Trash2 />
@@ -180,7 +210,7 @@ export function TemplateEditor({
                 <button
                   key={v.key}
                   type="button"
-                  disabled={disabled}
+                  disabled={busy}
                   onClick={() => insert(i, v.key)}
                   className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition hover:border-primary/40 hover:text-primary disabled:opacity-50"
                 >
@@ -202,12 +232,12 @@ export function TemplateEditor({
         <Button
           variant="outline"
           size="sm"
-          disabled={disabled || value.length >= TEMPLATE_MAX_COUNT}
+          disabled={busy || value.length >= TEMPLATE_MAX_COUNT}
           onClick={() => onChange([...value, ""])}
         >
           <Plus /> 문구 추가
         </Button>
-        <Button variant="ghost" size="sm" disabled={disabled} onClick={() => onChange(DEFAULT_TEMPLATES)}>
+        <Button variant="ghost" size="sm" disabled={busy} onClick={() => onChange(DEFAULT_TEMPLATES)}>
           <RotateCcw /> 기본 문구로
         </Button>
       </div>

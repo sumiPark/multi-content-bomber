@@ -17,6 +17,14 @@ export const metadata = {
 const TASK_LIMIT = 500;
 const HISTORY_LIMIT = 30;
 
+// 페이지를 열면 먼저 보여줄 계정 — 목록 맨 위 + 기본 선택 (2026-10-13 사용자 요청).
+// 계정 이름(display_name)으로 찾는다. 없으면 첫 번째 연결 계정이 기본.
+const DEFAULT_ACCOUNT_NAME = "joongdi";
+
+function isDefaultAccount(name: string | null): boolean {
+  return name?.toLowerCase() === DEFAULT_ACCOUNT_NAME;
+}
+
 // 1분 이상 뒤로 미뤄진 발송인지(하루 상한·호출 한도). 서버 렌더 시점 기준.
 function isFuture(iso: string): boolean {
   return new Date(iso).getTime() > Date.now() + 60_000;
@@ -97,10 +105,16 @@ export default async function Page({ searchParams }: PageProps) {
       seriesCount: summary.get(a.id)?.seriesCount ?? 0,
       replyOnCount: summary.get(a.id)?.replyOnCount ?? 0,
     }))
-    .sort((x, y) => Number(y.isActive) - Number(x.isActive));
+    // 기본 계정을 맨 위로, 그다음 쓸 수 있는 계정, 재연결이 필요한 계정은 뒤로.
+    .sort(
+      (x, y) =>
+        Number(isDefaultAccount(y.name)) - Number(isDefaultAccount(x.name)) ||
+        Number(y.isActive) - Number(x.isActive),
+    );
 
   const selected =
     accounts.find((a) => a.id === params.account) ??
+    accounts.find((a) => isDefaultAccount(a.name)) ??
     accounts.find((a) => a.isActive) ??
     accounts[0] ??
     null;

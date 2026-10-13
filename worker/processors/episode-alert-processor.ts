@@ -33,10 +33,11 @@ import type { Database } from "@/types/database";
 type Service = ReturnType<typeof createServiceClient>;
 type TaskRow = Database["public"]["Tables"]["episode_alert_tasks"]["Row"];
 
-// 답글 사이 간격. 같은 문구를 짧은 간격으로 대량 등록하면 인스타가 스팸으로 보고 활동을
-// 제한할 수 있다(공개 기준 없음). 무작위로 띄워 사람이 다는 속도에 가깝게.
-const SEND_INTERVAL_MIN_MS = 10_000;
-const SEND_INTERVAL_MAX_MS = 20_000;
+// 답글 사이 간격. 짧은 시간에 몰아서 달면 인스타가 스팸으로 보고 댓글 활동을 제한한다.
+// Meta가 공개한 기준은 없고, 실무 관찰치는 시간당 30~60개·하루 150~200개(2026-10 조사).
+// 1~2분 무작위면 평균 시간당 40개 — 관찰치 가운데에 두고, 간격도 일정하지 않게.
+const SEND_INTERVAL_MIN_MS = 60_000;
+const SEND_INTERVAL_MAX_MS = 120_000;
 // 한 번에 DB에서 꺼내 보낼 대상 수.
 const SEND_BATCH = 20;
 // 댓글 단위 실패가 연달아 이만큼 나면 작업을 멈춘다 (문구/권한 문제일 가능성).

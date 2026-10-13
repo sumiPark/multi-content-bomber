@@ -10,6 +10,7 @@ import {
   EpisodeAlertError,
   getInstagramAuth,
 } from "@/lib/episode-alerts/server";
+import { generateReplyTemplates } from "@/lib/ai/reply-template-generator";
 import { validateTemplates } from "@/lib/episode-alerts/templates";
 import { triggerEpisodeAlertRun } from "@/lib/github-dispatch";
 import {
@@ -321,6 +322,37 @@ export async function updateSeriesTemplatesAction(input: {
 
   revalidate();
   return { ok: true };
+}
+
+// 답글 문구 AI 생성 — 문구 수정 화면의 "AI로 새로 만들기". 누를 때마다 새 묶음.
+// 저장은 하지 않는다(편집 중인 칸에만 채우고, 사람이 "저장"을 눌러야 반영).
+export async function generateReplyTemplatesAction(input: {
+  seriesName: string;
+  current: string[];
+}): Promise<ActionResult<{ templates: string[] }>> {
+  const parsed = z
+    .object({
+      seriesName: z.string().max(60),
+      current: z.array(z.string().max(500)).max(20),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+
+  const auth = await authorize(true);
+  if ("error" in auth) return { ok: false, error: auth.error };
+
+  try {
+    const templates = await generateReplyTemplates(parsed.data);
+    return { ok: true, templates };
+  } catch (err) {
+    console.error("[episode-alerts] 답글 문구 AI 생성 실패:", err);
+    return {
+      ok: false,
+      error: err instanceof Error && err.message.includes("눌러주세요")
+        ? err.message
+        : "AI 문구를 만들지 못했어요. 잠시 뒤 다시 눌러주세요.",
+    };
+  }
 }
 
 export async function renameSeriesAction(input: {

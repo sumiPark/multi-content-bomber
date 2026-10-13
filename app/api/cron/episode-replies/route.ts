@@ -6,7 +6,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 // 시리즈 댓글 자동화 — 새 댓글 확인 (0020).
 // Supabase pg_cron이 5분마다 POST로 부른다(할 일이 있을 때만). 비밀값은 마이그레이션이 Vault에
 // 만들어 둔 것으로, pg_cron이 헤더에 싣고 여기서 RPC로 대조한다(Vercel 환경변수 불필요).
-// 실제 답글 발송은 하지 않는다 — 10~20초 간격 발송은 60초 제한에 안 맞아서, 보낼 게 생기면
+// 실제 답글 발송은 하지 않는다 — 1~2분 간격 발송은 60초 제한에 안 맞아서, 보낼 게 생기면
 // GitHub 답글 워커만 깨운다.
 
 export const maxDuration = 60;

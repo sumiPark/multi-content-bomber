@@ -16,8 +16,9 @@ export interface AlertSettings {
   isDefault: boolean;
 }
 
+// 하루 기본 150개 — 실무 관찰치(하루 150~200개)의 안전한 쪽 끝. 더 올리면 화면이 경고한다.
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
-  dailyLimit: 200,
+  dailyLimit: 150,
   isDefault: true,
 };
 
