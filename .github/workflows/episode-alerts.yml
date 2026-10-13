@@ -1,0 +1,49 @@
+name: episode-alerts
+
+# 다음 화 알림 워커(worker/process-alerts.ts) — 직전 화 댓글 수집 + 대댓글 발송.
+# 발행 워크플로(publish.yml)와 분리: 답글은 10~20초 간격으로 보내 run이 길어서,
+# 같은 concurrency 그룹이면 그동안 즉시 발행이 줄을 선다.
+on:
+  # 발행 run이 끝날 때마다 — 발행 워커가 "다음 화" 발행 성공 시 만든 작업을 바로 수집.
+  # (publish 30분 cron에도 따라 돌아서, 하루 상한으로 미뤄둔 작업도 이어서 처리된다.)
+  workflow_run:
+    workflows: [publish]
+    types: [completed]
+  # 즉시 실행 — 사용자가 "보내기"/"다시 시도"를 누름, 또는 이전 run이 시간 예산에 걸림.
+  repository_dispatch:
+    types: [episode-alerts]
+  # 수동 실행(디버깅용).
+  workflow_dispatch: {}
+
+# 두 run이 겹치지 않게 직렬화. claim RPC의 SKIP LOCKED가 중복을 막지만 한 번 더 안전하게.
+concurrency:
+  group: episode-alerts-worker
+  cancel-in-progress: false
+
+# 남은 작업이 있을 때 워커가 GITHUB_TOKEN으로 repository_dispatch를 보내 다음 run을 깨운다.
+# (repository_dispatch는 GITHUB_TOKEN으로 만든 이벤트도 새 run을 띄우는 예외 이벤트)
+permissions:
+  contents: write
+
+jobs:
+  process-alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 22 필수 — @supabase/realtime-js가 전역 WebSocket을 요구한다.
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Process episode alerts
+        run: npm run worker:alerts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 토큰 AES-256-GCM 복호화 키 (Vercel과 반드시 같은 값이어야 함).
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          # 다음 run 깨우기용 — 별도 PAT 없이 기본 토큰을 쓴다.
+          GITHUB_DISPATCH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}

@@ -6,6 +6,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import {
   Archive,
   BarChart3,
+  BellRing,
   CalendarClock,
   Link2,
   LayoutDashboard,
@@ -20,7 +21,7 @@ import {
 import { signOut } from "@/app/(auth)/actions";
 import { cn } from "@/lib/utils";
 
-type BadgeKind = "count" | "soon";
+type BadgeKind = "count" | "soon" | "alerts";
 
 interface NavItem {
   href: string;
@@ -58,6 +59,12 @@ const NAV_GROUPS: NavGroup[] = [
     label: "자동화",
     items: [
       {
+        href: "/episode-alerts",
+        label: "다음 화 알림",
+        icon: BellRing,
+        badgeKind: "alerts",
+      },
+      {
         href: "/auto-reply",
         label: "DM 자동 응답",
         icon: MessageSquareReply,
@@ -88,12 +95,15 @@ function isActive(pathname: string, href: string): boolean {
 interface SidebarShellProps {
   userEmail: string | null;
   failedJobCount: number;
+  // 다음 화 알림 "확인 대기" 건수.
+  alertWaitingCount: number;
   children: React.ReactNode;
 }
 
 export function SidebarShell({
   userEmail,
   failedJobCount,
+  alertWaitingCount,
   children,
 }: SidebarShellProps) {
   const pathname = usePathname();
@@ -113,6 +123,17 @@ export function SidebarShell({
           className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold leading-none text-destructive-foreground"
         >
           {display}
+        </span>
+      );
+    }
+    if (item.badgeKind === "alerts") {
+      if (alertWaitingCount <= 0) return null;
+      return (
+        <span
+          aria-label={`확인 대기 ${alertWaitingCount}건`}
+          className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+        >
+          {alertWaitingCount > 99 ? "99+" : alertWaitingCount}
         </span>
       );
     }

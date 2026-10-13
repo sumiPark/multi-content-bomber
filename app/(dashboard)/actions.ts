@@ -55,6 +55,8 @@ const createJobsInputSchema = z.object({
   contentId: z.string().uuid(),
   accountIds: z.array(z.string().uuid()).min(1),
   scheduledFor: z.string().nullable(),
+  // 다음 화 알림(0017) — 계정 id → 이 발행을 다음 화로 올릴 시리즈 id (인스타 계정만).
+  seriesByAccount: z.record(z.string().uuid(), z.string().uuid()).optional(),
 });
 
 const createBlankInputSchema = z.object({
@@ -603,6 +605,24 @@ export async function createPublishJobsAction(
     };
   }
 
+  // 시리즈는 그 계정의 것이어야 한다(시리즈는 계정 1개에 속함). 아니면 조용히 무시하지 않고
+  // 막는다 — 다른 계정 시리즈 댓글에 알림이 가는 사고를 피하려고.
+  const seriesByAccount = parsed.data.seriesByAccount ?? {};
+  const seriesIds = Array.from(new Set(Object.values(seriesByAccount)));
+  if (seriesIds.length > 0) {
+    const { data: seriesRows } = await supabase
+      .from("series")
+      .select("id, social_account_id")
+      .in("id", seriesIds)
+      .is("deleted_at", null);
+    const ownerById = new Map((seriesRows ?? []).map((s) => [s.id, s.social_account_id]));
+    for (const [accountId, seriesId] of Object.entries(seriesByAccount)) {
+      if (ownerById.get(seriesId) !== accountId) {
+        return { ok: false, error: "선택한 시리즈를 찾을 수 없어요. 새로고침 후 다시 골라주세요." };
+      }
+    }
+  }
+
   const mediaCount = content.media_urls.length;
   const jobs = targets.map((a) => ({
     content_id: parsed.data.contentId,
@@ -614,6 +634,10 @@ export async function createPublishJobsAction(
     ),
     scheduled_for: parsed.data.scheduledFor,
     is_ai_generated: true,
+    // 시리즈를 고른 경우에만 키를 넣는다 — 0017 적용 전 DB에서도 일반 발행은 그대로 되게.
+    ...(a.platform === "INSTAGRAM" && seriesByAccount[a.id]
+      ? { series_id: seriesByAccount[a.id] }
+      : {}),
   }));
 
   const { error } = await supabase.from("publish_jobs").insert(jobs);

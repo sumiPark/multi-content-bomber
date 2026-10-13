@@ -46,7 +46,7 @@ export default async function UploadPage() {
 
   // 토큰 만료(is_active=false) 계정도 목록에 남겨 마법사가 "비활성"으로 회색 표시한다
   // (선택은 불가). 연결 해제(0016)한 계정만 뺀다.
-  const [accountsRes, presetsRes, groupsRes] = await Promise.all([
+  const [accountsRes, presetsRes, groupsRes, seriesRes] = await Promise.all([
     supabase
       .from("social_accounts")
       .select(
@@ -63,7 +63,21 @@ export default async function UploadPage() {
       .from("account_groups")
       .select("id, name, color")
       .order("created_at", { ascending: true }),
+    // 다음 화 알림(0017) — 마지막 단계의 "다음 화로 올리기" 선택지. 인스타 계정별 시리즈.
+    supabase
+      .from("series")
+      .select("id, name, social_account_id, series_episodes(episode_no)")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true }),
   ]);
+
+  const seriesOptions = (seriesRes.data ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    socialAccountId: s.social_account_id,
+    nextEpisodeNo:
+      Math.max(0, ...s.series_episodes.map((e) => e.episode_no)) + 1,
+  }));
 
   return (
     <main className="container mx-auto max-w-5xl px-6 py-10 space-y-6">
@@ -90,6 +104,7 @@ export default async function UploadPage() {
         socialAccounts={accountsRes.data ?? []}
         accountGroups={groupsRes.data ?? []}
         presets={presetsRes.data ?? []}
+        seriesOptions={seriesOptions}
       />
     </main>
   );

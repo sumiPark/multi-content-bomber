@@ -83,12 +83,21 @@ interface PresetSummary {
   description: string | null;
 }
 
+// 다음 화 알림(0017) — 인스타 계정의 시리즈. 고르면 발행 성공 시 다음 회차로 기록된다.
+interface SeriesOption {
+  id: string;
+  name: string;
+  socialAccountId: string;
+  nextEpisodeNo: number;
+}
+
 interface UploadWizardProps {
   organizationId: string;
   userId: string;
   socialAccounts: SocialAccountSummary[];
   accountGroups: AccountGroupSummary[];
   presets: PresetSummary[];
+  seriesOptions?: SeriesOption[];
 }
 
 type MediaType = "IMAGE" | "VIDEO";
@@ -101,6 +110,7 @@ export function UploadWizard({
   socialAccounts = [],
   accountGroups = [],
   presets = [],
+  seriesOptions = [],
 }: UploadWizardProps) {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -130,6 +140,8 @@ export function UploadWizard({
   const [captionMode, setCaptionMode] = useState<CaptionMode>("ai");
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("now");
   const [scheduledAt, setScheduledAt] = useState("");
+  // 계정 id → "다음 화로 올리기"로 고른 시리즈 id. 빈 문자열이면 시리즈 아님.
+  const [seriesChoice, setSeriesChoice] = useState<Record<string, string>>({});
   const [completing, setCompleting] = useState(false);
   // '완료' 재진입 잠금 — state 반영(다음 렌더)보다 먼저 걸린다. 성공하면 페이지를
   // 벗어날 때까지 잠긴 채로 둔다(실패 시에만 해제).
@@ -156,6 +168,18 @@ export function UploadWizard({
   }, [selectedAccounts]);
 
   const includesTiktok = selectedPlatforms.includes("TIKTOK");
+
+  const seriesRows = useMemo(
+    () =>
+      selectedAccounts
+        .filter((a) => a.platform === "INSTAGRAM")
+        .map((account) => ({
+          account,
+          options: seriesOptions.filter((o) => o.socialAccountId === account.id),
+        }))
+        .filter((row) => row.options.length > 0),
+    [selectedAccounts, seriesOptions],
+  );
 
   // TikTok이 포함되면 영상 모드 강제 (TikTok Content Posting API는 영상만 지원)
   useEffect(() => {
@@ -466,10 +490,16 @@ export function UploadWizard({
       scheduleMode === "scheduled" && scheduledAt
         ? new Date(scheduledAt).toISOString()
         : null;
+    const seriesByAccount: Record<string, string> = {};
+    for (const row of seriesRows) {
+      const chosen = seriesChoice[row.account.id];
+      if (chosen) seriesByAccount[row.account.id] = chosen;
+    }
     const result = await createPublishJobsAction({
       contentId,
       accountIds: selectedAccountIds,
       scheduledFor,
+      seriesByAccount,
     });
     if (!result.ok) {
       completingRef.current = false;
@@ -606,6 +636,11 @@ export function UploadWizard({
             scheduleMode={scheduleMode}
             scheduledAt={scheduledAt}
             selectedAccountCount={selectedAccountIds.length}
+            seriesRows={seriesRows}
+            seriesChoice={seriesChoice}
+            onChangeSeries={(accountId, seriesId) =>
+              setSeriesChoice((prev) => ({ ...prev, [accountId]: seriesId }))
+            }
             completing={completing}
             onChangeMode={setScheduleMode}
             onChangeScheduledAt={setScheduledAt}
@@ -1378,6 +1413,9 @@ function Step5Schedule({
   scheduleMode,
   scheduledAt,
   selectedAccountCount,
+  seriesRows,
+  seriesChoice,
+  onChangeSeries,
   completing,
   onChangeMode,
   onChangeScheduledAt,
@@ -1387,6 +1425,9 @@ function Step5Schedule({
   scheduleMode: ScheduleMode;
   scheduledAt: string;
   selectedAccountCount: number;
+  seriesRows: { account: SocialAccountSummary; options: SeriesOption[] }[];
+  seriesChoice: Record<string, string>;
+  onChangeSeries: (accountId: string, seriesId: string) => void;
   completing: boolean;
   onChangeMode: (m: ScheduleMode) => void;
   onChangeScheduledAt: (v: string) => void;
@@ -1424,6 +1465,42 @@ function Step5Schedule({
           />
         )}
       </div>
+
+      {seriesRows.length > 0 && (
+        <div className="space-y-3 rounded-md border p-4">
+          <div>
+            <Label>다음 화로 올리기 (선택)</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              시리즈의 다음 화라면 골라주세요. 올라간 뒤 이전 화에 댓글 단 사람들에게 알림을 보낼 수
+              있어요.
+            </p>
+          </div>
+          <ul className="space-y-2">
+            {seriesRows.map(({ account, options }) => (
+              <li key={account.id} className="flex flex-wrap items-center gap-2">
+                <PlatformIcon platform="INSTAGRAM" size={16} />
+                <span className="min-w-0 truncate text-sm">
+                  @{account.display_name ?? "(이름 없음)"}
+                </span>
+                <select
+                  id={`series-choice-${account.id}`}
+                  aria-label={`@${account.display_name ?? ""} 시리즈`}
+                  value={seriesChoice[account.id] ?? ""}
+                  onChange={(e) => onChangeSeries(account.id, e.target.value)}
+                  className="ml-auto max-w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                >
+                  <option value="">시리즈 아님</option>
+                  {options.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name} · {o.nextEpisodeNo}화
+                    </option>
+                  ))}
+                </select>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="rounded-md border bg-muted/30 p-4 text-sm">
         <div className="flex items-center justify-between gap-2">

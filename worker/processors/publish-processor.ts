@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { decryptToken, encryptToken } from "@/lib/crypto";
+import { recordPublishedEpisode } from "@/lib/episode-alerts/server";
 import {
   getAdapter,
   MediaError,
@@ -32,6 +33,8 @@ interface PublishJobRow {
   status_history: Json | null;
   // 0015 — 어댑터가 재시도 때 이어받는 상태. 마이그레이션 전 DB엔 컬럼이 없어 optional.
   resume_state?: Json | null;
+  // 0017 — 업로드 마법사에서 "다음 화로 올리기"를 고른 시리즈.
+  series_id?: string | null;
 }
 
 interface AccountRow {
@@ -172,6 +175,10 @@ export async function processClaimedPublishJob(
       await saveResumeState(supabase, publishJobId, null);
     }
 
+    if (row.series_id) {
+      await recordSeriesEpisode(supabase, row, result);
+    }
+
     return { ok: true, ...result };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -212,6 +219,51 @@ export async function processClaimedPublishJob(
     // status는 위에서 이미 RETRYING/FAILED로 기록됨. 호출측(process-due)이 job별로
     // catch해 로그만 남긴다 — 재시도는 RETRYING row를 다음 sweep이 다시 claim.
     throw err;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 다음 화 알림 (0017) — 시리즈 회차로 기록하고 직전 화 댓글 알림 작업을 만든다.
+// 게시는 이미 끝났으므로 여기서 실패해도 발행 결과(SUCCESS)는 그대로 둔다. 만들어진
+// 작업은 이 run이 끝나면 episode-alerts 워크플로(workflow_run)가 이어서 처리한다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function recordSeriesEpisode(
+  supabase: ReturnType<typeof createServiceClient>,
+  row: PublishJobRow,
+  result: { platformPostId: string; platformPostUrl: string },
+) {
+  if (!row.series_id) return;
+  try {
+    const { data: content } = await supabase
+      .from("contents")
+      .select("internal_title, ai_captions, media_type")
+      .eq("id", row.content_id)
+      .maybeSingle();
+    const igCaption =
+      (content?.ai_captions as { instagram?: { caption?: string } } | null)
+        ?.instagram?.caption ?? null;
+
+    const outcome = await recordPublishedEpisode(supabase, {
+      seriesId: row.series_id,
+      socialAccountId: row.social_account_id,
+      igMediaId: result.platformPostId,
+      permalink: result.platformPostUrl,
+      caption: content?.internal_title?.trim() || igCaption,
+      mediaType: content?.media_type ?? null,
+      contentId: row.content_id,
+      publishJobId: row.id,
+    });
+    console.log(
+      `[publish-processor] 시리즈 회차 기록 (job=${row.id}) → 알림 ${
+        outcome?.created ? "작업 생성" : (outcome?.reason ?? "건너뜀")
+      }`,
+    );
+  } catch (err) {
+    console.error(
+      `[publish-processor] 시리즈 회차 기록 실패 (job=${row.id}):`,
+      err instanceof Error ? err.message : err,
+    );
   }
 }
 

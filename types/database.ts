@@ -293,6 +293,7 @@ export type Database = {
           post_type: Database["public"]["Enums"]["post_type"]
           resume_state: Json | null
           scheduled_for: string | null
+          series_id: string | null
           social_account_id: string
           status: Database["public"]["Enums"]["publish_status"]
           status_history: Json
@@ -314,6 +315,7 @@ export type Database = {
           post_type: Database["public"]["Enums"]["post_type"]
           resume_state?: Json | null
           scheduled_for?: string | null
+          series_id?: string | null
           social_account_id: string
           status?: Database["public"]["Enums"]["publish_status"]
           status_history?: Json
@@ -335,6 +337,7 @@ export type Database = {
           post_type?: Database["public"]["Enums"]["post_type"]
           resume_state?: Json | null
           scheduled_for?: string | null
+          series_id?: string | null
           social_account_id?: string
           status?: Database["public"]["Enums"]["publish_status"]
           status_history?: Json
@@ -353,6 +356,301 @@ export type Database = {
             columns: ["social_account_id"]
             isOneToOne: false
             referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      episode_alert_replies: {
+        Row: {
+          comment_text: string | null
+          commented_at: string | null
+          commenter_ig_id: string | null
+          commenter_username: string | null
+          created_at: string
+          error: string | null
+          id: string
+          ig_comment_id: string
+          reply_ig_id: string | null
+          reply_text: string | null
+          sent_at: string | null
+          skip_reason: string | null
+          status: "PENDING" | "SENT" | "SKIPPED" | "EXCLUDED" | "FAILED"
+          task_id: string
+        }
+        Insert: {
+          comment_text?: string | null
+          commented_at?: string | null
+          commenter_ig_id?: string | null
+          commenter_username?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          ig_comment_id: string
+          reply_ig_id?: string | null
+          reply_text?: string | null
+          sent_at?: string | null
+          skip_reason?: string | null
+          status?: "PENDING" | "SENT" | "SKIPPED" | "EXCLUDED" | "FAILED"
+          task_id: string
+        }
+        Update: {
+          comment_text?: string | null
+          commented_at?: string | null
+          commenter_ig_id?: string | null
+          commenter_username?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          ig_comment_id?: string
+          reply_ig_id?: string | null
+          reply_text?: string | null
+          sent_at?: string | null
+          skip_reason?: string | null
+          status?: "PENDING" | "SENT" | "SKIPPED" | "EXCLUDED" | "FAILED"
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "episode_alert_replies_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "episode_alert_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      episode_alert_settings: {
+        Row: {
+          daily_limit: number
+          enabled: boolean
+          mode: "APPROVAL" | "AUTO"
+          organization_id: string
+          social_account_id: string
+          templates: string[]
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          daily_limit?: number
+          enabled?: boolean
+          mode?: "APPROVAL" | "AUTO"
+          organization_id: string
+          social_account_id: string
+          templates?: string[]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          daily_limit?: number
+          enabled?: boolean
+          mode?: "APPROVAL" | "AUTO"
+          organization_id?: string
+          social_account_id?: string
+          templates?: string[]
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "episode_alert_settings_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: true
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      episode_alert_tasks: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          created_by: string | null
+          error_count: number
+          id: string
+          last_error: string | null
+          locked_at: string | null
+          mode: "APPROVAL" | "AUTO"
+          organization_id: string
+          scheduled_for: string
+          series_id: string
+          social_account_id: string
+          source_episode_id: string
+          status: 
+            | "COLLECTING"
+            | "AWAITING_APPROVAL"
+            | "SENDING"
+            | "DONE"
+            | "FAILED"
+            | "CANCELLED"
+          target_episode_id: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          error_count?: number
+          id?: string
+          last_error?: string | null
+          locked_at?: string | null
+          mode: "APPROVAL" | "AUTO"
+          organization_id: string
+          scheduled_for?: string
+          series_id: string
+          social_account_id: string
+          source_episode_id: string
+          status?: 
+            | "COLLECTING"
+            | "AWAITING_APPROVAL"
+            | "SENDING"
+            | "DONE"
+            | "FAILED"
+            | "CANCELLED"
+          target_episode_id: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          error_count?: number
+          id?: string
+          last_error?: string | null
+          locked_at?: string | null
+          mode?: "APPROVAL" | "AUTO"
+          organization_id?: string
+          scheduled_for?: string
+          series_id?: string
+          social_account_id?: string
+          source_episode_id?: string
+          status?: 
+            | "COLLECTING"
+            | "AWAITING_APPROVAL"
+            | "SENDING"
+            | "DONE"
+            | "FAILED"
+            | "CANCELLED"
+          target_episode_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "episode_alert_tasks_series_id_fkey"
+            columns: ["series_id"]
+            isOneToOne: false
+            referencedRelation: "series"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "episode_alert_tasks_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "episode_alert_tasks_source_episode_id_fkey"
+            columns: ["source_episode_id"]
+            isOneToOne: false
+            referencedRelation: "series_episodes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "episode_alert_tasks_target_episode_id_fkey"
+            columns: ["target_episode_id"]
+            isOneToOne: true
+            referencedRelation: "series_episodes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      series: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          id: string
+          name: string
+          organization_id: string
+          social_account_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          social_account_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          name?: string
+          organization_id?: string
+          social_account_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "series_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      series_episodes: {
+        Row: {
+          caption: string | null
+          content_id: string | null
+          created_at: string
+          episode_no: number
+          id: string
+          ig_media_id: string
+          media_type: string | null
+          permalink: string | null
+          posted_at: string | null
+          publish_job_id: string | null
+          series_id: string
+        }
+        Insert: {
+          caption?: string | null
+          content_id?: string | null
+          created_at?: string
+          episode_no: number
+          id?: string
+          ig_media_id: string
+          media_type?: string | null
+          permalink?: string | null
+          posted_at?: string | null
+          publish_job_id?: string | null
+          series_id: string
+        }
+        Update: {
+          caption?: string | null
+          content_id?: string | null
+          created_at?: string
+          episode_no?: number
+          id?: string
+          ig_media_id?: string
+          media_type?: string | null
+          permalink?: string | null
+          posted_at?: string | null
+          publish_job_id?: string | null
+          series_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "series_episodes_series_id_fkey"
+            columns: ["series_id"]
+            isOneToOne: false
+            referencedRelation: "series"
             referencedColumns: ["id"]
           },
         ]
@@ -435,10 +733,34 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      episode_alert_task_stats: {
+        Row: {
+          excluded: number | null
+          failed: number | null
+          pending: number | null
+          sent: number | null
+          skipped: number | null
+          task_id: string | null
+          total: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       accept_invitation: { Args: { p_token: string }; Returns: string }
+      add_series_episode: {
+        Args: {
+          p_caption?: string | null
+          p_content_id?: string | null
+          p_ig_media_id: string
+          p_media_type?: string | null
+          p_permalink?: string | null
+          p_posted_at?: string | null
+          p_publish_job_id?: string | null
+          p_series_id: string
+        }
+        Returns: Database["public"]["Tables"]["series_episodes"]["Row"]
+      }
       claim_due_publish_jobs: {
         Args: {
           p_limit?: number
@@ -446,6 +768,10 @@ export type Database = {
           p_stale_minutes?: number
         }
         Returns: Database["public"]["Tables"]["publish_jobs"]["Row"][]
+      }
+      claim_episode_alert_tasks: {
+        Args: { p_limit?: number; p_stale_minutes?: number }
+        Returns: Database["public"]["Tables"]["episode_alert_tasks"]["Row"][]
       }
       create_invitation: {
         Args: {

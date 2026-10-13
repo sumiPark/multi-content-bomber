@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>다음 화 알림 답글</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@600;700&display=swap">
+<style>
+/* 레이아웃: 한 줄 문서 칼럼(최대 780px). 위에 결론, 아래로 예시 → 흐름 → 준비물 → API → 제약 → 일정 → 결정 순서 */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --ink: #1a1e26;
+  --muted: #5a6271;
+  --line: #dde1e8;
+  --accent: #b8355a;
+  --accent-soft: #f9e8ed;
+  --ok: #2b7a57;
+  --ok-soft: #e4f3ec;
+  --warn: #9a5c0e;
+  --warn-soft: #fbf0e0;
+  --code-bg: #eceff4;
+  --font-display: "Noto Serif KR", "Apple SD Gothic Neo", "Malgun Gothic", serif;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b;
+    --surface: #1a1e26;
+    --ink: #e6e9ef;
+    --muted: #9aa3b2;
+    --line: #2b313c;
+    --accent: #f07c98;
+    --accent-soft: #3a2029;
+    --ok: #63c99c;
+    --ok-soft: #1c3229;
+    --warn: #e5a955;
+    --warn-soft: #382a17;
+    --code-bg: #232833;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b;
+  --surface: #1a1e26;
+  --ink: #e6e9ef;
+  --muted: #9aa3b2;
+  --line: #2b313c;
+  --accent: #f07c98;
+  --accent-soft: #3a2029;
+  --ok: #63c99c;
+  --ok-soft: #1c3229;
+  --warn: #e5a955;
+  --warn-soft: #382a17;
+  --code-bg: #232833;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.7;
+  padding-inline: 20px;
+  padding-block: 40px 72px;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.page { max-width: 780px; margin-inline: auto; display: grid; gap: 56px; }
+
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(30px, 6vw, 42px); line-height: 1.25; letter-spacing: -0.01em; }
+h2 { font-family: var(--font-display); font-weight: 700; font-size: 23px; line-height: 1.35; }
+h3 { font-size: 16px; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+code { font-family: var(--font-mono); font-size: 0.86em; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+strong { font-weight: 600; }
+
+.eyebrow { font-size: 12px; letter-spacing: 0.08em; color: var(--muted); font-weight: 500; }
+.lede { font-size: 17px; color: var(--muted); max-width: 62ch; }
+header { display: grid; gap: 14px; }
+
+section { display: grid; gap: 18px; min-width: 0; }
+.section-head { display: grid; gap: 6px; }
+.section-head p { color: var(--muted); max-width: 62ch; }
+
+/* 결론 박스 */
+.verdict { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 24px; display: grid; gap: 16px; }
+.verdict-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.accent { background: var(--accent-soft); color: var(--accent); }
+.verdict-title h2 { font-size: 21px; }
+.conditions { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.conditions li { display: grid; grid-template-columns: 26px 1fr; gap: 10px; }
+.conditions .n { font-family: var(--font-mono); font-size: 13px; color: var(--accent); font-weight: 500; padding-top: 2px; }
+.conditions li > div { min-width: 0; }
+.estimate { border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 14px; color: var(--muted); }
+.estimate b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 예시 댓글 스레드 */
+.thread { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.thread-post { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.thumb { width: 44px; height: 44px; border-radius: 6px; background: linear-gradient(160deg, var(--accent-soft), var(--code-bg)); flex: none; display: grid; place-items: center; font-family: var(--font-display); font-weight: 700; color: var(--accent); font-size: 15px; }
+.thread-post .meta { display: grid; min-width: 0; }
+.thread-post .meta span { font-size: 12px; color: var(--muted); }
+.comments { list-style: none; margin: 0; padding: 8px 16px 14px; display: grid; gap: 4px; }
+.c { display: grid; grid-template-columns: 32px 1fr; gap: 10px; padding-block: 8px; }
+.c.reply { margin-left: 42px; grid-template-columns: 26px 1fr; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--code-bg); color: var(--muted); display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+.c.reply .avatar { width: 26px; height: 26px; font-size: 11px; background: var(--accent-soft); color: var(--accent); }
+.c .body { min-width: 0; font-size: 14px; line-height: 1.55; }
+.c .who { font-weight: 600; margin-right: 6px; }
+.c .mention { color: var(--accent); }
+.c .sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 3px; font-size: 12px; color: var(--muted); }
+.tag { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; }
+.tag.auto { background: var(--accent-soft); color: var(--accent); }
+.tag.skip { background: var(--code-bg); color: var(--muted); }
+.caption { font-size: 12px; color: var(--muted); }
+
+/* 동작 순서 */
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; counter-reset: step; }
+.steps li { counter-increment: step; display: grid; grid-template-columns: 34px 1fr; gap: 14px; position: relative; padding-bottom: 18px; }
+.steps li::before { content: counter(step); width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--accent); color: var(--accent); display: grid; place-items: center; font-family: var(--font-mono); font-size: 13px; font-weight: 500; background: var(--bg); position: relative; z-index: 1; }
+.steps li:not(:last-child)::after { content: ""; position: absolute; left: 13.5px; top: 30px; bottom: 0; width: 1.5px; background: var(--line); }
+.steps li > div { min-width: 0; padding-top: 2px; display: grid; gap: 2px; }
+.steps .where { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+
+/* 준비물 그룹 */
+.groups { display: grid; gap: 28px; }
+.group { display: grid; gap: 12px; min-width: 0; }
+.group-label { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.group-label .kind { font-size: 12px; letter-spacing: 0.08em; color: var(--accent); font-weight: 600; }
+.bullets { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.bullets li { padding-left: 2px; }
+.bullets li::marker { color: var(--muted); }
+.note { background: var(--warn-soft); color: var(--ink); border-radius: 8px; padding: 12px 14px; font-size: 14px; }
+.note b { color: var(--warn); }
+
+/* 표 */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 1.55; }
+th, td { text-align: left; vertical-align: top; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; background: var(--bg); white-space: nowrap; }
+td.k { font-weight: 600; white-space: nowrap; }
+td .mono { font-family: var(--font-mono); font-size: 12.5px; }
+.api td:nth-child(2) { min-width: 260px; }
+.risk td:first-child { min-width: 150px; }
+.risk td:nth-child(2) { min-width: 180px; }
+.risk td:nth-child(3) { min-width: 240px; }
+.data td:nth-child(3) { min-width: 260px; }
+
+/* 일정 */
+.phases { display: grid; gap: 10px; }
+.phase { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+.phase h3 { font-size: 15px; }
+.phase .days { font-family: var(--font-mono); font-size: 13px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.phase p, .phase ul { grid-column: 1 / -1; font-size: 14px; color: var(--muted); }
+.phase ul { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 3px; }
+.phase.optional { background: transparent; border-style: dashed; }
+.phase.parallel { background: var(--accent-soft); border-color: transparent; }
+
+/* 결정 */
+.decisions { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; border-top: 1px solid var(--line); }
+.decisions li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 24px; padding-block: 14px; border-bottom: 1px solid var(--line); }
+.decisions .q { font-weight: 600; }
+.decisions .rec { font-size: 14px; color: var(--muted); }
+.decisions .rec b { color: var(--ok); font-weight: 600; }
+.templates { display: grid; gap: 8px; }
+.render { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; font-size: 14px; }
+.render .tpl { flex: 0 1 auto; min-width: 0; }
+.render .arrow { color: var(--muted); }
+.render .out { min-width: 0; }
+.render .mention { color: var(--accent); }
+.tpl { font-family: var(--font-mono); font-size: 13px; background: var(--code-bg); border-radius: 6px; padding: 8px 12px; overflow-wrap: anywhere; }
+
+footer { border-top: 1px solid var(--line); padding-top: 20px; display: grid; gap: 10px; font-size: 13px; color: var(--muted); }
+footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+
+@media (max-width: 560px) {
+  body { font-size: 14.5px; padding-block: 28px 56px; }
+  .page { gap: 44px; }
+  .verdict { padding: 18px; }
+  .decisions li { grid-template-columns: 1fr; }
+  .c.reply { margin-left: 24px; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <span class="eyebrow">MCB 기능 검토 · 2026년 10월 13일 · 1~4단계 구현 완료</span>
+    <h1>다음 화 알림 답글</h1>
+    <p class="lede">인스타에 시리즈 2화를 올리면, 1화에 댓글을 남긴 사람들에게 “2화 올라왔어요” 대댓글을 자동으로 달아주는 기능입니다. 가능한지, 무엇이 필요한지, 어떤 순서로 만들면 되는지 정리했습니다.</p>
+  </header>
+
+  <section class="verdict" aria-labelledby="verdict-h">
+    <div class="verdict-title">
+      <span class="pill ok">가능</span>
+      <h2 id="verdict-h">만들 수 있습니다. 먼저 정리할 조건이 세 가지 있습니다.</h2>
+    </div>
+    <p>인스타 API는 내 게시물 목록, 게시물의 댓글 조회, 댓글에 대댓글 등록을 모두 지원합니다. 이 기능에 필요한 권한(<code>instagram_business_manage_comments</code>)은 MCB가 이미 계정을 연결할 때 함께 요청하고 있습니다.</p>
+    <ol class="conditions">
+      <li><span class="n">1</span><div><strong>누구 계정에 쓰는지에 따라 검수가 갈립니다.</strong> 우리 팀이 소유·관리하고 앱에 등록한 계정에만 쓰면 Standard Access로 바로 동작합니다. 외부 고객 계정에도 쓰려면 이 기능으로 Meta 앱 검수(Advanced Access)를 받아야 합니다.</div></li>
+      <li><span class="n">2</span><div><strong>MCB가 “이 게시물이 1화, 저 게시물이 2화”라는 걸 알아야 합니다.</strong> 업로드할 때 시리즈와 회차를 지정하는 방식을 권장합니다. 캡션을 AI로 보고 추정하는 방식은 틀렸을 때 엉뚱한 사람에게 답글이 달려서 위험합니다.</div></li>
+      <li><span class="n">3</span><div><strong>인스타 쪽 제약이 있습니다.</strong> 댓글 속 링크는 눌리지 않고, 대댓글은 최상위 댓글에만 달 수 있으며, 같은 문구를 짧은 간격으로 많이 달면 스팸으로 제한될 수 있습니다. 문구를 여러 개 돌려쓰고 등록 속도를 조절해야 합니다.</div></li>
+    </ol>
+    <div class="estimate">
+      <span>진행 상황 <b>1~4단계 구현 완료</b> (마이그레이션 0017 적용 후 배포)</span>
+      <span>외부 계정용 검수 <b>Meta 응답 영업일 5~7일</b></span>
+    </div>
+  </section>
+
+  <section aria-labelledby="example-h">
+    <div class="section-head">
+      <h2 id="example-h">1화 댓글에 이렇게 달립니다</h2>
+      <p>2화가 올라간 직후 1화 게시물의 댓글 화면입니다. 걸러진 댓글에는 답글을 달지 않습니다.</p>
+    </div>
+    <div class="thread" role="figure" aria-label="1화 게시물 댓글 예시">
+      <div class="thread-post">
+        <div class="thumb" aria-hidden="true">1</div>
+        <div class="meta">
+          <strong>[노을 아래서] 1화</strong>
+          <span>릴스 · 댓글 4개 · 2화 발행 직후</span>
+        </div>
+      </div>
+      <ul class="comments">
+        <li class="c">
+          <div class="avatar" aria-hidden="true">MJ</div>
+          <div class="body"><span class="who">minji_daily</span>다음 화 언제 나와요?? 너무 궁금해요<div class="sub"><span>3일 전</span></div></div>
+        </li>
+        <li class="c reply">
+          <div class="avatar" aria-hidden="true">나</div>
+          <div class="body"><span class="who">내 계정</span><span class="mention">@minji_daily</span> 2화 올라왔어요! 프로필에서 바로 보실 수 있어요 🙌<div class="sub"><span>방금</span><span class="tag auto">자동 답글</span></div></div>
+        </li>
+        <li class="c">
+          <div class="avatar" aria-hidden="true">JC</div>
+          <div class="body"><span class="who">jun.cooks</span>ㅋㅋㅋ 마지막 장면 뭐야<div class="sub"><span>2일 전</span></div></div>
+        </li>
+        <li class="c reply">
+          <div class="avatar" aria-hidden="true">나</div>
+          <div class="body"><span class="who">내 계정</span><span class="mention">@jun.cooks</span> 기다리셨죠? 2화 업로드됐어요. 프로필 최신 게시물에서 확인해주세요<div class="sub"><span>방금</span><span class="tag auto">자동 답글 · 다른 문구</span></div></div>
+        </li>
+        <li class="c">
+          <div class="avatar" aria-hidden="true">나</div>
+          <div class="body"><span class="who">내 계정</span>2화는 금요일에 올라가요!<div class="sub"><span>2일 전</span><span class="tag skip">건너뜀 · 내 댓글</span></div></div>
+        </li>
+        <li class="c">
+          <div class="avatar" aria-hidden="true">MJ</div>
+          <div class="body"><span class="who">minji_daily</span>저장해뒀어요<div class="sub"><span>1일 전</span><span class="tag skip">건너뜀 · 이미 알림 받은 사람</span></div></div>
+        </li>
+      </ul>
+    </div>
+    <p class="caption">예시 화면입니다. 계정명과 댓글 내용은 가상입니다.</p>
+  </section>
+
+  <section aria-labelledby="flow-h">
+    <div class="section-head">
+      <h2 id="flow-h">동작 순서</h2>
+      <p>지금 발행 파이프라인(GitHub Actions 워커)에 단계를 덧붙이는 구조입니다. 새 서버는 필요 없습니다.</p>
+    </div>
+    <ol class="steps">
+      <li><div><strong>2화 발행 성공</strong><span>워커가 인스타 게시를 끝내고 결과를 기록하는 시점에 시작합니다.</span><span class="where">worker/processors/publish-processor.ts</span></div></li>
+      <li><div><strong>같은 계정의 1화 게시물 찾기</strong><span>시리즈 회차 정보에서 같은 인스타 계정에 올라간 직전 회차를 찾습니다. 계정이 여러 개면 계정마다 따로 처리합니다.</span></div></li>
+      <li><div><strong>1화 댓글 불러오기</strong><span>한 번에 최대 50개씩, 다음 페이지가 없을 때까지 가져옵니다. 인스타는 최상위 댓글만 돌려줍니다.</span></div></li>
+      <li><div><strong>걸러내기</strong><span>내 계정 댓글, 숨긴 댓글, 이번 회차 알림을 이미 받은 사람을 빼고, 한 사람이 여러 번 댓글을 달았으면 한 번만 남깁니다.</span></div></li>
+      <li><div><strong>미리보기와 승인 (승인 모드일 때)</strong><span>“이 23명에게 답글이 달립니다” 목록을 보여주고, 빼고 싶은 사람을 체크 해제한 뒤 보냅니다.</span></div></li>
+      <li><div><strong>대댓글 등록</strong><span>문구를 돌려쓰며 10~20초 간격으로 하나씩 등록합니다. 한 번 실행에 다 못 끝내면 진행 위치를 저장하고 다음 실행이 이어받습니다.</span></div></li>
+      <li><div><strong>결과 기록</strong><span>보낸 답글, 건너뛴 이유, 실패 사유를 남겨 시리즈 화면에서 확인합니다. 같은 댓글에 두 번 달리지 않게 하는 기준도 이 기록입니다.</span></div></li>
+    </ol>
+  </section>
+
+  <section aria-labelledby="need-h">
+    <div class="section-head">
+      <h2 id="need-h">필요한 것</h2>
+    </div>
+    <div class="groups">
+
+      <div class="group">
+        <div class="group-label"><span class="kind">META 권한</span><h3>권한과 검수</h3></div>
+        <ul class="bullets">
+          <li>필요한 권한은 <code>instagram_business_basic</code>와 <code>instagram_business_manage_comments</code> 두 가지이고, 둘 다 이미 OAuth 요청 목록에 있습니다(<code>lib/platforms/instagram.ts</code>). 연결된 계정 토큰에 실제로 부여됐는지는 1단계에서 직접 호출해 확인합니다.</li>
+          <li>호출 주소는 지금 발행에 쓰는 <code>graph.instagram.com/v23.0</code> 그대로입니다. 새 앱이나 새 로그인 방식은 필요 없습니다.</li>
+        </ul>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>이 기능을 쓸 계정</th><th>필요한 접근 수준</th><th>Meta 검수</th></tr></thead>
+            <tbody>
+              <tr><td>우리 팀이 소유·관리하고 앱 대시보드에 추가한 계정</td><td>Standard Access</td><td><span class="pill ok">필요 없음</span></td></tr>
+              <tr><td>외부 고객이 연결한 계정</td><td>Advanced Access</td><td><span class="pill warn">필요</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note"><b>확인 필요:</b> 기존 검수 신청서(<code>docs/sns-app-review.md</code>)에는 이 권한 사유가 “추후 자동 응답 기능용으로 미리 요청”으로 적혀 있습니다. Meta 앱 대시보드의 App Review 화면에서 현재 상태가 승인인지 확인해주세요. 승인되지 않았는데 외부 계정에 써야 한다면, 이 기능을 시연하는 영상으로 다시 신청해야 합니다.</p>
+      </div>
+
+      <div class="group">
+        <div class="group-label"><span class="kind">데이터</span><h3>Supabase 테이블 5개 (마이그레이션 0017)</h3></div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>테이블</th><th>역할</th><th>주요 컬럼</th></tr></thead>
+            <tbody>
+              <tr><td class="k"><span class="mono">series</span></td><td>시리즈 (인스타 계정 1개에 속함)</td><td>계정, 이름. 삭제는 소프트 삭제라 기록이 남음</td></tr>
+              <tr><td class="k"><span class="mono">series_episodes</span></td><td>회차와 인스타 게시물 연결</td><td>시리즈, 회차 번호, 인스타 게시물 ID, 게시물 주소, MCB 콘텐츠(MCB로 올렸을 때). 회차 번호는 DB가 원자적으로 매김</td></tr>
+              <tr><td class="k"><span class="mono">episode_alert_settings</span></td><td>계정별 설정</td><td>켜기/끄기, 보내는 방식(확인 후/바로), 답글 문구 목록, 하루 최대 답글 수</td></tr>
+              <tr><td class="k"><span class="mono">episode_alert_tasks</span></td><td>알림 작업 (새 회차 1개당 1개)</td><td>직전 회차, 새 회차, 상태(대상 모으는 중/확인 대기/보내는 중/완료/실패/중단), 다음 처리 시각, 워커 잠금</td></tr>
+              <tr><td class="k"><span class="mono">episode_alert_replies</span></td><td>댓글별 결과</td><td>댓글 ID, 댓글 단 사람, 댓글 내용, 결과(보냄/건너뜀/제외/실패), 사유, 등록된 답글. 같은 댓글은 한 번만</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="bullets">
+          <li>업로드 마법사에서 고른 시리즈는 <code>publish_jobs.series_id</code>에 담기고, 발행 성공 시 다음 회차로 기록됩니다.</li>
+          <li>모든 테이블에 조직 범위 RLS를 걸고, 쓰기는 워커와 서버 액션이 service_role로 합니다(<code>publish_jobs</code>와 같은 방식).</li>
+          <li>오늘 바꾼 계정 소프트 해제와 맞춰, 계정 연결을 해제하거나 시리즈를 지워도 보낸 기록은 남습니다.</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <div class="group-label"><span class="kind">화면</span><h3>사용자가 보는 곳</h3></div>
+        <ul class="bullets">
+          <li><strong>자동화 › 다음 화 알림:</strong> 위쪽에서 인스타 계정을 고르면 그 계정의 확인 대기, 시리즈, 보낸 기록, 알림 설정이 한 화면에 나옵니다. 확인 대기 건수는 사이드바와 계정 칩에 뱃지로 보입니다.</li>
+          <li><strong>새 시리즈:</strong> 이름을 적고, 이미 올린 회차가 있으면 게시물 그리드에서 1화부터 순서대로 누르면 끝입니다. 누른 순서가 회차 번호가 됩니다.</li>
+          <li><strong>업로드 마법사:</strong> 마지막 단계에 “다음 화로 올리기”가 생깁니다. 선택한 인스타 계정에 시리즈가 있을 때만 보이고, “노을 아래서 · 3화”처럼 다음 회차 번호를 보여줍니다.</li>
+          <li><strong>다음 화 추가:</strong> MCB 밖에서 올린 회차도 게시물 그리드에서 골라 추가하고, 그 자리에서 이전 화 댓글 알림을 만들 수 있습니다.</li>
+          <li><strong>확인 대기:</strong> 보낼 사람 목록(검색, 체크 해제), 실제로 달릴 답글 미리보기, “N명에게 보내기”.</li>
+        </ul>
+      </div>
+
+      <div class="group">
+        <div class="group-label"><span class="kind">문구</span><h3>답글 문구는 관리자가 등록합니다</h3></div>
+        <ul class="bullets">
+          <li><strong>수정 권한:</strong> ADMIN과 MANAGER만 등록·수정·삭제할 수 있고, STAFF는 보기만 합니다. 계정 관리와 같은 기준입니다.</li>
+          <li><strong>계정별 문구:</strong> 계정의 알림 설정에서 문구를 여러 개 등록합니다. 처음엔 기본 문구 3개가 채워져 있어서 바로 쓸 수 있고, “기본 문구로” 버튼으로 언제든 되돌릴 수 있습니다.</li>
+          <li><strong>변수:</strong> <code>{username}</code>은 댓글 단 사람, <code>{series}</code>는 시리즈 이름, <code>{episode}</code>는 새 회차 번호입니다. 보낼 때 실제 값으로 바뀝니다.</li>
+          <li><strong>돌려쓰기:</strong> 등록한 문구를 순서대로 돌려가며 씁니다. 같은 문구만 반복하면 스팸 제한에 걸리기 쉬워서 2~3개 이상을 권장하고, 1개만 있으면 저장할 때 경고합니다.</li>
+          <li><strong>미리보기:</strong> 문구를 고치는 동안 가상의 댓글에 실제로 어떻게 달리는지 바로 보여줍니다.</li>
+        </ul>
+        <div class="render" role="figure" aria-label="문구 변환 예시">
+          <span class="tpl">@{username} {series} {episode}화 업로드됐어요</span>
+          <span class="arrow" aria-hidden="true">→</span>
+          <span class="out"><span class="mention">@minji_daily</span> 노을 아래서 2화 업로드됐어요</span>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-label"><span class="kind">워커</span><h3>답글은 별도 워크플로에서 보냅니다</h3></div>
+        <ul class="bullets">
+          <li>댓글 API는 <code>lib/platforms/instagram-comments.ts</code>로 분리했습니다. 답글은 “잠시 제한됨(368)”과 “댓글이 지워짐”을 따로 다뤄야 해서 발행 어댑터와 에러 분류가 다릅니다.</li>
+          <li>발행 워커는 “다음 화” 발행에 성공하면 회차를 기록하고 알림 작업만 만듭니다. 실제 수집·발송은 <code>.github/workflows/episode-alerts.yml</code>(<code>worker/process-alerts.ts</code>)이 합니다.</li>
+          <li>워크플로를 나눈 이유: 답글은 10~20초 간격이라 실행이 길어서, 발행과 같은 직렬 그룹이면 그동안 즉시 발행이 줄을 섭니다.</li>
+          <li>알림 워크플로는 발행 실행이 끝날 때마다 따라 돌고, “보내기”를 누르면 바로 깨어납니다. 40분 안에 못 끝내면 남은 건 다음 실행이 이어받고, 스스로 다음 실행을 깨웁니다.</li>
+          <li>작업을 집어가는 방식은 발행과 같은 <code>FOR UPDATE SKIP LOCKED</code> RPC라 중복으로 보내지 않습니다.</li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <section aria-labelledby="api-h">
+    <div class="section-head">
+      <h2 id="api-h">사용할 인스타 API</h2>
+      <p>모두 Instagram 로그인 방식 기준이고, 권한은 위 두 가지면 됩니다.</p>
+    </div>
+    <div class="table-wrap">
+      <table class="api">
+        <thead><tr><th>하는 일</th><th>호출</th><th>알아둘 점</th></tr></thead>
+        <tbody>
+          <tr><td class="k">내 게시물 목록</td><td><span class="mono">GET /{내 계정ID}/media?fields=id,caption,media_type,media_product_type,permalink,thumbnail_url,timestamp,comments_count</span></td><td>MCB 밖에서 올린 1화를 회차로 연결할 때 사용</td></tr>
+          <tr><td class="k">댓글 목록</td><td><span class="mono">GET /{게시물ID}/comments?fields=id,text,timestamp,username,from,hidden</span></td><td>최상위 댓글만, 최신순, 한 번에 최대 50개. 날짜로 거를 수 없어 전부 받아서 거릅니다</td></tr>
+          <tr><td class="k">대댓글 등록</td><td><span class="mono">POST /{댓글ID}/replies<br>message=…</span></td><td>최상위 댓글에만 가능. 숨긴 댓글과 라이브 방송 댓글에는 불가</td></tr>
+          <tr><td class="k">비공개 답장 (선택)</td><td><span class="mono">POST /{내 계정ID}/messages<br>recipient={comment_id}</span></td><td>댓글 단 지 7일 이내, 댓글당 1번. 팔로워가 아니면 메시지 요청함으로 갑니다</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="risk-h">
+    <div class="section-head">
+      <h2 id="risk-h">제약과 대응</h2>
+    </div>
+    <div class="table-wrap">
+      <table class="risk">
+        <thead><tr><th>제약</th><th>영향</th><th>대응</th></tr></thead>
+        <tbody>
+          <tr><td class="k">댓글 링크가 눌리지 않음</td><td>답글에 2화 주소를 넣어도 클릭이 안 됩니다</td><td>문구를 “프로필에서 확인”으로 유도합니다. 링크가 꼭 필요하면 비공개 답장(DM)을 선택 기능으로 붙입니다</td></tr>
+          <tr><td class="k">스팸 제한</td><td>같은 문구를 짧은 간격으로 대량 등록하면 계정 활동이 제한될 수 있습니다. Meta가 공개한 기준 수치는 없습니다</td><td>문구 여러 개 돌려쓰기, 10~20초 무작위 간격, 계정당 하루 상한(기본 200개), 회차당 한 사람에게 한 번만. 인스타가 활동을 제한하면(368) 24시간 쉬었다가 이어서 보냅니다</td></tr>
+          <tr><td class="k">호출 한도</td><td>계정마다 24시간 동안 <span class="mono">4800 × 노출 수</span>만큼 호출 가능. 넘으면 오류 코드 80002</td><td>평소 규모에선 여유가 큽니다. 실측해 보니 graph.instagram.com은 사용량 헤더를 주지 않아서, 한도 오류가 나면 1시간 뒤 이어서 보냅니다</td></tr>
+          <tr><td class="k">내 답글이 목록에 섞여 옴</td><td>실측(댓글 653개 릴스): 문서와 달리 계정 주인의 답글도 댓글 목록에 함께 옵니다. 답글 펼치기는 작성자를 알려주지 않습니다</td><td><span class="mono">parent_id</span>로 답글을 골라내 대상에서 빼고, 새 회차 이후 내가 이미 단 답글이 있는 댓글은 건너뜁니다</td></tr>
+          <tr><td class="k">최상위 댓글에만 답글</td><td>다른 댓글에 답글을 단 사람은 대상 목록에 안 잡힙니다</td><td>1차 버전은 최상위 댓글만 대상으로 합니다. 필요하면 답글 단 사람까지 멘션하는 옵션을 뒤에 추가합니다</td></tr>
+          <tr><td class="k">안 보이는 댓글</td><td>제한(restrict)한 사용자, 연령 제한 게시물의 댓글은 API가 돌려주지 않습니다</td><td>자연히 대상에서 빠집니다. 따로 할 일은 없습니다</td></tr>
+          <tr><td class="k">늦게 달린 댓글</td><td>2화 발행 뒤에 1화에 달린 댓글은 처음 실행에 안 잡힙니다</td><td>1차는 발행 시점 한 번만. 2차에서 48시간 동안 다시 확인하거나 댓글 웹훅을 붙입니다</td></tr>
+          <tr><td class="k">토큰 만료·연결 해제</td><td>답글 작업이 실패합니다</td><td>작업을 실패로 남기고, 계정을 다시 연결한 뒤 재시도할 수 있게 합니다</td></tr>
+          <tr><td class="k">답글 수정·삭제 불가</td><td>API로 단 답글은 API로 고칠 수 없습니다</td><td>처음엔 승인 모드로 시작해 문구와 대상을 사람이 보고 보냅니다</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="plan-h">
+    <div class="section-head">
+      <h2 id="plan-h">진행 순서</h2>
+      <p>1~4단계는 2026년 10월 13일에 구현했습니다. 배포 전에 마이그레이션 0017을 Supabase에 적용해야 합니다.</p>
+    </div>
+    <div class="phases">
+      <div class="phase">
+        <h3>1단계 · 권한과 API 직접 확인</h3><span class="days">완료</span>
+        <ul>
+          <li>연결된 인스타 계정 4개 모두 댓글 조회 성공 (작성자 이름·숨김 여부 포함) — 우리 계정에는 추가 검수 없이 동작</li>
+          <li>댓글 653개 게시물에서 수집·분류 드라이런: 답글 325개 제외, 대상 327명</li>
+          <li>남은 확인: 테스트 게시물에 실제 대댓글 1개 (배포 후 확인 대기 화면에서)</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <h3>2단계 · 시리즈 데이터와 업로드 마법사</h3><span class="days">완료</span>
+        <ul>
+          <li>마이그레이션 0017 (테이블 5개 + RLS + RPC 2개)</li>
+          <li>마법사에 시리즈·회차 지정, 발행 성공 시 회차와 인스타 게시물 연결</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <h3>3단계 · 인스타 게시물 불러오기와 시리즈 화면</h3><span class="days">완료</span>
+        <ul>
+          <li>내 게시물 목록에서 골라 회차로 지정</li>
+          <li>계정별 화면, 시리즈 관리, 답글 문구 편집(미리보기, 기본 문구)</li>
+        </ul>
+      </div>
+      <div class="phase">
+        <h3>4단계 · 답글 작업, 승인, 기록</h3><span class="days">완료</span>
+        <ul>
+          <li>워커 답글 처리 단계, 작업 선점 RPC, 이어받기, 속도 조절</li>
+          <li>승인 대기 목록(대상 체크 해제 가능)과 보낸 기록 화면</li>
+        </ul>
+      </div>
+      <div class="phase optional">
+        <h3>5단계 · 자동 모드와 늦은 댓글 처리 (선택)</h3><span class="days">2~3일</span>
+        <ul>
+          <li>바로 보내기 모드는 4단계에 함께 들어갔습니다</li>
+          <li>남은 것: 발행 후 48시간 재확인 또는 댓글 웹훅, 비공개 답장(DM) 옵션</li>
+        </ul>
+      </div>
+      <div class="phase parallel">
+        <h3>병행 · 외부 계정에 쓸 경우 Meta 검수</h3><span class="days">영업일 5~7일</span>
+        <p>4단계까지 만든 화면으로 시연 영상을 찍어 Advanced Access를 신청합니다. 우리 팀 계정에만 쓴다면 건너뜁니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="decide-h">
+    <div class="section-head">
+      <h2 id="decide-h">정해야 할 것</h2>
+      <p>오른쪽은 따로 말씀이 없으면 적용할 기본값입니다.</p>
+    </div>
+    <ul class="decisions">
+      <li><span class="q">어떤 계정에 쓰나요?</span><span class="rec"><b>우리 팀 계정만</b>으로 시작하면 검수 없이 바로 쓸 수 있습니다</span></li>
+      <li><span class="q">자동으로 보낼까요, 확인 후 보낼까요?</span><span class="rec"><b>확인 후 보내기</b>로 시작하고, 문구와 대상이 안정되면 자동으로 전환</span></li>
+      <li><span class="q">어느 회차 댓글에 알릴까요?</span><span class="rec"><b>직전 회차만</b> (2화가 나오면 1화, 3화가 나오면 2화)</span></li>
+      <li><span class="q">어떤 댓글까지 대상인가요?</span><span class="rec"><b>새 회차 발행 시점까지 달린 댓글</b>. 늦은 댓글은 5단계에서</span></li>
+      <li><span class="q">공개 대댓글과 DM 중 무엇으로?</span><span class="rec"><b>공개 대댓글</b>. 다른 사람들에게도 2화 소식이 보이는 효과가 있습니다</span></li>
+      <li><span class="q">답글 문구는요?</span><span class="rec templates">
+        <span><b>관리자가 계정마다 등록</b>합니다. 처음엔 아래 3개가 기본 문구로 채워져 있습니다</span>
+        <span class="tpl">@{username} {episode}화 올라왔어요! 프로필에서 바로 보실 수 있어요</span>
+        <span class="tpl">@{username} 기다리셨죠? {series} {episode}화 업로드됐어요</span>
+        <span class="tpl">@{username} {episode}화 나왔어요. 프로필 최신 게시물에서 확인해주세요</span>
+      </span></li>
+    </ul>
+  </section>
+
+  <footer>
+    <span>근거 자료</span>
+    <ul>
+      <li><a href="https://developers.facebook.com/docs/instagram-platform/comment-moderation" target="_blank" rel="noopener">Meta · Comment Moderation</a> (권한, 접근 수준, 웹훅 권장)</li>
+      <li><a href="https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-comment/replies" target="_blank" rel="noopener">Meta · IG Comment Replies</a> (최상위 댓글에만, 숨김·라이브 불가)</li>
+      <li><a href="https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-media/comments" target="_blank" rel="noopener">Meta · IG Media Comments</a> (최상위만, 50개, 최신순, 날짜 필터 불가)</li>
+      <li><a href="https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-comment" target="_blank" rel="noopener">Meta · IG Comment</a> (from, username, hidden 필드와 미반환 댓글)</li>
+      <li><a href="https://developers.facebook.com/docs/instagram-platform/private-replies/" target="_blank" rel="noopener">Meta · Private Replies</a> (7일, 댓글당 1회)</li>
+      <li><a href="https://developers.facebook.com/docs/graph-api/overview/rate-limiting" target="_blank" rel="noopener">Meta · Rate Limiting</a> (4800 × 노출 수, 오류 80002)</li>
+      <li>MCB 코드: <code>supabase/migrations/0017_episode_alerts.sql</code>, <code>lib/platforms/instagram-comments.ts</code>, <code>worker/process-alerts.ts</code>, <code>app/(dashboard)/episode-alerts/</code>, <code>components/episode-alerts/</code></li>
+    </ul>
+  </footer>
+
+</div>
+</body>
+</html>

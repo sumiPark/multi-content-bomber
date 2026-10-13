@@ -11,12 +11,16 @@ export default async function DashboardLayout({
   // No user yet (e.g. mid-redirect from a protected page) — render bare.
   if (!user) return <>{children}</>;
 
-  const failedJobCount = await loadFailedJobCount();
+  const [failedJobCount, alertWaitingCount] = await Promise.all([
+    loadFailedJobCount(),
+    loadAlertWaitingCount(),
+  ]);
 
   return (
     <SidebarShell
       userEmail={user.email ?? null}
       failedJobCount={failedJobCount}
+      alertWaitingCount={alertWaitingCount}
     >
       {children}
     </SidebarShell>
@@ -35,6 +39,20 @@ async function loadFailedJobCount(): Promise<number> {
     .select("id", { count: "exact", head: true })
     .eq("status", "FAILED")
     .is("deleted_at", null);
+
+  return count ?? 0;
+}
+
+// 사이드바 "다음 화 알림" 뱃지 — 사람이 확인하고 보내기를 눌러야 하는 알림 수.
+async function loadAlertWaitingCount(): Promise<number> {
+  const profile = await getCurrentProfile();
+  if (!profile?.organization_id) return 0;
+
+  const supabase = await getServerSupabase();
+  const { count } = await supabase
+    .from("episode_alert_tasks")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "AWAITING_APPROVAL");
 
   return count ?? 0;
 }

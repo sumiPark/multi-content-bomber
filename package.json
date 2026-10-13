@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "worker:due": "tsx worker/process-due.ts"
+    "worker:due": "tsx worker/process-due.ts",
+    "worker:alerts": "tsx worker/process-alerts.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
