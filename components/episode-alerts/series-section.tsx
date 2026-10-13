@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition, type ReactNode } from "react";
-import { ExternalLink, Pencil, Plus, Trash2, XIcon } from "lucide-react";
+import { ChevronDown, ExternalLink, Pencil, Plus, Trash2, XIcon } from "lucide-react";
 import {
   addEpisodeAction,
   createSeriesAction,
@@ -13,7 +13,7 @@ import {
   updateSeriesTemplatesAction,
 } from "@/app/(dashboard)/episode-alerts/actions";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RelativeTime } from "@/components/ui/relative-time";
@@ -22,7 +22,12 @@ import { cn } from "@/lib/utils";
 import type { TaskView } from "./alert-history";
 import { mediaTypeLabel } from "./labels";
 import { MediaPicker } from "./media-picker";
-import { hasTemplateErrors, TemplateEditor, TemplateList } from "./template-editor";
+import {
+  hasTemplateErrors,
+  TemplateEditor,
+  TemplateList,
+  TemplateText,
+} from "./template-editor";
 
 export interface EpisodeView {
   id: string;
@@ -66,10 +71,10 @@ export function SeriesSection({
   const canEdit = canManage && accountActive;
 
   return (
-    <section className="space-y-3" aria-labelledby="series-title">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <h2 id="series-title" className="text-lg font-semibold">
-          시리즈
+    <section className="space-y-4" aria-labelledby="series-title">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 id="series-title" className="text-base font-semibold">
+          시리즈 <span className="font-normal text-muted-foreground">{series.length}</span>
         </h2>
         {canEdit && series.length > 0 && (
           <Button size="sm" onClick={() => setCreating(true)}>
@@ -81,7 +86,7 @@ export function SeriesSection({
       {series.length === 0 ? (
         <EmptySeries canEdit={canEdit} onCreate={() => setCreating(true)} />
       ) : (
-        <ul className="space-y-4">
+        <ul className="space-y-5">
           {series.map((s) => (
             <li key={s.id}>
               <SeriesCard series={s} canEdit={canEdit} onAddEpisode={() => setAddingTo(s)} />
@@ -105,25 +110,27 @@ export function SeriesSection({
 }
 
 function EmptySeries({ canEdit, onCreate }: { canEdit: boolean; onCreate: () => void }) {
+  const steps = [
+    "새 시리즈를 만들고, 이미 올린 회차가 있으면 1화부터 순서대로 골라요.",
+    "다음 화는 콘텐츠 생성 마지막 단계의 “다음 화로 올리기”로 올리거나, 여기서 직접 추가해요.",
+    "회차의 답글을 켜면 이전 화에 댓글 단 사람들에게 답글이 달려요.",
+  ];
   return (
     <Card>
-      <CardContent className="space-y-4 py-6">
-        <p className="font-medium">아직 시리즈가 없어요</p>
-        <ol className="space-y-2 text-sm text-muted-foreground">
-          <li>
-            <span className="mr-1.5 font-semibold text-foreground">1.</span>
-            새 시리즈를 만들고, 이미 올린 회차가 있으면 1화부터 순서대로 골라요.
-          </li>
-          <li>
-            <span className="mr-1.5 font-semibold text-foreground">2.</span>
-            다음 화는 콘텐츠 생성 마지막 단계의 “다음 화로 올리기”에서 이 시리즈를 고르거나, 여기서
-            직접 추가해요.
-          </li>
-          <li>
-            <span className="mr-1.5 font-semibold text-foreground">3.</span>
-            회차의 답글을 켜면 이전 화에 댓글 단 사람들에게 바로 답글이 달리고, 7일 동안 새로 댓글
-            단 사람에게도 이어서 달려요. 7일이 지나면 자동으로 꺼져요.
-          </li>
+      <CardContent className="space-y-4 py-8">
+        <div>
+          <p className="text-base font-semibold">아직 시리즈가 없어요</p>
+          <p className="mt-1 text-sm text-muted-foreground">세 단계면 시작할 수 있어요.</p>
+        </div>
+        <ol className="space-y-3">
+          {steps.map((text, i) => (
+            <li key={i} className="flex gap-3 text-sm">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                {i + 1}
+              </span>
+              <span className="pt-0.5">{text}</span>
+            </li>
+          ))}
         </ol>
         {canEdit && (
           <Button onClick={onCreate}>
@@ -149,6 +156,7 @@ function SeriesCard({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const lastNo = series.episodes.at(-1)?.episodeNo ?? 0;
+  const onCount = series.episodes.filter((e) => e.replyEnabled).length;
 
   function act(fn: () => Promise<Result>, after?: () => void) {
     setError(null);
@@ -163,180 +171,190 @@ function SeriesCard({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          {renaming ? (
-            <form
-              className="flex min-w-0 flex-1 items-center gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                act(() => renameSeriesAction({ seriesId: series.id, name }), () => setRenaming(false));
+    <Card className="gap-0 overflow-hidden py-0">
+      {/* 머리 — 시리즈 이름과 한 줄 요약 */}
+      <div className="flex items-start justify-between gap-3 px-5 pb-3 pt-4">
+        {renaming ? (
+          <form
+            className="flex min-w-0 flex-1 items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              act(() => renameSeriesAction({ seriesId: series.id, name }), () => setRenaming(false));
+            }}
+          >
+            <Input
+              id={`series-name-${series.id}`}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={60}
+              autoFocus
+              aria-label="시리즈 이름"
+            />
+            <Button type="submit" size="sm" disabled={isPending}>
+              저장
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setRenaming(false);
+                setName(series.name);
               }}
             >
-              <Input
-                id={`series-name-${series.id}`}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={60}
-                autoFocus
-                aria-label="시리즈 이름"
-              />
-              <Button type="submit" size="sm" disabled={isPending}>
-                저장
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setRenaming(false);
-                  setName(series.name);
-                }}
-              >
-                취소
-              </Button>
-            </form>
-          ) : (
-            <div className="min-w-0">
-              <CardTitle className="truncate">{series.name}</CardTitle>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {lastNo > 0 ? `${lastNo}화까지` : "아직 회차 없음"}
-              </p>
-            </div>
-          )}
-          {canEdit && !renaming && (
-            <div className="flex shrink-0 items-center gap-1">
-              <Button variant="ghost" size="icon-sm" title="이름 바꾸기" aria-label="이름 바꾸기" onClick={() => setRenaming(true)}>
-                <Pencil />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                title="시리즈 삭제"
-                aria-label="시리즈 삭제"
-                disabled={isPending}
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      `“${series.name}” 시리즈를 삭제할까요? 보내는 중인 답글은 멈추고, 이미 보낸 기록은 남아요.`,
-                    )
-                  )
-                    return;
-                  act(() => deleteSeriesAction({ seriesId: series.id }));
-                }}
-              >
-                <Trash2 />
-              </Button>
-            </div>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="space-y-2">
-          {series.episodes.length === 0 ? (
-            <p className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
-              이미 올린 1화가 있으면 추가하고, 아직이면 업로드할 때 이 시리즈를 고르세요.
-            </p>
-          ) : (
-            <ol className="divide-y rounded-md border">
-              {series.episodes.map((e, i) => (
-                <EpisodeRow key={e.id} episode={e} isFirst={i === 0} canEdit={canEdit} />
-              ))}
-            </ol>
-          )}
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {canEdit && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" onClick={onAddEpisode} disabled={isPending}>
-                <Plus /> {lastNo + 1}화 추가
-              </Button>
-              {lastNo > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground"
-                  disabled={isPending}
-                  onClick={() => {
-                    const last = series.episodes.at(-1);
-                    if (!last) return;
-                    if (!window.confirm(`${last.episodeNo}화를 시리즈에서 뺄까요? 인스타 게시물은 그대로예요.`)) return;
-                    act(() => removeLastEpisodeAction({ episodeId: last.id }));
-                  }}
-                >
-                  {lastNo}화 빼기
-                </Button>
+              취소
+            </Button>
+          </form>
+        ) : (
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-semibold leading-tight">{series.name}</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {lastNo > 0 ? `${lastNo}화까지` : "아직 회차 없음"}
+              {onCount > 0 && (
+                <span className="text-emerald-700 dark:text-emerald-300"> · 답글 켜진 회차 {onCount}개</span>
               )}
-            </div>
-          )}
-        </div>
+            </p>
+          </div>
+        )}
+        {canEdit && !renaming && (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <Button variant="ghost" size="icon-sm" title="이름 바꾸기" aria-label="이름 바꾸기" onClick={() => setRenaming(true)}>
+              <Pencil />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="시리즈 삭제"
+              aria-label="시리즈 삭제"
+              disabled={isPending}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    `“${series.name}” 시리즈를 삭제할까요? 보내는 중인 답글은 멈추고, 이미 보낸 기록은 남아요.`,
+                  )
+                )
+                  return;
+                act(() => deleteSeriesAction({ seriesId: series.id }));
+              }}
+            >
+              <Trash2 />
+            </Button>
+          </div>
+        )}
+      </div>
 
-        <SeriesTemplates
-          series={series}
-          previewEpisodeNo={Math.max(2, lastNo)}
-          canEdit={canEdit}
-        />
-      </CardContent>
+      {/* 회차 목록 */}
+      <div className="border-t">
+        {series.episodes.length === 0 ? (
+          <p className="px-5 py-5 text-sm text-muted-foreground">
+            이미 올린 1화가 있으면 추가하고, 아직이면 업로드할 때 이 시리즈를 고르세요.
+          </p>
+        ) : (
+          <ol className="divide-y">
+            {series.episodes.map((e, i) => (
+              <EpisodeRow
+                key={e.id}
+                episode={e}
+                isFirst={i === 0}
+                isLast={i === series.episodes.length - 1}
+                canEdit={canEdit}
+                onRemove={() => {
+                  if (!window.confirm(`${e.episodeNo}화를 시리즈에서 뺄까요? 인스타 게시물은 그대로예요.`)) return;
+                  act(() => removeLastEpisodeAction({ episodeId: e.id }));
+                }}
+                busy={isPending}
+              />
+            ))}
+          </ol>
+        )}
+        {canEdit && (
+          <button
+            type="button"
+            onClick={onAddEpisode}
+            disabled={isPending}
+            className="flex w-full items-center gap-2 border-t px-5 py-3 text-sm font-medium text-primary transition hover:bg-primary/5 disabled:opacity-50"
+          >
+            <Plus className="size-4" /> {lastNo + 1}화 추가
+          </button>
+        )}
+        {error && <p className="border-t px-5 py-2 text-sm text-destructive">{error}</p>}
+      </div>
+
+      {/* 답글 문구 — 평소엔 접어둔다 */}
+      <SeriesTemplates series={series} previewEpisodeNo={Math.max(2, lastNo)} canEdit={canEdit} />
     </Card>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 회차 한 줄 — 답글 켜기/끄기 스위치와 진행 상황
+// 회차 한 줄 — 왼쪽은 게시물, 오른쪽은 "N-1화 댓글에 답글" 스위치와 상태 배지
 // ─────────────────────────────────────────────────────────────────────────────
 
-function replyStatus(episode: EpisodeView): { text: string; tone: "muted" | "active" | "done" | "error" } {
+type Tone = "off" | "active" | "waiting" | "done" | "error";
+
+const TONE_CLASS: Record<Tone, string> = {
+  off: "bg-muted text-muted-foreground",
+  active: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
+  waiting: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  error: "bg-destructive/10 text-destructive",
+};
+
+function replyStatus(episode: EpisodeView): { text: string; tone: Tone } {
   const task = episode.task;
   const sent = task?.stats.sent ?? 0;
+  const sentText = `${sent.toLocaleString()}명에게 보냄`;
   if (!episode.replyEnabled) {
-    if (task?.watchExpired) {
-      return { text: `${sent.toLocaleString()}명에게 보냄 · 7일 지나 꺼짐`, tone: "muted" };
-    }
-    return { text: sent > 0 ? `꺼짐 · ${sent.toLocaleString()}명 보냄` : "꺼짐", tone: "muted" };
+    if (task?.watchExpired) return { text: `7일 지나 꺼짐 · ${sentText}`, tone: "off" };
+    return { text: sent > 0 ? `꺼짐 · ${sentText}` : "꺼짐", tone: "off" };
   }
   if (!task) return { text: "준비 중", tone: "active" };
   const toSend = task.stats.sent + task.stats.pending;
   switch (task.status) {
     case "COLLECTING":
-      return { text: "대상 모으는 중", tone: "active" };
+      return { text: "보낼 사람 모으는 중", tone: "active" };
     case "SENDING":
       return task.deferred
-        ? { text: `내일 이어서 · ${sent}/${toSend}`, tone: "active" }
-        : { text: `보내는 중 · ${sent}/${toSend}`, tone: "active" };
+        ? { text: `하루 한도 · 내일 이어서 ${sent}/${toSend}`, tone: "waiting" }
+        : { text: `보내는 중 ${sent}/${toSend}`, tone: "active" };
     case "DONE":
       return task.watching
-        ? { text: `${sent.toLocaleString()}명에게 보냄 · 새 댓글 확인 중`, tone: "done" }
-        : { text: `${sent.toLocaleString()}명에게 보냄`, tone: "done" };
+        ? { text: `${sentText} · 새 댓글 확인 중`, tone: "done" }
+        : { text: sentText, tone: "done" };
     case "FAILED":
-      return { text: "실패", tone: "error" };
+      return { text: "보내기 실패", tone: "error" };
     default:
-      return { text: "꺼짐", tone: "muted" };
+      return { text: "꺼짐", tone: "off" };
   }
 }
 
 function EpisodeRow({
   episode,
   isFirst,
+  isLast,
   canEdit,
+  busy,
+  onRemove,
 }: {
   episode: EpisodeView;
   isFirst: boolean;
+  isLast: boolean;
   canEdit: boolean;
+  busy: boolean;
+  onRemove: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const status = replyStatus(episode);
   const task = episode.task;
   const sending = task?.status === "COLLECTING" || task?.status === "SENDING";
+  const prevNo = episode.episodeNo - 1;
 
   function run(fn: () => Promise<Result>) {
     setError(null);
     startTransition(async () => {
       const result = await fn();
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
+      if (!result.ok) setError(result.error);
     });
   }
 
@@ -345,7 +363,7 @@ function EpisodeRow({
     if (
       next &&
       !window.confirm(
-        `${episode.episodeNo}화 답글을 켜면 ${episode.episodeNo - 1}화에 댓글 단 사람들에게 바로 답글이 달려요. 7일 동안은 새로 단 댓글에도 이어서 달고, 그 뒤엔 자동으로 꺼져요. 켤까요?`,
+        `${episode.episodeNo}화 답글을 켜면 ${prevNo}화에 댓글 단 사람들에게 바로 답글이 달려요. 7일 동안은 새로 단 댓글에도 이어서 달고, 그 뒤엔 자동으로 꺼져요. 켤까요?`,
       )
     ) {
       return;
@@ -357,67 +375,95 @@ function EpisodeRow({
   }
 
   return (
-    <li className="space-y-1 px-3 py-3">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <span className="w-10 shrink-0 text-sm font-semibold tabular-nums">{episode.episodeNo}화</span>
-        <div className="min-w-0 flex-1 basis-40">
-          <p className="truncate text-sm">{episode.caption?.trim() || mediaTypeLabel(episode.mediaType)}</p>
-          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+    <li className="px-5 py-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        {/* 회차 번호 */}
+        <div
+          className={cn(
+            "grid size-11 shrink-0 place-items-center rounded-lg text-sm font-bold tabular-nums",
+            episode.replyEnabled ? "bg-primary text-primary-foreground" : "bg-muted text-foreground",
+          )}
+          aria-hidden
+        >
+          {episode.episodeNo}화
+        </div>
+
+        {/* 게시물 */}
+        <div className="min-w-0 flex-1 basis-48">
+          <p className="truncate text-sm font-medium">
+            {episode.caption?.trim() || mediaTypeLabel(episode.mediaType)}
+          </p>
+          <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
             {episode.postedAt && <RelativeTime iso={episode.postedAt} format="date" />}
             {episode.permalink && (
               <a
                 href={episode.permalink}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-0.5 hover:text-foreground"
+                className="inline-flex items-center gap-0.5 underline-offset-2 hover:text-foreground hover:underline"
               >
                 인스타에서 보기 <ExternalLink className="size-3" />
               </a>
             )}
+            {isLast && canEdit && (
+              <button
+                type="button"
+                onClick={onRemove}
+                disabled={busy}
+                className="underline-offset-2 hover:text-destructive hover:underline disabled:opacity-50"
+              >
+                시리즈에서 빼기
+              </button>
+            )}
           </p>
         </div>
 
-        <div className="ml-auto flex shrink-0 items-center gap-2.5">
+        {/* 답글 */}
+        <div className="flex w-full shrink-0 flex-col items-start gap-1.5 sm:w-auto sm:items-end">
           {isFirst ? (
-            <span className="text-xs text-muted-foreground">첫 회차 · 답글 없음</span>
+            <span className="text-xs text-muted-foreground">첫 회차라 답글을 달 이전 화가 없어요</span>
           ) : (
             <>
-              <span
-                className={cn(
-                  "text-xs tabular-nums",
-                  status.tone === "muted" && "text-muted-foreground",
-                  status.tone === "active" && "text-blue-700 dark:text-blue-300",
-                  status.tone === "done" && "text-emerald-700 dark:text-emerald-300",
-                  status.tone === "error" && "text-destructive",
-                )}
-                title={task?.lastError ?? undefined}
-              >
-                {status.text}
-              </span>
-              {task?.status === "FAILED" && episode.replyEnabled && canEdit && (
-                <Button
-                  variant="outline"
-                  size="xs"
-                  disabled={isPending}
-                  onClick={() => run(() => retryAlertTaskAction({ taskId: task.id }))}
+              <div className="flex items-center gap-2.5">
+                <span id={`reply-label-${episode.id}`} className="text-sm">
+                  {prevNo}화 댓글에 답글
+                </span>
+                <ReplySwitch
+                  checked={episode.replyEnabled}
+                  disabled={!canEdit || isPending}
+                  labelledBy={`reply-label-${episode.id}`}
+                  onToggle={toggle}
+                />
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span
+                  className={cn(
+                    "rounded-full px-2.5 py-0.5 text-xs font-medium tabular-nums",
+                    TONE_CLASS[status.tone],
+                  )}
+                  title={task?.lastError ?? undefined}
                 >
-                  다시 시도
-                </Button>
-              )}
-              <ReplySwitch
-                checked={episode.replyEnabled}
-                disabled={!canEdit || isPending}
-                label={`${episode.episodeNo}화 답글`}
-                onToggle={toggle}
-              />
+                  {status.text}
+                </span>
+                {task?.status === "FAILED" && episode.replyEnabled && canEdit && (
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    disabled={isPending}
+                    onClick={() => run(() => retryAlertTaskAction({ taskId: task.id }))}
+                  >
+                    다시 시도
+                  </Button>
+                )}
+              </div>
             </>
           )}
         </div>
       </div>
       {task?.status === "FAILED" && task.lastError && episode.replyEnabled && (
-        <p className="pl-[3.25rem] text-xs text-destructive">{task.lastError}</p>
+        <p className="mt-2 text-xs text-destructive sm:pl-[3.75rem]">{task.lastError}</p>
       )}
-      {error && <p className="pl-[3.25rem] text-xs text-destructive">{error}</p>}
+      {error && <p className="mt-2 text-xs text-destructive sm:pl-[3.75rem]">{error}</p>}
     </li>
   );
 }
@@ -425,44 +471,41 @@ function EpisodeRow({
 function ReplySwitch({
   checked,
   disabled,
-  label,
+  labelledBy,
   onToggle,
 }: {
   checked: boolean;
   disabled: boolean;
-  label: string;
+  labelledBy: string;
   onToggle: () => void;
 }) {
   return (
-    <span className="flex items-center gap-1.5">
-      <span className="text-xs font-medium text-muted-foreground">답글</span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        disabled={disabled}
-        onClick={onToggle}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-labelledby={labelledBy}
+      disabled={disabled}
+      onClick={onToggle}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        checked ? "bg-primary" : "bg-muted-foreground/30",
+      )}
+    >
+      <span
         className={cn(
-          "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-          checked ? "bg-primary" : "bg-muted-foreground/30",
+          "inline-block size-5 rounded-full bg-background shadow transition",
+          checked ? "translate-x-[22px]" : "translate-x-0.5",
         )}
-      >
-        <span
-          className={cn(
-            "inline-block size-4 rounded-full bg-background shadow transition",
-            checked ? "translate-x-[18px]" : "translate-x-0.5",
-          )}
-        />
-      </button>
-    </span>
+      />
+    </button>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 시리즈 답글 문구
+// 시리즈 답글 문구 — 평소엔 접고 첫 문구만 미리보기
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SeriesTemplates({
@@ -474,6 +517,7 @@ function SeriesTemplates({
   previewEpisodeNo: number;
   canEdit: boolean;
 }) {
+  const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(series.templates);
   const [error, setError] = useState<string | null>(null);
@@ -492,60 +536,86 @@ function SeriesTemplates({
   }
 
   return (
-    <div className="space-y-2.5 border-t pt-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-medium">답글 문구</p>
-          <p className="text-xs text-muted-foreground">
-            {editing
-              ? "칩 버튼으로 댓글 단 사람·시리즈 이름·회차 번호를 넣을 수 있어요."
-              : `${series.templates.length}개를 번갈아 하나씩 달아요.`}
-          </p>
-        </div>
-        {canEdit && !editing && (
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => {
-              setDraft(series.templates);
-              setEditing(true);
-            }}
-          >
-            <Pencil /> 수정
-          </Button>
+    <div className="border-t bg-muted/20">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-muted/40"
+      >
+        <span className="shrink-0 text-sm font-medium">
+          답글 문구 <span className="font-normal text-muted-foreground">{series.templates.length}개</span>
+        </span>
+        {!open && (
+          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            <TemplateText
+              template={series.templates[0] ?? DEFAULT_TEMPLATES[0]}
+              seriesName={series.name}
+              episodeNo={previewEpisodeNo}
+            />
+          </span>
         )}
-      </div>
+        <ChevronDown
+          className={cn("ml-auto size-4 shrink-0 text-muted-foreground transition", open && "rotate-180")}
+        />
+      </button>
 
-      {editing ? (
-        <>
-          <TemplateEditor
-            idPrefix={`series-${series.id}`}
-            value={draft}
-            onChange={setDraft}
-            disabled={isPending}
-            seriesName={series.name}
-            episodeNo={previewEpisodeNo}
-          />
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={isPending}
-              onClick={() => {
-                setEditing(false);
-                setError(null);
-              }}
-            >
-              취소
-            </Button>
-            <Button size="sm" disabled={isPending || hasTemplateErrors(draft)} onClick={save}>
-              {isPending ? "저장 중…" : "저장"}
-            </Button>
-          </div>
-        </>
-      ) : (
-        <TemplateList templates={series.templates} seriesName={series.name} episodeNo={previewEpisodeNo} />
+      {open && (
+        <div className="space-y-3 px-5 pb-4">
+          {editing ? (
+            <>
+              <p className="text-xs text-muted-foreground">
+                칩 버튼으로 댓글 단 사람·시리즈 이름·회차 번호를 넣을 수 있어요.
+              </p>
+              <TemplateEditor
+                idPrefix={`series-${series.id}`}
+                value={draft}
+                onChange={setDraft}
+                disabled={isPending}
+                seriesName={series.name}
+                episodeNo={previewEpisodeNo}
+              />
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => {
+                    setEditing(false);
+                    setError(null);
+                  }}
+                >
+                  취소
+                </Button>
+                <Button size="sm" disabled={isPending || hasTemplateErrors(draft)} onClick={save}>
+                  {isPending ? "저장 중…" : "저장"}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-muted-foreground">아래 문구 중 하나가 번갈아 달려요.</p>
+              <TemplateList
+                templates={series.templates}
+                seriesName={series.name}
+                episodeNo={previewEpisodeNo}
+              />
+              {canEdit && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setDraft(series.templates);
+                    setEditing(true);
+                  }}
+                >
+                  <Pencil /> 문구 수정
+                </Button>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   );

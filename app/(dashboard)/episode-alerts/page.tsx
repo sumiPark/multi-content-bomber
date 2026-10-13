@@ -76,13 +76,28 @@ export default async function Page({ searchParams }: PageProps) {
   if (!profile?.organization_id) redirect("/onboarding");
   const canManage = profile.role === "ADMIN" || profile.role === "MANAGER";
 
+  // 계정 목록 요약 — 시리즈 수, 답글 켜진 회차 수 (삭제된 시리즈 제외).
+  const summary = new Map<string, { seriesCount: number; replyOnCount: number }>();
+  for (const s of seriesRows ?? []) {
+    if (s.deleted_at) continue;
+    const cur = summary.get(s.social_account_id) ?? { seriesCount: 0, replyOnCount: 0 };
+    cur.seriesCount += 1;
+    cur.replyOnCount += s.series_episodes.filter((e) => e.reply_enabled).length;
+    summary.set(s.social_account_id, cur);
+  }
+
   // 인스타 계정만. 연결 해제(0016)한 계정은 빼고, 토큰 만료 계정은 기록을 볼 수 있게 남긴다.
-  const accounts: AlertAccountView[] = (accountRows ?? []).map((a) => ({
-    id: a.id,
-    name: a.display_name,
-    avatarUrl: a.avatar_url,
-    isActive: a.is_active,
-  }));
+  // 쓸 수 있는 계정을 먼저, 재연결이 필요한 계정은 뒤로.
+  const accounts: AlertAccountView[] = (accountRows ?? [])
+    .map((a) => ({
+      id: a.id,
+      name: a.display_name,
+      avatarUrl: a.avatar_url,
+      isActive: a.is_active,
+      seriesCount: summary.get(a.id)?.seriesCount ?? 0,
+      replyOnCount: summary.get(a.id)?.replyOnCount ?? 0,
+    }))
+    .sort((x, y) => Number(y.isActive) - Number(x.isActive));
 
   const selected =
     accounts.find((a) => a.id === params.account) ??

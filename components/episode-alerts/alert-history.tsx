@@ -68,7 +68,7 @@ export function AlertHistory({
   return (
     <section className="space-y-3" aria-labelledby="alert-history-title">
       <div>
-        <h2 id="alert-history-title" className="text-lg font-semibold">
+        <h2 id="alert-history-title" className="text-base font-semibold">
           보낸 기록
         </h2>
         <p className="text-xs text-muted-foreground">최근 30건이에요.</p>
