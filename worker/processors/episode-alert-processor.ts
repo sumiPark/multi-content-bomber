@@ -21,11 +21,10 @@ import type { Database } from "@/types/database";
 // ─────────────────────────────────────────────────────────────────────────────
 // 시리즈 댓글 자동화 작업 처리 (episode_alert_tasks 상태 머신).
 //
-//   COLLECTING ─ 직전 화 댓글 수집 → 답글 대상(PENDING)/건너뜀(SKIPPED) 기록
-//       ├─ 확인 후 보내기(APPROVAL) → AWAITING_APPROVAL (사람이 "보내기"를 누르면 SENDING)
-//       └─ 바로 보내기(AUTO)       → SENDING
+//   COLLECTING ─ 직전 화 댓글 수집 → 답글 대상(PENDING)/건너뜀(SKIPPED) 기록 → 바로 SENDING
 //   SENDING ─ 간격을 두고 대댓글 등록. 하루 상한/시간 예산에 걸리면 다음 run으로 넘김.
 //       └─ 대상이 다 끝나면 DONE
+//   회차 답글을 끄면 CANCELLED(남은 대상은 EXCLUDED) — 이 워커는 손대지 않는다.
 //
 // 작업 단위 오류: 토큰 만료·연결 해제 → FAILED(재연결 후 "다시 시도"),
 //   호출 한도 → 1시간 뒤, 인스타 활동 제한(368) → 24시간 뒤, 그 외 → 15분 뒤 (3번까지).
@@ -53,7 +52,6 @@ const DAY_MS = 24 * 60 * 60_000;
 const INSERT_BATCH = 500;
 
 export type TaskOutcome =
-  | "awaiting-approval" // 확인 대기로 넘어감
   | "done" // 끝
   | "continue" // 시간 예산에 걸림 — 바로 다음 run이 이어서
   | "deferred" // 하루 상한·한도·오류로 나중에
@@ -78,15 +76,6 @@ export async function processEpisodeAlertTask(
       if (pending === 0) {
         await finish(service, task.id);
         return "done";
-      }
-      if (task.mode === "APPROVAL") {
-        await updateTask(service, task.id, {
-          status: "AWAITING_APPROVAL",
-          locked_at: null,
-          error_count: 0,
-          last_error: null,
-        });
-        return "awaiting-approval";
       }
       await updateTask(service, task.id, { status: "SENDING", error_count: 0, last_error: null });
     }
@@ -145,7 +134,17 @@ async function collectCandidates(
   }
   const topLevel = comments.filter((c) => !c.parentId);
 
-  const seen = new Set<string>();
+  // 같은 사람에게는 한 번만. 다시 켜서 또 모을 때도 이미 대상이었던 사람은 빼고,
+  // 그 사이 새로 댓글 단 사람만 더한다.
+  const { data: existing } = await service
+    .from("episode_alert_replies")
+    .select("commenter_ig_id, commenter_username")
+    .eq("task_id", task.id);
+  const seen = new Set<string>(
+    (existing ?? [])
+      .map((r) => r.commenter_ig_id ?? r.commenter_username?.toLowerCase() ?? null)
+      .filter((v): v is string => !!v),
+  );
   const rows: ReplyInsert[] = topLevel.map((c) => {
     const base: ReplyInsert = {
       task_id: task.id,

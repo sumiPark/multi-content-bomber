@@ -21,7 +21,7 @@ import {
 import { signOut } from "@/app/(auth)/actions";
 import { cn } from "@/lib/utils";
 
-type BadgeKind = "count" | "soon" | "alerts";
+type BadgeKind = "count" | "soon";
 
 interface NavItem {
   href: string;
@@ -62,7 +62,6 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/episode-alerts",
         label: "시리즈 댓글 자동화",
         icon: BellRing,
-        badgeKind: "alerts",
       },
       {
         href: "/auto-reply",
@@ -95,15 +94,12 @@ function isActive(pathname: string, href: string): boolean {
 interface SidebarShellProps {
   userEmail: string | null;
   failedJobCount: number;
-  // 시리즈 댓글 자동화 "확인 대기" 건수.
-  alertWaitingCount: number;
   children: React.ReactNode;
 }
 
 export function SidebarShell({
   userEmail,
   failedJobCount,
-  alertWaitingCount,
   children,
 }: SidebarShellProps) {
   const pathname = usePathname();
@@ -123,17 +119,6 @@ export function SidebarShell({
           className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold leading-none text-destructive-foreground"
         >
           {display}
-        </span>
-      );
-    }
-    if (item.badgeKind === "alerts") {
-      if (alertWaitingCount <= 0) return null;
-      return (
-        <span
-          aria-label={`확인 대기 ${alertWaitingCount}건`}
-          className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
-        >
-          {alertWaitingCount > 99 ? "99+" : alertWaitingCount}
         </span>
       );
     }

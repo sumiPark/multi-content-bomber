@@ -142,6 +142,8 @@ export function UploadWizard({
   const [scheduledAt, setScheduledAt] = useState("");
   // 계정 id → "다음 화로 올리기"로 고른 시리즈 id. 빈 문자열이면 시리즈 아님.
   const [seriesChoice, setSeriesChoice] = useState<Record<string, string>>({});
+  // 계정 id → 올라가면 바로 이전 화 댓글에 답글을 달지. 기본 꺼짐.
+  const [replyChoice, setReplyChoice] = useState<Record<string, boolean>>({});
   const [completing, setCompleting] = useState(false);
   // '완료' 재진입 잠금 — state 반영(다음 렌더)보다 먼저 걸린다. 성공하면 페이지를
   // 벗어날 때까지 잠긴 채로 둔다(실패 시에만 해제).
@@ -490,10 +492,15 @@ export function UploadWizard({
       scheduleMode === "scheduled" && scheduledAt
         ? new Date(scheduledAt).toISOString()
         : null;
-    const seriesByAccount: Record<string, string> = {};
+    const seriesByAccount: Record<string, { seriesId: string; reply: boolean }> = {};
     for (const row of seriesRows) {
       const chosen = seriesChoice[row.account.id];
-      if (chosen) seriesByAccount[row.account.id] = chosen;
+      if (chosen) {
+        seriesByAccount[row.account.id] = {
+          seriesId: chosen,
+          reply: replyChoice[row.account.id] === true,
+        };
+      }
     }
     const result = await createPublishJobsAction({
       contentId,
@@ -638,8 +645,14 @@ export function UploadWizard({
             selectedAccountCount={selectedAccountIds.length}
             seriesRows={seriesRows}
             seriesChoice={seriesChoice}
-            onChangeSeries={(accountId, seriesId) =>
-              setSeriesChoice((prev) => ({ ...prev, [accountId]: seriesId }))
+            onChangeSeries={(accountId, seriesId) => {
+              setSeriesChoice((prev) => ({ ...prev, [accountId]: seriesId }));
+              // 시리즈를 바꾸면 답글 켜기는 다시 꺼진 상태에서 시작.
+              setReplyChoice((prev) => ({ ...prev, [accountId]: false }));
+            }}
+            replyChoice={replyChoice}
+            onChangeReply={(accountId, on) =>
+              setReplyChoice((prev) => ({ ...prev, [accountId]: on }))
             }
             completing={completing}
             onChangeMode={setScheduleMode}
@@ -1416,6 +1429,8 @@ function Step5Schedule({
   seriesRows,
   seriesChoice,
   onChangeSeries,
+  replyChoice,
+  onChangeReply,
   completing,
   onChangeMode,
   onChangeScheduledAt,
@@ -1428,6 +1443,8 @@ function Step5Schedule({
   seriesRows: { account: SocialAccountSummary; options: SeriesOption[] }[];
   seriesChoice: Record<string, string>;
   onChangeSeries: (accountId: string, seriesId: string) => void;
+  replyChoice: Record<string, boolean>;
+  onChangeReply: (accountId: string, on: boolean) => void;
   completing: boolean;
   onChangeMode: (m: ScheduleMode) => void;
   onChangeScheduledAt: (v: string) => void;
@@ -1471,33 +1488,54 @@ function Step5Schedule({
           <div>
             <Label>다음 화로 올리기 (선택)</Label>
             <p className="mt-1 text-xs text-muted-foreground">
-              시리즈의 다음 화라면 골라주세요. 올라간 뒤 이전 화에 댓글 단 사람들에게 시리즈 답글
-              문구로 대댓글을 달아요.
+              시리즈의 다음 화라면 골라주세요. 회차로 추가되고, 답글은 꺼진 상태로 시작해요.
             </p>
           </div>
-          <ul className="space-y-2">
-            {seriesRows.map(({ account, options }) => (
-              <li key={account.id} className="flex flex-wrap items-center gap-2">
-                <PlatformIcon platform="INSTAGRAM" size={16} />
-                <span className="min-w-0 truncate text-sm">
-                  @{account.display_name ?? "(이름 없음)"}
-                </span>
-                <select
-                  id={`series-choice-${account.id}`}
-                  aria-label={`@${account.display_name ?? ""} 시리즈`}
-                  value={seriesChoice[account.id] ?? ""}
-                  onChange={(e) => onChangeSeries(account.id, e.target.value)}
-                  className="ml-auto max-w-full rounded-md border bg-background px-2 py-1.5 text-sm"
-                >
-                  <option value="">시리즈 아님</option>
-                  {options.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name} · {o.nextEpisodeNo}화
-                    </option>
-                  ))}
-                </select>
-              </li>
-            ))}
+          <ul className="space-y-3">
+            {seriesRows.map(({ account, options }) => {
+              const chosen = options.find((o) => o.id === seriesChoice[account.id]);
+              return (
+                <li key={account.id} className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <PlatformIcon platform="INSTAGRAM" size={16} />
+                    <span className="min-w-0 truncate text-sm">
+                      @{account.display_name ?? "(이름 없음)"}
+                    </span>
+                    <select
+                      id={`series-choice-${account.id}`}
+                      aria-label={`@${account.display_name ?? ""} 시리즈`}
+                      value={seriesChoice[account.id] ?? ""}
+                      onChange={(e) => onChangeSeries(account.id, e.target.value)}
+                      className="ml-auto max-w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                    >
+                      <option value="">시리즈 아님</option>
+                      {options.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.name} · {o.nextEpisodeNo}화
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {chosen && chosen.nextEpisodeNo > 1 && (
+                    <label className="flex cursor-pointer items-start gap-2.5 rounded-md bg-muted/40 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        id={`series-reply-${account.id}`}
+                        checked={replyChoice[account.id] === true}
+                        onChange={(e) => onChangeReply(account.id, e.target.checked)}
+                        className="mt-0.5 size-4"
+                      />
+                      <span className="min-w-0 text-sm">
+                        올라가면 바로 {chosen.nextEpisodeNo - 1}화 댓글에 답글 달기
+                        <span className="block text-xs text-muted-foreground">
+                          꺼두면 나중에 시리즈 댓글 자동화에서 켤 수 있어요.
+                        </span>
+                      </span>
+                    </label>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

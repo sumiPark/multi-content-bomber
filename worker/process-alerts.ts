@@ -15,7 +15,7 @@ import {
 //
 // .github/workflows/episode-alerts.yml이 깨운다:
 //   · workflow_run(publish 완료)  → 발행 워커가 만든 새 알림 작업을 바로 수집
-//   · repository_dispatch         → 사용자가 "보내기"를 누름 / 이전 run이 시간 예산에 걸림
+//   · repository_dispatch         → 사용자가 회차 답글을 켬 / 이전 run이 시간 예산에 걸림
 //
 // 발행 워커와 분리한 이유: 답글은 스팸 제한을 피하려고 10~20초 간격으로 보내서 run이
 // 길다. 같은 워크플로(concurrency 직렬화)에 두면 그동안 즉시 발행이 줄을 서게 된다.

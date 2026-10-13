@@ -2,7 +2,6 @@
 
 export type TaskStatus =
   | "COLLECTING"
-  | "AWAITING_APPROVAL"
   | "SENDING"
   | "DONE"
   | "FAILED"
@@ -12,10 +11,6 @@ export const TASK_STATUS: Record<TaskStatus, { label: string; className: string 
   COLLECTING: {
     label: "대상 모으는 중",
     className: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
-  },
-  AWAITING_APPROVAL: {
-    label: "확인 대기",
-    className: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
   },
   SENDING: {
     label: "보내는 중",
@@ -30,7 +25,7 @@ export const TASK_STATUS: Record<TaskStatus, { label: string; className: string 
     className: "border-destructive/30 bg-destructive/10 text-destructive",
   },
   CANCELLED: {
-    label: "중단됨",
+    label: "꺼짐",
     className: "border-border bg-muted text-muted-foreground",
   },
 };

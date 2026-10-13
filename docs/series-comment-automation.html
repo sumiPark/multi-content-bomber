@@ -203,7 +203,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
   <header>
     <span class="eyebrow">MCB 기능 검토 · 2026년 10월 13일 · 1~4단계 구현 완료</span>
     <h1>시리즈 댓글 자동화</h1>
-    <p class="lede">인스타에 시리즈 2화를 올리면, 1화에 댓글을 남긴 사람들에게 시리즈마다 정한 문구로 대댓글을 자동으로 달아주는 기능입니다. 가능한지, 무엇이 필요한지, 어떻게 만들었는지 정리했습니다.</p>
+    <p class="lede">인스타에 시리즈 2화를 올리고 그 회차의 답글을 켜면, 1화에 댓글을 남긴 사람들에게 시리즈마다 정한 문구로 대댓글을 바로 달아주는 기능입니다. 가능한지, 무엇이 필요한지, 어떻게 만들었는지 정리했습니다.</p>
   </header>
 
   <section class="verdict" aria-labelledby="verdict-h">
@@ -218,7 +218,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
       <li><span class="n">3</span><div><strong>인스타 쪽 제약이 있습니다.</strong> 댓글 속 링크는 눌리지 않고, 대댓글은 최상위 댓글에만 달 수 있으며, 같은 문구를 짧은 간격으로 많이 달면 스팸으로 제한될 수 있습니다. 문구를 여러 개 돌려쓰고 등록 속도를 조절해야 합니다.</div></li>
     </ol>
     <div class="estimate">
-      <span>진행 상황 <b>1~4단계 구현 완료</b> (마이그레이션 0017·0018 적용 후 배포)</span>
+      <span>진행 상황 <b>1~4단계 구현 완료</b> (마이그레이션 0017·0018·0019 적용 후 배포)</span>
       <span>외부 계정용 검수 <b>Meta 응답 영업일 5~7일</b></span>
     </div>
   </section>
@@ -276,7 +276,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
       <li><div><strong>같은 계정의 1화 게시물 찾기</strong><span>시리즈 회차 정보에서 같은 인스타 계정에 올라간 직전 회차를 찾습니다. 계정이 여러 개면 계정마다 따로 처리합니다.</span></div></li>
       <li><div><strong>1화 댓글 불러오기</strong><span>한 번에 최대 50개씩, 다음 페이지가 없을 때까지 가져옵니다. 인스타는 최상위 댓글만 돌려줍니다.</span></div></li>
       <li><div><strong>걸러내기</strong><span>내 계정 댓글, 숨긴 댓글, 이번 회차 알림을 이미 받은 사람을 빼고, 한 사람이 여러 번 댓글을 달았으면 한 번만 남깁니다.</span></div></li>
-      <li><div><strong>미리보기와 승인 (승인 모드일 때)</strong><span>“이 23명에게 답글이 달립니다” 목록을 보여주고, 빼고 싶은 사람을 체크 해제한 뒤 보냅니다.</span></div></li>
+      <li><div><strong>회차 답글 켜기</strong><span>회차는 답글이 꺼진 상태로 추가됩니다. 회차 목록의 스위치를 켜는 순간(또는 업로드할 때 켜고 올리면 올라간 직후) 바로 보내기 시작합니다. 끄면 남은 답글은 멈춥니다.</span></div></li>
       <li><div><strong>대댓글 등록</strong><span>시리즈 문구를 돌려쓰며 10~20초 간격으로 하나씩 등록합니다. 한 번 실행에 다 못 끝내면 진행 위치를 저장하고 다음 실행이 이어받습니다.</span></div></li>
       <li><div><strong>결과 기록</strong><span>보낸 답글, 건너뛴 이유, 실패 사유를 남겨 시리즈 화면에서 확인합니다. 같은 댓글에 두 번 달리지 않게 하는 기준도 이 기록입니다.</span></div></li>
     </ol>
@@ -313,9 +313,9 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
             <thead><tr><th>테이블</th><th>역할</th><th>주요 컬럼</th></tr></thead>
             <tbody>
               <tr><td class="k"><span class="mono">series</span></td><td>시리즈 (인스타 계정 1개에 속함)</td><td>계정, 이름, 답글 문구(시리즈별). 삭제는 소프트 삭제라 기록이 남음</td></tr>
-              <tr><td class="k"><span class="mono">series_episodes</span></td><td>회차와 인스타 게시물 연결</td><td>시리즈, 회차 번호, 인스타 게시물 ID, 게시물 주소, MCB 콘텐츠(MCB로 올렸을 때). 회차 번호는 DB가 원자적으로 매김</td></tr>
-              <tr><td class="k"><span class="mono">episode_alert_settings</span></td><td>계정 발송 설정</td><td>보내는 방식(확인 후/바로), 하루 최대 답글 수</td></tr>
-              <tr><td class="k"><span class="mono">episode_alert_tasks</span></td><td>알림 작업 (새 회차 1개당 1개)</td><td>직전 회차, 새 회차, 상태(대상 모으는 중/확인 대기/보내는 중/완료/실패/중단), 다음 처리 시각, 워커 잠금</td></tr>
+              <tr><td class="k"><span class="mono">series_episodes</span></td><td>회차와 인스타 게시물 연결</td><td>시리즈, 회차 번호, 인스타 게시물 ID, 게시물 주소, MCB 콘텐츠(MCB로 올렸을 때), 답글 켜짐/꺼짐(기본 꺼짐). 회차 번호는 DB가 원자적으로 매김</td></tr>
+              <tr><td class="k"><span class="mono">episode_alert_settings</span></td><td>계정 설정</td><td>하루 최대 답글 수</td></tr>
+              <tr><td class="k"><span class="mono">episode_alert_tasks</span></td><td>알림 작업 (새 회차 1개당 1개)</td><td>직전 회차, 새 회차, 상태(대상 모으는 중/보내는 중/완료/실패/꺼짐), 다음 처리 시각, 워커 잠금</td></tr>
               <tr><td class="k"><span class="mono">episode_alert_replies</span></td><td>댓글별 결과</td><td>댓글 ID, 댓글 단 사람, 댓글 내용, 결과(보냄/건너뜀/제외/실패), 사유, 등록된 답글. 같은 댓글은 한 번만</td></tr>
             </tbody>
           </table>
@@ -330,12 +330,12 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
       <div class="group">
         <div class="group-label"><span class="kind">화면</span><h3>사용자가 보는 곳</h3></div>
         <ul class="bullets">
-          <li><strong>자동화 › 시리즈 댓글 자동화:</strong> 위쪽에서 인스타 계정을 고르면 그 계정의 확인 대기, 시리즈, 보낸 기록, 발송 설정이 한 화면에 나옵니다. 확인 대기 건수는 사이드바와 계정 칩에 뱃지로 보입니다.</li>
+          <li><strong>자동화 › 시리즈 댓글 자동화:</strong> 위쪽에서 인스타 계정을 고르면 그 계정의 시리즈와 보낸 기록이 한 화면에 나옵니다. 보내는 중인 회차가 있으면 15초마다 진행 상황이 새로고침됩니다.</li>
           <li><strong>새 시리즈:</strong> 이름과 답글 문구를 정하고(기본 문구 3개가 채워져 있음), 이미 올린 회차가 있으면 게시물 그리드에서 1화부터 순서대로 누르면 끝입니다. 누른 순서가 회차 번호가 됩니다.</li>
-          <li><strong>발송 설정:</strong> 계정의 모든 시리즈에 똑같이 적용되는 두 가지뿐입니다. 보내는 방식(확인 후 보내기/바로 보내기)과 하루 최대 답글 수. 답글 문구는 여기가 아니라 시리즈마다 정합니다.</li>
-          <li><strong>업로드 마법사:</strong> 마지막 단계에 “다음 화로 올리기”가 생깁니다. 선택한 인스타 계정에 시리즈가 있을 때만 보이고, “노을 아래서 · 3화”처럼 다음 회차 번호를 보여줍니다.</li>
-          <li><strong>다음 화 추가:</strong> MCB 밖에서 올린 회차도 게시물 그리드에서 골라 추가하고, 그 자리에서 이전 화 댓글 알림을 만들 수 있습니다.</li>
-          <li><strong>확인 대기:</strong> 보낼 사람 목록(검색, 체크 해제), 실제로 달릴 답글 미리보기, “N명에게 보내기”.</li>
+          <li><strong>회차 답글 스위치:</strong> 회차마다 답글 켜기/끄기가 있고, 옆에 “보내는 중 120/327”, “327명에게 보냄”처럼 진행 상황이 보입니다. 새로 추가한 회차는 꺼진 상태이고, 켤 때 한 번 확인 창이 뜹니다. 첫 회차는 이전 화가 없어서 스위치가 없습니다.</li>
+          <li><strong>업로드 마법사:</strong> 마지막 단계에 “다음 화로 올리기”가 생깁니다. 선택한 인스타 계정에 시리즈가 있을 때만 보이고, “올라가면 바로 N화 댓글에 답글 달기” 체크박스로 켜고 올릴 수 있습니다(기본 꺼짐).</li>
+          <li><strong>다음 화 추가:</strong> MCB 밖에서 올린 회차도 게시물 그리드에서 골라 추가합니다. 꺼진 상태로 추가되니 준비되면 스위치를 켜면 됩니다.</li>
+          <li><strong>하루 최대 답글 수:</strong> 계정 설정은 이것 하나라 시리즈 목록 위에 한 줄로 두었습니다(기본 200개). 보내는 방식은 바로 보내기로 고정이라 설정이 없습니다.</li>
         </ul>
       </div>
 
@@ -403,7 +403,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
           <tr><td class="k">안 보이는 댓글</td><td>제한(restrict)한 사용자, 연령 제한 게시물의 댓글은 API가 돌려주지 않습니다</td><td>자연히 대상에서 빠집니다. 따로 할 일은 없습니다</td></tr>
           <tr><td class="k">늦게 달린 댓글</td><td>2화 발행 뒤에 1화에 달린 댓글은 처음 실행에 안 잡힙니다</td><td>1차는 발행 시점 한 번만. 2차에서 48시간 동안 다시 확인하거나 댓글 웹훅을 붙입니다</td></tr>
           <tr><td class="k">토큰 만료·연결 해제</td><td>답글 작업이 실패합니다</td><td>작업을 실패로 남기고, 계정을 다시 연결한 뒤 재시도할 수 있게 합니다</td></tr>
-          <tr><td class="k">답글 수정·삭제 불가</td><td>API로 단 답글은 API로 고칠 수 없습니다</td><td>처음엔 승인 모드로 시작해 문구와 대상을 사람이 보고 보냅니다</td></tr>
+          <tr><td class="k">답글 수정·삭제 불가</td><td>API로 단 답글은 API로 고칠 수 없습니다</td><td>회차는 꺼진 상태로 추가되고, 켤 때 확인 창을 한 번 띄웁니다. 문구는 시리즈 카드에서 미리보기로 확인합니다</td></tr>
         </tbody>
       </table>
     </div>
@@ -420,7 +420,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
         <ul>
           <li>연결된 인스타 계정 4개 모두 댓글 조회 성공 (작성자 이름·숨김 여부 포함) — 우리 계정에는 추가 검수 없이 동작</li>
           <li>댓글 653개 게시물에서 수집·분류 드라이런: 답글 325개 제외, 대상 327명</li>
-          <li>남은 확인: 테스트 게시물에 실제 대댓글 1개 (배포 후 확인 대기 화면에서)</li>
+          <li>남은 확인: 테스트 게시물에 실제 대댓글 1개 (배포 후 테스트 시리즈의 2화 답글을 켜서)</li>
         </ul>
       </div>
       <div class="phase">
@@ -438,17 +438,17 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
         </ul>
       </div>
       <div class="phase">
-        <h3>4단계 · 답글 작업, 승인, 기록</h3><span class="days">완료</span>
+        <h3>4단계 · 답글 작업, 켜기/끄기, 기록</h3><span class="days">완료</span>
         <ul>
           <li>워커 답글 처리 단계, 작업 선점 RPC, 이어받기, 속도 조절</li>
-          <li>승인 대기 목록(대상 체크 해제 가능)과 보낸 기록 화면</li>
+          <li>회차별 답글 스위치(기본 꺼짐, 켜면 바로 보내기)와 보낸 기록 화면</li>
         </ul>
       </div>
       <div class="phase optional">
-        <h3>5단계 · 자동 모드와 늦은 댓글 처리 (선택)</h3><span class="days">2~3일</span>
+        <h3>5단계 · 늦은 댓글 처리 (선택)</h3><span class="days">2~3일</span>
         <ul>
-          <li>바로 보내기 모드는 4단계에 함께 들어갔습니다</li>
-          <li>남은 것: 발행 후 48시간 재확인 또는 댓글 웹훅, 비공개 답장(DM) 옵션</li>
+          <li>지금은 껐다 다시 켜면 그 사이 새로 댓글 단 사람에게도 보냅니다(이미 받은 사람은 제외)</li>
+          <li>남은 것: 발행 후 48시간 자동 재확인 또는 댓글 웹훅, 비공개 답장(DM) 옵션</li>
         </ul>
       </div>
       <div class="phase parallel">
@@ -465,7 +465,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
     </div>
     <ul class="decisions">
       <li><span class="q">어떤 계정에 쓰나요?</span><span class="rec"><b>우리 팀 계정만</b>으로 시작하면 검수 없이 바로 쓸 수 있습니다</span></li>
-      <li><span class="q">자동으로 보낼까요, 확인 후 보낼까요?</span><span class="rec"><b>확인 후 보내기</b>로 시작하고, 문구와 대상이 안정되면 자동으로 전환</span></li>
+      <li><span class="q">자동으로 보낼까요, 확인 후 보낼까요?</span><span class="rec"><b>바로 보내기로 고정</b>. 대신 회차마다 답글 스위치가 있고 기본은 꺼짐</span></li>
       <li><span class="q">어느 회차 댓글에 알릴까요?</span><span class="rec"><b>직전 회차만</b> (2화가 나오면 1화, 3화가 나오면 2화)</span></li>
       <li><span class="q">어떤 댓글까지 대상인가요?</span><span class="rec"><b>새 회차 발행 시점까지 달린 댓글</b>. 늦은 댓글은 5단계에서</span></li>
       <li><span class="q">공개 대댓글과 DM 중 무엇으로?</span><span class="rec"><b>공개 대댓글</b>. 다른 사람들에게도 2화 소식이 보이는 효과가 있습니다</span></li>

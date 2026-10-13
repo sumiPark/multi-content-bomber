@@ -8,21 +8,21 @@ type Service = ReturnType<typeof createServiceClient>;
 type EpisodeRow = Database["public"]["Tables"]["series_episodes"]["Row"];
 type TaskRow = Database["public"]["Tables"]["episode_alert_tasks"]["Row"];
 
-export type AlertMode = "APPROVAL" | "AUTO";
-
-// 계정별 발송 설정. 답글 문구는 시리즈마다 따로 정한다(series.reply_templates, 0018).
+// 계정별 설정은 하루 최대 답글 수 하나. 답글은 항상 바로 보내고(0019), 문구는 시리즈마다
+// 따로 정한다(series.reply_templates, 0018).
 export interface AlertSettings {
-  mode: AlertMode;
   dailyLimit: number;
   // 아직 한 번도 저장하지 않아 기본값을 보여주는 중인지.
   isDefault: boolean;
 }
 
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
-  mode: "APPROVAL",
   dailyLimit: 200,
   isDefault: true,
 };
+
+// 회차 답글을 끌 때 남은 대상에 붙이는 사유. 다시 켜면 이 사유로 빠진 대상만 되살린다.
+export const REPLY_OFF_REASON = "답글 끔";
 
 // 사용자에게 그대로 보여줄 수 있는 문구를 담은 에러.
 export class EpisodeAlertError extends Error {
@@ -38,15 +38,11 @@ export async function loadAlertSettings(
 ): Promise<AlertSettings> {
   const { data } = await service
     .from("episode_alert_settings")
-    .select("mode, daily_limit")
+    .select("daily_limit")
     .eq("social_account_id", socialAccountId)
     .maybeSingle();
   if (!data) return DEFAULT_ALERT_SETTINGS;
-  return {
-    mode: data.mode,
-    dailyLimit: data.daily_limit,
-    isDefault: false,
-  };
+  return { dailyLimit: data.daily_limit, isDefault: false };
 }
 
 export interface InstagramAccountAuth {
@@ -127,7 +123,6 @@ export type CreateTaskResult =
 /**
  * 새 회차(episode)에 대한 답글 작업을 만든다. 직전 회차(번호가 더 작은 것 중 가장 큰 것)의
  * 댓글 단 사람들이 대상이다. 새 회차 하나당 작업은 하나뿐이다(target_episode_id unique).
- * 보내는 방식(확인 후/바로)은 만들 때의 계정 설정을 스냅샷으로 남긴다.
  */
 export async function createAlertTask(
   service: Service,
@@ -138,8 +133,6 @@ export async function createAlertTask(
     createdBy: string | null;
   },
 ): Promise<CreateTaskResult> {
-  const settings = await loadAlertSettings(service, args.socialAccountId);
-
   const { data: previous } = await service
     .from("series_episodes")
     .select("id")
@@ -165,7 +158,6 @@ export async function createAlertTask(
       social_account_id: args.socialAccountId,
       source_episode_id: previous.id,
       target_episode_id: args.episode.id,
-      mode: settings.mode,
       created_by: args.createdBy,
     })
     .select("*")
@@ -186,9 +178,95 @@ export async function createAlertTask(
   return { created: true, task };
 }
 
+export type EnableResult =
+  | { started: true }
+  | { started: false; reason: "no-previous" | "already-running" };
+
+/**
+ * 회차 답글 켜기. 직전 화에 댓글 단 사람들에게 바로 보내도록 작업을 만들거나 되살린다.
+ *   - 작업이 없으면 새로 만든다(COLLECTING → 워커가 모아서 바로 보냄).
+ *   - 껐다 켜거나(CANCELLED), 실패했거나(FAILED), 다 보냈던(DONE) 작업은 다시 모은다.
+ *     끌 때 빠졌던 대상은 되살리고, 그 사이 새로 댓글 단 사람도 더한다. 이미 답글을 받은
+ *     사람은 다시 받지 않는다(수집 단계에서 같은 사람 제외).
+ * 실제로 보내는 건 워커다 — 호출측이 워크플로를 깨운다.
+ */
+export async function enableEpisodeReplies(
+  service: Service,
+  args: {
+    episode: EpisodeRow;
+    organizationId: string;
+    socialAccountId: string;
+    createdBy: string | null;
+  },
+): Promise<EnableResult> {
+  const created = await createAlertTask(service, args);
+  // 첫 회차는 답글을 달 이전 화가 없다 — 켜지 않는다.
+  if (!created.created && created.reason === "no-previous") {
+    return { started: false, reason: "no-previous" };
+  }
+  await service
+    .from("series_episodes")
+    .update({ reply_enabled: true })
+    .eq("id", args.episode.id);
+  if (created.created) return { started: true };
+
+  const task = created.task;
+  if (!task) return { started: false, reason: "already-running" };
+  if (task.status === "COLLECTING" || task.status === "SENDING") {
+    return { started: false, reason: "already-running" };
+  }
+
+  await service
+    .from("episode_alert_replies")
+    .update({ status: "PENDING", skip_reason: null })
+    .eq("task_id", task.id)
+    .eq("status", "EXCLUDED")
+    .eq("skip_reason", REPLY_OFF_REASON);
+  await service
+    .from("episode_alert_tasks")
+    .update({
+      status: "COLLECTING",
+      error_count: 0,
+      last_error: null,
+      completed_at: null,
+      locked_at: null,
+      scheduled_for: new Date().toISOString(),
+    })
+    .eq("id", task.id);
+  return { started: true };
+}
+
+/**
+ * 회차 답글 끄기. 보내는 중이면 멈추고 남은 대상은 빼둔다(다시 켜면 되살아남).
+ * 이미 보낸 답글은 그대로다.
+ */
+export async function disableEpisodeReplies(service: Service, episodeId: string) {
+  await service.from("series_episodes").update({ reply_enabled: false }).eq("id", episodeId);
+
+  const { data: task } = await service
+    .from("episode_alert_tasks")
+    .update({
+      status: "CANCELLED",
+      completed_at: new Date().toISOString(),
+      locked_at: null,
+    })
+    .eq("target_episode_id", episodeId)
+    .in("status", ["COLLECTING", "SENDING"])
+    .select("id")
+    .maybeSingle();
+  if (task) {
+    await service
+      .from("episode_alert_replies")
+      .update({ status: "EXCLUDED", skip_reason: REPLY_OFF_REASON })
+      .eq("task_id", task.id)
+      .eq("status", "PENDING");
+  }
+}
+
 /**
  * 발행 워커 훅 — "다음 화로 올리기"를 고른 인스타 발행이 성공하면 호출된다.
- * 회차로 기록하고, 직전 회차 댓글 단 사람들 대상 답글 작업을 만든다.
+ * 회차로 기록하고, 업로드할 때 답글을 켜고 올렸으면(replyEnabled) 바로 답글을 시작한다.
+ * 꺼두고 올렸으면 회차만 기록한다(나중에 화면에서 켤 수 있음).
  * 실패해도 발행 결과에는 영향을 주지 않도록 호출측에서 잡는다.
  */
 export async function recordPublishedEpisode(
@@ -202,8 +280,9 @@ export async function recordPublishedEpisode(
     mediaType: string | null;
     contentId: string;
     publishJobId: string;
+    replyEnabled: boolean;
   },
-): Promise<CreateTaskResult | null> {
+): Promise<EnableResult | null> {
   const { data: series } = await service
     .from("series")
     .select("id, organization_id, social_account_id, deleted_at")
@@ -225,7 +304,8 @@ export async function recordPublishedEpisode(
     publishJobId: args.publishJobId,
   });
 
-  return createAlertTask(service, {
+  if (!args.replyEnabled) return null;
+  return enableEpisodeReplies(service, {
     episode,
     organizationId: series.organization_id,
     socialAccountId: series.social_account_id,

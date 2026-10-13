@@ -35,6 +35,8 @@ interface PublishJobRow {
   resume_state?: Json | null;
   // 0017 — 업로드 마법사에서 "다음 화로 올리기"를 고른 시리즈.
   series_id?: string | null;
+  // 0019 — 올리면서 이 회차 답글을 켰는지 (기본 꺼짐).
+  series_reply_enabled?: boolean;
 }
 
 interface AccountRow {
@@ -223,7 +225,8 @@ export async function processClaimedPublishJob(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 시리즈 댓글 자동화 (0017) — 시리즈 회차로 기록하고 직전 화 댓글 알림 작업을 만든다.
+// 시리즈 댓글 자동화 (0017/0019) — 시리즈 회차로 기록하고, 답글을 켜고 올렸으면 직전 화
+// 댓글 단 사람들에게 바로 답글을 시작한다.
 // 게시는 이미 끝났으므로 여기서 실패해도 발행 결과(SUCCESS)는 그대로 둔다. 만들어진
 // 작업은 이 run이 끝나면 episode-alerts 워크플로(workflow_run)가 이어서 처리한다.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -253,10 +256,11 @@ async function recordSeriesEpisode(
       mediaType: content?.media_type ?? null,
       contentId: row.content_id,
       publishJobId: row.id,
+      replyEnabled: row.series_reply_enabled === true,
     });
     console.log(
-      `[publish-processor] 시리즈 회차 기록 (job=${row.id}) → 알림 ${
-        outcome?.created ? "작업 생성" : (outcome?.reason ?? "건너뜀")
+      `[publish-processor] 시리즈 회차 기록 (job=${row.id}) → 답글 ${
+        outcome === null ? "꺼둠" : outcome.started ? "시작" : outcome.reason
       }`,
     );
   } catch (err) {

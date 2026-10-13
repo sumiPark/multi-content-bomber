@@ -4,7 +4,6 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import {
-  cancelAlertTaskAction,
   getTaskRepliesAction,
   retryAlertTaskAction,
   type ReplyDetail,
@@ -25,14 +24,13 @@ export interface TaskStats {
 
 export interface TaskView {
   id: string;
-  seriesId: string;
   seriesName: string;
   seriesDeleted: boolean;
   sourceEpisodeNo: number | null;
   targetEpisodeNo: number | null;
+  targetEpisodeId: string;
   status: TaskStatus;
-  mode: "APPROVAL" | "AUTO";
-  // 발행 워커가 자동으로 만든 작업인지 (사람이 "알리기"를 눌러 만든 게 아니라).
+  // 업로드하면서 답글을 켜고 올린 작업인지 (화면에서 스위치로 켠 게 아니라).
   auto: boolean;
   scheduledFor: string;
   // 하루 상한·호출 한도로 다음 발송이 미래로 미뤄진 상태인지 (서버에서 계산).
@@ -118,16 +116,10 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
     }
   }
 
-  function run(action: "cancel" | "retry") {
-    if (action === "cancel" && !window.confirm("남은 답글을 보내지 않고 멈출까요? 이미 보낸 답글은 그대로예요.")) {
-      return;
-    }
+  function retry() {
     setError(null);
     startTransition(async () => {
-      const result =
-        action === "cancel"
-          ? await cancelAlertTaskAction({ taskId: task.id })
-          : await retryAlertTaskAction({ taskId: task.id });
+      const result = await retryAlertTaskAction({ taskId: task.id });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -155,7 +147,7 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
           </span>
         </p>
         <span className="text-xs text-muted-foreground">
-          · {task.auto ? "업로드 후 자동" : "직접 시작"} · <RelativeTime iso={task.createdAt} />
+          · {task.auto ? "업로드하면서 켬" : "직접 켬"} · <RelativeTime iso={task.createdAt} />
         </span>
       </div>
 
@@ -201,13 +193,8 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
         <Button variant="ghost" size="xs" onClick={toggleDetail}>
           {open ? <ChevronUp /> : <ChevronDown />} 자세히
         </Button>
-        {canManage && (task.status === "SENDING" || task.status === "COLLECTING") && (
-          <Button variant="outline" size="xs" onClick={() => run("cancel")} disabled={isPending}>
-            중단
-          </Button>
-        )}
         {canManage && task.status === "FAILED" && (
-          <Button variant="outline" size="xs" onClick={() => run("retry")} disabled={isPending}>
+          <Button variant="outline" size="xs" onClick={retry} disabled={isPending}>
             다시 시도
           </Button>
         )}

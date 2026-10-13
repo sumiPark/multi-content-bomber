@@ -1,18 +1,17 @@
 "use client";
 
+import { useEffect, useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { CircleAlert } from "lucide-react";
-import { buttonVariants } from "@/components/ui/button";
+import { saveDailyLimitAction } from "@/app/(dashboard)/episode-alerts/actions";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PlatformIcon } from "@/components/ui/platform-icon";
 import { cn } from "@/lib/utils";
 import { AlertHistory, type TaskView } from "./alert-history";
-import { AlertSettingsCard, type AlertSettingsView } from "./alert-settings-card";
-import { ApprovalCard, type ApprovalView } from "./approval-card";
 import { SeriesSection, type SeriesView } from "./series-section";
 
-export type { AlertSettingsView } from "./alert-settings-card";
-export type { ApprovalView, CandidateView } from "./approval-card";
 export type { TaskView } from "./alert-history";
 export type { EpisodeView, SeriesView } from "./series-section";
 
@@ -21,41 +20,56 @@ export interface AlertAccountView {
   name: string | null;
   avatarUrl: string | null;
   isActive: boolean;
-  // 확인 대기 중인 알림 수.
-  waitingCount: number;
 }
+
+// 답글은 GitHub Actions 워커가 보내서 화면이 저절로 바뀌지 않는다. 보내는 중인 회차가
+// 있으면 이 간격으로 새로고침해 진행 상황을 보여준다.
+const LIVE_REFRESH_MS = 15_000;
 
 export function EpisodeAlertsPage({
   accounts,
   selectedAccountId,
   canManage,
-  settings,
+  dailyLimit,
   series,
-  approvals,
   history,
 }: {
   accounts: AlertAccountView[];
   selectedAccountId: string | null;
   canManage: boolean;
-  settings: AlertSettingsView | null;
+  dailyLimit: number;
   series: SeriesView[];
-  approvals: ApprovalView[];
   history: TaskView[];
 }) {
+  const router = useRouter();
   const selected = accounts.find((a) => a.id === selectedAccountId) ?? null;
-  const tasksById = new Map(history.map((t) => [t.id, t]));
+  const live = series.some((s) =>
+    s.episodes.some(
+      (e) =>
+        e.replyEnabled &&
+        (e.task === null ||
+          e.task.status === "COLLECTING" ||
+          (e.task.status === "SENDING" && !e.task.deferred)),
+    ),
+  );
+
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => router.refresh(), LIVE_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [live, router]);
 
   return (
-    <main className="container mx-auto max-w-6xl space-y-6 px-6 py-10">
+    <main className="container mx-auto max-w-4xl space-y-6 px-6 py-10">
       <header>
         <h1 className="text-3xl font-bold tracking-tight">시리즈 댓글 자동화</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          시리즈 다음 화가 인스타에 올라가면, 이전 화에 댓글 단 사람들에게 시리즈별로 정한 문구로
-          대댓글을 달아드려요.
+          회차의 답글을 켜면, 이전 화에 댓글 단 사람들에게 시리즈 문구로 바로 대댓글을 달아요.
+          새로 추가한 회차는 꺼진 상태로 시작해요.
         </p>
       </header>
 
-      {accounts.length === 0 || !selected || !settings ? (
+      {accounts.length === 0 || !selected ? (
         <Card>
           <CardContent className="flex flex-col items-start gap-3 py-8">
             <p className="font-medium">연결된 인스타그램 계정이 없어요</p>
@@ -83,38 +97,22 @@ export function EpisodeAlertsPage({
             </div>
           )}
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <div className="min-w-0 space-y-8">
-              {approvals.map((a) => (
-                <ApprovalCard
-                  key={a.task.id}
-                  approval={a}
-                  dailyLimit={settings.dailyLimit}
-                  canManage={canManage}
-                />
-              ))}
-              <SeriesSection
-                accountId={selected.id}
-                accountName={selected.name}
-                accountActive={selected.isActive}
-                series={series}
-                tasksById={tasksById}
-                mode={settings.mode}
-                canManage={canManage}
-              />
-              <AlertHistory history={history} canManage={canManage} />
-            </div>
-            <aside className="min-w-0">
-              <AlertSettingsCard
-                // 계정을 바꾸면 편집 중이던 값을 버리고 새 계정 설정으로 다시 시작한다.
-                key={selected.id}
-                accountId={selected.id}
-                accountName={selected.name}
-                settings={settings}
-                canManage={canManage}
-              />
-            </aside>
-          </div>
+          <DailyLimitBar
+            // 계정을 바꾸면 입력 중이던 값을 버리고 그 계정 값으로 다시 시작한다.
+            key={selected.id}
+            accountId={selected.id}
+            dailyLimit={dailyLimit}
+            canManage={canManage}
+          />
+
+          <SeriesSection
+            accountId={selected.id}
+            accountName={selected.name}
+            accountActive={selected.isActive}
+            series={series}
+            canManage={canManage}
+          />
+          <AlertHistory history={history} canManage={canManage} />
         </>
       )}
     </main>
@@ -153,14 +151,6 @@ function AccountSwitcher({
               <PlatformIcon platform="INSTAGRAM" size={16} />
             )}
             <span className="max-w-40 truncate">@{a.name ?? "(이름 없음)"}</span>
-            {a.waitingCount > 0 && (
-              <span
-                className="inline-flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold leading-4 text-white"
-                aria-label={`확인 대기 ${a.waitingCount}건`}
-              >
-                {a.waitingCount}
-              </span>
-            )}
             {!a.isActive && (
               <span className={cn("text-[10px]", active ? "text-background/70" : "text-destructive")}>
                 재연결 필요
@@ -170,5 +160,103 @@ function AccountSwitcher({
         );
       })}
     </nav>
+  );
+}
+
+// 계정 설정은 하루 최대 답글 수 하나뿐이라 카드 대신 한 줄로.
+function DailyLimitBar({
+  accountId,
+  dailyLimit,
+  canManage,
+}: {
+  accountId: string;
+  dailyLimit: number;
+  canManage: boolean;
+}) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(dailyLimit));
+  const [error, setError] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const n = Number(value);
+  const invalid = !Number.isInteger(n) || n < 1 || n > 1000;
+
+  function save() {
+    setError(null);
+    startTransition(async () => {
+      const result = await saveDailyLimitAction({ accountId, dailyLimit: n });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setEditing(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="space-y-1 rounded-md border bg-muted/30 px-3 py-2.5 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <p className="min-w-0 flex-1 text-muted-foreground">
+          답글은 10~20초 간격으로 하나씩 달고, 넘치는 만큼은 다음 날 이어서 보내요.
+        </p>
+        {editing ? (
+          <form
+            className="flex items-center gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!invalid) save();
+            }}
+          >
+            <label htmlFor={`daily-limit-${accountId}`} className="text-xs text-muted-foreground">
+              하루 최대
+            </label>
+            <input
+              id={`daily-limit-${accountId}`}
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={1000}
+              value={value}
+              autoFocus
+              disabled={isPending}
+              onChange={(e) => setValue(e.target.value)}
+              className="w-20 rounded-md border bg-background px-2 py-1 text-sm tabular-nums"
+            />
+            <span className="text-xs text-muted-foreground">개</span>
+            <Button type="submit" size="xs" disabled={isPending || invalid}>
+              저장
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              disabled={isPending}
+              onClick={() => {
+                setEditing(false);
+                setValue(String(dailyLimit));
+                setError(null);
+              }}
+            >
+              취소
+            </Button>
+          </form>
+        ) : (
+          <p className="flex items-center gap-2">
+            <span>
+              하루 최대 <span className="font-semibold tabular-nums">{dailyLimit}</span>개
+            </span>
+            {canManage && (
+              <Button variant="ghost" size="xs" onClick={() => setEditing(true)}>
+                변경
+              </Button>
+            )}
+          </p>
+        )}
+      </div>
+      {editing && invalid && <p className="text-xs text-destructive">1~1000 사이로 정해주세요.</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
   );
 }

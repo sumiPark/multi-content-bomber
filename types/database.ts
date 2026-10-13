@@ -294,6 +294,7 @@ export type Database = {
           resume_state: Json | null
           scheduled_for: string | null
           series_id: string | null
+          series_reply_enabled: boolean
           social_account_id: string
           status: Database["public"]["Enums"]["publish_status"]
           status_history: Json
@@ -316,6 +317,7 @@ export type Database = {
           resume_state?: Json | null
           scheduled_for?: string | null
           series_id?: string | null
+          series_reply_enabled?: boolean
           social_account_id: string
           status?: Database["public"]["Enums"]["publish_status"]
           status_history?: Json
@@ -338,6 +340,7 @@ export type Database = {
           resume_state?: Json | null
           scheduled_for?: string | null
           series_id?: string | null
+          series_reply_enabled?: boolean
           social_account_id?: string
           status?: Database["public"]["Enums"]["publish_status"]
           status_history?: Json
@@ -422,7 +425,6 @@ export type Database = {
       episode_alert_settings: {
         Row: {
           daily_limit: number
-          mode: "APPROVAL" | "AUTO"
           organization_id: string
           social_account_id: string
           updated_at: string
@@ -430,7 +432,6 @@ export type Database = {
         }
         Insert: {
           daily_limit?: number
-          mode?: "APPROVAL" | "AUTO"
           organization_id: string
           social_account_id: string
           updated_at?: string
@@ -438,7 +439,6 @@ export type Database = {
         }
         Update: {
           daily_limit?: number
-          mode?: "APPROVAL" | "AUTO"
           organization_id?: string
           social_account_id?: string
           updated_at?: string
@@ -463,7 +463,6 @@ export type Database = {
           id: string
           last_error: string | null
           locked_at: string | null
-          mode: "APPROVAL" | "AUTO"
           organization_id: string
           scheduled_for: string
           series_id: string
@@ -471,7 +470,6 @@ export type Database = {
           source_episode_id: string
           status: 
             | "COLLECTING"
-            | "AWAITING_APPROVAL"
             | "SENDING"
             | "DONE"
             | "FAILED"
@@ -487,7 +485,6 @@ export type Database = {
           id?: string
           last_error?: string | null
           locked_at?: string | null
-          mode: "APPROVAL" | "AUTO"
           organization_id: string
           scheduled_for?: string
           series_id: string
@@ -495,7 +492,6 @@ export type Database = {
           source_episode_id: string
           status?: 
             | "COLLECTING"
-            | "AWAITING_APPROVAL"
             | "SENDING"
             | "DONE"
             | "FAILED"
@@ -511,7 +507,6 @@ export type Database = {
           id?: string
           last_error?: string | null
           locked_at?: string | null
-          mode?: "APPROVAL" | "AUTO"
           organization_id?: string
           scheduled_for?: string
           series_id?: string
@@ -519,7 +514,6 @@ export type Database = {
           source_episode_id?: string
           status?: 
             | "COLLECTING"
-            | "AWAITING_APPROVAL"
             | "SENDING"
             | "DONE"
             | "FAILED"
@@ -614,6 +608,7 @@ export type Database = {
           permalink: string | null
           posted_at: string | null
           publish_job_id: string | null
+          reply_enabled: boolean
           series_id: string
         }
         Insert: {
@@ -627,6 +622,7 @@ export type Database = {
           permalink?: string | null
           posted_at?: string | null
           publish_job_id?: string | null
+          reply_enabled?: boolean
           series_id: string
         }
         Update: {
@@ -640,6 +636,7 @@ export type Database = {
           permalink?: string | null
           posted_at?: string | null
           publish_job_id?: string | null
+          reply_enabled?: boolean
           series_id?: string
         }
         Relationships: [

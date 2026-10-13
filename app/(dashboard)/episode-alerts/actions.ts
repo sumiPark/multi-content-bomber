@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import {
   addEpisode,
-  createAlertTask,
+  disableEpisodeReplies,
+  enableEpisodeReplies,
   EpisodeAlertError,
   getInstagramAuth,
 } from "@/lib/episode-alerts/server";
@@ -343,7 +344,7 @@ export async function deleteSeriesAction(input: { seriesId: string }): Promise<A
     .from("episode_alert_tasks")
     .update({ status: "CANCELLED", completed_at: nowIso, locked_at: null })
     .eq("series_id", series.id)
-    .in("status", ["COLLECTING", "AWAITING_APPROVAL", "SENDING"])
+    .in("status", ["COLLECTING", "SENDING"])
     .select("id");
   for (const t of open ?? []) await excludePending(service, t.id, "시리즈 삭제");
 
@@ -361,17 +362,13 @@ export async function deleteSeriesAction(input: { seriesId: string }): Promise<A
 // 회차
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 회차 추가 — 답글은 꺼진 상태로 시작한다(0019). 켜는 건 회차 목록의 스위치로.
 export async function addEpisodeAction(input: {
   seriesId: string;
   mediaId: string;
-  notify: boolean;
-}): Promise<ActionResult<{ episodeNo: number; alert: "created" | "none" }>> {
+}): Promise<ActionResult<{ episodeNo: number }>> {
   const parsed = z
-    .object({
-      seriesId: z.string().uuid(),
-      mediaId: z.string().min(1).max(64),
-      notify: z.boolean(),
-    })
+    .object({ seriesId: z.string().uuid(), mediaId: z.string().min(1).max(64) })
     .safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
 
@@ -394,28 +391,13 @@ export async function addEpisodeAction(input: {
       postedAt: media.timestamp,
     });
 
-    let alert: "created" | "none" = "none";
-    if (parsed.data.notify) {
-      const result = await createAlertTask(service, {
-        episode,
-        organizationId: auth.organizationId,
-        socialAccountId: series.social_account_id,
-        createdBy: auth.userId,
-      });
-      if (result.created) {
-        alert = "created";
-        await dispatchSoft("episode-added");
-      }
-    }
-
     revalidate();
-    return { ok: true, episodeNo: episode.episode_no, alert };
+    return { ok: true, episodeNo: episode.episode_no };
   } catch (err) {
     return { ok: false, error: toMessage(err) };
   }
 }
 
-// 잘못 고른 회차를 되돌리는 용도. 맨 마지막 회차만, 알림을 보낸 적 없을 때만 뺄 수 있다.
 export async function removeLastEpisodeAction(input: {
   episodeId: string;
 }): Promise<ActionResult> {
@@ -469,11 +451,15 @@ export async function removeLastEpisodeAction(input: {
   return { ok: true };
 }
 
-// 알림 없이 추가된 회차(불러온 회차, 설정이 꺼져 있던 때)에 직접 알림을 만든다.
-export async function notifyEpisodeAction(input: {
+// 회차 답글 켜기/끄기. 켜면 직전 화에 댓글 단 사람들에게 바로 답글을 보내기 시작하고,
+// 끄면 남은 답글을 멈춘다(이미 보낸 답글은 그대로).
+export async function setEpisodeReplyAction(input: {
   episodeId: string;
+  enabled: boolean;
 }): Promise<ActionResult> {
-  const parsed = z.object({ episodeId: z.string().uuid() }).safeParse(input);
+  const parsed = z
+    .object({ episodeId: z.string().uuid(), enabled: z.boolean() })
+    .safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
   const auth = await authorize(true);
   if ("error" in auth) return { ok: false, error: auth.error };
@@ -488,24 +474,25 @@ export async function notifyEpisodeAction(input: {
     if (!episode) return { ok: false, error: "회차를 찾을 수 없어요." };
     const series = await loadSeries(service, episode.series_id, auth.organizationId);
     if (!series) return { ok: false, error: "시리즈를 찾을 수 없어요." };
-    await authForAccount(service, series.social_account_id, auth.organizationId);
 
-    const result = await createAlertTask(service, {
+    if (!parsed.data.enabled) {
+      await disableEpisodeReplies(service, episode.id);
+      revalidate();
+      return { ok: true };
+    }
+
+    // 켜기 전에 토큰부터 확인 — 만료된 계정이면 켜자마자 실패만 쌓인다.
+    await authForAccount(service, series.social_account_id, auth.organizationId);
+    const result = await enableEpisodeReplies(service, {
       episode,
       organizationId: auth.organizationId,
       socialAccountId: series.social_account_id,
       createdBy: auth.userId,
     });
-    if (!result.created) {
-      return {
-        ok: false,
-        error:
-          result.reason === "no-previous"
-            ? "이전 회차가 없어서 답글을 달 대상이 없어요."
-            : "이 회차는 이미 답글 작업이 만들어져 있어요.",
-      };
+    if (!result.started && result.reason === "no-previous") {
+      return { ok: false, error: "첫 회차는 답글을 달 이전 화가 없어요." };
     }
-    await dispatchSoft("episode-notify");
+    if (result.started) await dispatchSoft("episode-reply-on");
     revalidate();
     return { ok: true };
   } catch (err) {
@@ -514,19 +501,21 @@ export async function notifyEpisodeAction(input: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 계정별 발송 설정 (보내는 방식, 하루 최대 답글 수)
+// 계정별 설정 — 하루 최대 답글 수
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function saveAlertSettingsAction(input: {
+export async function saveDailyLimitAction(input: {
   accountId: string;
-  mode: "APPROVAL" | "AUTO";
   dailyLimit: number;
 }): Promise<ActionResult> {
   const parsed = z
     .object({
       accountId: z.string().uuid(),
-      mode: z.enum(["APPROVAL", "AUTO"]),
-      dailyLimit: z.number().int().min(1, "하루 최대 답글 수는 1 이상이어야 해요.").max(1000, "하루 최대 답글 수는 1000 이하로 정해주세요."),
+      dailyLimit: z
+        .number()
+        .int()
+        .min(1, "하루 최대 답글 수는 1 이상이어야 해요.")
+        .max(1000, "하루 최대 답글 수는 1000 이하로 정해주세요."),
     })
     .safeParse(input);
   if (!parsed.success) {
@@ -550,7 +539,6 @@ export async function saveAlertSettingsAction(input: {
     {
       social_account_id: account.id,
       organization_id: auth.organizationId,
-      mode: parsed.data.mode,
       daily_limit: parsed.data.dailyLimit,
       updated_by: auth.userId,
     },
@@ -563,83 +551,8 @@ export async function saveAlertSettingsAction(input: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 알림 작업 — 확인 후 보내기 / 중단 / 다시 시도
+// 답글 작업 — 다시 시도 / 기록
 // ─────────────────────────────────────────────────────────────────────────────
-
-export async function approveAlertTaskAction(input: {
-  taskId: string;
-  excludeReplyIds: string[];
-}): Promise<ActionResult<{ sending: number }>> {
-  const parsed = z
-    .object({
-      taskId: z.string().uuid(),
-      excludeReplyIds: z.array(z.string().uuid()).max(10_000),
-    })
-    .safeParse(input);
-  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
-  const auth = await authorize(true);
-  if ("error" in auth) return { ok: false, error: auth.error };
-
-  const service = createServiceClient();
-  const task = await loadTask(service, parsed.data.taskId, auth.organizationId);
-  if (!task) return { ok: false, error: "답글 작업을 찾을 수 없어요." };
-  if (task.status !== "AWAITING_APPROVAL") {
-    return { ok: false, error: "이미 처리된 답글 작업이에요. 새로고침해주세요." };
-  }
-
-  if (parsed.data.excludeReplyIds.length > 0) {
-    await excludePending(service, task.id, "보내기 전에 제외", parsed.data.excludeReplyIds);
-  }
-
-  const { count } = await service
-    .from("episode_alert_replies")
-    .select("id", { count: "exact", head: true })
-    .eq("task_id", task.id)
-    .eq("status", "PENDING");
-  const sending = count ?? 0;
-  const nowIso = new Date().toISOString();
-
-  const { error } = await service
-    .from("episode_alert_tasks")
-    .update(
-      sending === 0
-        ? { status: "DONE", completed_at: nowIso, locked_at: null }
-        : { status: "SENDING", scheduled_for: nowIso, locked_at: null },
-    )
-    .eq("id", task.id)
-    .eq("status", "AWAITING_APPROVAL");
-  if (error) return { ok: false, error: error.message };
-
-  if (sending > 0) await dispatchSoft("approved");
-  revalidate();
-  return { ok: true, sending };
-}
-
-export async function cancelAlertTaskAction(input: { taskId: string }): Promise<ActionResult> {
-  const parsed = z.object({ taskId: z.string().uuid() }).safeParse(input);
-  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
-  const auth = await authorize(true);
-  if ("error" in auth) return { ok: false, error: auth.error };
-
-  const service = createServiceClient();
-  const task = await loadTask(service, parsed.data.taskId, auth.organizationId);
-  if (!task) return { ok: false, error: "답글 작업을 찾을 수 없어요." };
-
-  const { data: cancelled, error } = await service
-    .from("episode_alert_tasks")
-    .update({ status: "CANCELLED", completed_at: new Date().toISOString(), locked_at: null })
-    .eq("id", task.id)
-    .in("status", ["COLLECTING", "AWAITING_APPROVAL", "SENDING"])
-    .select("id");
-  if (error) return { ok: false, error: error.message };
-  if (!cancelled || cancelled.length === 0) {
-    return { ok: false, error: "이미 끝난 답글 작업이에요." };
-  }
-  await excludePending(service, task.id, "보내기 중단");
-
-  revalidate();
-  return { ok: true };
-}
 
 export async function retryAlertTaskAction(input: { taskId: string }): Promise<ActionResult> {
   const parsed = z.object({ taskId: z.string().uuid() }).safeParse(input);
@@ -659,20 +572,13 @@ export async function retryAlertTaskAction(input: { taskId: string }): Promise<A
     return { ok: false, error: toMessage(err) };
   }
 
-  // 수집 단계에서 실패했으면(대상이 없거나, 확인 후 보내기인데 아직 아무것도 처리 안 함)
-  // 다시 수집부터. 수집은 같은 댓글을 두 번 넣지 않아 반복해도 안전하다.
-  const { data: rows } = await service
+  // 수집 단계에서 실패했으면(아직 대상이 없음) 다시 모으기부터, 아니면 남은 대상 보내기.
+  // 수집은 같은 댓글·같은 사람을 두 번 넣지 않아 반복해도 안전하다.
+  const { count: replyCount } = await service
     .from("episode_alert_replies")
-    .select("status")
-    .eq("task_id", task.id)
-    .in("status", ["SENT", "EXCLUDED", "PENDING"])
-    .limit(1000);
-  const statuses = new Set((rows ?? []).map((r) => r.status));
-  const nothingHandled = !statuses.has("SENT") && !statuses.has("EXCLUDED");
-  const nextStatus =
-    (rows ?? []).length === 0 || (task.mode === "APPROVAL" && nothingHandled)
-      ? "COLLECTING"
-      : "SENDING";
+    .select("id", { count: "exact", head: true })
+    .eq("task_id", task.id);
+  const nextStatus = (replyCount ?? 0) === 0 ? "COLLECTING" : "SENDING";
 
   const { error } = await service
     .from("episode_alert_tasks")
