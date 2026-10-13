@@ -164,5 +164,5 @@ multi-content-bomber/
   - **큐 = `publish_jobs` 테이블.** `claim_due_publish_jobs` RPC가 `FOR UPDATE SKIP LOCKED`로 due job(예약 시각 지난 PENDING/RETRYING + stale PROCESSING 회수)을 원자적으로 선점 → 동시 실행해도 중복 처리 없음. fan-out·동시성은 워커 스크립트(`process-due.ts`)가 `CONCURRENCY`로 제어, rate limit은 플랫폼 어댑터에서.
   - **실행 = GitHub Actions** (`.github/workflows/publish.yml`). `schedule` cron 30분(예약 발행 sweep) + `repository_dispatch`(즉시 발행 — 서버 액션 `lib/github-dispatch.ts`의 `triggerPublishRun()`이 깸, 지연 없음). 상주 프로세스 없음 → **Upstash·Railway 비용 0.** private repo도 ~1,440 run/월로 무료 2,000분 안.
   - **재시도:** BullMQ backoff 대신, 실패 시 row를 RETRYING으로 남기면 다음 sweep이 다시 claim. `attempts < 3` 동안 반복.
-  - **트레이드오프:** 예약 발행은 cron best-effort라 5~30분 지연 가능(즉시 발행은 dispatch라 무관). 신뢰성이 더 필요하면 cron만 Railway Cron($5)으로 승격 — `process-due.ts`는 그대로 재사용.
+  - **예약 발행 트리거 (0022):** GitHub `schedule`은 실측 몇 시간씩 밀려(2026-10-13: 5~6시간 간격) 예약 시각을 못 지켰다. 그래서 **Supabase pg_cron이 1분마다** 예약 시각이 된 발행 건이 있을 때만 `/api/cron/publish-due`를 부르고, 앱이 `triggerPublishRun()`으로 워커를 깨운다 → 예약 시각 후 1~2분 안에 시작. GitHub `schedule`은 백업으로 유지. 호출 인증은 0020이 Vault에 만든 비밀값을 RPC(`verify_episode_replies_cron_secret`)로 대조(시리즈 댓글 자동화의 `/api/cron/episode-replies`도 같은 방식).
   - **⚠️ GitHub Actions 함정:** `schedule` 워크플로는 repo가 **60일 무커밋이면 자동 비활성화**된다. 또 처리 단계는 **Vercel 함수(60초 timeout)에서 절대 돌리면 안 됨** — 긴 영상 업로드(IG 컨테이너 폴링 등)는 timeout 없는 Actions 러너에서만.

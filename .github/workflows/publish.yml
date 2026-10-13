@@ -4,9 +4,9 @@ name: publish
 # 상주 BullMQ 워커를 대체한다 — due job이 있을 때만 러너가 떠서 처리하고 종료.
 on:
   schedule:
-    # 30분마다 — 예약 발행분 sweep. (private repo GitHub Actions 무료 분 안에서 동작:
-    # ~1,440 run/월 < 2,000분 무료) ⚠️ schedule은 best-effort라 5~30분 지연 가능 —
-    # 예약 발행에만 영향. 즉시 발행은 아래 repository_dispatch라 지연 없음.
+    # 30분마다 — 예약 발행분 sweep의 백업. ⚠️ GitHub이 schedule을 실측 몇 시간씩 미뤄서
+    # (2026-10-13: 5~6시간 간격) 예약 발행을 제시간에 깨우는 건 Supabase pg_cron이 맡는다
+    # (0022: 1분마다 확인 → /api/cron/publish-due → repository_dispatch). 이건 그게 실패할 때 대비.
     - cron: "*/30 * * * *"
   repository_dispatch:
     # 즉시 발행 — 서버 액션 triggerPublishRun()이 이 이벤트로 깨운다(지연 없음).
