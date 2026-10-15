@@ -46,3 +46,6 @@ next-env.d.ts
 
 # Supabase CLI temp/cache
 supabase/.temp/
+
+# 데모 영상 (SNS 검수용, 65MB) — 워커 checkout마다 받게 되므로 저장소에 넣지 않는다
+docs/video/
