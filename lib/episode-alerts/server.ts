@@ -1,6 +1,7 @@
 import { decryptToken } from "@/lib/crypto";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/types/database";
+import { refreshSeriesTemplates } from "./auto-templates";
 
 // 시리즈 댓글 자동화 — 서버 액션과 워커가 같이 쓰는 로직. service_role 클라이언트 전용.
 
@@ -462,6 +463,11 @@ export async function recordPublishedEpisode(
     contentId: args.contentId,
     publishJobId: args.publishJobId,
   });
+
+  // 새 화마다 답글 문구를 AI가 새로 쓴다 — 답글을 켜기 전에 끝내 첫 답글부터 새 문구로.
+  // 토큰이 만료됐으면 말투 예시 없이 쓴다. 실패해도 기존 문구로 이어간다.
+  const auth = await getInstagramAuth(service, series.social_account_id).catch(() => null);
+  await refreshSeriesTemplates(service, { seriesId: series.id, auth });
 
   if (!args.replyEnabled) return null;
   return enableEpisodeReplies(service, {

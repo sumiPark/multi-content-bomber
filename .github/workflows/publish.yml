@@ -42,6 +42,8 @@ jobs:
           # 토큰 AES-256-GCM 복호화 키 (Vercel과 반드시 같은 값이어야 함).
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL }}
+          # 시리즈 새 화가 발행되면 답글 문구를 AI로 새로 쓴다(lib/episode-alerts/auto-templates.ts).
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # 플랫폼 OAuth — 토큰 refresh / publish에 필요.
           INSTAGRAM_APP_ID: ${{ secrets.INSTAGRAM_APP_ID }}
           INSTAGRAM_APP_SECRET: ${{ secrets.INSTAGRAM_APP_SECRET }}

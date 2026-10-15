@@ -14,6 +14,7 @@ import {
   type IncludeOlderResult,
 } from "@/lib/episode-alerts/server";
 import { generateReplyTemplates } from "@/lib/ai/reply-template-generator";
+import { refreshSeriesTemplates } from "@/lib/episode-alerts/auto-templates";
 import { validateTemplates } from "@/lib/episode-alerts/templates";
 import { triggerEpisodeAlertRun } from "@/lib/github-dispatch";
 import {
@@ -422,6 +423,7 @@ export async function deleteSeriesAction(input: { seriesId: string }): Promise<A
 // ─────────────────────────────────────────────────────────────────────────────
 
 // 회차 추가 — 답글은 꺼진 상태로 시작한다(0019). 켜는 건 회차 목록의 스위치로.
+// 추가하면 답글 문구를 AI가 새로 쓴다(실패하면 기존 문구 그대로).
 export async function addEpisodeAction(input: {
   seriesId: string;
   mediaId: string;
@@ -449,6 +451,7 @@ export async function addEpisodeAction(input: {
       mediaType: media.mediaType,
       postedAt: media.timestamp,
     });
+    await refreshSeriesTemplates(service, { seriesId: series.id, auth: ig });
 
     revalidate();
     return { ok: true, episodeNo: episode.episode_no };

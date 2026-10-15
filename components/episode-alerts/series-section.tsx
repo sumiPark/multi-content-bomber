@@ -698,7 +698,9 @@ function SeriesTemplates({
             </>
           ) : (
             <>
-              <p className="text-xs text-muted-foreground">아래 문구 중 하나가 번갈아 달려요.</p>
+              <p className="text-xs text-muted-foreground">
+                아래 문구 중 하나가 번갈아 달려요. 새 화를 추가하면 AI가 문구를 새로 써요.
+              </p>
               <TemplateList
                 templates={series.templates}
                 seriesName={series.name}
@@ -976,7 +978,7 @@ function AddEpisodeDialog({
             취소
           </Button>
           <Button onClick={submit} disabled={isPending || picked.length === 0}>
-            {isPending ? "추가하는 중…" : `${nextNo}화로 추가`}
+            {isPending ? "추가하고 답글 문구 새로 쓰는 중…" : `${nextNo}화로 추가`}
           </Button>
         </>
       }

@@ -1,5 +1,10 @@
-import "server-only";
 import OpenAI from "openai";
+
+// server-only 대신 런타임 체크 — 발행 워커(tsx + plain Node)에서도 시리즈 답글 문구를 새로
+// 쓰는데, server-only는 워커에서 import하면 throw한다(lib/platforms/server-guard.ts와 같은 이유).
+if (typeof window !== "undefined") {
+  throw new Error("lib/openai는 서버(Server Action / API route / 워커)에서만 import해야 합니다.");
+}
 
 let cached: OpenAI | null = null;
 
