@@ -74,7 +74,7 @@ export default async function Page({ searchParams }: PageProps) {
     supabase
       .from("episode_alert_tasks")
       .select(
-        "id, social_account_id, series_id, source_episode_id, target_episode_id, status, scheduled_for, last_error, created_at, completed_at, created_by, watch_until",
+        "id, social_account_id, series_id, source_episode_id, target_episode_id, status, scheduled_for, last_error, created_at, completed_at, created_by, watch_until, include_older",
       )
       .order("created_at", { ascending: false })
       .limit(TASK_LIMIT),
@@ -152,6 +152,7 @@ export default async function Page({ searchParams }: PageProps) {
         targetEpisodeNo: episodeNoById.get(t.target_episode_id) ?? null,
         targetEpisodeId: t.target_episode_id,
         status: t.status,
+        includeOlder: t.include_older,
         auto: t.created_by === null,
         scheduledFor: t.scheduled_for,
         deferred:
@@ -169,6 +170,7 @@ export default async function Page({ searchParams }: PageProps) {
           skipped: s?.skipped ?? 0,
           excluded: s?.excluded ?? 0,
           failed: s?.failed ?? 0,
+          sentOlder: s?.sent_older ?? 0,
         },
       };
     });

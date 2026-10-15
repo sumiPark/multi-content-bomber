@@ -377,6 +377,7 @@ export type Database = {
           reply_text: string | null
           sent_at: string | null
           skip_reason: string | null
+          source_episode_id: string | null
           status: "PENDING" | "SENT" | "SKIPPED" | "EXCLUDED" | "FAILED"
           task_id: string
         }
@@ -393,6 +394,7 @@ export type Database = {
           reply_text?: string | null
           sent_at?: string | null
           skip_reason?: string | null
+          source_episode_id?: string | null
           status?: "PENDING" | "SENT" | "SKIPPED" | "EXCLUDED" | "FAILED"
           task_id: string
         }
@@ -409,10 +411,18 @@ export type Database = {
           reply_text?: string | null
           sent_at?: string | null
           skip_reason?: string | null
+          source_episode_id?: string | null
           status?: "PENDING" | "SENT" | "SKIPPED" | "EXCLUDED" | "FAILED"
           task_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "episode_alert_replies_source_episode_id_fkey"
+            columns: ["source_episode_id"]
+            isOneToOne: false
+            referencedRelation: "series_episodes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "episode_alert_replies_task_id_fkey"
             columns: ["task_id"]
@@ -461,6 +471,7 @@ export type Database = {
           created_by: string | null
           error_count: number
           id: string
+          include_older: boolean
           last_checked_at: string | null
           last_comment_count: number | null
           last_error: string | null
@@ -486,6 +497,7 @@ export type Database = {
           created_by?: string | null
           error_count?: number
           id?: string
+          include_older?: boolean
           last_checked_at?: string | null
           last_comment_count?: number | null
           last_error?: string | null
@@ -511,6 +523,7 @@ export type Database = {
           created_by?: string | null
           error_count?: number
           id?: string
+          include_older?: boolean
           last_checked_at?: string | null
           last_comment_count?: number | null
           last_error?: string | null
@@ -742,6 +755,7 @@ export type Database = {
           failed: number | null
           pending: number | null
           sent: number | null
+          sent_older: number | null
           skipped: number | null
           task_id: string | null
           total: number | null

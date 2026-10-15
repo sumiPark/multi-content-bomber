@@ -19,6 +19,8 @@ export interface TaskStats {
   skipped: number;
   excluded: number;
   failed: number;
+  // 그중 이전 회차 댓글에 보낸 수 (이전 화 댓글에도 보내기, 0023).
+  sentOlder: number;
 }
 
 export interface TaskView {
@@ -29,6 +31,8 @@ export interface TaskView {
   targetEpisodeNo: number | null;
   targetEpisodeId: string;
   status: TaskStatus;
+  // 최신화 소식을 이전 회차 댓글에도 보냈는지(0023). 대상은 1~sourceEpisodeNo화.
+  includeOlder: boolean;
   // 업로드하면서 답글을 켜고 올린 작업인지 (화면에서 스위치로 켠 게 아니라).
   auto: boolean;
   scheduledFor: string;
@@ -42,6 +46,14 @@ export interface TaskView {
   createdAt: string;
   completedAt: string | null;
   stats: TaskStats;
+}
+
+// 답글 대상 회차 — "4화" 또는 이전 화에도 보냈으면 "1~4화".
+export function sourceRangeText(task: Pick<TaskView, "includeOlder" | "sourceEpisodeNo">): string {
+  if (task.sourceEpisodeNo === null) return "직전 화";
+  return task.includeOlder && task.sourceEpisodeNo > 1
+    ? `1~${task.sourceEpisodeNo}화`
+    : `${task.sourceEpisodeNo}화`;
 }
 
 export function StatusPill({ status }: { status: TaskStatus }) {
@@ -131,6 +143,7 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
 
   const counts: { label: string; value: number }[] = [
     { label: "보냄", value: stats.sent },
+    { label: "그중 이전 화", value: stats.sentOlder },
     { label: "남음", value: stats.pending },
     { label: "건너뜀", value: stats.skipped },
     { label: "제외", value: stats.excluded },
@@ -144,7 +157,7 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
         <p className="min-w-0 text-sm font-medium">
           {task.seriesName} {task.targetEpisodeNo}화
           <span className="font-normal text-muted-foreground">
-            {" "}→ {task.sourceEpisodeNo}화 댓글
+            {" "}→ {sourceRangeText(task)} 댓글
           </span>
         </p>
         <span className="text-xs text-muted-foreground">
@@ -237,7 +250,10 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
                     )}
                   </p>
                   {r.commentText && (
-                    <p className="line-clamp-1 text-xs text-muted-foreground">댓글: {r.commentText}</p>
+                    <p className="line-clamp-1 text-xs text-muted-foreground">
+                      {task.includeOlder && r.sourceEpisodeNo ? `${r.sourceEpisodeNo}화 댓글` : "댓글"}:{" "}
+                      {r.commentText}
+                    </p>
                   )}
                   {r.replyText && <p className="line-clamp-2 text-xs">답글: {r.replyText}</p>}
                   {r.reason && r.status !== "SENT" && (

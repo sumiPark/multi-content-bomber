@@ -6,6 +6,7 @@ import {
   addEpisodeAction,
   createSeriesAction,
   deleteSeriesAction,
+  includeOlderEpisodesAction,
   removeLastEpisodeAction,
   renameSeriesAction,
   retryAlertTaskAction,
@@ -257,6 +258,7 @@ function SeriesCard({
                 episode={e}
                 isFirst={i === 0}
                 isLast={i === series.episodes.length - 1}
+                latestEpisodeNo={lastNo}
                 canEdit={canEdit}
                 onRemove={() => {
                   if (!window.confirm(`${e.episodeNo}화를 시리즈에서 뺄까요? 인스타 게시물은 그대로예요.`)) return;
@@ -287,7 +289,8 @@ function SeriesCard({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 회차 한 줄 — 왼쪽은 게시물, 오른쪽은 "N-1화 댓글에 답글" 스위치와 상태 배지
+// 회차 한 줄 — 왼쪽은 게시물, 오른쪽은 "N-1화 댓글에 답글" 스위치와 상태 배지.
+// 최신화 줄엔 "이전 화 댓글에도 보내기"(0023) — 누르면 스위치 이름이 "1~N-1화 댓글에 답글"로 바뀐다.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Tone = "off" | "active" | "waiting" | "done" | "error";
@@ -303,7 +306,10 @@ const TONE_CLASS: Record<Tone, string> = {
 function replyStatus(episode: EpisodeView): { text: string; tone: Tone } {
   const task = episode.task;
   const sent = task?.stats.sent ?? 0;
-  const sentText = `${sent.toLocaleString()}명에게 보냄`;
+  const sentOlder = task?.stats.sentOlder ?? 0;
+  const sentText =
+    `${sent.toLocaleString()}명에게 보냄` +
+    (sentOlder > 0 ? ` (이전 화 ${sentOlder.toLocaleString()}명 포함)` : "");
   if (!episode.replyEnabled) {
     if (task?.watchExpired) return { text: `7일 지나 꺼짐 · ${sentText}`, tone: "off" };
     return { text: sent > 0 ? `꺼짐 · ${sentText}` : "꺼짐", tone: "off" };
@@ -316,7 +322,11 @@ function replyStatus(episode: EpisodeView): { text: string; tone: Tone } {
     case "SENDING":
       return task.deferred
         ? { text: `하루 한도 · 내일 이어서 ${sent}/${toSend}`, tone: "waiting" }
-        : { text: `보내는 중 ${sent}/${toSend}`, tone: "active" };
+        : {
+            // 이전 화까지 넓히면 분모가 갑자기 커진다 — 왜 늘었는지 같이 보여준다.
+            text: `${task.includeOlder ? "이전 화까지 " : ""}보내는 중 ${sent}/${toSend}`,
+            tone: "active",
+          };
     case "DONE":
       return task.watching
         ? { text: `${sentText} · 새 댓글 확인 중`, tone: "done" }
@@ -332,6 +342,7 @@ function EpisodeRow({
   episode,
   isFirst,
   isLast,
+  latestEpisodeNo,
   canEdit,
   busy,
   onRemove,
@@ -339,6 +350,7 @@ function EpisodeRow({
   episode: EpisodeView;
   isFirst: boolean;
   isLast: boolean;
+  latestEpisodeNo: number;
   canEdit: boolean;
   busy: boolean;
   onRemove: () => void;
@@ -349,6 +361,19 @@ function EpisodeRow({
   const task = episode.task;
   const sending = task?.status === "COLLECTING" || task?.status === "SENDING";
   const prevNo = episode.episodeNo - 1;
+  const no = episode.episodeNo;
+  // 이전 화까지 넓힌 상태는 최신화인 동안만 유효하다(다음 화가 올라오면 직전 화만 남음).
+  const olderActive = !!task?.includeOlder && isLast;
+  const scopeText = olderActive ? `1~${prevNo}화` : `${prevNo}화`;
+  const canIncludeOlder =
+    canEdit &&
+    isLast &&
+    no >= 3 &&
+    episode.replyEnabled &&
+    !!task &&
+    !task.includeOlder &&
+    task.status !== "FAILED" &&
+    task.status !== "CANCELLED";
 
   function run(fn: () => Promise<Result>) {
     setError(null);
@@ -358,16 +383,39 @@ function EpisodeRow({
     });
   }
 
+  function enableMessage(): string {
+    const body = `${no}화 답글을 켜면 ${scopeText}에 댓글 단 사람들에게 바로 답글이 달려요. 7일 동안은 새로 단 댓글에도 이어서 달고, 그 뒤엔 자동으로 꺼져요.`;
+    if (isLast) return `${body} 켤까요?`;
+    // 최신화가 아닌 회차 — 사용자는 "2화 댓글 단 사람에게 보내려면 3화를 켠다"로 생각하기 쉬운데,
+    // 그러면 최신화가 따로 있는데도 "3화 올라왔어요"가 나간다.
+    return [
+      `지금 최신화는 ${latestEpisodeNo}화예요.`,
+      `${no}화 답글을 켜면 ${prevNo}화에 댓글 단 사람들에게 “${no}화 올라왔어요”로 나가요.`,
+      `최신화 소식을 알리려면 ${latestEpisodeNo}화 답글을 켜고 “이전 화 댓글에도 보내기”를 누르세요.`,
+      ``,
+      `그래도 ${no}화 답글을 켤까요?`,
+    ].join("\n");
+  }
+
+  function includeOlder() {
+    const olderText = prevNo - 1 > 1 ? `1~${prevNo - 1}화` : "1화";
+    const message = [
+      `${no}화 소식을 ${olderText}에 댓글 단 사람들에게도 보낼까요?`,
+      ``,
+      `· 한 사람에게 답글 하나 — 가장 최근 화에 단 댓글에 달아요`,
+      `· 이미 ${no}화 답글을 받았거나 ${no}화에 댓글 단 사람은 빼요`,
+      `· 다른 화 답글이 이미 달린 댓글에도 ${no}화 답글을 달아요`,
+      `· 지금부터 7일 동안 1~${prevNo}화 새 댓글도 확인해요`,
+      `· ${no}화 답글을 끄면 같이 멈추고, 다시 켜면 이어서 보내요`,
+      `· ${no + 1}화가 올라오면 이전 화 쪽은 멈춰요 (${no}화에만 적용)`,
+    ].join("\n");
+    if (!window.confirm(message)) return;
+    run(() => includeOlderEpisodesAction({ episodeId: episode.id }));
+  }
+
   function toggle() {
     const next = !episode.replyEnabled;
-    if (
-      next &&
-      !window.confirm(
-        `${episode.episodeNo}화 답글을 켜면 ${prevNo}화에 댓글 단 사람들에게 바로 답글이 달려요. 7일 동안은 새로 단 댓글에도 이어서 달고, 그 뒤엔 자동으로 꺼져요. 켤까요?`,
-      )
-    ) {
-      return;
-    }
+    if (next && !window.confirm(enableMessage())) return;
     if (!next && sending && !window.confirm("남은 답글을 보내지 않을까요? 이미 보낸 답글은 그대로예요.")) {
       return;
     }
@@ -426,7 +474,7 @@ function EpisodeRow({
             <>
               <div className="flex items-center gap-2.5">
                 <span id={`reply-label-${episode.id}`} className="text-sm">
-                  {prevNo}화 댓글에 답글
+                  {scopeText} 댓글에 답글
                 </span>
                 <ReplySwitch
                   checked={episode.replyEnabled}
@@ -445,6 +493,11 @@ function EpisodeRow({
                 >
                   {status.text}
                 </span>
+                {canIncludeOlder && (
+                  <Button variant="outline" size="xs" disabled={isPending} onClick={includeOlder}>
+                    이전 화 댓글에도 보내기
+                  </Button>
+                )}
                 {task?.status === "FAILED" && episode.replyEnabled && canEdit && (
                   <Button
                     variant="outline"

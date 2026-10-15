@@ -9,6 +9,8 @@ import {
   enableEpisodeReplies,
   EpisodeAlertError,
   getInstagramAuth,
+  includeOlderEpisodes,
+  type IncludeOlderResult,
 } from "@/lib/episode-alerts/server";
 import { generateReplyTemplates } from "@/lib/ai/reply-template-generator";
 import { validateTemplates } from "@/lib/episode-alerts/templates";
@@ -548,6 +550,45 @@ export async function setEpisodeReplyAction(input: {
   }
 }
 
+const INCLUDE_OLDER_ERRORS: Record<
+  Exclude<IncludeOlderResult, { ok: true }>["reason"],
+  string
+> = {
+  "not-latest": "최신화에서만 이전 화 댓글에도 보낼 수 있어요.",
+  "no-older": "직전 화 말고는 이전 화가 없어요.",
+  off: "먼저 이 회차 답글을 켜주세요.",
+  already: "이미 이전 화 댓글에도 보내고 있어요.",
+  busy: "지금 답글을 보내는 중이에요. 잠시 뒤 다시 눌러주세요.",
+};
+
+// 최신화 소식을 이전 회차 댓글에도 보내기(0023). 최신화 줄의 버튼이 부른다.
+export async function includeOlderEpisodesAction(input: {
+  episodeId: string;
+}): Promise<ActionResult> {
+  const parsed = z.object({ episodeId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize(true);
+  if ("error" in auth) return { ok: false, error: auth.error };
+
+  const service = createServiceClient();
+  try {
+    const loaded = await loadEpisodeWithSeries(service, parsed.data.episodeId, auth.organizationId);
+    if (!loaded) return { ok: false, error: "회차를 찾을 수 없어요." };
+    const { episode, series } = loaded;
+
+    // 토큰부터 확인 — 만료된 계정이면 모으자마자 실패한다.
+    await authForAccount(service, series.social_account_id, auth.organizationId);
+    const result = await includeOlderEpisodes(service, episode);
+    if (!result.ok) return { ok: false, error: INCLUDE_OLDER_ERRORS[result.reason] };
+
+    dispatchSoft("episode-reply-include-older");
+    revalidate();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: toMessage(err) };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 계정별 설정 — 하루 최대 답글 수
 // ─────────────────────────────────────────────────────────────────────────────
@@ -652,6 +693,8 @@ export interface ReplyDetail {
   id: string;
   username: string | null;
   commentText: string | null;
+  // 이 댓글이 달린 회차 번호.
+  sourceEpisodeNo: number | null;
   status: "PENDING" | "SENT" | "SKIPPED" | "EXCLUDED" | "FAILED";
   reason: string | null;
   replyText: string | null;
@@ -671,7 +714,9 @@ export async function getTaskRepliesAction(input: {
   const LIMIT = 1000;
   const { data, error } = await supabase
     .from("episode_alert_replies")
-    .select("id, commenter_username, comment_text, status, skip_reason, error, reply_text, sent_at, commented_at")
+    .select(
+      "id, commenter_username, comment_text, status, skip_reason, error, reply_text, sent_at, commented_at, series_episodes(episode_no)",
+    )
     .eq("task_id", parsed.data.taskId)
     .order("commented_at", { ascending: false, nullsFirst: false })
     .limit(LIMIT + 1);
@@ -685,6 +730,7 @@ export async function getTaskRepliesAction(input: {
       id: r.id,
       username: r.commenter_username,
       commentText: r.comment_text,
+      sourceEpisodeNo: r.series_episodes?.episode_no ?? null,
       status: r.status,
       reason: r.status === "FAILED" ? r.error : r.skip_reason,
       replyText: r.reply_text,

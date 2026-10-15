@@ -252,6 +252,72 @@ export async function enableEpisodeReplies(
   return { started: true };
 }
 
+export type IncludeOlderResult =
+  | { ok: true }
+  | { ok: false; reason: "not-latest" | "no-older" | "off" | "already" | "busy" };
+
+// 워커 잠금이 이보다 오래되면 죽은 잠금으로 본다(claim_episode_alert_tasks의 p_stale_minutes와 같음).
+const STALE_LOCK_MS = 60 * 60_000;
+
+/**
+ * 최신화 소식을 이전 회차 댓글에도 보내기(0023). 직전 화만 대상이던 작업을 1~(N-1)화 전체로
+ * 넓혀 다시 모은다. 한 사람에게 하나(가장 최근 화에 단 댓글), 이미 이 회차 답글을 받았거나
+ * 이 회차에 댓글 단 사람은 빠진다(collect.ts). 새 댓글 지켜보기 7일은 지금부터 다시 센다.
+ * 이 회차가 최신화인 동안만 유효하다 — 다음 화가 올라오면 이전 화 쪽은 멈춘다(scope.ts).
+ * 답글을 끄면 같이 멈추고, 다시 켜면 넓힌 범위 그대로 이어서 보낸다.
+ */
+export async function includeOlderEpisodes(
+  service: Service,
+  episode: EpisodeRow,
+): Promise<IncludeOlderResult> {
+  const [{ data: latest }, { data: task }] = await Promise.all([
+    service
+      .from("series_episodes")
+      .select("id")
+      .eq("series_id", episode.series_id)
+      .order("episode_no", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    service
+      .from("episode_alert_tasks")
+      .select("id, status, include_older")
+      .eq("target_episode_id", episode.id)
+      .maybeSingle(),
+  ]);
+  if (latest?.id !== episode.id) return { ok: false, reason: "not-latest" };
+  // 2화는 이전 화가 직전 화(1화) 하나뿐이다.
+  if (episode.episode_no < 3) return { ok: false, reason: "no-older" };
+  if (!episode.reply_enabled || !task || task.status === "CANCELLED") {
+    return { ok: false, reason: "off" };
+  }
+  if (task.include_older) return { ok: false, reason: "already" };
+
+  // 워커가 지금 보내는 중이면(잠금) 건드리지 않는다 — 끝나면서 DONE으로 덮어써 다시 모으기가
+  // 사라진다. 잠금이 없으면(대기·하루 상한으로 미룸·완료) 바로 다시 모으기로 돌린다.
+  const staleBefore = new Date(Date.now() - STALE_LOCK_MS).toISOString();
+  const { data: updated } = await service
+    .from("episode_alert_tasks")
+    .update({
+      include_older: true,
+      status: "COLLECTING",
+      error_count: 0,
+      last_error: null,
+      completed_at: null,
+      scheduled_for: new Date().toISOString(),
+      watch_until: watchUntilFromNow(),
+      last_checked_at: null,
+      last_comment_count: null,
+    })
+    .eq("id", task.id)
+    .eq("include_older", false)
+    .neq("status", "CANCELLED")
+    .or(`locked_at.is.null,locked_at.lt.${staleBefore}`)
+    .select("id")
+    .maybeSingle();
+  if (!updated) return { ok: false, reason: "busy" };
+  return { ok: true };
+}
+
 /**
  * 회차 답글 끄기. 보내는 중이면 멈추고 남은 대상은 빼둔다(다시 켜면 되살아남).
  * 새 댓글 지켜보기도 멈춘다. 이미 보낸 답글은 그대로다.

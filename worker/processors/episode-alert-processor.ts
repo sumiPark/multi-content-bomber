@@ -1,6 +1,12 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { collectCandidates } from "@/lib/episode-alerts/collect";
 import {
+  excludeOutdatedOlder,
+  loadNewerExpandedTasks,
+  loadTaskScope,
+  type NewerTask,
+} from "@/lib/episode-alerts/scope";
+import {
   EpisodeAlertError,
   getInstagramAuth,
   loadAlertSettings,
@@ -20,7 +26,8 @@ import type { Database } from "@/types/database";
 // ─────────────────────────────────────────────────────────────────────────────
 // 시리즈 댓글 자동화 작업 처리 (episode_alert_tasks 상태 머신).
 //
-//   COLLECTING ─ 직전 화 댓글 수집 → 답글 대상(PENDING)/건너뜀(SKIPPED) 기록 → 바로 SENDING
+//   COLLECTING ─ 대상 회차 댓글 수집(보통 직전 화, "이전 화에도"면 1~N-1화 — scope.ts)
+//       → 답글 대상(PENDING)/건너뜀(SKIPPED) 기록 → 바로 SENDING
 //   SENDING ─ 간격을 두고 대댓글 등록. 하루 상한/시간 예산에 걸리면 다음 run으로 넘김.
 //       └─ 대상이 다 끝나면 DONE
 //   회차 답글을 끄면 CANCELLED(남은 대상은 EXCLUDED) — 이 워커는 손대지 않는다.
@@ -101,15 +108,12 @@ async function sendReplies(
 ): Promise<TaskOutcome> {
   const settings = await loadAlertSettings(service, task.social_account_id);
 
-  const [{ data: series }, { data: target }] = await Promise.all([
-    service.from("series").select("name, reply_templates").eq("id", task.series_id).maybeSingle(),
-    service
-      .from("series_episodes")
-      .select("episode_no")
-      .eq("id", task.target_episode_id)
-      .maybeSingle(),
-  ]);
-  if (!series || !target) throw new EpisodeAlertError("시리즈 정보를 찾을 수 없어요.");
+  const { data: series } = await service
+    .from("series")
+    .select("name, reply_templates")
+    .eq("id", task.series_id)
+    .maybeSingle();
+  if (!series) throw new EpisodeAlertError("시리즈 정보를 찾을 수 없어요.");
   // 답글 문구는 시리즈별(0018). 보내는 시점의 문구를 쓴다.
   const templates = effectiveTemplates(series.reply_templates);
 
@@ -142,6 +146,12 @@ async function sendReplies(
       return "continue";
     }
 
+    // 배치마다 회차 범위를 다시 본다 — 보내는 사이 다음 화가 올라오면 이전 화 쪽은 멈추고,
+    // 뒤 회차의 "이전 화에도" 작업이 맡은 댓글은 그쪽 소식으로 대신한다(scope.ts).
+    const scope = await loadTaskScope(service, task);
+    await excludeOutdatedOlder(service, task, scope);
+    const newerTasks = await loadNewerExpandedTasks(service, task, scope);
+
     const { data: batch, error } = await service
       .from("episode_alert_replies")
       .select("id, ig_comment_id, commenter_username")
@@ -168,10 +178,19 @@ async function sendReplies(
         .maybeSingle();
       if (fresh?.status !== "PENDING") continue;
 
+      const newerNo = await claimedByNewer(service, newerTasks, row.ig_comment_id);
+      if (newerNo !== null) {
+        await updateReply(service, row.id, {
+          status: "SKIPPED",
+          skip_reason: `${newerNo}화 답글로 대신해요`,
+        });
+        continue;
+      }
+
       const text = renderTemplate(pickTemplate(templates, rotation), {
         username: row.commenter_username ?? "",
         series: series.name,
-        episode: target.episode_no,
+        episode: scope.target.episode_no,
       });
 
       try {
@@ -213,6 +232,26 @@ async function sendReplies(
       await sleep(randomInterval());
     }
   }
+}
+
+// 뒤 회차의 "이전 화에도" 작업이 이 댓글을 맡았으면(보낼 예정이거나 보냄) 그 회차 번호.
+// 같은 댓글에는 최신화 소식 하나만 — 두 작업이 동시에 모았을 때를 보내기 직전에 막는다.
+async function claimedByNewer(
+  service: Service,
+  newerTasks: NewerTask[],
+  igCommentId: string,
+): Promise<number | null> {
+  if (newerTasks.length === 0) return null;
+  const { data } = await service
+    .from("episode_alert_replies")
+    .select("task_id")
+    .in("task_id", newerTasks.map((t) => t.id))
+    .eq("ig_comment_id", igCommentId)
+    .in("status", ["PENDING", "SENT"])
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  return newerTasks.find((t) => t.id === data.task_id)?.episodeNo ?? null;
 }
 
 // 이 계정이 최근 24시간 동안 보낸 답글 수 (모든 작업 합산).

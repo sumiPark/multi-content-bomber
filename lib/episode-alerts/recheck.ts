@@ -1,13 +1,15 @@
 import type { createServiceClient } from "@/lib/supabase/service";
 import { getInstagramMedia, InstagramApiError } from "@/lib/platforms/instagram-comments";
 import { collectCandidates } from "./collect";
+import { loadTaskScope } from "./scope";
 import { getInstagramAuth } from "./server";
 
-// 시리즈 댓글 자동화 — 답글이 켜져 있는 동안 직전 화의 새 댓글 찾기(0020).
+// 시리즈 댓글 자동화 — 답글이 켜져 있는 동안 대상 회차의 새 댓글 찾기(0020).
+// 대상 회차는 보통 직전 화, "이전 화 댓글에도 보내기"면 1~(N-1)화 전체(0023, scope.ts).
 // Supabase pg_cron이 5분마다 /api/cron/episode-replies를 부르면 이 함수가 돈다.
 //
 //   · 다 보낸(DONE) 작업 중 지켜보기 기한(watch_until)이 남은 것을 골라
-//   · 게시물 댓글 수가 지난번보다 늘었을 때만 댓글을 다시 모으고(새 사람만 더해짐)
+//   · 대상 게시물 댓글 수(합)가 지난번과 달라졌을 때만 댓글을 다시 모으고(새 사람만 더해짐)
 //   · 보낼 사람이 생기면 SENDING으로 돌려 GitHub 답글 워커를 깨우게 한다.
 //   · 덤으로, 보내야 하는데 워커가 몇 분째 안 집어간 작업이 있어도 워커를 깨운다
 //     (하루 상한으로 미뤄둔 발송이 다시 열린 경우 등 — 예전엔 발행 run을 기다렸다).
@@ -75,17 +77,17 @@ export async function recheckWatchedTasks(
 
     try {
       const auth = await getInstagramAuth(service, task.social_account_id);
-      const { data: source } = await service
-        .from("series_episodes")
-        .select("ig_media_id")
-        .eq("id", task.source_episode_id)
-        .maybeSingle();
-      if (!source) continue;
+      const scope = await loadTaskScope(service, task);
 
-      // 댓글 수가 안 늘었으면 전체를 다시 읽지 않는다(인스타 호출 1번으로 끝).
-      const media = await getInstagramMedia(source.ig_media_id, auth.token);
-      const count = media.commentsCount;
-      if (count !== null && task.last_comment_count !== null && count <= task.last_comment_count) {
+      // 댓글 수가 그대로면 전체를 다시 읽지 않는다(게시물마다 인스타 호출 1번으로 끝).
+      // "같음"으로 비교한다 — 다음 화가 올라와 대상 회차가 줄면 합도 달라져 한 번 다시 모은다.
+      const medias = await Promise.all(
+        scope.sources.map((s) => getInstagramMedia(s.ig_media_id, auth.token)),
+      );
+      const count = medias.some((m) => m.commentsCount === null)
+        ? null
+        : medias.reduce((sum, m) => sum + (m.commentsCount ?? 0), 0);
+      if (count !== null && task.last_comment_count !== null && count === task.last_comment_count) {
         continue;
       }
 

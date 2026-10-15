@@ -451,6 +451,8 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
         <ul>
           <li>답글을 켠 뒤 7일 동안 5분마다 직전 화 새 댓글을 확인해서 보냄 (Supabase pg_cron, 마이그레이션 0020)</li>
           <li>7일이 지나면 다 보낸 회차의 답글 스위치가 자동으로 꺼지고 “7일 지나 꺼짐”으로 표시 (0021). 기간은 일단 7일 고정</li>
+          <li>최신화 소식을 이전 회차 댓글에도: 최신화 줄 “이전 화 댓글에도 보내기”. 가장 최근 화에 단 댓글에 하나만, 이미 받은 사람·이번 화에 댓글 단 사람은 빼고, 같은 댓글엔 최신화 소식 하나 (0023)</li>
+          <li>최신화가 아닌 회차 스위치를 켜면 “N화 올라왔어요”로 나간다고 경고</li>
           <li>남은 것(선택): 댓글 웹훅으로 실시간 처리, 비공개 답장(DM) 옵션</li>
         </ul>
       </div>
@@ -469,7 +471,7 @@ footer ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
     <ul class="decisions">
       <li><span class="q">어떤 계정에 쓰나요?</span><span class="rec"><b>우리 팀 계정만</b>으로 시작하면 검수 없이 바로 쓸 수 있습니다</span></li>
       <li><span class="q">자동으로 보낼까요, 확인 후 보낼까요?</span><span class="rec"><b>바로 보내기로 고정</b>. 대신 회차마다 답글 스위치가 있고 기본은 꺼짐</span></li>
-      <li><span class="q">어느 회차 댓글에 알릴까요?</span><span class="rec"><b>직전 회차만</b> (2화가 나오면 1화, 3화가 나오면 2화)</span></li>
+      <li><span class="q">어느 회차 댓글에 알릴까요?</span><span class="rec"><b>기본은 직전 회차만</b> (2화가 나오면 1화, 3화가 나오면 2화). 최신화 줄의 “이전 화 댓글에도 보내기”를 누르면 1~(N-1)화 전체 — 한 사람에게 하나, 다음 화가 올라오면 이전 화 쪽은 멈춤 (0023)</span></li>
       <li><span class="q">어떤 댓글까지 대상인가요?</span><span class="rec"><b>켜는 순간까지의 댓글 + 켜진 7일 동안 새로 달린 댓글</b>. 7일이 지나면 자동으로 꺼짐</span></li>
       <li><span class="q">공개 대댓글과 DM 중 무엇으로?</span><span class="rec"><b>공개 대댓글</b>. 다른 사람들에게도 2화 소식이 보이는 효과가 있습니다</span></li>
       <li><span class="q">답글 문구는요?</span><span class="rec templates">
