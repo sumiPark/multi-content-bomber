@@ -24,6 +24,8 @@ export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
 
 // 회차 답글을 끌 때 남은 대상에 붙이는 사유. 다시 켜면 이 사유로 빠진 대상만 되살린다.
 export const REPLY_OFF_REASON = "답글 끔";
+// "이전 화는 그만 보내기"로 빠진 이전 화 대상의 사유. 다시 넓히면 이 사유로 빠진 대상만 되살린다.
+export const OLDER_OFF_REASON = "이전 화 그만 보냄";
 
 // 답글을 켠 뒤 새 댓글을 지켜보는 기간(0020). 이 동안 5분마다 직전 화 새 댓글을 확인하고,
 // 지나면 다 보낸 회차의 답글 스위치가 자동으로 꺼진다(0021, pg_cron 'episode-replies-expire').
@@ -141,6 +143,8 @@ export async function createAlertTask(
     organizationId: string;
     socialAccountId: string;
     createdBy: string | null;
+    // 이전 회차 댓글에도 보낼지(0023). 최신화인지는 호출측이 확인한다.
+    includeOlder?: boolean;
   },
 ): Promise<CreateTaskResult> {
   // 서로 독립이라 한 번에 묻는다(DB 왕복 줄이기).
@@ -172,6 +176,7 @@ export async function createAlertTask(
       target_episode_id: args.episode.id,
       created_by: args.createdBy,
       watch_until: watchUntilFromNow(),
+      include_older: args.includeOlder ?? false,
     })
     .select("*")
     .single();
@@ -201,6 +206,8 @@ export type EnableResult =
  *   - 껐다 켜거나(CANCELLED), 실패했거나(FAILED), 다 보냈던(DONE) 작업은 다시 모은다.
  *     끌 때 빠졌던 대상은 되살리고, 그 사이 새로 댓글 단 사람도 더한다. 이미 답글을 받은
  *     사람은 다시 받지 않는다(수집 단계에서 같은 사람 제외).
+ *   - includeOlder면 이전 회차 댓글에도 보낸다(0023, 켤 때 확인창에서 고름). 최신화(3화 이상)가
+ *     아니면 무시하고 직전 화만. 다시 켤 때 고른 값으로 바뀐다.
  * 실제로 보내는 건 워커다 — 호출측이 워크플로를 깨운다.
  */
 export async function enableEpisodeReplies(
@@ -210,9 +217,11 @@ export async function enableEpisodeReplies(
     organizationId: string;
     socialAccountId: string;
     createdBy: string | null;
+    includeOlder?: boolean;
   },
 ): Promise<EnableResult> {
-  const created = await createAlertTask(service, args);
+  const includeOlder = !!args.includeOlder && (await isLatestWithOlder(service, args.episode));
+  const created = await createAlertTask(service, { ...args, includeOlder });
   // 첫 회차는 답글을 달 이전 화가 없다 — 켜지 않는다.
   if (!created.created && created.reason === "no-previous") {
     return { started: false, reason: "no-previous" };
@@ -229,15 +238,18 @@ export async function enableEpisodeReplies(
     return { started: false, reason: "already-running" };
   }
 
+  // 끌 때 빠졌던 대상을 되살린다. 이전 화에도 보내면 "이전 화 그만 보냄"으로 빠졌던 대상도.
+  // 이번엔 이전 화를 안 고르면 되살아난 이전 화 대상은 다시 모을 때 빠진다(scope.ts).
   await service
     .from("episode_alert_replies")
     .update({ status: "PENDING", skip_reason: null })
     .eq("task_id", task.id)
     .eq("status", "EXCLUDED")
-    .eq("skip_reason", REPLY_OFF_REASON);
+    .in("skip_reason", includeOlder ? [REPLY_OFF_REASON, OLDER_OFF_REASON] : [REPLY_OFF_REASON]);
   await service
     .from("episode_alert_tasks")
     .update({
+      include_older: includeOlder,
       status: "COLLECTING",
       error_count: 0,
       last_error: null,
@@ -252,19 +264,30 @@ export async function enableEpisodeReplies(
   return { started: true };
 }
 
+// 이 회차가 최신화이고 직전 화 말고도 이전 화가 있는지(3화 이상) — 이전 화에도 보내기의 조건.
+async function isLatestWithOlder(service: Service, episode: EpisodeRow): Promise<boolean> {
+  if (episode.episode_no < 3) return false;
+  const { data: latest } = await service
+    .from("series_episodes")
+    .select("id")
+    .eq("series_id", episode.series_id)
+    .order("episode_no", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return latest?.id === episode.id;
+}
+
 export type IncludeOlderResult =
   | { ok: true }
-  | { ok: false; reason: "not-latest" | "no-older" | "off" | "already" | "busy" };
-
-// 워커 잠금이 이보다 오래되면 죽은 잠금으로 본다(claim_episode_alert_tasks의 p_stale_minutes와 같음).
-const STALE_LOCK_MS = 60 * 60_000;
+  | { ok: false; reason: "not-latest" | "no-older" | "off" | "already" };
 
 /**
  * 최신화 소식을 이전 회차 댓글에도 보내기(0023). 직전 화만 대상이던 작업을 1~(N-1)화 전체로
  * 넓혀 다시 모은다. 한 사람에게 하나(가장 최근 화에 단 댓글), 이미 이 회차 답글을 받았거나
  * 이 회차에 댓글 단 사람은 빠진다(collect.ts). 새 댓글 지켜보기 7일은 지금부터 다시 센다.
  * 이 회차가 최신화인 동안만 유효하다 — 다음 화가 올라오면 이전 화 쪽은 멈춘다(scope.ts).
- * 답글을 끄면 같이 멈추고, 다시 켜면 넓힌 범위 그대로 이어서 보낸다.
+ * 보내는 중에도 켤 수 있다 — 워커가 배치마다 상태를 다시 보고, 다시 모으기(COLLECTING)를
+ * 보면 그 자리에서 이전 화 댓글을 모아 이어서 보낸다(episode-alert-processor.ts).
  */
 export async function includeOlderEpisodes(
   service: Service,
@@ -292,9 +315,6 @@ export async function includeOlderEpisodes(
   }
   if (task.include_older) return { ok: false, reason: "already" };
 
-  // 워커가 지금 보내는 중이면(잠금) 건드리지 않는다 — 끝나면서 DONE으로 덮어써 다시 모으기가
-  // 사라진다. 잠금이 없으면(대기·하루 상한으로 미룸·완료) 바로 다시 모으기로 돌린다.
-  const staleBefore = new Date(Date.now() - STALE_LOCK_MS).toISOString();
   const { data: updated } = await service
     .from("episode_alert_tasks")
     .update({
@@ -311,10 +331,61 @@ export async function includeOlderEpisodes(
     .eq("id", task.id)
     .eq("include_older", false)
     .neq("status", "CANCELLED")
-    .or(`locked_at.is.null,locked_at.lt.${staleBefore}`)
     .select("id")
     .maybeSingle();
-  if (!updated) return { ok: false, reason: "busy" };
+  // 동시에 두 번 눌러 다른 쪽이 먼저 켰다.
+  if (!updated) return { ok: false, reason: "already" };
+
+  // 전에 "이전 화는 그만 보내기"로 빠졌던 대상은 되살린다(다시 모을 때 같은 댓글은 그대로 두므로).
+  await service
+    .from("episode_alert_replies")
+    .update({ status: "PENDING", skip_reason: null })
+    .eq("task_id", task.id)
+    .eq("status", "EXCLUDED")
+    .eq("skip_reason", OLDER_OFF_REASON);
+  return { ok: true };
+}
+
+/**
+ * 이전 화는 그만 보내기(0023). 직전 화 댓글 답글과 새 댓글 확인은 그대로 두고, 이전 회차
+ * 댓글에 남은 답글만 뺀다(이미 보낸 답글은 그대로). 다시 넓히면 이어서 보낸다.
+ * 보내는 중이어도 바로 누를 수 있다 — 워커가 모으던 중이라 뒤늦게 들어온 대상은 워커가
+ * 보내기 전에 확인해서 뺀다(episode-alert-processor.ts).
+ */
+export async function stopOlderEpisodes(
+  service: Service,
+  episodeId: string,
+): Promise<{ ok: true } | { ok: false; reason: "not-included" }> {
+  const { data: task } = await service
+    .from("episode_alert_tasks")
+    .update({ include_older: false })
+    .eq("target_episode_id", episodeId)
+    .eq("include_older", true)
+    .select("id, source_episode_id")
+    .maybeSingle();
+  if (!task) return { ok: false, reason: "not-included" };
+
+  await service
+    .from("episode_alert_replies")
+    .update({ status: "EXCLUDED", skip_reason: OLDER_OFF_REASON })
+    .eq("task_id", task.id)
+    .eq("status", "PENDING")
+    .neq("source_episode_id", task.source_episode_id);
+
+  // 남은 게 이전 화 대상뿐이었으면 바로 완료로 — 워커가 다시 돌 때까지 "보내는 중"으로 남지 않게.
+  const { count } = await service
+    .from("episode_alert_replies")
+    .select("id", { count: "exact", head: true })
+    .eq("task_id", task.id)
+    .eq("status", "PENDING");
+  if ((count ?? 0) === 0) {
+    await service
+      .from("episode_alert_tasks")
+      .update({ status: "DONE", completed_at: new Date().toISOString(), last_error: null })
+      .eq("id", task.id)
+      .eq("status", "SENDING")
+      .is("locked_at", null);
+  }
   return { ok: true };
 }
 

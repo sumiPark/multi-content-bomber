@@ -1,12 +1,13 @@
 // server-only는 쓰지 않는다 — 워커(tsx + plain Node)에서도 import한다.
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/types/database";
-import { EpisodeAlertError } from "./server";
+import { EpisodeAlertError, OLDER_OFF_REASON } from "./server";
 
 // 시리즈 댓글 자동화 — 답글 작업이 어느 회차 댓글을 대상으로 하는지(0023).
 //   · 기본: 직전 화(source_episode_id) 하나 — "다음 화 올라왔어요"
 //   · 이전 화 댓글에도 보내기(include_older): 이 회차가 최신화인 동안 1~(N-1)화 전체.
 //     다음 화가 올라오면 "N화 올라왔어요"는 철 지난 소식이라 이전 화 쪽은 멈추고 직전 화만 남는다.
+//     "이전 화는 그만 보내기"를 누르면 include_older가 꺼져 직전 화만 남는다.
 // 같은 댓글에는 최신화 소식 하나 — 뒤 회차의 "이전 화에도" 작업이 맡은 댓글은 앞 회차 작업이 건너뛴다.
 
 type Service = ReturnType<typeof createServiceClient>;
@@ -58,12 +59,18 @@ export async function loadTaskScope(service: Service, task: TaskRow): Promise<Ta
   };
 }
 
-// "이전 화에도" 작업인데 다음 화가 올라왔으면, 이전 화 댓글에 남은 답글은 보내지 않는다.
-export async function excludeOutdatedOlder(service: Service, task: TaskRow, scope: TaskScope) {
-  if (!task.include_older || scope.newerEpisodeNo === null) return;
+// 이전 화 쪽이 지금 유효하지 않으면 이전 화 댓글에 남은 답글은 보내지 않는다.
+//   · "이전 화는 그만 보내기"를 눌렀거나(include_older 꺼짐) — 다시 넓히면 되살아남
+//   · 다음 화가 올라와 "N화 올라왔어요"가 철 지난 소식이 됐거나
+// 이전 화 댓글이 없는 작업이면 바뀌는 행이 없다.
+export async function excludeInactiveOlder(service: Service, task: TaskRow, scope: TaskScope) {
+  if (scope.olderActive) return;
+  const reason = !task.include_older
+    ? OLDER_OFF_REASON
+    : `${scope.newerEpisodeNo}화가 올라와 멈췄어요`;
   await service
     .from("episode_alert_replies")
-    .update({ status: "EXCLUDED", skip_reason: `${scope.newerEpisodeNo}화가 올라와 멈췄어요` })
+    .update({ status: "EXCLUDED", skip_reason: reason })
     .eq("task_id", task.id)
     .eq("status", "PENDING")
     .neq("source_episode_id", task.source_episode_id);

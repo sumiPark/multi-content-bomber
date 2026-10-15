@@ -1,7 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { collectCandidates } from "@/lib/episode-alerts/collect";
 import {
-  excludeOutdatedOlder,
+  excludeInactiveOlder,
   loadNewerExpandedTasks,
   loadTaskScope,
   type NewerTask,
@@ -10,6 +10,7 @@ import {
   EpisodeAlertError,
   getInstagramAuth,
   loadAlertSettings,
+  REPLY_OFF_REASON,
   type InstagramAccountAuth,
 } from "@/lib/episode-alerts/server";
 import {
@@ -30,7 +31,8 @@ import type { Database } from "@/types/database";
 //       → 답글 대상(PENDING)/건너뜀(SKIPPED) 기록 → 바로 SENDING
 //   SENDING ─ 간격을 두고 대댓글 등록. 하루 상한/시간 예산에 걸리면 다음 run으로 넘김.
 //       └─ 대상이 다 끝나면 DONE
-//   회차 답글을 끄면 CANCELLED(남은 대상은 EXCLUDED) — 이 워커는 손대지 않는다.
+//   회차 답글을 끄면 CANCELLED(남은 대상은 EXCLUDED). 끄는 순간 모으던 중이었으면 뒤늦게 들어온
+//   대상이 남으므로, 보내기 전 배치마다 스위치를 다시 보고 꺼져 있으면 빼고 멈춘다.
 //
 // 작업 단위 오류: 토큰 만료·연결 해제 → FAILED(재연결 후 "다시 시도"),
 //   호출 한도 → 1시간 뒤, 인스타 활동 제한(368) → 24시간 뒤, 그 외 → 15분 뒤 (3번까지).
@@ -76,12 +78,10 @@ export async function processEpisodeAlertTask(
   try {
     const auth = await getInstagramAuth(service, task.social_account_id);
 
+    // 모을 대상이 0명이어도 발송 단계로 넘긴다 — 모으는 사이 "이전 화 댓글에도"를 켰으면
+    // 발송 단계가 그걸 보고 다시 모은다. 보낼 게 없으면 거기서 바로 완료된다.
     if (task.status === "COLLECTING") {
-      const pending = await collectCandidates(service, task, auth);
-      if (pending === 0) {
-        await finish(service, task.id);
-        return "done";
-      }
+      await collectCandidates(service, task, auth);
       await updateTask(service, task.id, { status: "SENDING", error_count: 0, last_error: null });
     }
 
@@ -128,8 +128,70 @@ async function sendReplies(
   let remainingToday = settings.dailyLimit - (await sentInLastDay(service, task.social_account_id));
   let consecutiveFailures = 0;
   let sentThisRun = 0;
+  // 이전 화 댓글까지 모았는지 — 처음 집어온 task 행 기준. 보내는 사이 켜지면 아래에서 모은다.
+  let collectedOlder = task.include_older;
 
   for (;;) {
+    // 배치마다 지금 상태를 다시 본다(처음 집어온 task 행은 낡았을 수 있다).
+    //   · 답글을 껐으면 남은 대상을 빼고 멈춘다 — 끄는 순간 모으던 중이라 끄기가 미처 못 뺀 대상까지
+    //   · "이전 화 댓글에도"를 켰으면(다시 모으기) 그 자리에서 이전 화 댓글을 모아 이어서 보낸다
+    //   · 이전 화를 껐거나 다음 화가 올라왔으면 이전 화 쪽 남은 대상을 뺀다
+    //   · 뒤 회차의 "이전 화에도" 작업이 맡은 댓글은 그쪽 소식으로 대신한다(scope.ts)
+    const current = await loadLiveTask(service, task);
+    if (!current) {
+      await stopTurnedOff(service, task.id);
+      console.log(`[episode-alerts] ${task.id} 답글이 꺼져 멈춤 — 이번 run 보냄 ${sentThisRun}개`);
+      return "done";
+    }
+    if (current.status !== "SENDING" && current.status !== "COLLECTING") {
+      // 다른 곳에서 끝낸 작업 — 잠금만 풀고 손 뗀다.
+      await releaseTask(service, task.id);
+      return "done";
+    }
+    if (current.status === "COLLECTING" || (current.include_older && !collectedOlder)) {
+      await collectCandidates(service, current, auth);
+      collectedOlder = current.include_older;
+      await service
+        .from("episode_alert_tasks")
+        .update({ status: "SENDING" })
+        .eq("id", task.id)
+        .eq("status", "COLLECTING");
+    }
+    const scope = await loadTaskScope(service, current);
+    await excludeInactiveOlder(service, current, scope);
+    const newerTasks = await loadNewerExpandedTasks(service, current, scope);
+
+    if (Date.now() + SEND_INTERVAL_MAX_MS + 5_000 > deadlineAt) {
+      await updateTask(service, task.id, { locked_at: null, scheduled_for: nowIso() });
+      console.log(`[episode-alerts] ${task.id} 시간 예산 소진 — 보냄 ${sentThisRun}개, 다음 run이 이어서`);
+      return "continue";
+    }
+
+    // 최근 화 댓글부터, 같은 화 안에서는 최근 댓글부터 — 하루 상한에 걸려도 최근 독자가 먼저 받는다.
+    const { data: batch, error } = await service
+      .from("episode_alert_replies")
+      .select("id, ig_comment_id, commenter_username, series_episodes(episode_no)")
+      .eq("task_id", task.id)
+      .eq("status", "PENDING")
+      .order("series_episodes(episode_no)", { ascending: false, nullsFirst: false })
+      .order("commented_at", { ascending: false, nullsFirst: false })
+      .limit(SEND_BATCH);
+    if (error) throw new Error(`답글 대상 조회 실패: ${error.message}`);
+    if (!batch || batch.length === 0) {
+      // 그 사이 상태가 바뀌었으면(이전 화 다시 모으기·끔) 완료로 덮지 않고 위에서 다시 본다.
+      const { data: finished, error: finishError } = await service
+        .from("episode_alert_tasks")
+        .update({ status: "DONE", completed_at: nowIso(), locked_at: null, last_error: null })
+        .eq("id", task.id)
+        .eq("status", "SENDING")
+        .select("id")
+        .maybeSingle();
+      if (finishError) throw new Error(`작업 완료 처리 실패: ${finishError.message}`);
+      if (!finished) continue;
+      console.log(`[episode-alerts] ${task.id} 완료 — 이번 run 보냄 ${sentThisRun}개`);
+      return "done";
+    }
+    // 보낼 게 있을 때만 하루 상한을 본다 — 남은 게 없으면 위에서 바로 완료.
     if (remainingToday <= 0) {
       const resumeAt = await dailyWindowReopensAt(service, task.social_account_id);
       await updateTask(service, task.id, {
@@ -139,31 +201,6 @@ async function sendReplies(
       });
       console.log(`[episode-alerts] ${task.id} 하루 상한 도달 — ${resumeAt}에 이어서`);
       return "deferred";
-    }
-    if (Date.now() + SEND_INTERVAL_MAX_MS + 5_000 > deadlineAt) {
-      await updateTask(service, task.id, { locked_at: null, scheduled_for: nowIso() });
-      console.log(`[episode-alerts] ${task.id} 시간 예산 소진 — 보냄 ${sentThisRun}개, 다음 run이 이어서`);
-      return "continue";
-    }
-
-    // 배치마다 회차 범위를 다시 본다 — 보내는 사이 다음 화가 올라오면 이전 화 쪽은 멈추고,
-    // 뒤 회차의 "이전 화에도" 작업이 맡은 댓글은 그쪽 소식으로 대신한다(scope.ts).
-    const scope = await loadTaskScope(service, task);
-    await excludeOutdatedOlder(service, task, scope);
-    const newerTasks = await loadNewerExpandedTasks(service, task, scope);
-
-    const { data: batch, error } = await service
-      .from("episode_alert_replies")
-      .select("id, ig_comment_id, commenter_username")
-      .eq("task_id", task.id)
-      .eq("status", "PENDING")
-      .order("commented_at", { ascending: false, nullsFirst: false })
-      .limit(Math.min(SEND_BATCH, remainingToday));
-    if (error) throw new Error(`답글 대상 조회 실패: ${error.message}`);
-    if (!batch || batch.length === 0) {
-      await finish(service, task.id);
-      console.log(`[episode-alerts] ${task.id} 완료 — 이번 run 보냄 ${sentThisRun}개`);
-      return "done";
     }
 
     for (const row of batch) {
@@ -232,6 +269,40 @@ async function sendReplies(
       await sleep(randomInterval());
     }
   }
+}
+
+// 지금 작업 행. 답글을 껐으면(회차 스위치 꺼짐·작업 꺼짐·회차 빠짐) null.
+async function loadLiveTask(service: Service, task: TaskRow): Promise<TaskRow | null> {
+  const [taskResult, episodeResult] = await Promise.all([
+    service.from("episode_alert_tasks").select("*").eq("id", task.id).maybeSingle(),
+    service
+      .from("series_episodes")
+      .select("reply_enabled")
+      .eq("id", task.target_episode_id)
+      .maybeSingle(),
+  ]);
+  // 조회 실패를 "꺼짐"으로 착각해 작업을 꺼버리지 않게 — 일반 오류로 다음에 다시 시도한다.
+  const failed = taskResult.error ?? episodeResult.error;
+  if (failed) throw new Error(`작업 상태 확인 실패: ${failed.message}`);
+  const current = taskResult.data;
+  const episode = episodeResult.data;
+  if (!current || current.status === "CANCELLED" || !episode?.reply_enabled) return null;
+  return current;
+}
+
+// 답글이 꺼진 작업 정리 — 끄기(disableEpisodeReplies)와 같은 모양으로 남겨 다시 켜면 되살아나게.
+async function stopTurnedOff(service: Service, taskId: string) {
+  await service
+    .from("episode_alert_replies")
+    .update({ status: "EXCLUDED", skip_reason: REPLY_OFF_REASON })
+    .eq("task_id", taskId)
+    .eq("status", "PENDING");
+  // 새 댓글 확인 중에 꺼서 확인 쪽이 SENDING으로 되돌린 경우도 꺼짐으로 맞춘다.
+  await service
+    .from("episode_alert_tasks")
+    .update({ status: "CANCELLED", completed_at: nowIso(), locked_at: null })
+    .eq("id", taskId)
+    .in("status", ["COLLECTING", "SENDING"]);
 }
 
 // 뒤 회차의 "이전 화에도" 작업이 이 댓글을 맡았으면(보낼 예정이거나 보냄) 그 회차 번호.
@@ -363,15 +434,6 @@ async function updateReply(
 ) {
   const { error } = await service.from("episode_alert_replies").update(patch).eq("id", replyId);
   if (error) console.error(`[episode-alerts] 답글 ${replyId} 갱신 실패:`, error.message);
-}
-
-async function finish(service: Service, taskId: string) {
-  await updateTask(service, taskId, {
-    status: "DONE",
-    completed_at: nowIso(),
-    locked_at: null,
-    last_error: null,
-  });
 }
 
 async function fail(service: Service, taskId: string, message: string) {

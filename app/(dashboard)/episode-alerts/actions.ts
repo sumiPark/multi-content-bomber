@@ -10,6 +10,7 @@ import {
   EpisodeAlertError,
   getInstagramAuth,
   includeOlderEpisodes,
+  stopOlderEpisodes,
   type IncludeOlderResult,
 } from "@/lib/episode-alerts/server";
 import { generateReplyTemplates } from "@/lib/ai/reply-template-generator";
@@ -507,13 +508,19 @@ export async function removeLastEpisodeAction(input: {
 }
 
 // 회차 답글 켜기/끄기. 켜면 직전 화에 댓글 단 사람들에게 바로 답글을 보내기 시작하고,
-// 끄면 남은 답글을 멈춘다(이미 보낸 답글은 그대로).
+// 끄면 남은 답글을 멈춘다(이미 보낸 답글은 그대로). 최신화를 켤 땐 확인창에서 이전 화
+// 댓글에도 보낼지 고른다(includeOlder, 0023).
 export async function setEpisodeReplyAction(input: {
   episodeId: string;
   enabled: boolean;
+  includeOlder?: boolean;
 }): Promise<ActionResult> {
   const parsed = z
-    .object({ episodeId: z.string().uuid(), enabled: z.boolean() })
+    .object({
+      episodeId: z.string().uuid(),
+      enabled: z.boolean(),
+      includeOlder: z.boolean().optional(),
+    })
     .safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
   const auth = await authorize(true);
@@ -538,6 +545,7 @@ export async function setEpisodeReplyAction(input: {
       organizationId: auth.organizationId,
       socialAccountId: series.social_account_id,
       createdBy: auth.userId,
+      includeOlder: parsed.data.includeOlder,
     });
     if (!result.started && result.reason === "no-previous") {
       return { ok: false, error: "첫 회차는 답글을 달 이전 화가 없어요." };
@@ -558,10 +566,9 @@ const INCLUDE_OLDER_ERRORS: Record<
   "no-older": "직전 화 말고는 이전 화가 없어요.",
   off: "먼저 이 회차 답글을 켜주세요.",
   already: "이미 이전 화 댓글에도 보내고 있어요.",
-  busy: "지금 답글을 보내는 중이에요. 잠시 뒤 다시 눌러주세요.",
 };
 
-// 최신화 소식을 이전 회차 댓글에도 보내기(0023). 최신화 줄의 버튼이 부른다.
+// 최신화 소식을 이전 회차 댓글에도 보내기(0023). 최신화 줄의 "이전 화 댓글에도" 스위치가 부른다.
 export async function includeOlderEpisodesAction(input: {
   episodeId: string;
 }): Promise<ActionResult> {
@@ -582,6 +589,29 @@ export async function includeOlderEpisodesAction(input: {
     if (!result.ok) return { ok: false, error: INCLUDE_OLDER_ERRORS[result.reason] };
 
     dispatchSoft("episode-reply-include-older");
+    revalidate();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: toMessage(err) };
+  }
+}
+
+// 이전 화 댓글에도 끄기 — 직전 화 댓글 답글은 그대로 두고 이전 회차 쪽 남은 답글만 뺀다.
+export async function stopOlderEpisodesAction(input: {
+  episodeId: string;
+}): Promise<ActionResult> {
+  const parsed = z.object({ episodeId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize(true);
+  if ("error" in auth) return { ok: false, error: auth.error };
+
+  const service = createServiceClient();
+  try {
+    const loaded = await loadEpisodeWithSeries(service, parsed.data.episodeId, auth.organizationId);
+    if (!loaded) return { ok: false, error: "회차를 찾을 수 없어요." };
+
+    const result = await stopOlderEpisodes(service, loaded.episode.id);
+    if (!result.ok) return { ok: false, error: "이전 화 댓글에 보내고 있지 않아요." };
     revalidate();
     return { ok: true };
   } catch (err) {

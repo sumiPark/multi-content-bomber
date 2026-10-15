@@ -8,7 +8,7 @@ import {
 } from "@/lib/platforms/instagram-comments";
 import type { Database } from "@/types/database";
 import {
-  excludeOutdatedOlder,
+  excludeInactiveOlder,
   loadAutoReplyIds,
   loadCommentsClaimedBy,
   loadNewerExpandedTasks,
@@ -35,7 +35,7 @@ export async function collectCandidates(
 ): Promise<number> {
   const scope = await loadTaskScope(service, task);
   const { target } = scope;
-  await excludeOutdatedOlder(service, task, scope);
+  await excludeInactiveOlder(service, task, scope);
 
   // 내 댓글/내 답글 판별. 댓글 from.id는 저장된 platform_account_id(= /me의 id)가 아니라
   // /me의 user_id와 같다(실측). 셋 다, 그리고 사용자 이름까지 같이 비교한다.

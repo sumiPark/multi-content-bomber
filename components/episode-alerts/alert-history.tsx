@@ -49,9 +49,12 @@ export interface TaskView {
 }
 
 // 답글 대상 회차 — "4화" 또는 이전 화에도 보냈으면 "1~4화".
-export function sourceRangeText(task: Pick<TaskView, "includeOlder" | "sourceEpisodeNo">): string {
+// "이전 화는 그만 보내기"로 껐어도 이미 이전 화에 보냈으면 기록엔 범위를 남긴다.
+export function sourceRangeText(
+  task: Pick<TaskView, "includeOlder" | "sourceEpisodeNo" | "stats">,
+): string {
   if (task.sourceEpisodeNo === null) return "직전 화";
-  return task.includeOlder && task.sourceEpisodeNo > 1
+  return (task.includeOlder || task.stats.sentOlder > 0) && task.sourceEpisodeNo > 1
     ? `1~${task.sourceEpisodeNo}화`
     : `${task.sourceEpisodeNo}화`;
 }
@@ -251,7 +254,7 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
                   </p>
                   {r.commentText && (
                     <p className="line-clamp-1 text-xs text-muted-foreground">
-                      {task.includeOlder && r.sourceEpisodeNo ? `${r.sourceEpisodeNo}화 댓글` : "댓글"}:{" "}
+                      {r.sourceEpisodeNo ? `${r.sourceEpisodeNo}화 댓글` : "댓글"}:{" "}
                       {r.commentText}
                     </p>
                   )}
