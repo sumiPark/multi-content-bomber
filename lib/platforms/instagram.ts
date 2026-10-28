@@ -190,8 +190,20 @@ export const instagram: PlatformAdapter = {
     const longRes = await fetch(longLivedUrl);
     if (!longRes.ok) {
       const text = await longRes.text();
+      // 요청 형식은 공식 문서와 같은데도 code 100 "Unsupported request"가 계정에 따라 난다.
+      // 원인(개인 계정·권한 미동의·토큰 자체 무효)을 가르려고 short-lived 토큰으로 /me를
+      // 찔러본 결과와 동의된 권한을 에러에 같이 싣는다.
+      const meProbe = await fetch(
+        `${ME_URL}?fields=id,username,account_type&access_token=${encodeURIComponent(shortLived.access_token)}`,
+      )
+        .then(async (r) => `${r.status} ${(await r.text()).slice(0, 150)}`)
+        .catch((e: unknown) => `요청 실패 ${String(e)}`);
+      const granted = Array.isArray(shortLived.permissions)
+        ? shortLived.permissions.join(",")
+        : (shortLived.permissions ?? "응답에 없음");
       throw new Error(
-        `Instagram long-lived 교환 실패 (${longRes.status}): ${text.slice(0, 200)}`,
+        `Instagram long-lived 교환 실패 (${longRes.status}): ${text.slice(0, 200)}` +
+          ` | 진단: 동의 권한=[${granted}], short-lived로 /me=${meProbe}`,
       );
     }
     const longData = (await longRes.json()) as {
