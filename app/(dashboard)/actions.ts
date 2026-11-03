@@ -300,6 +300,107 @@ export async function updateInternalTitleAction(
   return { ok: true, savedAt: updated.updated_at };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 임시 저장 (0033) — 보관함은 사람이 '임시 저장'을 누른 콘텐츠만 보여준다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const saveDraftSchema = z.object({
+  contentId: z.string().uuid(),
+  internalTitle: z.string().max(200),
+  // 이어서 하기용 마법사 상태(lib/upload/draft.ts). 화면 전용이라 모양은 읽을 때 확인한다.
+  state: z.record(z.string(), z.unknown()),
+  // 이어서 하다가 계정 · 미디어를 바꿔 콘텐츠가 새로 만들어졌으면, 예전 임시 저장은 보관함에서 뺀다.
+  replacesContentId: z.string().uuid().optional(),
+});
+
+export type SaveDraftResult =
+  | { ok: true; draftSavedAt: string }
+  | { ok: false; error: string };
+
+export async function saveDraftAction(
+  input: z.infer<typeof saveDraftSchema>,
+): Promise<SaveDraftResult> {
+  const parsed = saveDraftSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+
+  // 이미 발행을 등록한 콘텐츠는 배포 관리 관할이라 임시 저장하지 않는다.
+  const { count: jobCount, error: jobError } = await supabase
+    .from("publish_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("content_id", parsed.data.contentId);
+  if (jobError) {
+    return { ok: false, error: `임시 저장하지 못했어요: ${jobError.message}` };
+  }
+  if ((jobCount ?? 0) > 0) {
+    return { ok: false, error: "이미 발행을 등록한 콘텐츠예요. 배포 관리에서 확인하세요." };
+  }
+
+  const draftSavedAt = new Date().toISOString();
+  const { data: updated, error } = await supabase
+    .from("contents")
+    .update({
+      draft_saved_at: draftSavedAt,
+      draft_state: parsed.data.state as Json,
+      internal_title: parsed.data.internalTitle.trim() || null,
+    })
+    .eq("id", parsed.data.contentId)
+    .select("id")
+    .single();
+  if (error || !updated) {
+    return {
+      ok: false,
+      error: `임시 저장하지 못했어요: ${error?.message ?? "콘텐츠를 찾을 수 없거나 권한이 없어요"}`,
+    };
+  }
+
+  if (
+    parsed.data.replacesContentId &&
+    parsed.data.replacesContentId !== parsed.data.contentId
+  ) {
+    await clearDraftFlag(supabase, parsed.data.replacesContentId);
+  }
+
+  revalidatePath("/contents");
+  return { ok: true, draftSavedAt };
+}
+
+// 보관함에서만 뺀다(지우지 않는다). 실패해도 발행 흐름은 막지 않는다 — 로그만.
+async function clearDraftFlag(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  contentId: string,
+) {
+  const { error } = await supabase
+    .from("contents")
+    .update({ draft_saved_at: null })
+    .eq("id", contentId);
+  if (error) console.warn("[clearDraftFlag] failed:", error.message);
+}
+
+const clearDraftSchema = z.object({ contentId: z.string().uuid() });
+
+/** 이어서 하던 임시 저장을 다른 콘텐츠로 발행했을 때, 예전 임시 저장을 보관함에서 뺀다. */
+export async function clearDraftAction(
+  input: z.infer<typeof clearDraftSchema>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const parsed = clearDraftSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "로그인이 필요합니다." };
+  await clearDraftFlag(supabase, parsed.data.contentId);
+  revalidatePath("/contents");
+  return { ok: true };
+}
+
 export async function updateCaptionsAction(
   input: z.infer<typeof updateInputSchema>,
 ): Promise<UpdateCaptionsResult> {

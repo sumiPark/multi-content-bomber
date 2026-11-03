@@ -12,11 +12,12 @@ import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth
 const THUMB_TTL_SECONDS = 3600;
 const PAGE_LIMIT = 50;
 
-// 보관함은 "초안" 전용 — 발행 잡이 하나도 없는 콘텐츠만 보여준다.
-// 발행을 시도한 순간(성공/실패/예약 무관) 그 콘텐츠는 /postings 관할로 넘어가고,
-// 조회·삭제는 배포 관리의 포스팅 상세에서 한다.
+// 보관함 = 사람이 콘텐츠 생성 화면에서 '임시 저장'을 누른 콘텐츠만(0033, draft_saved_at).
+// 그중에서도 발행 잡이 하나도 없는 것만 — 발행을 등록한 순간(성공/실패/예약 무관) 그 콘텐츠는
+// /postings 관할로 넘어가고, 조회·삭제는 배포 관리의 발행 상세에서 한다.
+// 누르면 콘텐츠 생성 화면이 저장한 단계로 다시 열린다(/upload?draft=).
 const SELECT_COLUMNS =
-  "id, media_urls, ai_captions, created_at, updated_at, created_by, internal_title, publish_jobs!left(id)";
+  "id, media_type, media_urls, metadata, ai_captions, created_at, updated_at, created_by, internal_title, draft_saved_at, publish_jobs!left(id)";
 
 export default async function ContentsPage() {
   const user = await getSessionUser();
@@ -31,7 +32,10 @@ export default async function ContentsPage() {
   // 응답 전체를 명시 타입으로 cast (재생성 후 cast 제거).
   type ContentRow = {
     id: string;
+    media_type: "IMAGE" | "VIDEO";
     media_urls: string[];
+    metadata: unknown;
+    draft_saved_at: string | null;
     ai_captions: unknown;
     created_at: string;
     updated_at: string;
@@ -45,7 +49,8 @@ export default async function ContentsPage() {
     .from("contents")
     .select(SELECT_COLUMNS)
     .is("publish_jobs", null)
-    .order("created_at", { ascending: false })
+    .not("draft_saved_at", "is", null)
+    .order("draft_saved_at", { ascending: false })
     .limit(PAGE_LIMIT)) as unknown as { data: ContentRow[] | null };
 
   const rows = contents ?? [];
@@ -59,18 +64,23 @@ export default async function ContentsPage() {
         parsed.data.tiktok?.caption ??
         "")
       : "";
+    // 영상은 파일 대신 첫 프레임 썸네일(metadata.thumbnail_path)을 보여준다.
+    const thumb = (c.metadata as { thumbnail_path?: unknown } | null)?.thumbnail_path;
     return {
       id: c.id,
       media_urls: c.media_urls,
+      thumb_path:
+        c.media_type === "VIDEO" && typeof thumb === "string" ? thumb : undefined,
       caption_preview: preview,
-      updated_at: c.updated_at,
+      // 목록의 시각 = 임시 저장한 시각
+      updated_at: c.draft_saved_at ?? c.updated_at,
       created_by: c.created_by,
       internal_title: c.internal_title,
     };
   });
 
   const firstPaths = list
-    .map((c) => c.media_urls[0])
+    .map((c) => c.thumb_path ?? c.media_urls[0])
     .filter((p): p is string => Boolean(p));
 
   const thumbsByPath: Record<string, string> = {};
@@ -87,11 +97,11 @@ export default async function ContentsPage() {
     <main className="p-4 sm:p-6 space-y-6">
       <header className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-[-0.01em]">콘텐츠 보관함</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">보관함</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            아직 발행하지 않은 콘텐츠 ({list.length}개
-            {list.length === PAGE_LIMIT ? "+" : ""}) — 발행한 콘텐츠는 배포
-            관리에 있어요
+            콘텐츠 생성에서 임시 저장한 콘텐츠 ({list.length}개
+            {list.length === PAGE_LIMIT ? "+" : ""}) — 누르면 이어서 할 수 있어요.
+            발행한 콘텐츠는 배포 관리에 있어요
           </p>
         </div>
         <Link href="/upload" className={buttonVariants({ variant: "outline" })}>

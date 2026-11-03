@@ -14,6 +14,8 @@ import { deleteContentsAction } from "@/app/(dashboard)/actions";
 export interface ContentItem {
   id: string;
   media_urls: string[];
+  /** 썸네일로 쓸 경로 — 영상은 첫 프레임 이미지. 없으면 media_urls[0]. */
+  thumb_path?: string;
   caption_preview: string;
   updated_at: string;
   created_by: string | null;
@@ -80,9 +82,10 @@ export function ContentsLibrary({
     return (
       <Card>
         <CardContent className="py-16 text-center text-muted-foreground">
-          발행을 기다리는 초안이 없어요.
+          임시 저장한 콘텐츠가 없어요.
           <br />
-          발행한 콘텐츠는 배포 관리에서 볼 수 있어요.
+          콘텐츠 생성 중에 &lsquo;임시 저장&rsquo;을 누르면 여기에 모여요. 발행한 콘텐츠는 배포
+          관리에서 볼 수 있어요.
         </CardContent>
       </Card>
     );
@@ -151,9 +154,8 @@ export function ContentsLibrary({
           {items.map((c) => {
             const captionPreview = c.caption_preview;
             const internal = c.internal_title;
-            const thumbUrl = c.media_urls[0]
-              ? thumbsByPath[c.media_urls[0]]
-              : undefined;
+            const thumbPath = c.thumb_path ?? c.media_urls[0];
+            const thumbUrl = thumbPath ? thumbsByPath[thumbPath] : undefined;
             const isMine = c.created_by === currentUserId;
             const isSelected = selected.has(c.id);
 
@@ -179,7 +181,7 @@ export function ContentsLibrary({
                       />
                     </div>
                     <Link
-                      href={`/?content=${c.id}`}
+                      href={`/upload?draft=${c.id}`}
                       className="flex min-w-0 flex-1 gap-4"
                     >
                       <div className="relative size-24 shrink-0 overflow-hidden rounded-md border bg-muted">

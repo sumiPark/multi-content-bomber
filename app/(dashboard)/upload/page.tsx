@@ -1,8 +1,86 @@
 import { redirect } from "next/navigation";
 import { UploadWizard } from "@/components/upload/wizard/upload-wizard";
+import { captionsSchema } from "@/lib/ai/caption-generator";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { parseDraftState, type WizardDraft } from "@/lib/upload/draft";
 
-export default async function UploadPage() {
+const DRAFT_THUMB_TTL_SECONDS = 600;
+
+// 보관함 '이어서 하기' (0033) — 임시 저장했고 아직 발행을 등록하지 않은 콘텐츠만 연다.
+async function loadDraft(
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+  contentId: string,
+): Promise<WizardDraft | null> {
+  type DraftRow = {
+    id: string;
+    media_type: "IMAGE" | "VIDEO";
+    media_urls: string[];
+    metadata: unknown;
+    ai_captions: unknown;
+    updated_at: string;
+    internal_title: string | null;
+    draft_saved_at: string | null;
+    draft_state: unknown;
+    publish_jobs: { id: string }[];
+  };
+  const { data } = (await supabase
+    .from("contents")
+    .select(
+      "id, media_type, media_urls, metadata, ai_captions, updated_at, internal_title, draft_saved_at, draft_state, publish_jobs!left(id)",
+    )
+    .eq("id", contentId)
+    .not("draft_saved_at", "is", null)
+    .maybeSingle()) as unknown as { data: DraftRow | null };
+  if (!data || !data.draft_saved_at || data.publish_jobs.length > 0) return null;
+
+  const captions = captionsSchema.safeParse(data.ai_captions);
+  const state = parseDraftState(data.draft_state);
+  if (!captions.success || !state) return null;
+
+  const metadata =
+    data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
+      ? (data.metadata as Record<string, unknown>)
+      : {};
+  // 캡션 분석 경로 — 저장된 값이 없으면 업로드 때 규칙대로(영상은 첫 프레임, 사진은 그대로).
+  if (state.analyzePaths.length === 0) {
+    const thumb = metadata.thumbnail_path;
+    state.analyzePaths =
+      data.media_type === "VIDEO"
+        ? typeof thumb === "string"
+          ? [thumb]
+          : []
+        : data.media_urls;
+  }
+
+  const { data: signed } =
+    state.analyzePaths.length > 0
+      ? await supabase.storage
+          .from("media")
+          .createSignedUrls(state.analyzePaths, DRAFT_THUMB_TTL_SECONDS)
+      : { data: [] };
+
+  return {
+    contentId: data.id,
+    mediaType: data.media_type,
+    mediaPaths: data.media_urls,
+    metadata,
+    captions: captions.data,
+    savedAt: data.updated_at,
+    draftSavedAt: data.draft_saved_at,
+    thumbnailUrls: (signed ?? [])
+      .map((x) => x.signedUrl)
+      .filter((u): u is string => Boolean(u)),
+    internalTitle: data.internal_title ?? "",
+    state,
+  };
+}
+
+export default async function UploadPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ draft?: string }>;
+}) {
+  const { draft: draftId } = await searchParams;
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
@@ -72,6 +150,8 @@ export default async function UploadPage() {
       Math.max(0, ...s.series_episodes.map((e) => e.episode_no)) + 1,
   }));
 
+  const initialDraft = draftId ? await loadDraft(supabase, draftId) : null;
+
   return (
     <main className="p-4 sm:p-6 space-y-6">
       <header>
@@ -80,7 +160,15 @@ export default async function UploadPage() {
           사진이나 영상을 한 번 올리고, 계정마다 캡션을 맞춰 동시에 올려요.
         </p>
       </header>
+      {draftId && !initialDraft && (
+        <p className="rounded-lg bg-warn-soft px-3.5 py-3 text-[13px] text-ink-2">
+          이어서 할 임시 저장을 찾을 수 없어요. 이미 발행을 등록했거나 지워졌을 수 있어요. 새로
+          만들어 주세요.
+        </p>
+      )}
       <UploadWizard
+        key={initialDraft?.contentId ?? "new"}
+        initialDraft={initialDraft}
         organizationId={profile.organization_id}
         userId={user.id}
         socialAccounts={accountsRes.data ?? []}

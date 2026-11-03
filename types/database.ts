@@ -546,6 +546,8 @@ export type Database = {
           ai_captions: Json | null
           created_at: string
           created_by: string | null
+          draft_saved_at: string | null
+          draft_state: Json | null
           id: string
           internal_title: string | null
           media_type: Database["public"]["Enums"]["media_type"]
@@ -560,6 +562,8 @@ export type Database = {
           ai_captions?: Json | null
           created_at?: string
           created_by?: string | null
+          draft_saved_at?: string | null
+          draft_state?: Json | null
           id?: string
           internal_title?: string | null
           media_type: Database["public"]["Enums"]["media_type"]
@@ -574,6 +578,8 @@ export type Database = {
           ai_captions?: Json | null
           created_at?: string
           created_by?: string | null
+          draft_saved_at?: string | null
+          draft_state?: Json | null
           id?: string
           internal_title?: string | null
           media_type?: Database["public"]["Enums"]["media_type"]

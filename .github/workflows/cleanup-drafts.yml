@@ -1,0 +1,38 @@
+name: cleanup-drafts
+
+# 버려진 작업 정리(worker/cleanup-drafts.ts) — 콘텐츠 생성 중 '임시 저장' 없이 나가고 7일 지난
+# 콘텐츠 · 파일을 지운다. 발행을 등록한 콘텐츠와 그 파일, 임시 저장한 콘텐츠는 건드리지 않는다.
+on:
+  # 매일 04시(KST) = 19시(UTC). 몇 시간 밀려도 괜찮다.
+  schedule:
+    - cron: "0 19 * * *"
+  # 수동 실행(디버깅용). apply를 끄면 세기만 한다.
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "실제로 지우기 (끄면 세기만)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: cleanup-drafts
+  cancel-in-progress: false
+
+jobs:
+  cleanup-drafts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 22 필수 — @supabase/realtime-js가 전역 WebSocket을 요구한다.
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Clean up abandoned drafts
+        # 예약 실행은 지운다. 수동 실행은 apply를 켰을 때만 지운다.
+        run: npm run worker:cleanup-drafts -- ${{ (github.event_name == 'schedule' || inputs.apply) && '--apply' || '' }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

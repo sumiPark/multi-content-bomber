@@ -14,6 +14,7 @@ import {
   OctagonAlert,
   Pencil,
   RefreshCw,
+  Save,
   Send,
   Sparkles,
 } from "lucide-react";
@@ -27,20 +28,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PlatformIcon } from "@/components/ui/platform-icon";
+import { RelativeTime } from "@/components/ui/relative-time";
 import { Segmented } from "@/components/ui/segmented";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
+  clearDraftAction,
   createBlankContentAction,
   createPublishJobsAction,
   generateCaptionsAction,
   regenerateCaptionsAction,
+  saveDraftAction,
   type CreateBlankContentResult,
   type GenerateCaptionsResult,
   type RegenerateCaptionsResult,
 } from "@/app/(dashboard)/actions";
 import type { Captions } from "@/lib/ai/caption-generator";
 import type { Platform } from "@/lib/platforms";
+import type { WizardDraft, WizardDraftState } from "@/lib/upload/draft";
 import { uploadMedia, uploadOne } from "@/lib/storage/upload";
 import {
   extractImageMeta,
@@ -105,6 +110,31 @@ interface UploadWizardProps {
   accountGroups: AccountGroupSummary[];
   presets: PresetSummary[];
   seriesOptions?: SeriesOption[];
+  /** 보관함에서 '이어서 하기'로 열었을 때 임시 저장한 상태 (0033). */
+  initialDraft?: WizardDraft | null;
+}
+
+// 이어서 할 땐 원본 파일이 없어 다시 검증할 수 없다 — 저장할 때의 검증 결과를 지금 고른 플랫폼만큼
+// 다시 쓴다. 저장 뒤 새로 고른 플랫폼이 있으면 결과가 없으니 null(사진 · 영상을 다시 올려야 한다).
+function restoredValidationFor(
+  snapshot: ValidationResult | null,
+  platforms: Platform[],
+): ValidationResult | null {
+  if (!snapshot || platforms.length === 0) return null;
+  const perPlatform = platforms.map((p) =>
+    snapshot.perPlatform.find((v) => v.platform === p),
+  );
+  if (perPlatform.some((v) => !v)) return null;
+  const list = perPlatform as PlatformVerdict[];
+  const blockedPlatforms = list
+    .filter((v) => v.status === "blocked")
+    .map((v) => v.platform);
+  return {
+    ok: blockedPlatforms.length === 0,
+    blockedPlatforms,
+    perPlatform: list,
+    issues: list.flatMap((v) => v.issues),
+  };
 }
 
 type MediaType = "IMAGE" | "VIDEO";
@@ -118,39 +148,90 @@ export function UploadWizard({
   accountGroups = [],
   presets = [],
   seriesOptions = [],
+  initialDraft = null,
 }: UploadWizardProps) {
   const router = useRouter();
-  const [step, setStep] = useState(1);
-  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
-  const [mediaType, setMediaType] = useState<MediaType>("IMAGE");
+  const draft = initialDraft;
+  // 이어서 하기: 지금도 고를 수 있는 계정만 되살린다(그 사이 연결이 끊긴 계정은 뺀다).
+  const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>(() =>
+    draft
+      ? draft.state.accountIds.filter((id) =>
+          socialAccounts.some((a) => a.id === id && a.is_active),
+        )
+      : [],
+  );
+  const [step, setStep] = useState(() =>
+    draft ? (selectedAccountIds.length > 0 ? draft.state.step : 1) : 1,
+  );
+  const [mediaType, setMediaType] = useState<MediaType>(
+    draft?.mediaType ?? "IMAGE",
+  );
   const [files, setFiles] = useState<File[]>([]);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   // 사용자가 고른 커버 프레임 시점(초). null이면 미지정. 영상 모드에서만 사용.
   const [coverSeconds, setCoverSeconds] = useState<number | null>(null);
   // 고른 프레임을 캡처한 JPEG. YouTube 썸네일 업로드용 (TikTok/IG는 시점 ms만 사용).
   const [coverBlob, setCoverBlob] = useState<Blob | null>(null);
-  const [mediaPaths, setMediaPaths] = useState<string[]>([]);
-  const [analyzePaths, setAnalyzePaths] = useState<string[]>([]);
-  const [mediaMetadata, setMediaMetadata] = useState<Record<string, unknown>>(
-    {},
+  const [mediaPaths, setMediaPaths] = useState<string[]>(
+    draft?.mediaPaths ?? [],
   );
-  const [validation, setValidation] = useState<ValidationResult | null>(null);
+  const [analyzePaths, setAnalyzePaths] = useState<string[]>(
+    draft?.state.analyzePaths ?? [],
+  );
+  const [mediaMetadata, setMediaMetadata] = useState<Record<string, unknown>>(
+    draft?.metadata ?? {},
+  );
+  // 이어서 하기로 열어 임시 저장한 사진 · 영상을 그대로 쓰는 중인지. 새 파일을 고르면 false.
+  const [resumedMedia, setResumedMedia] = useState(!!draft);
+  const [validation, setValidation] = useState<ValidationResult | null>(() =>
+    draft
+      ? restoredValidationFor(
+          draft.state.validation,
+          Array.from(
+            new Set(
+              socialAccounts
+                .filter((a) => selectedAccountIds.includes(a.id))
+                .map((a) => a.platform),
+            ),
+          ),
+        )
+      : null,
+  );
   const [uploading, setUploading] = useState(false);
-  const [internalTitle, setInternalTitle] = useState("");
-  const [presetId, setPresetId] = useState<string>("");
-  const [description, setDescription] = useState("");
+  const [internalTitle, setInternalTitle] = useState(draft?.internalTitle ?? "");
+  const [presetId, setPresetId] = useState<string>(draft?.state.presetId ?? "");
+  const [description, setDescription] = useState(draft?.state.description ?? "");
   const [generating, setGenerating] = useState(false);
-  const [captions, setCaptions] = useState<Captions | null>(null);
-  const [contentId, setContentId] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [thumbnailUrls, setThumbnailUrls] = useState<string[]>([]);
-  const [captionMode, setCaptionMode] = useState<CaptionMode>("ai");
-  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("now");
-  const [scheduledAt, setScheduledAt] = useState("");
+  const [captions, setCaptions] = useState<Captions | null>(
+    draft?.captions ?? null,
+  );
+  const [contentId, setContentId] = useState<string | null>(
+    draft?.contentId ?? null,
+  );
+  const [savedAt, setSavedAt] = useState<string | null>(draft?.savedAt ?? null);
+  const [thumbnailUrls, setThumbnailUrls] = useState<string[]>(
+    draft?.thumbnailUrls ?? [],
+  );
+  const [captionMode, setCaptionMode] = useState<CaptionMode>(
+    draft?.state.captionMode ?? "ai",
+  );
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>(
+    draft?.state.scheduleMode ?? "now",
+  );
+  const [scheduledAt, setScheduledAt] = useState(draft?.state.scheduledAt ?? "");
   // 계정 id → "다음 화로 올리기"로 고른 시리즈 id. 빈 문자열이면 시리즈 아님.
-  const [seriesChoice, setSeriesChoice] = useState<Record<string, string>>({});
+  const [seriesChoice, setSeriesChoice] = useState<Record<string, string>>(
+    draft?.state.seriesChoice ?? {},
+  );
   // 계정 id → 올라가면 바로 이전 화 댓글에 답글을 달지. 기본 꺼짐.
-  const [replyChoice, setReplyChoice] = useState<Record<string, boolean>>({});
+  const [replyChoice, setReplyChoice] = useState<Record<string, boolean>>(
+    draft?.state.replyChoice ?? {},
+  );
+  // 임시 저장 — 누른 시각(보관함에 들어간 시각). 이어서 하기면 예전 저장 시각부터.
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(
+    draft?.draftSavedAt ?? null,
+  );
+  const [savingDraft, setSavingDraft] = useState(false);
   const [completing, setCompleting] = useState(false);
   // '완료' 재진입 잠금 — state 반영(다음 렌더)보다 먼저 걸린다. 성공하면 페이지를
   // 벗어날 때까지 잠긴 채로 둔다(실패 시에만 해제).
@@ -194,6 +275,7 @@ export function UploadWizard({
   useEffect(() => {
     if (includesTiktok && mediaType === "IMAGE") {
       setMediaType("VIDEO");
+      setResumedMedia(false);
       setFiles([]);
       setMediaPaths([]);
       setAnalyzePaths([]);
@@ -213,7 +295,11 @@ export function UploadWizard({
     async function run() {
       if (mediaType === "IMAGE") {
         if (files.length === 0) {
-          setValidation(null);
+          setValidation(
+            resumedMedia
+              ? restoredValidationFor(draft?.state.validation ?? null, selectedPlatforms)
+              : null,
+          );
           return;
         }
         const items: MediaItem[] = await Promise.all(
@@ -230,7 +316,11 @@ export function UploadWizard({
         setValidation(validateMedia("IMAGE", items, selectedPlatforms));
       } else {
         if (!videoFile) {
-          setValidation(null);
+          setValidation(
+            resumedMedia
+              ? restoredValidationFor(draft?.state.validation ?? null, selectedPlatforms)
+              : null,
+          );
           return;
         }
         try {
@@ -263,15 +353,22 @@ export function UploadWizard({
     return () => {
       cancelled = true;
     };
-  }, [files, videoFile, mediaType, selectedPlatforms]);
+  }, [files, videoFile, mediaType, selectedPlatforms, resumedMedia, draft]);
 
   const canAdvanceStep1 = selectedAccountIds.length > 0;
 
+  // 이어서 하기: 새 파일을 안 골랐으면 임시 저장한 사진 · 영상을 그대로 쓴다.
+  const usingResumedMedia =
+    resumedMedia &&
+    mediaPaths.length > 0 &&
+    (mediaType === "IMAGE" ? files.length === 0 : !videoFile);
+
   const canAdvanceStep2 = useMemo(() => {
+    if (usingResumedMedia) return validation?.ok ?? false;
     if (mediaType === "IMAGE" && files.length === 0) return false;
     if (mediaType === "VIDEO" && !videoFile) return false;
     return validation?.ok ?? false;
-  }, [mediaType, files, videoFile, validation]);
+  }, [mediaType, files, videoFile, validation, usingResumedMedia]);
 
   const canAdvanceStep3 = !!captions;
 
@@ -283,6 +380,7 @@ export function UploadWizard({
   function switchMediaType(next: MediaType) {
     if (mediaType === next) return;
     setMediaType(next);
+    setResumedMedia(false);
     setFiles([]);
     setVideoFile(null);
     setCoverSeconds(null);
@@ -295,9 +393,17 @@ export function UploadWizard({
 
   // 영상 파일이 바뀌면 이전에 고른 커버는 무의미해지므로 초기화.
   function handleChangeVideo(file: File | null) {
+    // 드롭존은 처음 그려질 때 null을 한 번 알린다 — 실제로 고른 때만 임시 저장 미디어를 버린다.
+    if (file) setResumedMedia(false);
     setVideoFile(file);
     setCoverSeconds(null);
     setCoverBlob(null);
+  }
+
+  function handleChangeFiles(next: File[]) {
+    // 드롭존은 처음 그려질 때 빈 배열을 한 번 알린다 — 실제로 고른 때만 임시 저장 미디어를 버린다.
+    if (next.length > 0) setResumedMedia(false);
+    setFiles(next);
   }
 
   // 미리보기에서 캡처한 커버 프레임 — 시점(초)과 JPEG blob을 함께 받는다.
@@ -319,6 +425,10 @@ export function UploadWizard({
   async function advanceFromStep2() {
     setError(null);
     if (!canAdvanceStep2) return;
+    if (usingResumedMedia) {
+      setStep(3);
+      return;
+    }
     setUploading(true);
     try {
       if (mediaType === "IMAGE") {
@@ -376,6 +486,14 @@ export function UploadWizard({
           original_mime: videoFile.type,
           ...coverMeta,
         });
+      }
+      // 캡션을 만든 뒤 사진 · 영상을 새로 올렸으면 그 캡션 · 콘텐츠는 옛 미디어 것이다.
+      // 그대로 두면 옛 미디어로 발행되므로 캡션을 다시 쓰게 한다.
+      if (contentId) {
+        setCaptions(null);
+        setContentId(null);
+        setSavedAt(null);
+        setThumbnailUrls([]);
       }
       setStep(3);
     } catch (err) {
@@ -524,16 +642,81 @@ export function UploadWizard({
     // 성공 시엔 잠금을 풀지 않는다. router.push는 즉시 화면이 바뀌지 않아서,
     // 여기서 completing을 false로 되돌리면 이동 대기 중에 '완료' 버튼이 되살아나고
     // 한 번 더 눌려 같은 배치가 두 번 등록됐다(계정당 릴스 2개 발행의 원인).
+    // 이어서 하다가 콘텐츠가 새로 만들어졌으면(계정 · 미디어 변경) 예전 임시 저장은 보관함에서 뺀다.
+    if (draft && draft.contentId !== contentId) {
+      await clearDraftAction({ contentId: draft.contentId }).catch(() => null);
+    }
     router.push(`/?content=${contentId}`);
     router.refresh();
   }
 
+  // 임시 저장 — 누르면 보관함에 들어간다(0033). 캡션을 만든 뒤(콘텐츠가 생긴 뒤)부터 쓸 수 있다.
+  async function handleSaveDraft() {
+    if (!contentId || savingDraft || completingRef.current) return;
+    setError(null);
+    // 캡션 단계의 저장 안 한 수정을 먼저 저장한다.
+    if (step === 3 && captionRef.current) {
+      const ok = await captionRef.current.commit();
+      if (!ok) return;
+    }
+    setSavingDraft(true);
+    const state: WizardDraftState = {
+      step: Math.max(3, step),
+      accountIds: selectedAccountIds,
+      captionMode,
+      presetId,
+      description,
+      scheduleMode,
+      scheduledAt,
+      seriesChoice,
+      replyChoice,
+      analyzePaths,
+      validation,
+    };
+    const result = await saveDraftAction({
+      contentId,
+      internalTitle,
+      state: state as unknown as Record<string, unknown>,
+      replacesContentId:
+        draft && draft.contentId !== contentId ? draft.contentId : undefined,
+    });
+    setSavingDraft(false);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setDraftSavedAt(result.draftSavedAt);
+  }
+
   // 끝낸 단계로만 되돌아간다. 업로드 · 캡션 생성 · 등록 중에는 막는다.
-  const busy = uploading || generating || completing;
+  const busy = uploading || generating || completing || savingDraft;
   const currentStep = STEPS[step - 1];
+
+  // 3 · 4 · 5단계 아래 줄의 '임시 저장' — 캡션을 만든 뒤(콘텐츠가 생긴 뒤)부터 누를 수 있다.
+  const draftButton = (
+    <Button
+      variant="ghost"
+      onClick={handleSaveDraft}
+      disabled={!contentId || busy}
+      title={!contentId ? "캡션을 만든 뒤 임시 저장할 수 있어요" : undefined}
+    >
+      <Save />
+      {savingDraft ? "저장 중…" : "임시 저장"}
+    </Button>
+  );
 
   return (
     <div className="grid items-start gap-4 lg:grid-cols-[188px_minmax(0,1fr)] xl:grid-cols-[188px_minmax(0,1fr)_300px]">
+      {draft && (
+        <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-[13px] text-ink-2 lg:col-span-2 xl:col-span-3">
+          <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+          <p>
+            임시 저장한 콘텐츠를 이어서 하고 있어요. 고른 계정 · 캡션 · 시각이 그대로예요.
+            {selectedAccountIds.length < draft.state.accountIds.length &&
+              " 그 사이 연결이 끊긴 계정은 뺐어요."}
+          </p>
+        </div>
+      )}
       <StepIndicator
         current={step}
         steps={STEPS}
@@ -551,11 +734,27 @@ export function UploadWizard({
               {currentStep.description}
             </p>
           </div>
-          {step === 1 && selectedAccountIds.length > 0 && (
-            <Badge className="tabular-nums">
-              {selectedAccountIds.length}개 고름
-            </Badge>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {draftSavedAt && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Badge variant="ok">
+                  <CircleCheck />
+                  임시 저장됨
+                </Badge>
+                <span className="tabular-nums">
+                  <RelativeTime iso={draftSavedAt} />
+                </span>
+                <Link href="/contents" className="font-medium text-primary hover:underline">
+                  보관함
+                </Link>
+              </span>
+            )}
+            {step === 1 && selectedAccountIds.length > 0 && (
+              <Badge className="tabular-nums">
+                {selectedAccountIds.length}개 고름
+              </Badge>
+            )}
+          </div>
         </header>
 
         {error && (
@@ -599,11 +798,12 @@ export function UploadWizard({
             coverSeconds={coverSeconds}
             onChangeCover={handleCoverChange}
             onSwitchType={switchMediaType}
-            onChangeFiles={setFiles}
+            onChangeFiles={handleChangeFiles}
             onChangeVideo={handleChangeVideo}
             onPrev={() => setStep(1)}
             onNext={advanceFromStep2}
             canAdvance={canAdvanceStep2}
+            usingResumedMedia={usingResumedMedia}
           />
         )}
 
@@ -631,6 +831,7 @@ export function UploadWizard({
             onPrev={() => setStep(2)}
             onNext={advanceFromStep3}
             canAdvance={canAdvanceStep3}
+            draftButton={draftButton}
           />
         )}
 
@@ -649,6 +850,7 @@ export function UploadWizard({
             onPrev={() => setStep(3)}
             onNext={() => setStep(5)}
             canAdvance={canAdvanceStep4}
+            draftButton={draftButton}
           />
         )}
 
@@ -673,6 +875,7 @@ export function UploadWizard({
             onChangeScheduledAt={setScheduledAt}
             onPrev={() => setStep(4)}
             onComplete={handleComplete}
+            draftButton={draftButton}
           />
         )}
       </section>
@@ -1169,6 +1372,7 @@ function Step2Media({
   onPrev,
   onNext,
   canAdvance,
+  usingResumedMedia,
 }: {
   mediaType: MediaType;
   files: File[];
@@ -1185,10 +1389,20 @@ function Step2Media({
   onPrev: () => void;
   onNext: () => void;
   canAdvance: boolean;
+  usingResumedMedia: boolean;
 }) {
   return (
     <>
       <StepBody>
+        {usingResumedMedia && (
+          <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-[13px] text-ink-2">
+            <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+            <p>
+              임시 저장한 {mediaType === "IMAGE" ? "사진" : "영상"}이 이미 올라가 있어요. 그대로
+              쓰려면 다음으로 넘어가세요. 새로 고르면 캡션을 다시 써야 해요.
+            </p>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <Segmented<MediaType>
             ariaLabel="올릴 것"
@@ -1345,6 +1559,7 @@ function Step3Caption({
   onPrev,
   onNext,
   canAdvance,
+  draftButton,
 }: {
   captions: Captions | null;
   contentId: string | null;
@@ -1368,6 +1583,7 @@ function Step3Caption({
   onPrev: () => void;
   onNext: () => void;
   canAdvance: boolean;
+  draftButton: React.ReactNode;
 }) {
   return (
     <>
@@ -1467,8 +1683,8 @@ function Step3Caption({
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-brand-soft px-3.5 py-3">
               <p className="flex gap-2.5 text-[13px] text-ink-2">
                 <Info className="mt-0.5 size-4 shrink-0 text-primary" />
-                빈 캡션으로 시작해 플랫폼마다 직접 써요. 시작하면 임시 콘텐츠가
-                보관함에 저장돼요.
+                빈 캡션으로 시작해 플랫폼마다 직접 써요. 중간에 멈추려면 아래
+                &lsquo;임시 저장&rsquo;을 누르세요 — 보관함에서 이어서 할 수 있어요.
               </p>
               <Button onClick={onStartManual} disabled={generating}>
                 <Pencil className="size-4" />
@@ -1514,9 +1730,12 @@ function Step3Caption({
         )}
       </StepBody>
       <StepFooter>
-        <Button variant="outline" onClick={onPrev} disabled={generating}>
-          이전
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={onPrev} disabled={generating}>
+            이전
+          </Button>
+          {draftButton}
+        </div>
         <Button onClick={onNext} disabled={!canAdvance}>
           다음: {STEPS[3].label}
         </Button>
@@ -1547,6 +1766,7 @@ function Step4Review({
   onPrev,
   onNext,
   canAdvance,
+  draftButton,
 }: {
   selectedAccounts: {
     id: string;
@@ -1563,6 +1783,7 @@ function Step4Review({
   onPrev: () => void;
   onNext: () => void;
   canAdvance: boolean;
+  draftButton: React.ReactNode;
 }) {
   const verdicts = validation?.perPlatform ?? [];
   const blocked = verdicts.filter((v) => v.status === "blocked").length;
@@ -1642,9 +1863,12 @@ function Step4Review({
         )}
       </StepBody>
       <StepFooter>
-        <Button variant="outline" onClick={onPrev}>
-          이전
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={onPrev}>
+            이전
+          </Button>
+          {draftButton}
+        </div>
         <Button onClick={onNext} disabled={!canAdvance}>
           다음: {STEPS[4].label}
         </Button>
@@ -1767,6 +1991,7 @@ function Step5Schedule({
   onChangeScheduledAt,
   onPrev,
   onComplete,
+  draftButton,
 }: {
   scheduleMode: ScheduleMode;
   scheduledAt: string;
@@ -1781,6 +2006,7 @@ function Step5Schedule({
   onChangeScheduledAt: (v: string) => void;
   onPrev: () => void;
   onComplete: () => void;
+  draftButton: React.ReactNode;
 }) {
   // 누른 빠른 시각 — 날짜를 직접 바꾸면 해제한다. (값 비교에 현재 시각이 필요 없게 따로 기억)
   const [quickHour, setQuickHour] = useState<number | null>(null);
@@ -1928,9 +2154,12 @@ function Step5Schedule({
         )}
       </StepBody>
       <StepFooter>
-        <Button variant="outline" onClick={onPrev} disabled={completing}>
-          이전
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={onPrev} disabled={completing}>
+            이전
+          </Button>
+          {draftButton}
+        </div>
         <Button onClick={onComplete} disabled={completing || missingTime}>
           {scheduleMode === "scheduled" ? <CalendarCheck /> : <Send />}
           {completing

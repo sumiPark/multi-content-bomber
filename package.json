@@ -19,7 +19,8 @@
     "worker:b-script": "tsx worker/write-b-scripts.ts",
     "worker:plan-a": "tsx worker/plan-a-slots.ts",
     "worker:a-shotlist": "tsx worker/write-a-shotlists.ts",
-    "worker:shoot-edit": "tsx worker/edit-shoots.ts"
+    "worker:shoot-edit": "tsx worker/edit-shoots.ts",
+    "worker:cleanup-drafts": "tsx worker/cleanup-drafts.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
