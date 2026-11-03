@@ -6,6 +6,7 @@ import { Reorder } from "framer-motion";
 import { GripVertical, ImageUp, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { previewUrlOf, releasePreviewUrl } from "@/lib/upload/preview-url";
 
 const ACCEPT = {
   "image/jpeg": [".jpg", ".jpeg"],
@@ -29,10 +30,15 @@ interface SelectedImage {
 
 interface ImageDropzoneProps {
   onChange?: (files: File[]) => void;
+  // 이미 고른 파일 — 단계를 오가며 다시 그려져도 고른 사진이 사라지지 않게(2026-11-04).
+  // 처음 그릴 때만 읽는다.
+  initialFiles?: File[];
 }
 
-export function ImageDropzone({ onChange }: ImageDropzoneProps) {
-  const [files, setFiles] = useState<SelectedImage[]>([]);
+export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
+  const [files, setFiles] = useState<SelectedImage[]>(() =>
+    (initialFiles ?? []).map((file) => ({ id: crypto.randomUUID(), file, previewUrl: previewUrlOf(file) })),
+  );
   const [error, setError] = useState<string | null>(null);
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -64,7 +70,7 @@ export function ImageDropzone({ onChange }: ImageDropzoneProps) {
       const additions: SelectedImage[] = accepted.map((file) => ({
         id: crypto.randomUUID(),
         file,
-        previewUrl: URL.createObjectURL(file),
+        previewUrl: previewUrlOf(file),
       }));
 
       setFiles((prev) => [...prev, ...additions]);
@@ -74,20 +80,14 @@ export function ImageDropzone({ onChange }: ImageDropzoneProps) {
 
   const removeFile = (id: string) => {
     const target = filesRef.current.find((f) => f.id === id);
-    if (target) URL.revokeObjectURL(target.previewUrl);
+    if (target) releasePreviewUrl(target.file);
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
   const clearAll = () => {
-    filesRef.current.forEach((f) => URL.revokeObjectURL(f.previewUrl));
+    filesRef.current.forEach((f) => releasePreviewUrl(f.file));
     setFiles([]);
   };
-
-  useEffect(() => {
-    return () => {
-      filesRef.current.forEach((f) => URL.revokeObjectURL(f.previewUrl));
-    };
-  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,

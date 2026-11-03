@@ -393,6 +393,8 @@ export function UploadWizard({
 
   // 영상 파일이 바뀌면 이전에 고른 커버는 무의미해지므로 초기화.
   function handleChangeVideo(file: File | null) {
+    // 드롭존이 다시 그려지며 같은 영상을 알려 오면(단계를 오갈 때) 아무것도 바꾸지 않는다 — 고른 커버 유지
+    if (file === videoFile) return;
     // 드롭존은 처음 그려질 때 null을 한 번 알린다 — 실제로 고른 때만 임시 저장 미디어를 버린다.
     if (file) setResumedMedia(false);
     setVideoFile(file);
@@ -401,6 +403,8 @@ export function UploadWizard({
   }
 
   function handleChangeFiles(next: File[]) {
+    // 드롭존이 다시 그려지며 같은 파일을 같은 순서로 알려 오면(단계를 오갈 때) 아무것도 바꾸지 않는다
+    if (next.length === files.length && next.every((f, i) => f === files[i])) return;
     // 드롭존은 처음 그려질 때 빈 배열을 한 번 알린다 — 실제로 고른 때만 임시 저장 미디어를 버린다.
     if (next.length > 0) setResumedMedia(false);
     setFiles(next);
@@ -422,10 +426,22 @@ export function UploadWizard({
     setThumbnailUrls([]);
   }
 
+  // 올린 사진 · 영상의 지문 — 같은 파일 · 순서 · 커버면 다시 올리지 않는다
+  const uploadedKeyRef = useRef<string | null>(null);
+  function mediaKey(): string {
+    const sig = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
+    return mediaType === "IMAGE" ? `I|${files.map(sig).join("|")}` : `V|${videoFile ? sig(videoFile) : ""}|${coverSeconds ?? ""}`;
+  }
+
   async function advanceFromStep2() {
     setError(null);
     if (!canAdvanceStep2) return;
     if (usingResumedMedia) {
+      setStep(3);
+      return;
+    }
+    // 이미 올린 것과 같은 사진 · 영상(커버 포함)이면 다시 올리지 않는다 — 다시 올리면 써 둔 캡션이 지워졌다(2026-11-04)
+    if (mediaPaths.length > 0 && uploadedKeyRef.current === mediaKey()) {
       setStep(3);
       return;
     }
@@ -487,6 +503,7 @@ export function UploadWizard({
           ...coverMeta,
         });
       }
+      uploadedKeyRef.current = mediaKey();
       // 캡션을 만든 뒤 사진 · 영상을 새로 올렸으면 그 캡션 · 콘텐츠는 옛 미디어 것이다.
       // 그대로 두면 옛 미디어로 발행되므로 캡션을 다시 쓰게 한다.
       if (contentId) {
@@ -617,6 +634,13 @@ export function UploadWizard({
       scheduleMode === "scheduled" && scheduledAt
         ? new Date(scheduledAt).toISOString()
         : null;
+    // 지난 시각으로 예약하면 바로 올라가 버린다 — 완료 전에 막는다(서버도 같은 검사)
+    if (scheduledFor && Date.parse(scheduledFor) < Date.now()) {
+      completingRef.current = false;
+      setCompleting(false);
+      setError("이미 지난 시각이에요. 예약 시각을 다시 고르거나 '바로 올리기'를 골라 주세요.");
+      return;
+    }
     const seriesByAccount: Record<string, { seriesId: string; reply: boolean }> = {};
     for (const row of seriesRows) {
       const chosen = seriesChoice[row.account.id];
@@ -859,6 +883,7 @@ export function UploadWizard({
             scheduleMode={scheduleMode}
             scheduledAt={scheduledAt}
             selectedAccountCount={selectedAccountIds.length}
+            hasTikTok={selectedPlatforms.includes("TIKTOK")}
             seriesRows={seriesRows}
             seriesChoice={seriesChoice}
             onChangeSeries={(accountId, seriesId) => {
@@ -1422,10 +1447,11 @@ function Step2Media({
           )}
         </div>
         {mediaType === "IMAGE" ? (
-          <ImageDropzone onChange={onChangeFiles} />
+          <ImageDropzone onChange={onChangeFiles} initialFiles={files} />
         ) : (
           <VideoDropzone
             onChange={onChangeVideo}
+            initialFile={videoFile}
             coverSeconds={coverSeconds}
             onCoverChange={onChangeCover}
           />
@@ -1981,6 +2007,7 @@ function Step5Schedule({
   scheduleMode,
   scheduledAt,
   selectedAccountCount,
+  hasTikTok,
   seriesRows,
   seriesChoice,
   onChangeSeries,
@@ -1996,6 +2023,8 @@ function Step5Schedule({
   scheduleMode: ScheduleMode;
   scheduledAt: string;
   selectedAccountCount: number;
+  // 틱톡은 앱 심사 전이라 '나만 보기'로만 올라간다(lib/platforms/tiktok.ts privacy_level SELF_ONLY)
+  hasTikTok: boolean;
   seriesRows: { account: SocialAccountSummary; options: SeriesOption[] }[];
   seriesChoice: Record<string, string>;
   onChangeSeries: (accountId: string, seriesId: string) => void;
@@ -2010,6 +2039,8 @@ function Step5Schedule({
 }) {
   // 누른 빠른 시각 — 날짜를 직접 바꾸면 해제한다. (값 비교에 현재 시각이 필요 없게 따로 기억)
   const [quickHour, setQuickHour] = useState<number | null>(null);
+  // 고른 시각이 이미 지났는지 — 고를 때(이벤트) 계산해 둔다
+  const [pastPicked, setPastPicked] = useState(false);
   // 예약을 골랐는데 시각이 비어 있으면 완료를 막는다 — 비어 있으면 바로 올라가 버린다.
   const missingTime = scheduleMode === "scheduled" && !scheduledAt;
   return (
@@ -2044,6 +2075,7 @@ function Step5Schedule({
                       disabled={completing}
                       onClick={() => {
                         setQuickHour(h);
+                        setPastPicked(false);
                         onChangeScheduledAt(tomorrowAt(h));
                       }}
                       className={cn(
@@ -2066,6 +2098,7 @@ function Step5Schedule({
                 value={scheduledAt}
                 onChange={(e) => {
                   setQuickHour(null);
+                  setPastPicked(!!e.target.value && Date.parse(e.target.value) < Date.now());
                   onChangeScheduledAt(e.target.value);
                 }}
                 disabled={completing}
@@ -2076,12 +2109,24 @@ function Step5Schedule({
                   날짜와 시각을 골라 주세요. 바로 올리려면 &lsquo;바로 올리기&rsquo;를 고르세요.
                 </p>
               )}
+              {!missingTime && pastPicked && (
+                <p className="text-xs text-risk">이미 지난 시각이에요. 앞으로의 시각을 골라 주세요.</p>
+              )}
             </div>
           </div>
         ) : (
           <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-[13px] text-ink-2">
             <Send className="mt-0.5 size-4 shrink-0 text-primary" />
             <p>완료를 누르면 곧 올리기 시작해요. 진행은 배포 관리에서 볼 수 있어요.</p>
+          </div>
+        )}
+
+        {hasTikTok && (
+          <div className="flex gap-2.5 rounded-lg border border-warn/40 bg-warn-soft px-3.5 py-3 text-[13px] text-ink-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warn" />
+            <p>
+              틱톡은 지금 <b>&lsquo;나만 보기&rsquo;</b>로 올라가요. 틱톡 앱 심사를 마치기 전이라 공개로 올릴 수 없어요. 올라간 뒤 틱톡 앱에서 공개로 바꿔 주세요.
+            </p>
           </div>
         )}
 
@@ -2160,7 +2205,7 @@ function Step5Schedule({
           </Button>
           {draftButton}
         </div>
-        <Button onClick={onComplete} disabled={completing || missingTime}>
+        <Button onClick={onComplete} disabled={completing || missingTime || (scheduleMode === "scheduled" && pastPicked)}>
           {scheduleMode === "scheduled" ? <CalendarCheck /> : <Send />}
           {completing
             ? "등록 중…"

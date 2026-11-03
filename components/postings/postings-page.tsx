@@ -45,7 +45,7 @@ type PublishStatus =
 type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
 
 // 기획서의 6가지 사용자 보기 상태 — 백엔드 enum + scheduled_for로 파생.
-type DisplayStatus =
+export type DisplayStatus =
   | "scheduled"
   | "uploading"
   | "completed"
@@ -84,6 +84,7 @@ export interface PostingItem {
 interface PostingsPageProps {
   initialPostings: PostingItem[];
   canManage: boolean;
+  initialStatus?: DisplayStatus;
 }
 
 
@@ -236,16 +237,19 @@ function displayLabel(item: { internalTitle: string | null; captions: unknown })
 export function PostingsPage({
   initialPostings,
   canManage,
+  initialStatus,
 }: PostingsPageProps) {
   const router = useRouter();
 
+  // 대시보드 · 편성표 링크(/postings?status=failed 등)로 들어오면 그 상태만 보이게(2026-11-04, 전엔 무시했다)
   const [statusFilter, setStatusFilter] = useState<Set<DisplayStatus>>(
-    () => new Set(ALL_STATUSES),
+    () => new Set(initialStatus ? [initialStatus] : ALL_STATUSES),
   );
   const [platformFilter, setPlatformFilter] = useState<Set<Platform>>(
     () => new Set(ALL_PLATFORMS),
   );
-  const [period, setPeriod] = useState<PeriodPreset>("7d");
+  // 실패 · 예약은 7일보다 오래된 것도 봐야 해서 상태로 들어오면 기간은 전체
+  const [period, setPeriod] = useState<PeriodPreset>(initialStatus ? "all" : "7d");
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("published");

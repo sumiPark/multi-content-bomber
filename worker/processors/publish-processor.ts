@@ -32,6 +32,8 @@ interface PublishJobRow {
   status: string;
   attempts: number;
   status_history: Json | null;
+  // 예약 시각 — 재시도 때 다음 시도 시각으로 미룬다(원래 값은 status_history에 남긴다)
+  scheduled_for?: string | null;
   // 0015 — 어댑터가 재시도 때 이어받는 상태. 마이그레이션 전 DB엔 컬럼이 없어 optional.
   resume_state?: Json | null;
   // 0017 — 업로드 마법사에서 "다음 화로 올리기"를 고른 시리즈.
@@ -205,12 +207,17 @@ export async function processClaimedPublishJob(
         .eq("id", row.social_account_id);
     }
 
+    // 재시도 간격 — 바로 다시 잡히면 같은 run 안에서 몇 초 만에 3번을 다 써서, 한도 초과 같은 잠깐의 오류도
+    // 최종 실패가 됐다(2026-11-04). 다음 시도 시각을 scheduled_for로 미루면 claim RPC가 그때까지 잡지 않고,
+    // 시각이 되면 pg_cron(0022, 1분마다)이 워커를 깨운다.
+    const retryAt = isLastAttempt ? null : new Date(Date.now() + retryDelayMs(err, attemptNumber, hasResumeState));
     const failureHistory: StatusHistoryEntry[] = [
       ...processingHistory,
       {
         status: nextStatus,
         timestamp: nowIso(),
         message: `${classifyError(err)}: ${errorMsg}`,
+        ...(retryAt ? { retry_at: retryAt.toISOString(), scheduled_for_before: row.scheduled_for ?? null } : {}),
       },
     ];
 
@@ -221,6 +228,7 @@ export async function processClaimedPublishJob(
         last_error: errorMsg,
         status_history: failureHistory,
         updated_at: nowIso(),
+        ...(retryAt ? { scheduled_for: retryAt.toISOString() } : {}),
         ...(isLastAttempt ? { completed_at: nowIso() } : {}),
       })
       .eq("id", publishJobId);
@@ -229,6 +237,19 @@ export async function processClaimedPublishJob(
     // catch해 로그만 남긴다 — 재시도는 RETRYING row를 다음 sweep이 다시 claim.
     throw err;
   }
+}
+
+/**
+ * 다음 시도까지 기다릴 시간. 1번째 실패 뒤 10분, 2번째 뒤 30분.
+ * 플랫폼이 다시 시도할 때를 알려 주면(429 retry-after) 그보다 일찍 하지 않는다.
+ * 인스타 컨테이너가 아직 인코딩 중이라 이어받을 상태가 있으면 5분 — 서버 쪽 처리는 계속 진행 중이다.
+ */
+function retryDelayMs(err: unknown, attemptNumber: number, hasResumeState: boolean): number {
+  const MIN = 60_000;
+  if (hasResumeState && !(err instanceof RateLimitedError)) return 5 * MIN;
+  const base = attemptNumber <= 1 ? 10 * MIN : 30 * MIN;
+  if (err instanceof RateLimitedError && err.retryAfterSec) return Math.max(base, err.retryAfterSec * 1000);
+  return base;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

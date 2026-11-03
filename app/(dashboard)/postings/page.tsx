@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
-import { PostingsPage } from "@/components/postings/postings-page";
+import { PostingsPage, type DisplayStatus } from "@/components/postings/postings-page";
 
 // 클라이언트에서 필터/검색/일괄 선택을 다루므로, 서버에서는 한 번에 충분히 큰
 // 윈도우(최근 90일, soft-delete 제외, 최신 200건)를 가져와 클라이언트 보드로 넘긴다.
@@ -9,7 +9,11 @@ const MAX_ROWS = 200;
 const WINDOW_DAYS = 90;
 const SIGNED_URL_TTL = 600;
 
-export default async function Page() {
+const STATUS_PARAMS: DisplayStatus[] = ["scheduled", "uploading", "completed", "failed", "pending", "cancelled"];
+
+export default async function Page({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+  const { status } = await searchParams;
+  const initialStatus = STATUS_PARAMS.find((x) => x === status);
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
@@ -157,7 +161,7 @@ export default async function Page() {
 
   return (
     <main className="p-4 sm:p-6">
-      <PostingsPage initialPostings={postings} canManage={canManage} />
+      <PostingsPage initialPostings={postings} canManage={canManage} initialStatus={initialStatus} />
     </main>
   );
 }

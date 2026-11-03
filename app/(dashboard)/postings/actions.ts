@@ -43,6 +43,11 @@ async function authorize(): Promise<
   if (!profile?.organization_id) {
     return { ok: false, error: "소속된 조직이 없습니다." };
   }
+  // 화면은 관리자 · 매니저에게만 버튼을 보여 준다 — 서버에서도 같은 기준(2026-11-04, 전엔 역할을 읽기만 했다).
+  // 처리는 service 키라 RLS가 막아 주지 않는다.
+  if (profile.role !== "ADMIN" && profile.role !== "MANAGER") {
+    return { ok: false, error: "관리자 · 매니저만 할 수 있어요." };
+  }
   return {
     ok: true,
     userId: user.id,

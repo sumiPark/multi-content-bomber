@@ -9,6 +9,7 @@ import {
   type Captions,
 } from "@/lib/ai/caption-generator";
 import { triggerPublishRun } from "@/lib/github-dispatch";
+import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
 const SIGNED_URL_TTL_SECONDS = 600;
@@ -84,7 +85,7 @@ const deleteContentsInputSchema = z.object({
 });
 
 export type DeleteContentsResult =
-  | { ok: true; deleted: number }
+  | { ok: true; deleted: number; notice?: string }
   | { ok: false; error: string };
 
 export type GenerateCaptionsResult =
@@ -606,7 +607,7 @@ export async function deleteContentsAction(
   // RLS가 권한 없는 행을 자동 차단 — 우선 삭제 대상의 미디어 경로를 수집한다.
   const { data: targets, error: selectError } = await supabase
     .from("contents")
-    .select("id, media_urls")
+    .select("id, media_urls, metadata")
     .in("id", parsed.data.contentIds);
 
   if (selectError) {
@@ -616,22 +617,45 @@ export async function deleteContentsAction(
     return { ok: false, error: "삭제할 콘텐츠를 찾을 수 없거나 권한이 없습니다." };
   }
 
-  const deletableIds = targets.map((t) => t.id);
-  const storagePaths = Array.from(
-    new Set(
-      targets.flatMap((t) => t.media_urls).filter((p): p is string => Boolean(p)),
-    ),
-  );
-
-  // DB 먼저 삭제 (publish_jobs는 cascade). RLS가 권한 없는 id는 통과시키지 않으므로
-  // 위에서 select된 deletableIds만 대상으로 한다.
-  const { error: deleteError, count } = await supabase
+  // DB 먼저 삭제 (publish_jobs는 cascade). 콘텐츠 삭제는 만든 사람이나 관리자만 된다(RLS, 0001) —
+  // 실제로 지워진 행을 받아 그 행의 파일만 정리한다. 0건이면 "삭제됨"이라고 하지 않는다(2026-11-04).
+  const { data: deletedRows, error: deleteError } = await supabase
     .from("contents")
-    .delete({ count: "exact" })
-    .in("id", deletableIds);
+    .delete()
+    .in(
+      "id",
+      targets.map((t) => t.id),
+    )
+    .select("id");
 
   if (deleteError) {
     return { ok: false, error: `삭제 실패: ${deleteError.message}` };
+  }
+  const deletedIds = new Set((deletedRows ?? []).map((r) => r.id));
+  if (deletedIds.size === 0) {
+    return { ok: false, error: "지울 권한이 없어요. 콘텐츠는 만든 사람이나 관리자만 지울 수 있어요." };
+  }
+
+  const pathsOf = (t: { media_urls: string[]; metadata: unknown }) => {
+    const meta = (t.metadata && typeof t.metadata === "object" ? t.metadata : {}) as Record<string, unknown>;
+    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path].filter((x): x is string => typeof x === "string" && !!x);
+  };
+  const candidatePaths = Array.from(new Set(targets.filter((t) => deletedIds.has(t.id)).flatMap(pathsOf)));
+
+  // 같은 파일을 쓰는 다른 콘텐츠가 남아 있으면 그 파일은 지우지 않는다 — 1단계에서 계정을 바꿔 다시 만든 콘텐츠 ·
+  // 예약된 발행이 같은 파일을 쓸 수 있다(예전엔 지워져 예약 발행이 실패했다). 조직 전체를 보려고 service로 조회.
+  let storagePaths = candidatePaths;
+  if (candidatePaths.length > 0) {
+    const service = createServiceClient();
+    const { data: still } = await service.from("contents").select("media_urls, metadata").overlaps("media_urls", candidatePaths);
+    const { data: stillMeta, error: metaErr } = await service
+      .from("contents")
+      .select("media_urls, metadata")
+      .or(candidatePaths.map((x) => `metadata->>thumbnail_path.eq.${x},metadata->>cover_path.eq.${x}`).join(","));
+    const keep = new Set([...(still ?? []), ...(stillMeta ?? [])].flatMap(pathsOf));
+    // 남은 콘텐츠를 확인하지 못했으면 지우지 않는 쪽으로 — 파일이 남는 건 정리 워커가 나중에 처리한다
+    const unsure = !still || !!metaErr;
+    storagePaths = unsure ? [] : candidatePaths.filter((x) => !keep.has(x));
   }
 
   // Storage 파일 제거 — DB 삭제 후 best-effort. 실패해도 본 응답은 ok 처리하되 로그.
@@ -652,7 +676,12 @@ export async function deleteContentsAction(
   revalidatePath("/postings");
   revalidatePath("/uploads");
 
-  return { ok: true, deleted: count ?? deletableIds.length };
+  const skipped = targets.length - deletedIds.size;
+  return {
+    ok: true,
+    deleted: deletedIds.size,
+    ...(skipped > 0 ? { notice: `${skipped}건은 지울 권한이 없어 남겼어요 (만든 사람이나 관리자만 지울 수 있어요).` } : {}),
+  };
 }
 
 export async function createPublishJobsAction(
@@ -661,6 +690,10 @@ export async function createPublishJobsAction(
   const parsed = createJobsInputSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  }
+  // 지난 시각으로 "예약"하면 바로 올라가 버렸다(2026-11-04) — 1분 여유를 두고 막는다. 바로 올리기는 scheduledFor가 null.
+  if (parsed.data.scheduledFor && Date.parse(parsed.data.scheduledFor) < Date.now() - 60_000) {
+    return { ok: false, error: "이미 지난 시각이에요. 예약 시각을 다시 고르거나 '바로 올리기'를 골라 주세요." };
   }
 
   const supabase = await createClient();

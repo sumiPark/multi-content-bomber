@@ -35,6 +35,11 @@ export async function GET(
   if (!user) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
+  // 계정 연결 · 다시 연결은 관리자 · 매니저만(콜백이 service 키로 저장해 RLS가 막아 주지 않는다)
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  if (profile?.role !== "ADMIN" && profile?.role !== "MANAGER") {
+    return redirectWithError(request, "계정 연결은 관리자 · 매니저만 할 수 있어요.");
+  }
 
   const state = randomBytes(32).toString("base64url");
   const redirectUri = getRedirectUri(platform);

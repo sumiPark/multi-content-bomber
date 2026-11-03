@@ -9,6 +9,14 @@ import {
 // 만료까지 이 시간 미만 남은 계정을 sweep 대상으로 본다. YouTube access_token이
 // 1시간 짜리라 1시간 윈도우면 30분 주기 sweep과 합쳐 적어도 한 번은 잡힌다.
 const REFRESH_THRESHOLD_MS = 60 * 60 * 1000;
+// Instagram long-lived 토큰(60일)은 만료되면 갱신할 수 없다(ig_refresh_token은 살아 있는 토큰만 받음).
+// sweep은 발행 워커가 돌 때만 실행되고 GitHub 예약 실행은 몇 시간씩 밀려, 1시간 창으로는 놓치기 쉽다 →
+// 7일 전부터 갱신한다(2026-11-04). 발급 24시간 안 된 토큰은 갱신이 거절되지만 그런 토큰은 이 창에 들지 않는다.
+const INSTAGRAM_REFRESH_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
+
+function thresholdOf(platform: Platform): number {
+  return platform === "INSTAGRAM" ? INSTAGRAM_REFRESH_THRESHOLD_MS : REFRESH_THRESHOLD_MS;
+}
 
 // 한 번 sweep에서 처리할 최대 계정 수. 만료가 동시에 몰려도 외부 API 호출이 너무
 // 길어지지 않게. 못 잡힌 잔여는 다음 30분 cron sweep에서 자연스럽게 처리.
@@ -58,10 +66,10 @@ export async function processTokenRefreshSweep(
   if (accountIds && accountIds.length > 0) {
     query = query.in("id", accountIds);
   } else {
-    // 만료까지 1시간 미만 남은 것들. token_expires_at IS NULL은 영구 토큰
-    // (Instagram 비즈니스 long-lived 등)이거나 만료 시각 미상 — sweep 대상 아님.
-    const cutoff = new Date(now.getTime() + REFRESH_THRESHOLD_MS).toISOString();
-    query = query.lt("token_expires_at", cutoff);
+    // 만료까지 플랫폼별 창(인스타 7일 · 그 외 1시간) 안에 든 것들 — 넓은 창으로 받아 아래에서 플랫폼별로 거른다.
+    // token_expires_at IS NULL은 영구 토큰이거나 만료 시각 미상 — sweep 대상 아님.
+    const cutoff = new Date(now.getTime() + INSTAGRAM_REFRESH_THRESHOLD_MS).toISOString();
+    query = query.lt("token_expires_at", cutoff).order("token_expires_at");
   }
 
   const { data: accounts, error } = await query
@@ -73,13 +81,18 @@ export async function processTokenRefreshSweep(
     return stats;
   }
 
-  stats.total = accounts?.length ?? 0;
+  const targets = (accounts ?? []).filter(
+    (a) =>
+      (accountIds && accountIds.length > 0) ||
+      (a.token_expires_at !== null && Date.parse(a.token_expires_at) - now.getTime() < thresholdOf(a.platform)),
+  );
+  stats.total = targets.length;
   if (stats.total === 0) return stats;
 
   console.log(`[token-refresh] sweep start | targets=${stats.total}`);
 
   // 2. 직렬 처리. 100개여도 API당 ~수백ms라 1-2분 안에 끝난다.
-  for (const account of accounts ?? []) {
+  for (const account of targets) {
     try {
       await refreshOne(supabase, account);
       stats.refreshed++;

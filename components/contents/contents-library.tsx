@@ -69,7 +69,7 @@ export function ContentsLibrary({
       setActionMessage(null);
       const result = await deleteContentsAction({ contentIds: ids });
       if (result.ok) {
-        setActionMessage(`${result.deleted}건 삭제됨`);
+        setActionMessage(`${result.deleted}건을 삭제했어요.${result.notice ? ` ${result.notice}` : ""}`);
         setSelected(new Set());
         router.refresh();
       } else {

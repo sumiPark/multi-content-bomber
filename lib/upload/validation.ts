@@ -58,7 +58,8 @@ export const INSTAGRAM_MAX_VIDEO_BYTES = 1024 * MB;
 
 const CONSTRAINTS: Record<Platform, PlatformConstraints> = {
   YOUTUBE: {
-    supportsImage: true,
+    // 유튜브는 영상만 — 어댑터(lib/platforms/youtube.ts publish)가 사진을 거절해 발행이 늘 실패했다(2026-11-04).
+    supportsImage: false,
     supportsVideo: true,
     maxImagesPerPost: 1,
     maxFileSizeBytes: 256 * 1024 * MB,
@@ -88,10 +89,9 @@ const CONSTRAINTS: Record<Platform, PlatformConstraints> = {
     supportsImage: false,
     supportsVideo: true,
     maxImagesPerPost: 0,
-    maxFileSizeBytes: 287 * MB,
-    // 어댑터가 single chunk 업로드만 구현 — lib/platforms/tiktok.ts 참고.
-    warnFileSizeBytes: 64 * MB,
-    warnFileSizeNote: "발행 시 실패할 수 있어요 (분할 업로드 미지원).",
+    // 공식 한도는 287MB지만 어댑터가 한 번에 올리기(single chunk)만 구현해 64MB를 넘으면 발행이 늘 실패한다
+    // (lib/platforms/tiktok.ts). 경고만 하던 것을 막도록 바꿨다(2026-11-04).
+    maxFileSizeBytes: 64 * MB,
     maxVideoDurationSec: 60 * 60,
     imageMimes: [],
     videoMimes: ["video/mp4", "video/quicktime"],
@@ -102,6 +102,12 @@ const CONSTRAINTS: Record<Platform, PlatformConstraints> = {
 };
 
 const ASPECT_TOLERANCE = 0.05;
+
+const PLATFORM_KO: Record<Platform, { name: string; topic: string }> = {
+  YOUTUBE: { name: "유튜브", topic: "유튜브는" },
+  INSTAGRAM: { name: "인스타그램", topic: "인스타그램은" },
+  TIKTOK: { name: "틱톡", topic: "틱톡은" },
+};
 
 function ratio(width?: number, height?: number): number | null {
   if (!width || !height) return null;
@@ -114,6 +120,7 @@ function evaluatePlatform(
   items: MediaItem[],
 ): PlatformVerdict {
   const c = CONSTRAINTS[platform];
+  const { name, topic } = PLATFORM_KO[platform];
   const issues: ValidationIssue[] = [];
 
   if (mediaType === "IMAGE" && !c.supportsImage) {
@@ -121,7 +128,7 @@ function evaluatePlatform(
       severity: "error",
       platform,
       code: "image_unsupported",
-      message: `${platform}은 이미지 게시를 지원하지 않습니다 (영상만 가능).`,
+      message: `${topic} 사진을 올릴 수 없어요 (영상만 가능). 1단계에서 이 계정을 빼거나 영상으로 바꿔 주세요.`,
     });
   }
   if (mediaType === "VIDEO" && !c.supportsVideo) {
@@ -129,7 +136,7 @@ function evaluatePlatform(
       severity: "error",
       platform,
       code: "video_unsupported",
-      message: `${platform}은 영상 게시를 지원하지 않습니다.`,
+      message: `${topic} 영상을 올릴 수 없어요.`,
     });
   }
 
@@ -138,7 +145,7 @@ function evaluatePlatform(
       severity: "error",
       platform,
       code: "too_many_images",
-      message: `${platform} 1회 게시는 ${c.maxImagesPerPost}장까지 가능합니다 (현재 ${items.length}장).`,
+      message: `${name} 게시물 하나에는 ${c.maxImagesPerPost}장까지 올릴 수 있어요 (지금 ${items.length}장).`,
     });
   }
 
@@ -150,7 +157,7 @@ function evaluatePlatform(
         severity: "error",
         platform,
         code: "mime_unsupported",
-        message: `${platform}은 ${item.file.type || "알 수 없는 포맷"}을 지원하지 않습니다 (${item.file.name}).`,
+        message: `${topic} 이 파일 형식(${item.file.type || "알 수 없음"})을 올릴 수 없어요 (${item.file.name}).`,
       });
     }
 
@@ -165,7 +172,7 @@ function evaluatePlatform(
         severity: "warning",
         platform,
         code: "file_over_supported_size",
-        message: `${platform}은 ${warnMB}MB 이하만 지원합니다 (${item.file.name}: ${fileMB}MB). ${c.warnFileSizeNote ?? ""}`.trim(),
+        message: `${topic} ${warnMB}MB 이하만 안정적으로 올라가요 (${item.file.name}: ${fileMB}MB). ${c.warnFileSizeNote ?? ""}`.trim(),
       });
     }
 
@@ -176,7 +183,7 @@ function evaluatePlatform(
         severity: "error",
         platform,
         code: "file_too_large",
-        message: `${platform} 최대 파일 크기 ${maxMB}MB 초과 (${item.file.name}: ${fileMB}MB).`,
+        message: `${name} 최대 파일 크기 ${maxMB}MB를 넘어요 (${item.file.name}: ${fileMB}MB).`,
       });
     }
 
@@ -191,7 +198,7 @@ function evaluatePlatform(
         severity: "error",
         platform,
         code: "video_too_long",
-        message: `${platform} 영상 길이 한도 초과 (${dur}초 > ${maxMin}분).`,
+        message: `${name} 영상 길이 한도를 넘어요 (${dur}초 > ${maxMin}분).`,
       });
     }
 
@@ -203,7 +210,7 @@ function evaluatePlatform(
           severity: "warning",
           platform,
           code: "aspect_off",
-          message: `${platform} 권장 비율(${c.recommendedAspectName})과 다릅니다. 자동 크롭 또는 여백이 발생할 수 있어요.`,
+          message: `${name} 권장 비율(${c.recommendedAspectName})과 달라요. 잘리거나 여백이 생길 수 있어요.`,
         });
       }
     }
@@ -219,7 +226,7 @@ function evaluatePlatform(
         severity: "warning",
         platform,
         code: "resolution_low",
-        message: `${platform} 권장 최소 해상도(${c.recommendedMinResolution.width}×${c.recommendedMinResolution.height}) 미만입니다.`,
+        message: `${name} 권장 최소 해상도(${c.recommendedMinResolution.width}×${c.recommendedMinResolution.height})보다 작아요.`,
       });
     }
   }

@@ -64,11 +64,14 @@ export async function GET(
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("organization_id")
+    .select("organization_id, role")
     .eq("id", user.id)
     .maybeSingle();
   if (!profile?.organization_id) {
     return NextResponse.redirect(new URL("/onboarding", request.url));
+  }
+  if (profile.role !== "ADMIN" && profile.role !== "MANAGER") {
+    return redirectWithError(request, "계정 연결은 관리자 · 매니저만 할 수 있어요.");
   }
 
   const adapter = getAdapter(platform);

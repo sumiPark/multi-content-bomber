@@ -254,8 +254,12 @@ export function AccountsPage({
         </div>
       )}
 
-      {/* 계정 추가 — 가장 많이 쓰는 액션이라 상단 고정 */}
-      <ConnectorCard />
+      {/* 계정 추가 — 가장 많이 쓰는 액션이라 상단 고정. 연결은 관리자 · 매니저만(서버도 같은 기준) */}
+      {canManage ? (
+        <ConnectorCard />
+      ) : (
+        <p className="rounded-lg border bg-card px-4 py-3 text-[13px] text-muted-foreground">계정 연결 · 다시 연결은 관리자 · 매니저만 할 수 있어요.</p>
+      )}
 
       {isCreating && canManage && (
         <GroupForm

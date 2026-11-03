@@ -5,6 +5,7 @@ import { useDropzone, type FileRejection } from "react-dropzone";
 import { Film, ImageIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { previewUrlOf, releasePreviewUrl } from "@/lib/upload/preview-url";
 
 function formatTime(s: number): string {
   const mm = Math.floor(s / 60);
@@ -29,6 +30,8 @@ const REJECT_MESSAGES: Record<string, string> = {
 
 interface VideoDropzoneProps {
   onChange?: (file: File | null) => void;
+  // 이미 고른 영상 — 단계를 오가며 다시 그려져도 사라지지 않게(2026-11-04). 처음 그릴 때만 읽는다.
+  initialFile?: File | null;
   // 커버 프레임 — 미리보기 영상에서 직접 시점을 고른다. 없으면 커버 UI 숨김.
   // blob은 고른 프레임을 캔버스로 캡처한 JPEG(YouTube 썸네일 업로드용).
   coverSeconds?: number | null;
@@ -37,11 +40,13 @@ interface VideoDropzoneProps {
 
 export function VideoDropzone({
   onChange,
+  initialFile = null,
   coverSeconds = null,
   onCoverChange,
 }: VideoDropzoneProps) {
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(initialFile);
+  // 미리보기 주소는 파일마다 하나(lib/upload/preview-url) — 다시 그려져도 깨지지 않게
+  const previewUrl = file ? previewUrlOf(file) : null;
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -53,11 +58,6 @@ export function VideoDropzone({
     onChange?.(file);
   }, [file]);
 
-  useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
 
   const onDrop = useCallback(
     (accepted: File[], rejected: FileRejection[]) => {
@@ -69,19 +69,17 @@ export function VideoDropzone({
       }
       if (accepted.length === 0) return;
 
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return URL.createObjectURL(accepted[0]);
+      setFile((prev) => {
+        if (prev && prev !== accepted[0]) releasePreviewUrl(prev);
+        return accepted[0];
       });
-      setFile(accepted[0]);
       setCoverPreview(null);
     },
     [],
   );
 
   const handleRemove = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
+    if (file) releasePreviewUrl(file);
     setFile(null);
     setError(null);
     setCurrentTime(0);
