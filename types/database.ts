@@ -230,6 +230,7 @@ export type Database = {
           content_id: string | null
           created_at: string
           error: string | null
+          human_brief: string | null
           id: string
           note: string | null
           organization_id: string
@@ -252,6 +253,7 @@ export type Database = {
           content_id?: string | null
           created_at?: string
           error?: string | null
+          human_brief?: string | null
           id?: string
           note?: string | null
           organization_id: string
@@ -274,6 +276,7 @@ export type Database = {
           content_id?: string | null
           created_at?: string
           error?: string | null
+          human_brief?: string | null
           id?: string
           note?: string | null
           organization_id?: string
@@ -1257,6 +1260,69 @@ export type Database = {
           },
         ]
       }
+      shoot_requests: {
+        Row: {
+          clips: Json
+          created_at: string
+          cuts: Json
+          due_at: string | null
+          edit: Json | null
+          error: string | null
+          id: string
+          organization_id: string
+          plan_id: string
+          rendered_path: string | null
+          status: string
+          updated_at: string
+          uploaded_at: string | null
+        }
+        Insert: {
+          clips?: Json
+          created_at?: string
+          cuts?: Json
+          due_at?: string | null
+          edit?: Json | null
+          error?: string | null
+          id?: string
+          organization_id: string
+          plan_id: string
+          rendered_path?: string | null
+          status?: string
+          updated_at?: string
+          uploaded_at?: string | null
+        }
+        Update: {
+          clips?: Json
+          created_at?: string
+          cuts?: Json
+          due_at?: string | null
+          edit?: Json | null
+          error?: string | null
+          id?: string
+          organization_id?: string
+          plan_id?: string
+          rendered_path?: string | null
+          status?: string
+          updated_at?: string
+          uploaded_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shoot_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shoot_requests_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: true
+            referencedRelation: "content_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shop_categories: {
         Row: {
           category_id: number
@@ -1526,6 +1592,7 @@ export type Database = {
       }
       track_settings: {
         Row: {
+          a_shoot_deadline: string
           b_confirm_deadline: string
           b_full_auto: boolean
           organization_id: string
@@ -1535,6 +1602,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          a_shoot_deadline?: string
           b_confirm_deadline?: string
           b_full_auto?: boolean
           organization_id: string
@@ -1544,6 +1612,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          a_shoot_deadline?: string
           b_confirm_deadline?: string
           b_full_auto?: boolean
           organization_id?: string

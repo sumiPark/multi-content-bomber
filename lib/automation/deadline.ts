@@ -11,3 +11,8 @@ export function confirmDeadlineIso(slotDate: string, deadline: string): string {
 export function isPastDeadline(slotDate: string, deadline: string, now = Date.now()): boolean {
   return now >= Date.parse(confirmDeadlineIso(slotDate, deadline));
 }
+
+/** 칸의 올릴 시각(KST)이 지났는지 — 직접 촬영 칸은 그 전까지 고르고 찍고 확인할 수 있다. */
+export function isPastSlot(slotDate: string, slotTime: string, now = Date.now()): boolean {
+  return now >= Date.parse(kstToIso(slotDate, slotTime));
+}

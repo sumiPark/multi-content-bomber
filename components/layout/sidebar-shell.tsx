@@ -9,6 +9,7 @@ import {
   BellRing,
   CalendarCheck,
   CalendarClock,
+  Clapperboard,
   Link2,
   LayoutDashboard,
   LogOut,
@@ -18,6 +19,7 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
+  Video,
   Wand2,
   XIcon,
 } from "lucide-react";
@@ -66,6 +68,14 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/auto/confirm", label: "AI 자동 업로드", icon: CalendarCheck },
       { href: "/products", label: "상품 분석", icon: Package },
       { href: "/rules", label: "광고 문구 규칙", icon: ShieldCheck },
+    ],
+  },
+  // 직접 촬영 콘텐츠(2026-11 신규) — 12 · 18시 칸. 사람이 찍고 AI가 편집한다.
+  {
+    label: "직접 촬영 콘텐츠",
+    items: [
+      { href: "/shoot/plans", label: "촬영 기획 고르기", icon: Clapperboard },
+      { href: "/shoot/uploads", label: "촬영 · 올리기", icon: Video },
     ],
   },
   {

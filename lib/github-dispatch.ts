@@ -18,6 +18,9 @@ export const EPISODE_ALERTS_DISPATCH_EVENT = "episode-alerts";
 export const METRICS_DISPATCH_EVENT = "collect-metrics";
 // 상품 수집 · 상세 이미지 분석 워크플로(.github/workflows/products.yml).
 export const PRODUCTS_DISPATCH_EVENT = "collect-products";
+// 직접 촬영 콘텐츠 워크플로(.github/workflows/a-plan.yml) — 기획안 후보 · 컷 리스트.
+export const SHOOT_PLAN_DISPATCH_EVENT = "plan-a";
+export const SHOTLIST_DISPATCH_EVENT = "a-shotlist";
 
 /**
  * publish 워크플로를 즉시 실행시킨다.
@@ -62,7 +65,20 @@ export async function triggerProductsRun(reason: string): Promise<void> {
   await dispatch(PRODUCTS_DISPATCH_EVENT, reason);
 }
 
-async function dispatch(eventType: string, reason: string): Promise<void> {
+/**
+ * 직접 촬영 기획안 후보 만들기 — "다시 만들기"로 칸 제안을 지운 뒤. date가 있으면 그 날짜 칸을 채운다.
+ * 평소엔 매일 05시(KST) schedule이 내일 칸을 채운다.
+ */
+export async function triggerShootPlanRun(reason: string, date?: string): Promise<void> {
+  await dispatch(SHOOT_PLAN_DISPATCH_EVENT, reason, date ? { date } : {});
+}
+
+/** 직접 촬영 컷 리스트 쓰기 — 사람이 기획을 고르거나 상품을 직접 지정한 직후(사람이 촬영을 기다린다). */
+export async function triggerShotlistRun(reason: string): Promise<void> {
+  await dispatch(SHOTLIST_DISPATCH_EVENT, reason);
+}
+
+async function dispatch(eventType: string, reason: string, extra: Record<string, string> = {}): Promise<void> {
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   const repo = process.env.GITHUB_REPO;
   if (!token || !repo) {
@@ -81,7 +97,7 @@ async function dispatch(eventType: string, reason: string): Promise<void> {
     },
     body: JSON.stringify({
       event_type: eventType,
-      client_payload: { reason },
+      client_payload: { reason, ...extra },
     }),
   });
 

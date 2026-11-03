@@ -1,0 +1,48 @@
+name: a-plan
+
+# 직접 촬영 콘텐츠 워커 — 내일 12 · 18시 칸마다 기획안 후보 2~3개를 만들고(plan-a-slots.ts),
+# 사람이 고르거나 상품을 직접 지정한 칸은 촬영 컷 리스트 · 화면 문구 · 캡션을 쓴다(write-a-shotlists.ts).
+# 고르는 즉시 화면이 a-shotlist로 이 워크플로를 깨운다(사람이 촬영을 기다리므로).
+on:
+  schedule:
+    # 05:00 KST(20:00 UTC) 내일 칸 기획안 후보. 사람은 09시쯤 고른다.
+    - cron: "0 20 * * *"
+  repository_dispatch:
+    types: [plan-a, a-shotlist]
+  workflow_dispatch: {}
+
+concurrency:
+  group: a-plan-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  plan-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Plan shoot ideas
+        if: ${{ github.event.action != 'a-shotlist' }}
+        run: npm run worker:plan-a -- --date "${{ github.event.client_payload.date }}"
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+      # 고른 칸의 컷 리스트 + 점검. 한국어 채점 스크립트(.claude/skills/ig-*-ko)가 파이썬이라 러너의 python3를 쓴다.
+      - name: Write shot lists for chosen slots
+        if: ${{ !cancelled() }}
+        run: npm run worker:a-shotlist
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}

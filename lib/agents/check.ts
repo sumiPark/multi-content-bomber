@@ -38,23 +38,40 @@ const groundingSchema = z.object({
     .describe("사람이 직접 써 본 것처럼 꾸민 1인칭 체험 · 지어낸 후기 · 가짜 고객 이야기. 없으면 빈 배열"),
 });
 
-export async function checkScript(script: ScriptOutput, facts: ProductFacts, rules: ContentRule[], handle: string): Promise<CheckResult> {
+// 직접 촬영 칸(A): 사람이 찍고 완성본을 보므로 컷에서 보여 주는 1인칭은 괜찮고, 길이는 컷 길이 합으로 잰다.
+export interface CheckOptions {
+  track?: "A" | "B";
+  // A: 컷 길이 합(초) — 말하는 속도 대신 이걸로 길이를 잰다
+  seconds?: number;
+}
+
+export async function checkScript(
+  script: ScriptOutput,
+  facts: ProductFacts,
+  rules: ContentRule[],
+  handle: string,
+  opts: CheckOptions = {},
+): Promise<CheckResult> {
+  const track = opts.track ?? "B";
   const issues: CheckIssue[] = [];
-  const spoken = script.beats.map((b) => b.spoken);
+  const spoken = script.beats.map((b) => b.spoken).filter(Boolean);
   const onScreen = script.beats.map((b) => b.on_screen).filter(Boolean);
 
-  // 1. 훅 — 고른 훅(첫 비트)을 다시 채점한다(작가 에이전트의 자기 채점을 믿지 않음)
-  const [hook] = scoreHooks([spoken[0] ?? ""]);
+  // 1. 훅 — 고른 훅을 다시 채점한다(작가 에이전트의 자기 채점을 믿지 않음).
+  //    B는 첫 비트, A는 고른 훅 문장(말하지 않는 계정은 첫 컷이 짧은 화면 문구뿐이라).
+  const hookText = track === "A" ? (script.hooks[script.chosen_hook]?.spoken ?? spoken[0]) : spoken[0];
+  const [hook] = scoreHooks([hookText ?? ""]);
   if (!hook || hook.score < MIN_HOOK_SCORE) {
     issues.push({ kind: "hook", detail: `훅 점수 ${hook?.score ?? 0}점 (기준 ${MIN_HOOK_SCORE}점) — 가장 약한 축: ${hook?.weakest ?? "?"}` });
   }
 
   // 2. 길이 · 비트
-  const timing = timeScript(spoken, 20);
-  if (timing.totalSeconds < LENGTH_RANGE[0] || timing.totalSeconds > LENGTH_RANGE[1]) {
-    issues.push({ kind: "length", detail: `길이 ${timing.totalSeconds.toFixed(1)}초 (기준 ${LENGTH_RANGE[0]}~${LENGTH_RANGE[1]}초)` });
+  const timing = timeScript(spoken.length >= 2 ? spoken : [...spoken, ""], 20);
+  const seconds = opts.seconds ?? timing.totalSeconds;
+  if (seconds < LENGTH_RANGE[0] || seconds > LENGTH_RANGE[1]) {
+    issues.push({ kind: "length", detail: `길이 ${seconds.toFixed(1)}초 (기준 ${LENGTH_RANGE[0]}~${LENGTH_RANGE[1]}초)` });
   }
-  const longBeats = timing.beats.filter((b) => b.dur > 4.5);
+  const longBeats = track === "B" ? timing.beats.filter((b) => b.dur > 4.5) : [];
   if (longBeats.length) issues.push({ kind: "length", detail: `4초 넘는 비트 ${longBeats.length}개: "${longBeats[0].text.slice(0, 30)}…"` });
 
   // 3. 광고 문구 규칙 — 내레이션 · 화면 문구 · 캡션 전부
@@ -93,7 +110,12 @@ export async function checkScript(script: ScriptOutput, facts: ProductFacts, rul
         content: `너는 쇼핑몰 릴스의 광고 심의 담당이다. 대본 · 화면 문구 · 캡션의 문장을 하나씩 상품 사실과 원문에 대조한다.
 - 사실 주장(숫자 · 성분 · 효과 · 산지 · 구성 · 가격)이 상품 사실이나 원문에 없으면 unsupported.
 - 말투 · 감탄 · 권유(예: "가볍게 써 보세요")는 사실 주장이 아니니 괜찮다.
-- 실제 사람이 써 본 것처럼 꾸민 1인칭 체험("써 봤는데", "제 피부가"), 지어낸 고객 후기는 fabricated. 이 영상은 AI가 만들고 사람이 써 본 적이 없다.
+${
+          track === "A"
+            ? `- 이 영상은 사람이 직접 찍는다. 그 장면에서 실제로 보여 주는 것에 대한 1인칭("덜어 보면 묽어요", "잘라 보니 속이 노래요")은 괜찮다.
+  촬영으로 확인할 수 없는 체험(장기간 사용 결과 · 효과 체감 · "먹고 나서 속이 편해졌어요")과 지어낸 고객 후기는 fabricated.`
+            : `- 실제 사람이 써 본 것처럼 꾸민 1인칭 체험("써 봤는데", "제 피부가"), 지어낸 고객 후기는 fabricated. 이 영상은 AI가 만들고 사람이 써 본 적이 없다.`
+        }
 - 애매하면 통과시키지 말고 적는다.`,
       },
       {
@@ -111,7 +133,7 @@ export async function checkScript(script: ScriptOutput, facts: ProductFacts, rul
   return {
     passed: issues.length === 0,
     issues,
-    scores: { hook: hook?.score ?? null, humanScore: human, seconds: timing.totalSeconds, caption: cap.verdict },
+    scores: { hook: hook?.score ?? null, humanScore: human, seconds, caption: cap.verdict },
     tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },
   };
 }

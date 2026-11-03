@@ -53,7 +53,8 @@ export interface ScriptContext {
   fixRequests?: string[];
 }
 
-function skills(ctx: ScriptContext): AgentSkill[] {
+// 촬영 컷 리스트(shotlist.ts)도 같은 스킬을 쓴다.
+export function writerSkills(ctx: Pick<ScriptContext, "facts" | "rules" | "accountName">): AgentSkill[] {
   return [
     {
       name: "get_product_facts",
@@ -157,7 +158,7 @@ export async function writeScript(ctx: ScriptContext, opts: { log: boolean }): P
     agent: "plan",
     system: systemPrompt(ctx),
     user: `${ctx.facts.name}로 ${ctx.slotTime} 릴스 대본 · 화면 문구 · 캡션을 써 줘.${fix}`,
-    skills: skills(ctx),
+    skills: writerSkills(ctx),
     outputSchema: scriptSchema,
     outputName: "reel_script",
     maxSteps: 14,

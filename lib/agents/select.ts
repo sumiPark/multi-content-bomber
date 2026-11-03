@@ -42,7 +42,8 @@ export type SelectOutput = z.infer<typeof pickSchema>;
 
 type AnalysisSummary = { oneLine?: string };
 
-async function candidateRows(ctx: SelectContext) {
+// 직접 촬영 기획(plan-a.ts)도 같은 후보 규칙을 쓴다.
+export async function candidateRows(ctx: Pick<SelectContext, "service" | "accountId" | "scopes" | "repeatGapDays" | "slotDate" | "alsoBlocked">) {
   const s = ctx.service;
   const since = addDays(ctx.slotDate, -ctx.repeatGapDays);
   const [{ data: usedHere }, { data: usedToday }] = await Promise.all([
@@ -109,11 +110,11 @@ async function candidateRows(ctx: SelectContext) {
     });
 }
 
-function skillsFor(ctx: SelectContext, cache: { ids: Set<string> }): AgentSkill[] {
+export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: { ids: Set<string> }): AgentSkill[] {
   const listCandidates: AgentSkill = {
     name: "list_candidates",
     description:
-      "이 계정이 B 트랙에 쓸 수 있는 상품 후보 (판매 중 · 분석 완료 · 최근 사용 안 함만). 판매량 · 후기 수 많은 순.",
+      "이 계정이 쓸 수 있는 상품 후보 (판매 중 · 분석 완료 · 최근 사용 안 함 · 같은 날 다른 계정 미사용만). 판매량 · 후기 수 많은 순.",
     input: z.object({
       kind: z.enum(["FRUIT", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]).nullable().describe("종류로 좁히기, 전체면 null"),
       limit: z.number().int().min(5).max(60).describe("최대 개수 (보통 30)"),
@@ -209,7 +210,7 @@ export async function selectProducts(
     agent: "select",
     system: systemPrompt(ctx),
     user: `${ctx.slotDate} B 칸 ${ctx.slotTimes.join(", ")}에 넣을 상품을 골라 줘.`,
-    skills: skillsFor(ctx, cache),
+    skills: selectSkills(ctx, cache),
     outputSchema: pickSchema,
     outputName: "product_picks",
     service: opts.log ? ctx.service : null,

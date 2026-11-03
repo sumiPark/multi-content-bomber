@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 
 // B 칸 하나 — 제안 상품 · 이유 · 대안. 컨펌 / 대안으로 바꿔 컨펌 / 건너뛰기.
 
-interface ProductBrief {
+export interface ProductBrief {
   id: string;
   name: string;
   price: number | null;
@@ -158,7 +158,7 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
   );
 }
 
-function ProductRow({ product, compact }: { product: ProductBrief; compact?: boolean }) {
+export function ProductRow({ product, compact }: { product: ProductBrief; compact?: boolean }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
       {product.image ? (
