@@ -32,6 +32,16 @@ const MAX_ATTEMPTS = 3;
 const PRODUCT_CONCURRENCY = 3;
 
 type Service = ReturnType<typeof createServiceClient>;
+
+// OpenAI 크레딧 · 한도 소진 — 상품 문제가 아니라 계정 문제라 그 상품의 실패로 세지 않고 run 전체를 멈춘다.
+// (2026-11-03 크레딧이 바닥난 채로 돌아 대기 상품이 줄줄이 "실패"로 쌓일 뻔했다.)
+class QuotaExhaustedError extends Error {}
+
+function isQuotaError(err: unknown): boolean {
+  const e = err as { status?: number; code?: string; error?: { code?: string; type?: string } };
+  const code = e?.code ?? e?.error?.code ?? e?.error?.type;
+  return e?.status === 429 && (code === "insufficient_quota" || code === "credit_balance_exhausted");
+}
 type ProductRow = Database["public"]["Tables"]["products"]["Row"];
 
 function arg(argv: string[], flag: string): string | undefined {
@@ -190,6 +200,14 @@ async function analyzeOne(service: Service, product: ProductRow, usage: TokenUsa
     return r.state;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (isQuotaError(err)) {
+      // 시도 횟수는 그대로 두고 대기로 되돌린다 — 크레딧을 채우면 다음 run이 그대로 이어 간다.
+      await service
+        .from("products")
+        .update({ analysis_state: "queued", analysis_error: null, analysis_locked_until: null })
+        .eq("id", product.id);
+      throw new QuotaExhaustedError(`OpenAI 크레딧 · 한도 소진 — 분석을 멈춤: ${message.slice(0, 200)}`);
+    }
     const attempts = product.analysis_attempts + 1;
     await service
       .from("products")
@@ -233,11 +251,25 @@ async function main() {
     const batch = (data ?? []) as ProductRow[];
     if (batch.length === 0) break;
 
-    for (let i = 0; i < batch.length; i += PRODUCT_CONCURRENCY) {
-      const results = await Promise.all(
-        batch.slice(i, i + PRODUCT_CONCURRENCY).map((p) => analyzeOne(service, p, usage)),
-      );
-      for (const r of results) tally[r] = (tally[r] ?? 0) + 1;
+    try {
+      for (let i = 0; i < batch.length; i += PRODUCT_CONCURRENCY) {
+        const results = await Promise.all(
+          batch.slice(i, i + PRODUCT_CONCURRENCY).map((p) => analyzeOne(service, p, usage)),
+        );
+        for (const r of results) tally[r] = (tally[r] ?? 0) + 1;
+      }
+    } catch (err) {
+      if (!(err instanceof QuotaExhaustedError)) throw err;
+      fatal = err.message;
+      console.error(`[analyze-products] ${err.message}`);
+      // 같은 묶음에서 아직 잡혀 있는 상품은 잠금을 풀어 대기로 돌린다.
+      await service
+        .from("products")
+        .update({ analysis_state: "queued", analysis_locked_until: null })
+        .in("id", batch.map((p) => p.id))
+        .eq("analysis_state", "analyzing");
+      process.exitCode = 1;
+      break;
     }
     done += batch.length;
   }
