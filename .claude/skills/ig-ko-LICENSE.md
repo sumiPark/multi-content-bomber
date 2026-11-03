@@ -1,8 +1,8 @@
-# 라이선스 고지 — ig-reel-ko · ig-human-ko · ig-caption-ko · ig-viral-ko
+# 라이선스 고지 — ig-reel-ko · ig-human-ko · ig-caption-ko · ig-viral-ko · ig-profile-ko · ig-audit-ko
 
-이 폴더의 `ig-reel-ko/`, `ig-human-ko/`, `ig-caption-ko/`, `ig-viral-ko/`는
-**instagram-agent-skill**(github.com/Jakeschincariol/instagram-agent-skill)의
-`ig-reel`, `ig-human`, `ig-caption`, `ig-viral` 스킬을 **한국어로 각색**한 것이다.
+이 폴더의 `ig-reel-ko/`, `ig-human-ko/`, `ig-caption-ko/`, `ig-viral-ko/`, `ig-profile-ko/`,
+`ig-audit-ko/`는 **instagram-agent-skill**(github.com/Jakeschincariol/instagram-agent-skill)의
+`ig-reel`, `ig-human`, `ig-caption`, `ig-viral`, `ig-profile`, `ig-audit` 스킬을 **한국어로 각색**한 것이다.
 원본은 MIT 라이선스로 배포된다.
 
 ## 무엇을 바꿨나 (한국어 각색)
@@ -17,6 +17,11 @@
 - `caption.py` → `caption_ko.py`: 한글 글자 폭 기반 "더 보기" 컷 추정, 한국어 요청·해시태그·
   검색어·광고 심의 검사.
 - `swipe.py` → `swipe_ko.py`: 한국어 공식·채점 사용, 한국어 열 이름·"1.2만" 같은 숫자 입력.
+- `ig-profile/rubric.json` → `rubric_ko.json`: 개인 브랜드 기준을 쇼핑몰·브랜드 계정 기준으로,
+  광고 표현 규칙 감점 추가. `profile_ko.py`(새로 씀): 규칙으로 판정되는 7개 항목은 기계 채점,
+  나머지 5개는 근거만 모은다.
+- `ig-audit`: `audit_ko.py`(새로 씀) — 배수 · 공유/도달 · 저장/도달 계산, 상위/하위 비교, 표본 수
+  표시, 편성 칸(시간대 + 방식 묶임) 주의.
 
 원본 파일(`~/.claude/skills/ig-*`)은 수정하지 않았다.
 
