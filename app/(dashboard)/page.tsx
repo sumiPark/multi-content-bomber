@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CaptionResult } from "@/components/ai/caption-result";
+import { CollectionHealthBar } from "@/components/dashboard/collection-health";
 import {
   type AccountSummary,
   type DashboardData,
@@ -16,6 +17,7 @@ import {
 } from "@/components/dashboard/dashboard-hub";
 import { captionsSchema } from "@/lib/ai/caption-generator";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { loadCollectionHealth, type HealthWarning } from "@/lib/collection-health";
 
 const THUMBNAIL_TTL_SECONDS = 3600;
 const UPCOMING_LIMIT = 5;
@@ -49,7 +51,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
 
   // ── 액션 허브 데이터 수집 ────────────────────────────────────────────────────
-  const data = await loadDashboardData(supabase);
+  const [data, healthWarnings] = await Promise.all([
+    loadDashboardData(supabase),
+    safeCollectionHealth(supabase),
+  ]);
 
   return (
     <main className="container mx-auto max-w-6xl space-y-8 px-6 py-10">
@@ -58,12 +63,26 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         failedCount={data.failedCount}
         topFailureSummary={data.topFailureSummary}
       />
+      <CollectionHealthBar warnings={healthWarnings} />
       <StatTiles data={data} />
       <UpcomingUploads items={data.upcoming} />
       <LinkedAccounts summaries={data.accounts} />
       <QuickActions />
     </main>
   );
+}
+
+// 수집 누락 경고(콘텐츠 자동화 2-6). 새 테이블을 읽다 실패해도 기존 대시보드는 그대로 보이게
+// 여기서 삼킨다 — 경고 줄만 빠진다.
+async function safeCollectionHealth(
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+): Promise<HealthWarning[]> {
+  try {
+    return await loadCollectionHealth(supabase, Date.now());
+  } catch (err) {
+    console.error("[dashboard] 수집 상태 확인 실패:", err);
+    return [];
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
