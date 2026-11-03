@@ -1,0 +1,146 @@
+import type OpenAI from "openai";
+import { zodFunction, zodResponseFormat } from "openai/helpers/zod";
+import type { z } from "zod";
+import { getOpenAI } from "@/lib/openai";
+import { callOptions } from "@/lib/products/analysis/analyze";
+import type { createServiceClient } from "@/lib/supabase/service";
+import type { Json } from "@/types/database";
+
+// 에이전트 실행기 — 지시문 + 스킬(함수 호출) + 구조화된 최종 답.
+// 에이전트는 스킬을 몇 번 불러 근거를 모은 뒤 정해진 형식(outputSchema)으로 답한다.
+// 실행마다 agent_runs(0028)에 어떤 스킬을 어떤 입력으로 불렀는지 · 토큰 · 결과를 남긴다.
+// 스킬은 코드라 피드백으로 바뀌지 않고, 바뀌는 건 지시문(플레이북)뿐이다(5단계).
+
+export type AgentName = "select" | "plan" | "edit" | "check" | "upload" | "analyze";
+type Service = ReturnType<typeof createServiceClient>;
+
+export interface AgentSkill<S extends z.ZodObject = z.ZodObject> {
+  name: string;
+  description: string;
+  input: S;
+  run: (args: z.infer<S>) => Promise<unknown>;
+}
+
+export interface SkillCall {
+  skill: string;
+  args: unknown;
+  ok: boolean;
+  ms: number;
+  error?: string;
+}
+
+export interface AgentResult<T> {
+  output: T;
+  skillCalls: SkillCall[];
+  tokens: { input: number; output: number };
+  model: string;
+  runId: string | null;
+}
+
+export function agentModel(): string {
+  return process.env.AGENT_MODEL || "gpt-6.1-terra";
+}
+
+const MAX_RESULT_CHARS = 12_000;
+
+export async function runAgent<T>(opts: {
+  agent: AgentName;
+  system: string;
+  user: string;
+  skills: AgentSkill[];
+  outputSchema: z.ZodType<T>;
+  outputName: string;
+  maxSteps?: number;
+  // null이면 기록하지 않음(--dry-run)
+  service: Service | null;
+  planId?: string | null;
+  input?: Record<string, unknown>;
+}): Promise<AgentResult<T>> {
+  const model = agentModel();
+  const maxSteps = opts.maxSteps ?? 8;
+  const skillCalls: SkillCall[] = [];
+  const tokens = { input: 0, output: 0 };
+
+  let runId: string | null = null;
+  if (opts.service) {
+    const { data } = await opts.service
+      .from("agent_runs")
+      .insert({ agent: opts.agent, plan_id: opts.planId ?? null, model, input: (opts.input ?? {}) as Json })
+      .select("id")
+      .single();
+    runId = data?.id ?? null;
+  }
+
+  const finish = async (patch: { status: "success" | "failed"; output?: unknown; error?: string }) => {
+    if (!opts.service || !runId) return;
+    await opts.service
+      .from("agent_runs")
+      .update({
+        status: patch.status,
+        output: (patch.output ?? null) as Json,
+        error: patch.error ?? null,
+        skill_calls: skillCalls as unknown as Json,
+        tokens_input: tokens.input,
+        tokens_output: tokens.output,
+        finished_at: new Date().toISOString(),
+      })
+      .eq("id", runId);
+  };
+
+  const tools = opts.skills.map((s) =>
+    zodFunction({ name: s.name, description: s.description, parameters: s.input }),
+  );
+  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: "system", content: opts.system },
+    { role: "user", content: opts.user },
+  ];
+
+  try {
+    for (let step = 0; step < maxSteps; step++) {
+      const completion = await getOpenAI().chat.completions.parse({
+        model,
+        ...callOptions(model, 6000),
+        messages,
+        tools,
+        response_format: zodResponseFormat(opts.outputSchema as z.ZodType, opts.outputName),
+      });
+      tokens.input += completion.usage?.prompt_tokens ?? 0;
+      tokens.output += completion.usage?.completion_tokens ?? 0;
+      const msg = completion.choices[0]?.message;
+      if (!msg) throw new Error("에이전트 응답이 비어 있음");
+
+      const calls = msg.tool_calls ?? [];
+      if (calls.length === 0) {
+        if (!msg.parsed) throw new Error("에이전트가 정해진 형식으로 답하지 않음");
+        const output = msg.parsed as T;
+        await finish({ status: "success", output });
+        return { output, skillCalls, tokens, model, runId };
+      }
+
+      messages.push(msg as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+      for (const call of calls) {
+        if (call.type !== "function") continue;
+        const skill = opts.skills.find((s) => s.name === call.function.name);
+        const started = Date.now();
+        let content: string;
+        try {
+          if (!skill) throw new Error(`없는 스킬: ${call.function.name}`);
+          const args = skill.input.parse(JSON.parse(call.function.arguments || "{}"));
+          const result = await skill.run(args);
+          content = JSON.stringify(result).slice(0, MAX_RESULT_CHARS);
+          skillCalls.push({ skill: call.function.name, args, ok: true, ms: Date.now() - started });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          content = JSON.stringify({ error });
+          skillCalls.push({ skill: call.function.name, args: call.function.arguments, ok: false, ms: Date.now() - started, error });
+        }
+        messages.push({ role: "tool", tool_call_id: call.id, content });
+      }
+    }
+    throw new Error(`스킬 호출이 ${maxSteps}번을 넘음 — 답을 정하지 못함`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    await finish({ status: "failed", error });
+    throw err;
+  }
+}

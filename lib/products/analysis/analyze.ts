@@ -21,11 +21,11 @@ export function analysisModel(): string {
 
 // GPT-5 이후(추론) 모델은 temperature를 받지 않고, max_completion_tokens에 추론 토큰이 포함된다.
 // 받아 적기 · 요약은 깊은 추론이 필요 없어 effort를 낮게 두고, 상한은 넉넉히.
-function isReasoningModel(model: string): boolean {
+export function isReasoningModel(model: string): boolean {
   return /^(gpt-5|gpt-6|o\d)/.test(model);
 }
 
-function callOptions(model: string, maxTokens: number) {
+export function callOptions(model: string, maxTokens: number) {
   return isReasoningModel(model)
     ? { reasoning_effort: "low" as const, max_completion_tokens: maxTokens * 3 }
     : { temperature: 0, max_completion_tokens: maxTokens };

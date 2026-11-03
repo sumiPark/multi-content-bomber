@@ -115,6 +115,65 @@ export type Database = {
           },
         ]
       }
+      agent_runs: {
+        Row: {
+          agent: string
+          error: string | null
+          finished_at: string | null
+          id: string
+          input: Json
+          model: string | null
+          output: Json | null
+          plan_id: string | null
+          playbook_version: number | null
+          skill_calls: Json
+          started_at: string
+          status: string
+          tokens_input: number | null
+          tokens_output: number | null
+        }
+        Insert: {
+          agent: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          input?: Json
+          model?: string | null
+          output?: Json | null
+          plan_id?: string | null
+          playbook_version?: number | null
+          skill_calls?: Json
+          started_at?: string
+          status?: string
+          tokens_input?: number | null
+          tokens_output?: number | null
+        }
+        Update: {
+          agent?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          input?: Json
+          model?: string | null
+          output?: Json | null
+          plan_id?: string | null
+          playbook_version?: number | null
+          skill_calls?: Json
+          started_at?: string
+          status?: string
+          tokens_input?: number | null
+          tokens_output?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_runs_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "content_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       caption_presets: {
         Row: {
           created_at: string
@@ -159,6 +218,111 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      content_plans: {
+        Row: {
+          check_result: Json | null
+          confirmed_at: string | null
+          confirmed_by: string | null
+          content_id: string | null
+          created_at: string
+          error: string | null
+          id: string
+          note: string | null
+          organization_id: string
+          product_changed: boolean
+          product_id: string | null
+          proposal: Json
+          publish_job_id: string | null
+          script: Json | null
+          slot_date: string
+          slot_time: string
+          social_account_id: string
+          status: string
+          track: string
+          updated_at: string
+        }
+        Insert: {
+          check_result?: Json | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          content_id?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          note?: string | null
+          organization_id: string
+          product_changed?: boolean
+          product_id?: string | null
+          proposal?: Json
+          publish_job_id?: string | null
+          script?: Json | null
+          slot_date: string
+          slot_time: string
+          social_account_id: string
+          status?: string
+          track: string
+          updated_at?: string
+        }
+        Update: {
+          check_result?: Json | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          content_id?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          note?: string | null
+          organization_id?: string
+          product_changed?: boolean
+          product_id?: string | null
+          proposal?: Json
+          publish_job_id?: string | null
+          script?: Json | null
+          slot_date?: string
+          slot_time?: string
+          social_account_id?: string
+          status?: string
+          track?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_plans_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_plans_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_plans_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_plans_publish_job_id_fkey"
+            columns: ["publish_job_id"]
+            isOneToOne: false
+            referencedRelation: "publish_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_plans_content_id_fkey"
+            columns: ["content_id"]
+            isOneToOne: false
+            referencedRelation: "contents"
             referencedColumns: ["id"]
           },
         ]
@@ -1160,6 +1324,51 @@ export type Database = {
 
         ]
       }
+      slot_rules: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          organization_id: string
+          slot_time: string
+          social_account_id: string
+          track: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          organization_id: string
+          slot_time: string
+          social_account_id: string
+          track: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          organization_id?: string
+          slot_time?: string
+          social_account_id?: string
+          track?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "slot_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "slot_rules_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       social_accounts: {
         Row: {
           access_token_encrypted: string | null
@@ -1310,6 +1519,51 @@ export type Database = {
             foreignKeyName: "social_posts_social_account_id_fkey"
             columns: ["social_account_id"]
             isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      track_settings: {
+        Row: {
+          b_confirm_deadline: string
+          b_full_auto: boolean
+          organization_id: string
+          product_scopes: Json
+          repeat_gap_days: number
+          social_account_id: string
+          updated_at: string
+        }
+        Insert: {
+          b_confirm_deadline?: string
+          b_full_auto?: boolean
+          organization_id: string
+          product_scopes?: Json
+          repeat_gap_days?: number
+          social_account_id: string
+          updated_at?: string
+        }
+        Update: {
+          b_confirm_deadline?: string
+          b_full_auto?: boolean
+          organization_id?: string
+          product_scopes?: Json
+          repeat_gap_days?: number
+          social_account_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "track_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "track_settings_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: true
             referencedRelation: "social_accounts"
             referencedColumns: ["id"]
           },
