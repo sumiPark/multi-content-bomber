@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarRange, CheckCircle2, OctagonAlert } from "lucide-react";
+import { CalendarRange, CheckCircle2, OctagonAlert, TriangleAlert } from "lucide-react";
 import { TrackBadge } from "@/components/schedule/slot-rule-cell";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +50,34 @@ export function BlockedAlert({ items }: { items: DayBoard["blocked"] }) {
         ))}
       </ul>
       {items.length > 4 && <p className="mt-1.5 text-xs text-risk">외 {items.length - 4}개 — 편성표에서 모두 볼 수 있어요</p>}
+    </div>
+  );
+}
+
+// 곧 비는 칸(5-4) — 마감까지 준비가 안 될 것 같은 오늘 · 내일 칸
+export function AtRiskAlert({ items }: { items: DayBoard["atRisk"] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-warn/40 bg-warn-soft px-4 py-3">
+      <p className="flex items-center gap-2 text-sm font-semibold text-warn">
+        <TriangleAlert className="size-4 shrink-0" /> 곧 비는 칸 — 마감 전에 준비가 안 될 것 같아요
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {items.slice(0, 5).map((b) => (
+          <li key={b.key} className="flex items-center justify-between gap-3 text-[13px]">
+            <span className="min-w-0">
+              <b>{b.label}</b>
+              {b.reason && <span className="ml-1.5 text-ink-2">{b.reason}</span>}
+            </span>
+            {b.href && (
+              <Link href={b.href} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "shrink-0")}>
+                보기
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+      {items.length > 5 && <p className="mt-1.5 text-xs text-warn">외 {items.length - 5}개 — 편성표에서 모두 볼 수 있어요</p>}
     </div>
   );
 }

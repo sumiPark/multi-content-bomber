@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CaptionResult } from "@/components/ai/caption-result";
 import { CollectionHealthBar } from "@/components/dashboard/collection-health";
-import { BlockedAlert, DayBoardTable, TaskTiles, YesterdayStrip } from "@/components/dashboard/today-board";
+import { AtRiskAlert, BlockedAlert, DayBoardTable, TaskTiles, YesterdayStrip } from "@/components/dashboard/today-board";
 import {
   type AccountSummary,
   type DashboardData,
@@ -75,6 +75,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       {board && board.total > 0 && (
         <>
           <BlockedAlert items={board.blocked} />
+          <AtRiskAlert items={board.atRisk} />
           <TaskTiles board={board} />
           <DayBoardTable board={board} today={today} tomorrow={tomorrow} />
           <YesterdayStrip lines={yesterday} />

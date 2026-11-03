@@ -272,3 +272,16 @@ export async function fetchProduct(shop: ShopCode, id: number): Promise<ShopProd
     },
   };
 }
+
+/**
+ * 가격 · 판매 상태만 — 발행 직전 다시 확인(5-4)용. 상세 이미지 개수 검사 같은 수집용 검사는 하지 않는다
+ * (발행을 막을 이유가 아니므로).
+ */
+export async function fetchProductStatus(
+  shop: ShopCode,
+  id: number,
+): Promise<{ name: string; price: number | null; stockStatus: StockStatus }> {
+  const d = detailSchema.parse(await getJson(`${SHOPS[shop].apiBase}/v1/products/${id}`));
+  if (d.id !== id) throw new ShopApiError(`${shop} 상품 ${id}: 응답 id 불일치(${d.id})`, null);
+  return { name: d.name.trim(), price: d.productPrice?.price ?? null, stockStatus: stockStatusOf(d, Date.now()) };
+}

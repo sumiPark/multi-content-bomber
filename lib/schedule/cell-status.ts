@@ -59,6 +59,8 @@ export function cellStatus(
     }
   }
   if (plan.status === "SKIPPED") return { label: "건너뜀", tone: "idle", href: null };
+  // 예약까지 갔다가 발행 직전 확인(판매 상태 · 가격)에 걸린 칸 — 배포 관리에서 다시 시도한다
+  if (plan.status === "BLOCKED" && plan.jobStatus) return { label: "발행 전 멈춤", tone: "risk", href: "/postings?status=failed" };
   if (plan.status === "FAILED") return { label: "오류", tone: "risk", href: plan.track === "B" ? confirm : "/shoot/review" };
 
   if (plan.track === "B") {

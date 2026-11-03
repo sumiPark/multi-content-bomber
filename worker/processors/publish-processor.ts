@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import { recordPublishedEpisode } from "@/lib/episode-alerts/server";
+import { prepublishCheck } from "@/lib/products/prepublish-check";
 import {
   getAdapter,
   MediaError,
@@ -143,13 +144,19 @@ export async function processClaimedPublishJob(
   };
 
   try {
+    // 2.5 편성 칸(content_plans)에서 예약된 발행이면 올리기 직전 판매 상태 · 가격을 다시 확인한다(5-4).
+    //     판매 중이 아니거나 캡션 가격이 다르면 재시도 없이 FAILED — 칸은 BLOCKED(멈춤)로 대시보드에 뜬다.
+    //     사람이 콘텐츠 생성에서 만든 발행은 확인 없이 예전 그대로.
+    const gate = await prepublishCheck(supabase, row);
+    if (!gate.ok) throw new PublishError(gate.reason, { permanent: true });
+
     // 3. social_accounts + contents 조회 → 어댑터로 게시
     const result = await runPublish(supabase, row, deadlineAt, persistResumeState);
 
     // 4. SUCCESS 마킹
     const successHistory: StatusHistoryEntry[] = [
       ...processingHistory,
-      { status: "SUCCESS", timestamp: nowIso() },
+      { status: "SUCCESS", timestamp: nowIso(), ...(gate.note ? { message: gate.note } : {}) },
     ];
 
     const { error: successError } = await supabase

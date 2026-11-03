@@ -1,5 +1,5 @@
-import { isPastDeadline, isPastSlot } from "@/lib/automation/deadline";
-import { addDays, kstDate } from "@/lib/automation/time";
+import { confirmDeadlineIso, isPastDeadline, isPastSlot } from "@/lib/automation/deadline";
+import { addDays, kstDate, kstToIso } from "@/lib/automation/time";
 import { cellStatus, type CellStatus, type CellTask } from "@/lib/schedule/cell-status";
 import type { getServerSupabase } from "@/lib/auth";
 
@@ -35,9 +35,23 @@ export interface DayBoard {
   empty: number; // 기획 없이 빈 칸(오늘만)
   tasks: Record<CellTask, { count: number; href: string }>;
   blocked: BlockedItem[];
+  // 곧 비는 칸(5-4) — 마감까지 준비가 안 될 것 같은 오늘 · 내일 칸
+  atRisk: BlockedItem[];
 }
 
 const TASK_DAYS = 7;
+const HOUR = 3_600_000;
+// 곧 비는 칸 기준 — 이 시간 안에 마감 · 올릴 시각이 오는데 아직 사람 할 일이 남은 칸
+const RISK_CONFIRM_MS = 12 * HOUR; // 상품 확인 마감(올리는 날 07시)
+const RISK_SHOOT_MS = 8 * HOUR; // 직접 촬영 칸: 기획 고르기 · 촬영 전
+const RISK_REVIEW_MS = 2 * HOUR; // 완성본 확인 전 · 편집 중
+// 내일 칸 기획이 만들어지는 시각(KST, 기획 워커 05시 · 09시 + 여유) — 이 뒤에도 비어 있으면 경고
+const NEXT_DAY_PLANNED_BY = "10:00";
+
+function hoursLeft(ms: number): string {
+  const h = Math.floor(ms / HOUR);
+  return h >= 1 ? `${h}시간` : `${Math.max(1, Math.round(ms / 60_000))}분`;
+}
 
 function dayName(date: string, today: string): string {
   if (date === today) return "오늘";
@@ -110,6 +124,52 @@ export async function loadDayBoard(supabase: Supabase, date: string, now = Date.
   if (firstDate.confirm) tasks.confirm.href = `/auto/confirm?date=${firstDate.confirm}`;
   if (firstDate.plans) tasks.plans.href = `/shoot/plans?date=${firstDate.plans}`;
 
+  // ── 곧 비는 칸: 오늘 · 내일, 올릴 시각이 안 지난 칸
+  const tomorrow = addDays(today, 1);
+  const atRisk: BlockedItem[] = [];
+  const planBySlot = new Map((plans ?? []).map((p) => [`${p.social_account_id}|${p.slot_date}|${p.slot_time}`, p]));
+  const emptyCount: Record<string, number> = {};
+  for (const date of [today, tomorrow]) {
+    for (const r of rules ?? []) {
+      if (!r.social_accounts || r.social_accounts.disconnected_at) continue;
+      if (isPastSlot(date, r.slot_time, 0, now)) continue;
+      const p = planBySlot.get(`${r.social_account_id}|${date}|${r.slot_time}`);
+      const name = `@${r.social_accounts.display_name ?? ""} ${dayName(date, today)} ${r.slot_time}`;
+      if (!p) {
+        if (date === today || now >= Date.parse(kstToIso(today, NEXT_DAY_PLANNED_BY))) emptyCount[date] = (emptyCount[date] ?? 0) + 1;
+        continue;
+      }
+      const st = statusOf(p);
+      const toSlot = Date.parse(kstToIso(date, r.slot_time)) - now;
+      if (st.task === "confirm") {
+        const toDeadline = Date.parse(confirmDeadlineIso(date, deadlineOf.get(r.social_account_id) ?? "07:00")) - now;
+        if (toDeadline > 0 && toDeadline <= RISK_CONFIRM_MS)
+          atRisk.push({ key: p.id, label: `${name} — 상품 확인 전`, reason: `확인 마감까지 ${hoursLeft(toDeadline)}, 안 하면 이 칸은 건너뛰어요`, href: st.href });
+      } else if ((st.task === "plans" || st.task === "shoot") && toSlot <= RISK_SHOOT_MS) {
+        atRisk.push({
+          key: p.id,
+          label: `${name} — ${st.task === "plans" ? "기획 고르기 전" : "촬영 전"}`,
+          reason: `올릴 시각까지 ${hoursLeft(toSlot)}, 완성본 확인까지 못 가면 건너뛰어요`,
+          href: st.href,
+        });
+      } else if ((st.task === "review" || (st.tone === "wait" && p.track === "A")) && toSlot <= RISK_REVIEW_MS) {
+        atRisk.push({
+          key: p.id,
+          label: `${name} — ${st.label}`,
+          reason: `올릴 시각까지 ${hoursLeft(toSlot)}, ${st.task === "review" ? "확인하지 않으면" : "편집이 늦어지면"} 건너뛰어요`,
+          href: st.href,
+        });
+      }
+    }
+  }
+  for (const [date, n] of Object.entries(emptyCount).sort())
+    atRisk.unshift({
+      key: `empty-${date}`,
+      label: `${dayName(date, today)} 기획 없는 칸 ${n}개`,
+      reason: "이대로면 그 시각에 아무것도 안 올라가요",
+      href: date === today ? "/schedule" : `/schedule?week=${date}`,
+    });
+
   // ── 고른 날의 칸 판
   const planOf = new Map((plans ?? []).filter((p) => p.slot_date === date).map((p) => [`${p.social_account_id}|${p.slot_time}`, p]));
   const rows: BoardRow[] = [];
@@ -141,6 +201,7 @@ export async function loadDayBoard(supabase: Supabase, date: string, now = Date.
     empty: rows.filter((r) => r.status.label === "빈 칸").length,
     tasks,
     blocked,
+    atRisk,
   };
 }
 
