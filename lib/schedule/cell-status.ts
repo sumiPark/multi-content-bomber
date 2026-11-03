@@ -7,10 +7,13 @@ import { kstDate } from "@/lib/automation/time";
 //   risk  멈춤 · 실패 · 오늘 빈 칸       idle  기획 전 · 건너뜀 · 꺼짐 · 지난 날 기록 없음
 
 export type CellTone = "todo" | "wait" | "ok" | "risk" | "idle";
+// 사람 할 일 종류 — 대시보드 할 일 칸이 센다
+export type CellTask = "confirm" | "plans" | "shoot" | "review";
 export interface CellStatus {
   label: string;
   tone: CellTone;
   href: string | null;
+  task?: CellTask;
 }
 
 export interface CellPlan {
@@ -61,7 +64,7 @@ export function cellStatus(
   if (plan.track === "B") {
     switch (plan.status) {
       case "PROPOSED":
-        return { label: "상품 확인", tone: "todo", href: confirm };
+        return { label: "상품 확인", tone: "todo", href: confirm, task: "confirm" };
       case "CONFIRMED":
         return { label: "대본 쓰는 중", tone: "wait", href: confirm };
       case "SCRIPTED":
@@ -74,17 +77,17 @@ export function cellStatus(
   } else {
     switch (plan.status) {
       case "PROPOSED":
-        return { label: "기획 고르기", tone: "todo", href: "/shoot/plans" };
+        return { label: "기획 고르기", tone: "todo", href: "/shoot/plans", task: "plans" };
       case "CONFIRMED":
         return { label: "컷 리스트 쓰는 중", tone: "wait", href: "/shoot/plans" };
       case "SCRIPTED":
-        return { label: "촬영", tone: "todo", href: "/shoot/uploads" };
+        return { label: "촬영", tone: "todo", href: "/shoot/uploads", task: "shoot" };
       case "SHOT":
         return plan.requestStatus === "FAILED"
           ? { label: "편집 실패", tone: "risk", href: "/shoot/review" }
           : { label: "편집 중", tone: "wait", href: "/shoot/review" };
       case "RENDERED":
-        return { label: "완성본 확인", tone: "todo", href: "/shoot/review" };
+        return { label: "완성본 확인", tone: "todo", href: "/shoot/review", task: "review" };
       case "BLOCKED":
         return { label: "멈춤", tone: "risk", href: "/shoot/plans" };
     }

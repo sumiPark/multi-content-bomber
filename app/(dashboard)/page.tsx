@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CaptionResult } from "@/components/ai/caption-result";
 import { CollectionHealthBar } from "@/components/dashboard/collection-health";
+import { BlockedAlert, DayBoardTable, TaskTiles, YesterdayStrip } from "@/components/dashboard/today-board";
 import {
   type AccountSummary,
   type DashboardData,
@@ -17,7 +18,9 @@ import {
 } from "@/components/dashboard/dashboard-hub";
 import { captionsSchema } from "@/lib/ai/caption-generator";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { addDays, kstDate } from "@/lib/automation/time";
 import { loadCollectionHealth, type HealthWarning } from "@/lib/collection-health";
+import { loadDayBoard, loadYesterday, type DayBoard, type YesterdayLine } from "@/lib/schedule/day-board";
 
 const THUMBNAIL_TTL_SECONDS = 3600;
 const UPCOMING_LIMIT = 5;
@@ -27,11 +30,11 @@ const STATS_WINDOW_DAYS = 14; // ② 통계용 슬림 윈도우 — 이번 주/�
 type Captions = ReturnType<typeof captionsSchema.parse>;
 
 interface DashboardPageProps {
-  searchParams: Promise<{ content?: string }>;
+  searchParams: Promise<{ content?: string; day?: string }>;
 }
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
-  const { content: targetContentId } = await searchParams;
+  const { content: targetContentId, day } = await searchParams;
 
   const user = await getSessionUser();
   // 비로그인 사용자에겐 redirect 대신 server-rendered landing을 반환. 이유:
@@ -51,9 +54,13 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   }
 
   // ── 액션 허브 데이터 수집 ────────────────────────────────────────────────────
-  const [data, healthWarnings] = await Promise.all([
+  const today = kstDate(0);
+  const tomorrow = addDays(today, 1);
+  const [data, healthWarnings, board, yesterday] = await Promise.all([
     loadDashboardData(supabase),
     safeCollectionHealth(supabase),
+    safeDayBoard(supabase, day === "tomorrow" ? tomorrow : today),
+    safeYesterday(supabase),
   ]);
 
   return (
@@ -64,6 +71,15 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         topFailureSummary={data.topFailureSummary}
       />
       <CollectionHealthBar warnings={healthWarnings} />
+      {/* 오늘 할 일(5-2) — 편성 칸이 있을 때만. 읽다 실패하면 이 묶음만 빠진다 */}
+      {board && board.total > 0 && (
+        <>
+          <BlockedAlert items={board.blocked} />
+          <TaskTiles board={board} />
+          <DayBoardTable board={board} today={today} tomorrow={tomorrow} />
+          <YesterdayStrip lines={yesterday} />
+        </>
+      )}
       <StatTiles data={data} />
       <UpcomingUploads items={data.upcoming} />
       <LinkedAccounts summaries={data.accounts} />
@@ -81,6 +97,30 @@ async function safeCollectionHealth(
     return await loadCollectionHealth(supabase, Date.now());
   } catch (err) {
     console.error("[dashboard] 수집 상태 확인 실패:", err);
+    return [];
+  }
+}
+
+// 오늘 할 일(콘텐츠 자동화 5-2). 수집 경고와 같은 이유로 실패를 삼킨다 — 기존 대시보드는 그대로.
+async function safeDayBoard(
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+  date: string,
+): Promise<DayBoard | null> {
+  try {
+    return await loadDayBoard(supabase, date);
+  } catch (err) {
+    console.error("[dashboard] 오늘 할 일 불러오기 실패:", err);
+    return null;
+  }
+}
+
+async function safeYesterday(
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
+): Promise<YesterdayLine[]> {
+  try {
+    return await loadYesterday(supabase);
+  } catch (err) {
+    console.error("[dashboard] 어제 성과 불러오기 실패:", err);
     return [];
   }
 }
