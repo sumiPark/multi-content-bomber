@@ -3,6 +3,11 @@ import { redirect } from "next/navigation";
 import { Package, SlidersHorizontal } from "lucide-react";
 import { collectProductsNowAction } from "@/app/(dashboard)/products/actions";
 import { CollectNowButton } from "@/components/analytics/collect-now-button";
+import {
+  CollectionStatus,
+  type FailedProduct,
+  type WorkerRunRow,
+} from "@/components/products/collection-status";
 import { ANALYSIS_BADGE, ANALYSIS_LABEL, STOCK_LABEL, won } from "@/components/products/labels";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -16,6 +21,43 @@ import { cn } from "@/lib/utils";
 // 수집 · 분석은 products.yml 워커가 매일 03시에 한다. 여기서는 확인 · 승인 · 다시 분석 · 제외.
 
 const PAGE_SIZE = 50;
+
+type Supabase = Awaited<ReturnType<typeof getServerSupabase>>;
+
+/** 수집 · 분석 워커의 마지막 실행 기록(0027)과 실패한 상품. */
+async function loadRunStatus(supabase: Supabase) {
+  const latest = (worker: string) =>
+    supabase
+      .from("worker_runs")
+      .select("status, started_at, finished_at, summary, error, github_run_url")
+      .eq("worker", worker)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+  const [{ data: collectRun }, { data: analyzeRun }, { data: failedRows }] = await Promise.all([
+    latest("collect-products"),
+    latest("analyze-products"),
+    supabase
+      .from("products")
+      .select("id, name, analysis_error")
+      .eq("analysis_state", "failed")
+      .eq("excluded", false)
+      .order("updated_at", { ascending: false })
+      .limit(5),
+  ]);
+  const failed: FailedProduct[] = (failedRows ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    error: r.analysis_error ?? "",
+  }));
+  return {
+    collectRun: (collectRun ?? null) as WorkerRunRow | null,
+    analyzeRun: (analyzeRun ?? null) as WorkerRunRow | null,
+    failed,
+    // "실행 중"이 너무 오래됐는지(러너가 죽음) 판단할 기준 시각
+    now: Date.now(),
+  };
+}
 
 interface Search {
   shop?: string;
@@ -48,6 +90,16 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
     if (!data || data.length < 1000) break;
   }
   const count = (f: (r: (typeof stats)[number]) => boolean) => stats.filter(f).length;
+  const runStatus = await loadRunStatus(supabase);
+  // 분석 대상 = 판매 중 + 분석하는 종류
+  const target = stats.filter((r) => r.stock_status === "available" && r.analysis_state !== "skipped");
+  const progress = {
+    total: target.length,
+    done: target.filter((r) => ["ready", "review", "insufficient"].includes(r.analysis_state)).length,
+    queued: target.filter((r) => r.analysis_state === "queued").length,
+    analyzing: target.filter((r) => r.analysis_state === "analyzing").length,
+    failed: target.filter((r) => r.analysis_state === "failed").length,
+  };
 
   // 목록
   // 기본 보기는 판매 중 — 분석 대상이 판매 중 상품뿐이라.
@@ -104,6 +156,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           )}
         </div>
       </header>
+
+      <CollectionStatus {...runStatus} progress={progress} />
 
       {stats.length === 0 ? (
         <Card className="border-dashed">

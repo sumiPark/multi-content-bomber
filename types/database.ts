@@ -1315,6 +1315,44 @@ export type Database = {
           },
         ]
       }
+      worker_runs: {
+        Row: {
+          error: string | null
+          finished_at: string | null
+          github_run_url: string | null
+          id: string
+          started_at: string
+          status: string
+          summary: Json
+          trigger: string | null
+          worker: string
+        }
+        Insert: {
+          error?: string | null
+          finished_at?: string | null
+          github_run_url?: string | null
+          id?: string
+          started_at?: string
+          status?: string
+          summary?: Json
+          trigger?: string | null
+          worker: string
+        }
+        Update: {
+          error?: string | null
+          finished_at?: string | null
+          github_run_url?: string | null
+          id?: string
+          started_at?: string
+          status?: string
+          summary?: Json
+          trigger?: string | null
+          worker?: string
+        }
+        Relationships: [
+
+        ]
+      }
     }
     Views: {
       episode_alert_task_stats: {

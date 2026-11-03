@@ -7,6 +7,7 @@ import { fetchProduct } from "@/lib/products/shop-api";
 import { SHOP_CODES, type ProductKind, type ShopCode } from "@/lib/products/shops";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Database, Json } from "@/types/database";
+import { startRunLog } from "./run-log";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 상세페이지 분석 워커 — 수집기가 분석 대기(queued)로 둔 판매 중 상품의 상세 이미지를 읽어
@@ -209,7 +210,9 @@ async function main() {
 
   const service = createServiceClient();
   const startedAt = Date.now();
+  const log = await startRunLog(service, "analyze-products");
   const limit = Number(arg(argv, "--limit") ?? Infinity);
+  let fatal: string | null = null;
   const usage = emptyUsage();
   const tally: Record<string, number> = {};
   let done = 0;
@@ -221,6 +224,7 @@ async function main() {
     });
     if (error) {
       console.error("[analyze-products] claim RPC 실패:", error.message);
+      fatal = `claim RPC 실패: ${error.message}`;
       process.exitCode = 1;
       break;
     }
@@ -239,6 +243,14 @@ async function main() {
   printUsage(usage);
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`[analyze-products] 완료 ${done}개 ${JSON.stringify(tally)} | ${elapsed}s`);
+  await log.finish(fatal ? "failed" : "success", {
+    done,
+    tally,
+    model: analysisModel(),
+    tokens: { input: usage.input, output: usage.output, calls: usage.calls },
+    // 시간 예산에 걸려 남은 대기분은 다음 run(다음 날 03시 또는 지금 수집)이 이어 간다.
+    stoppedByDeadline: Date.now() - startedAt >= RUN_DEADLINE_MS,
+  }, fatal);
 }
 
 main()

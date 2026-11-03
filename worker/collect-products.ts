@@ -16,6 +16,7 @@ import {
 } from "@/lib/products/shops";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
+import { startRunLog } from "./run-log";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 상품 수집 워커 — 세 몰(오늘과일 · 쿠마마켓 · 리유) 상품을 공개 API로 받아 products에 쌓는다.
@@ -308,11 +309,22 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const service = args.dryRun ? null : createServiceClient();
   const startedAt = Date.now();
+  const log = service ? await startRunLog(service, "collect-products") : null;
+  const summaries: Record<string, unknown>[] = [];
 
   let failed = 0;
   for (const shop of args.shops) {
     try {
       const s = await collectShop(service, shop, args);
+      summaries.push({
+        shop,
+        listed: s.listed,
+        saved: s.saved,
+        queued: s.queued,
+        markedUnavailable: s.markedUnavailable,
+        errors: s.errors.slice(0, 10),
+        errorCount: s.errors.length,
+      });
       console.log(
         `[collect-products] ${shop}: 카테고리 ${s.categories} | 수집 카테고리 ${s.collectRoots.join(", ") || "없음"}\n` +
           `  목록 ${s.listed}개 → 저장 ${s.saved}개 (분석 대기 ${s.queued}, 꺼진 하위 카테고리 ${s.skippedByCategory}, 사라짐 처리 ${s.markedUnavailable})\n` +
@@ -322,11 +334,14 @@ async function main() {
       if (s.errors.length > 0 && s.saved === 0) failed++;
     } catch (err) {
       failed++;
-      console.error(`[collect-products] ${shop} 실패:`, err instanceof Error ? err.message : err);
+      const message = err instanceof Error ? err.message : String(err);
+      summaries.push({ shop, failed: true, errors: [message], errorCount: 1 });
+      console.error(`[collect-products] ${shop} 실패:`, message);
     }
   }
 
   if (failed === args.shops.length) process.exitCode = 1;
+  await log?.finish(failed === args.shops.length ? "failed" : "success", { shops: summaries });
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`[collect-products] 완료${args.dryRun ? " (dry-run, DB 저장 안 함)" : ""} | ${elapsed}s`);
 }

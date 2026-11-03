@@ -14,6 +14,7 @@ import {
 } from "@/lib/platforms/instagram-insights";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
+import { startRunLog } from "./run-log";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 성과 수집 워커 — 성과 분석 에이전트(6)의 수집 부분. "한 번 실행하고 종료"하는 배치.
@@ -222,6 +223,7 @@ async function main() {
   const service = createServiceClient();
   const startedAt = Date.now();
   const win = kstWindow(startedAt);
+  const log = await startRunLog(service, "collect-metrics");
 
   const { data, error } = await service
     .from("social_accounts")
@@ -233,11 +235,13 @@ async function main() {
   if (error) {
     console.error("[collect-metrics] 계정 조회 실패:", error.message);
     process.exitCode = 1;
+    await log.finish("failed", {}, `계정 조회 실패: ${error.message}`);
     return;
   }
   const accounts = (data ?? []) as AccountRow[];
   if (accounts.length === 0) {
     console.log("[collect-metrics] 수집할 인스타 계정 없음");
+    await log.finish("success", { accounts: [] });
     return;
   }
 
@@ -253,6 +257,7 @@ async function main() {
   }
 
   if (results.every((r) => r.status !== "ok")) process.exitCode = 1;
+  await log.finish(process.exitCode ? "failed" : "success", { day: win.today, accounts: results });
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`[collect-metrics] 완료 day=${win.today} | ${elapsed}s`);
 }
