@@ -10,6 +10,7 @@ import {
   CalendarCheck,
   CalendarClock,
   Clapperboard,
+  Film,
   Link2,
   LayoutDashboard,
   LogOut,
@@ -76,6 +77,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/shoot/plans", label: "촬영 기획 고르기", icon: Clapperboard },
       { href: "/shoot/uploads", label: "촬영 · 올리기", icon: Video },
+      { href: "/shoot/review", label: "완성본 확인", icon: Film },
     ],
   },
   {

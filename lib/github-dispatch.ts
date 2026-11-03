@@ -21,6 +21,8 @@ export const PRODUCTS_DISPATCH_EVENT = "collect-products";
 // 직접 촬영 콘텐츠 워크플로(.github/workflows/a-plan.yml) — 기획안 후보 · 컷 리스트.
 export const SHOOT_PLAN_DISPATCH_EVENT = "plan-a";
 export const SHOTLIST_DISPATCH_EVENT = "a-shotlist";
+// 직접 촬영 편집 워크플로(.github/workflows/shoot-edit.yml).
+export const SHOOT_EDIT_DISPATCH_EVENT = "shoot-edit";
 
 /**
  * publish 워크플로를 즉시 실행시킨다.
@@ -76,6 +78,11 @@ export async function triggerShootPlanRun(reason: string, date?: string): Promis
 /** 직접 촬영 컷 리스트 쓰기 — 사람이 기획을 고르거나 상품을 직접 지정한 직후(사람이 촬영을 기다린다). */
 export async function triggerShotlistRun(reason: string): Promise<void> {
   await dispatch(SHOTLIST_DISPATCH_EVENT, reason);
+}
+
+/** 직접 촬영 편집 — "다 올렸어요" · "고친 문구로 다시 편집" 직후. 편집은 FFmpeg라 Actions에서만. */
+export async function triggerShootEditRun(reason: string): Promise<void> {
+  await dispatch(SHOOT_EDIT_DISPATCH_EVENT, reason);
 }
 
 async function dispatch(eventType: string, reason: string, extra: Record<string, string> = {}): Promise<void> {

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { CheckCircle2, Circle, ExternalLink, Trash2, Upload } from "lucide-react";
@@ -93,6 +94,11 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
           {request.slotDate.slice(5)} {request.slotTime}
         </span>
         <Badge variant={s.variant}>{s.label}</Badge>
+        {(request.status === "EDITED" || request.status === "FAILED") && (
+          <Link href="/shoot/review" className="text-xs font-medium underline">
+            완성본 확인으로 →
+          </Link>
+        )}
         {open && request.dueIso && (
           <span className="text-xs text-muted-foreground">
             촬영 마감 <RelativeTime iso={request.dueIso} />
