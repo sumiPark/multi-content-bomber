@@ -15,6 +15,7 @@ import {
   MessageSquareReply,
   Package,
   Send,
+  ShieldCheck,
   Sparkles,
   Wand2,
   XIcon,
@@ -84,6 +85,8 @@ const NAV_GROUPS: NavGroup[] = [
     label: "설정",
     items: [
       { href: "/accounts", label: "계정 연동", icon: Link2 },
+      // 금지 표현 · 건기식 심의 문구 (콘텐츠 자동화 2단계)
+      { href: "/rules", label: "표현 규칙", icon: ShieldCheck },
       { href: "/presets", label: "AI 프리셋", icon: Sparkles },
     ],
   },

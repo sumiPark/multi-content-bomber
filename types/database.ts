@@ -163,6 +163,56 @@ export type Database = {
           },
         ]
       }
+      content_rules: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          match_type: string
+          phrase: string
+          reason: string | null
+          rule_type: string
+          scope: string
+          suggestion: string | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          match_type?: string
+          phrase: string
+          reason?: string | null
+          rule_type?: string
+          scope?: string
+          suggestion?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          match_type?: string
+          phrase?: string
+          reason?: string | null
+          rule_type?: string
+          scope?: string
+          suggestion?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contents: {
         Row: {
           ai_analyzed_at: string | null
@@ -412,6 +462,48 @@ export type Database = {
             foreignKeyName: "product_analyses_product_id_fkey"
             columns: ["product_id"]
             isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_claim_approvals: {
+        Row: {
+          approved_at: string
+          approved_by: string | null
+          claim: string
+          id: string
+          product_id: string
+          source: string
+        }
+        Insert: {
+          approved_at?: string
+          approved_by?: string | null
+          claim: string
+          id?: string
+          product_id: string
+          source?: string
+        }
+        Update: {
+          approved_at?: string
+          approved_by?: string | null
+          claim?: string
+          id?: string
+          product_id?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_claim_approvals_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_claim_approvals_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["id"]
           },
