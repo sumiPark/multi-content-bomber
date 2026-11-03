@@ -2,10 +2,16 @@
 
 import { useState, useTransition } from "react";
 import { RefreshCw } from "lucide-react";
-import { collectMetricsNowAction } from "@/app/(dashboard)/analytics/actions";
 import { Button } from "@/components/ui/button";
 
-export function CollectNowButton() {
+// "지금 수집" — 워크플로를 깨우는 서버 액션을 받아 실행한다(분석 · 상품 화면 공용).
+export function CollectNowButton({
+  action,
+  doneText,
+}: {
+  action: () => Promise<{ ok: true } | { ok: false; error: string }>;
+  doneText: string;
+}) {
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(
     null,
@@ -20,11 +26,9 @@ export function CollectNowButton() {
         onClick={() =>
           startTransition(async () => {
             setMessage(null);
-            const result = await collectMetricsNowAction();
+            const result = await action();
             setMessage(
-              result.ok
-                ? { ok: true, text: "수집을 시작했어요. 2~3분 뒤 새로고침하세요." }
-                : { ok: false, text: result.error },
+              result.ok ? { ok: true, text: doneText } : { ok: false, text: result.error },
             );
           })
         }

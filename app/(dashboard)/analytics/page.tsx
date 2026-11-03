@@ -6,6 +6,7 @@ import {
   type BaselineAccount,
   type BaselinePost,
 } from "@/components/analytics/account-baseline";
+import { collectMetricsNowAction } from "@/app/(dashboard)/analytics/actions";
 import { CollectNowButton } from "@/components/analytics/collect-now-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -118,7 +119,12 @@ export default async function AnalyticsPage() {
             최근 게시물 성과를 자동으로 수집해요.
           </p>
         </div>
-        {accounts.length > 0 && <CollectNowButton />}
+        {accounts.length > 0 && (
+          <CollectNowButton
+            action={collectMetricsNowAction}
+            doneText="수집을 시작했어요. 2~3분 뒤 새로고침하세요."
+          />
+        )}
       </header>
 
       {accounts.length === 0 ? (

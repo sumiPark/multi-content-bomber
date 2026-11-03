@@ -13,6 +13,7 @@ import {
   LogOut,
   Menu,
   MessageSquareReply,
+  Package,
   Send,
   Sparkles,
   Wand2,
@@ -53,6 +54,8 @@ const NAV_GROUPS: NavGroup[] = [
         badgeKind: "count",
       },
       { href: "/contents", label: "보관함", icon: Archive },
+      // 세 몰 상품 + 상세페이지 분석 (콘텐츠 자동화 2단계). 사이드바 전체 개편은 5단계.
+      { href: "/products", label: "상품", icon: Package },
     ],
   },
   {
