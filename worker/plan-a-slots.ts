@@ -65,7 +65,7 @@ async function main() {
     if (scopes.length === 0) continue;
 
     const [{ data: slots }, { data: existing }] = await Promise.all([
-      service.from("slot_rules").select("slot_time").eq("social_account_id", st.social_account_id).eq("track", "A").eq("active", true),
+      service.from("slot_rules").select("slot_time, topic").eq("social_account_id", st.social_account_id).eq("track", "A").eq("active", true),
       service.from("content_plans").select("slot_time, product_id").eq("social_account_id", st.social_account_id).eq("slot_date", slotDate),
     ]);
     for (const e of existing ?? []) if (e.product_id) picked.add(e.product_id);
@@ -88,6 +88,7 @@ async function main() {
           repeatGapDays: st.repeat_gap_days,
           slotDate,
           slotTimes,
+          slotTopics: Object.fromEntries((slots ?? []).filter((s) => s.topic).map((s) => [s.slot_time, s.topic as string])),
           alsoBlocked: picked,
         },
         { log: !dryRun },

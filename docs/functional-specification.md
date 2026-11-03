@@ -647,7 +647,7 @@ posting_metrics (
 | 배포 관리 | `/postings` | `app/(dashboard)/postings/page.tsx` |
 | 보관함 | `/contents` | `app/(dashboard)/contents/page.tsx` |
 | DM 자동 응답 | `/auto-reply` | `app/(dashboard)/auto-reply/page.tsx` (coming soon) |
-| 예약 규칙 | `/schedule-rules` | `app/(dashboard)/schedule-rules/page.tsx` (coming soon) |
+| 편성표 | `/schedule` | `app/(dashboard)/schedule/page.tsx` (구 `/schedule-rules` 예약 규칙 자리 — 영구 리다이렉트) |
 | 계정 연동 | `/accounts` | `app/(dashboard)/accounts/page.tsx` |
 | AI 프리셋 | `/presets` | `app/(dashboard)/presets/page.tsx` |
 

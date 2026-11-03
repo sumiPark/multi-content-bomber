@@ -22,6 +22,8 @@ export interface SelectContext {
   repeatGapDays: number;
   slotDate: string;
   slotTimes: string[];
+  // 편성표 칸 주제 (slot_time → 주제, 0031). 사람이 정한 것만 들어 있다.
+  slotTopics?: Record<string, string>;
   // 이번 실행에서 앞 계정이 이미 고른 상품 (아직 DB에 없을 수 있어 따로 넘긴다)
   alsoBlocked: Set<string>;
 }
@@ -185,6 +187,14 @@ export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: { 
   return [listCandidates, getProduct, recentPosts];
 }
 
+/** 편성표 주제 안내 한 줄 — 주제가 정해진 칸이 없으면 빈 문자열(프롬프트가 예전과 같다). */
+export function topicLine(ctx: Pick<SelectContext, "slotTimes" | "slotTopics">, what: string): string {
+  const pairs = ctx.slotTimes.filter((t) => ctx.slotTopics?.[t]).map((t) => `${t} = ${ctx.slotTopics![t]}`);
+  if (pairs.length === 0) return "";
+  return `
+- 편성표 칸 주제(사람이 정함): ${pairs.join(" · ")}. 이 주제에 맞는 ${what}을 먼저 찾고, 맞는 후보가 없으면 주제와 가장 가까운 것으로 고른 뒤 이유에 그렇게 적는다.`;
+}
+
 function systemPrompt(ctx: SelectContext): string {
   const focus = ctx.roleFocus === "PERSON" ? "사람 중심(1인칭 후기 · 일상 루틴)" : ctx.roleFocus === "PRODUCT" ? "상품 중심(성분 · 제형 · 구성 · 가격)" : "미정";
   return `너는 인스타그램 계정 @${ctx.accountName}의 B 트랙(AI 자동 생성 릴스) 상품 선정 담당이다.
@@ -198,7 +208,7 @@ function systemPrompt(ctx: SelectContext): string {
 - 판매량 · 후기가 많은 상품은 근거가 되지만 그것만 보지 말고, 최근 게시물 반응(account_recent_posts)이 있으면 참고한다.
 - 과일은 제철 · 지금 판매 중인 상품을 고른다. 건강기능식품은 기능성 표현에 기대지 않는 특징이 있는지 본다.
 - reason은 사람이 컨펌할 때 읽는다. 짧고 구체적으로(왜 이 상품, 왜 이 시간대).
-- 후보가 칸 수보다 적으면 있는 만큼만 고른다.`;
+- 후보가 칸 수보다 적으면 있는 만큼만 고른다.${topicLine(ctx, "상품")}`;
 }
 
 export async function selectProducts(
@@ -214,7 +224,7 @@ export async function selectProducts(
     outputSchema: pickSchema,
     outputName: "product_picks",
     service: opts.log ? ctx.service : null,
-    input: { account: ctx.accountName, slotDate: ctx.slotDate, slotTimes: ctx.slotTimes },
+    input: { account: ctx.accountName, slotDate: ctx.slotDate, slotTimes: ctx.slotTimes, slotTopics: ctx.slotTopics ?? {} },
   });
 
   // 코드로 한 번 더: 후보에서 받은 id만, 칸마다 하나, 같은 상품 중복 없음.

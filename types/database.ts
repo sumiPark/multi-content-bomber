@@ -1399,6 +1399,8 @@ export type Database = {
           slot_time: string
           social_account_id: string
           track: string
+          topic: string | null
+          updated_at: string
         }
         Insert: {
           active?: boolean
@@ -1408,6 +1410,8 @@ export type Database = {
           slot_time: string
           social_account_id: string
           track: string
+          topic?: string | null
+          updated_at?: string
         }
         Update: {
           active?: boolean
@@ -1417,6 +1421,8 @@ export type Database = {
           slot_time?: string
           social_account_id?: string
           track?: string
+          topic?: string | null
+          updated_at?: string
         }
         Relationships: [
           {

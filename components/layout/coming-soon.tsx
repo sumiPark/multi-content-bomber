@@ -12,7 +12,7 @@ interface ComingSoonProps {
   primaryLabel?: string;
 }
 
-// 자동화 그룹의 추후 구현 메뉴(/auto-reply, /schedule-rules)가 공유하는 안내 화면.
+// 자동화 그룹의 추후 구현 메뉴(/auto-reply)가 쓰는 안내 화면.
 export function ComingSoon({
   icon: Icon,
   title,

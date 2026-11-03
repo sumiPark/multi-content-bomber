@@ -48,6 +48,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     items: [
       { href: "/", label: "대시보드", icon: LayoutDashboard },
+      // 편성표(5단계) — 예전 "예약 규칙(준비 중)" 자리. 계정별 하루 칸 · 주제 · 주간 진행
+      { href: "/schedule", label: "편성표", icon: CalendarClock },
       { href: "/analytics", label: "분석", icon: BarChart3 },
     ],
   },
@@ -95,12 +97,6 @@ const NAV_GROUPS: NavGroup[] = [
         href: "/auto-reply",
         label: "DM 자동 응답",
         icon: MessageSquareReply,
-        badgeKind: "soon",
-      },
-      {
-        href: "/schedule-rules",
-        label: "예약 규칙",
-        icon: CalendarClock,
         badgeKind: "soon",
       },
     ],
