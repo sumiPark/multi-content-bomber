@@ -1,28 +1,30 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  AlertTriangle,
-  Check,
-  CheckCircle2,
-  CircleAlert,
+  Ban,
+  CircleCheck,
   Clock,
   ExternalLink,
+  EyeOff,
+  Hourglass,
   Loader2,
+  OctagonAlert,
   RefreshCw,
+  Search,
   Trash2,
+  Wand2,
   X,
   XIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { PlatformIcon } from "@/components/ui/platform-icon";
 import { RelativeTime } from "@/components/ui/relative-time";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
 import {
   cancelPostingsAction,
@@ -87,20 +89,24 @@ interface PostingsPageProps {
 
 const STATUS_LABEL: Record<DisplayStatus, string> = {
   scheduled: "예약중",
-  uploading: "업로드중",
+  uploading: "올리는 중",
   completed: "완료",
   failed: "실패",
   pending: "대기",
   cancelled: "취소됨",
 };
 
-const STATUS_BADGE_CLASS: Record<DisplayStatus, string> = {
-  scheduled: "bg-warn-soft text-warn border-warn/30",
-  uploading: "bg-brand-soft text-primary border-primary/30",
-  completed: "bg-ok-soft text-ok border-ok/30",
-  failed: "bg-risk-soft text-risk border-risk/30",
-  pending: "bg-zinc-100 text-zinc-700 border-zinc-300",
-  cancelled: "bg-zinc-100 text-zinc-500 border-zinc-300",
+// DESIGN.md 2장 의미 색 — 예약중 warn · 올리는 중 파랑 · 완료 ok · 실패 risk · 대기 · 취소 회색.
+const STATUS_BADGE_VARIANT: Record<
+  DisplayStatus,
+  "default" | "secondary" | "ok" | "warn" | "destructive"
+> = {
+  scheduled: "warn",
+  uploading: "default",
+  completed: "ok",
+  failed: "destructive",
+  pending: "secondary",
+  cancelled: "secondary",
 };
 
 const ALL_STATUSES: DisplayStatus[] = [
@@ -126,8 +132,8 @@ const PERIOD_LABEL: Record<PeriodPreset, string> = {
 type SortKey = "published" | "created" | "status";
 
 const SORT_LABEL: Record<SortKey, string> = {
-  published: "게시 시간순",
-  created: "생성 시간순",
+  published: "올린 시각순",
+  created: "만든 시각순",
   status: "상태순",
 };
 
@@ -245,7 +251,11 @@ export function PostingsPage({
   const [sortKey, setSortKey] = useState<SortKey>("published");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detailItem, setDetailItem] = useState<PostingItem | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  // 결과 알림. ok면 오른쪽 아래 토스트(4초), 실패면 위쪽 빨간 상자(닫을 때까지).
+  const [actionMessage, setActionMessage] = useState<{
+    text: string;
+    ok: boolean;
+  } | null>(null);
   const [isPending, startTransition] = useTransition();
 
   // 콘텐츠 완전 삭제 — 목록에서 숨기는 deletePostingsAction과 다르다.
@@ -258,13 +268,20 @@ export function PostingsPage({
       const result = await deleteContentsAction({ contentIds: [contentId] });
       if (result.ok) {
         setDetailItem(null);
-        setActionMessage("콘텐츠를 삭제했습니다.");
+        setActionMessage({ text: "콘텐츠를 삭제했어요", ok: true });
         router.refresh();
       } else {
-        setActionMessage(result.error);
+        setActionMessage({ text: result.error, ok: false });
       }
     });
   }
+
+  // 성공 토스트는 4초 뒤 닫는다.
+  useEffect(() => {
+    if (!actionMessage?.ok) return;
+    const t = setTimeout(() => setActionMessage(null), 4000);
+    return () => clearTimeout(t);
+  }, [actionMessage]);
 
   // 검색 디바운스 300ms
   useEffect(() => {
@@ -405,14 +422,6 @@ export function PostingsPage({
     });
   }
 
-  function toggleStatus(s: DisplayStatus) {
-    setStatusFilter((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
-  }
   function togglePlatform(p: Platform) {
     setPlatformFilter((prev) => {
       const next = new Set(prev);
@@ -430,7 +439,7 @@ export function PostingsPage({
   function runAction(
     action: (input: { ids: string[] }) => Promise<PostingActionResult>,
     ids: string[],
-    successLabel: string,
+    doneMessage: string,
     confirmMessage?: string,
   ) {
     if (ids.length === 0) return;
@@ -439,11 +448,14 @@ export function PostingsPage({
       setActionMessage(null);
       const result = await action({ ids });
       if (result.ok) {
-        setActionMessage(`${successLabel} ${result.affected}건 처리됨`);
+        setActionMessage({
+          text: `${doneMessage} · ${result.affected}건`,
+          ok: true,
+        });
         setSelected(new Set());
         router.refresh();
       } else {
-        setActionMessage(result.error);
+        setActionMessage({ text: result.error, ok: false });
       }
     });
   }
@@ -454,138 +466,242 @@ export function PostingsPage({
   ).length;
   const selectedScheduledCount = selectedItems.filter(canCancelPosting).length;
 
+  const allTab = statusFilter.size === ALL_STATUSES.length;
+  const activeTab: DisplayStatus | "all" | null = allTab
+    ? "all"
+    : statusFilter.size === 1
+      ? Array.from(statusFilter)[0]
+      : null;
+
+  // 가장 먼저 올라갈 예약 — 숫자 카드 아래 "다음 ..."에 쓴다.
+  const nextScheduled = useMemo(() => {
+    const list = summaryBase
+      .filter((p) => p.displayStatus === "scheduled" && p.scheduledFor)
+      .map((p) => p.scheduledFor as string)
+      .sort();
+    return list[0] ?? null;
+  }, [summaryBase]);
+
   return (
-    <div className="space-y-6">
-      <header className="flex items-center justify-between">
+    <div className="space-y-4">
+      <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold tracking-[-0.01em]">포스팅 관리</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">배포 관리</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            예약·업로드·실패 상태를 한눈에 확인하고 일괄 작업할 수 있어요.
+            예약 · 올리는 중 · 실패를 한곳에서 보고, 다시 시도하거나 취소해요 · 최근 90일
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => router.refresh()}
-          disabled={isPending}
-        >
-          <RefreshCw
-            className={cn("size-4", isPending && "animate-spin")}
-          />
-          새로고침
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => router.refresh()}
+            disabled={isPending}
+          >
+            <RefreshCw className={cn(isPending && "animate-spin")} />
+            새로고침
+          </Button>
+          <Link href="/upload" className={buttonVariants()}>
+            <Wand2 />
+            콘텐츠 생성
+          </Link>
+        </div>
       </header>
 
-      {actionMessage && (
-        <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
-          {actionMessage}
+      {actionMessage && !actionMessage.ok && (
+        <div
+          role="alert"
+          className="flex items-start gap-2.5 rounded-lg bg-risk-soft px-3.5 py-3 text-[13px] text-ink-2"
+        >
+          <OctagonAlert className="mt-0.5 size-4 shrink-0 text-risk" />
+          <p className="min-w-0 flex-1">{actionMessage.text}</p>
+          <button
+            type="button"
+            onClick={() => setActionMessage(null)}
+            aria-label="닫기"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <XIcon className="size-4" />
+          </button>
+        </div>
+      )}
+
+      {summary.failed > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-risk-soft px-3.5 py-3 text-[13px] text-ink-2">
+          <OctagonAlert className="size-4 shrink-0 text-risk" />
+          <p className="min-w-0 flex-1">
+            <b className="text-foreground">
+              발행 {summary.failed}건이 실패했어요.
+            </b>{" "}
+            줄을 누르면 원인이 나와요. 계정 연결 문제면 계정 연동에서 다시 연결한 뒤
+            재시도하세요.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => jumpToStatus("failed")}
+          >
+            실패만 보기
+          </Button>
         </div>
       )}
 
       <SummaryCards
         summary={summary}
-        statusFilter={statusFilter}
+        activeTab={activeTab}
+        nextScheduled={nextScheduled}
+        periodLabel={PERIOD_LABEL[period]}
         onJump={jumpToStatus}
       />
 
-      <FiltersBar
-        statusFilter={statusFilter}
-        platformFilter={platformFilter}
-        period={period}
-        sortKey={sortKey}
-        searchInput={searchInput}
-        onToggleStatus={toggleStatus}
-        onTogglePlatform={togglePlatform}
-        onChangePeriod={setPeriod}
-        onChangeSort={setSortKey}
-        onChangeSearch={setSearchInput}
-      />
+      <section className="min-w-0 overflow-hidden rounded-lg border bg-card">
+        <StatusTabs
+          summary={summary}
+          activeTab={activeTab}
+          onSelectAll={() => setStatusFilter(new Set(ALL_STATUSES))}
+          onSelect={jumpToStatus}
+        />
 
-      {selected.size > 0 && canManage && (
-        <BulkActionBar
-          selectedCount={selected.size}
-          failedCount={selectedFailedCount}
-          scheduledCount={selectedScheduledCount}
+        <FiltersBar
+          platformFilter={platformFilter}
+          period={period}
+          sortKey={sortKey}
+          searchInput={searchInput}
+          onTogglePlatform={togglePlatform}
+          onChangePeriod={setPeriod}
+          onChangeSort={setSortKey}
+          onChangeSearch={setSearchInput}
+        />
+
+        {selected.size > 0 && canManage && (
+          <BulkActionBar
+            selectedCount={selected.size}
+            failedCount={selectedFailedCount}
+            scheduledCount={selectedScheduledCount}
+            isPending={isPending}
+            onRetry={() =>
+              runAction(
+                retryPostingsAction,
+                selectedItems
+                  .filter((p) => p.displayStatus === "failed")
+                  .map((p) => p.id),
+                "다시 시도했어요",
+              )
+            }
+            onCancel={() =>
+              runAction(
+                cancelPostingsAction,
+                selectedItems.filter(canCancelPosting).map((p) => p.id),
+                "발행을 취소했어요",
+                "고른 항목의 발행을 취소할까요? 이미 올리는 중인 건은 취소되지 않아요.",
+              )
+            }
+            onDelete={() =>
+              runAction(
+                deletePostingsAction,
+                selectedItems.map((p) => p.id),
+                "목록에서 숨겼어요",
+                `${selected.size}건을 배포 관리 목록에서 숨길까요? 콘텐츠와 SNS 게시물은 지워지지 않아요.`,
+              )
+            }
+            onClear={() => setSelected(new Set())}
+          />
+        )}
+
+        <PostingsTable
+          items={filtered}
+          selected={selected}
+          canManage={canManage}
           isPending={isPending}
-          onRetry={() =>
-            runAction(
-              retryPostingsAction,
-              selectedItems
-                .filter((p) => p.displayStatus === "failed")
-                .map((p) => p.id),
-              "재시도",
-            )
+          onToggleAll={toggleSelectAll}
+          onToggleOne={toggleOne}
+          onSelectDetail={setDetailItem}
+          onRetry={(id) =>
+            runAction(retryPostingsAction, [id], "다시 시도했어요")
           }
-          onCancel={() =>
+          onCancel={(id) =>
             runAction(
               cancelPostingsAction,
-              selectedItems.filter(canCancelPosting).map((p) => p.id),
-              "취소",
-              "선택한 항목의 발행을 취소할까요? 이미 처리 중(업로드 진행 중)인 건은 취소되지 않습니다.",
+              [id],
+              "발행을 취소했어요",
+              "이 발행을 취소할까요?",
             )
           }
-          onDelete={() =>
-            runAction(
-              deletePostingsAction,
-              selectedItems.map((p) => p.id),
-              "삭제(soft)",
-              `${selected.size}건을 배포 관리 목록에서 숨길까요? 콘텐츠와 SNS 게시물은 삭제되지 않습니다.`,
-            )
-          }
-          onClear={() => setSelected(new Set())}
         />
-      )}
 
-      <PostingsTable
-        items={filtered}
-        selected={selected}
-        canManage={canManage}
-        isPending={isPending}
-        onToggleAll={toggleSelectAll}
-        onToggleOne={toggleOne}
-        onSelectDetail={setDetailItem}
-        onRetry={(id) =>
-          runAction(retryPostingsAction, [id], "재시도")
-        }
-        onCancel={(id) =>
-          runAction(
-            cancelPostingsAction,
-            [id],
-            "취소",
-            "이 포스팅의 발행을 취소할까요?",
-          )
-        }
-        onDelete={(id) =>
-          runAction(
-            deletePostingsAction,
-            [id],
-            "삭제(soft)",
-            "이 포스팅을 배포 관리 목록에서 숨길까요? 콘텐츠와 SNS 게시물은 삭제되지 않습니다.",
-          )
-        }
-      />
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground">
+          <span className="tabular-nums">
+            {filtered.length}건 · {SORT_LABEL[sortKey]}
+          </span>
+          <span>목록에서 숨겨도 콘텐츠와 SNS 게시물은 지워지지 않아요</span>
+        </div>
+      </section>
 
       {detailItem && (
-        <DetailDialog
+        <DetailDrawer
           onDeleteContent={runDeleteContent}
           item={detailItem}
           canManage={canManage}
           isPending={isPending}
           onClose={() => setDetailItem(null)}
           onRetry={(id) =>
-            runAction(retryPostingsAction, [id], "재시도")
+            runAction(retryPostingsAction, [id], "다시 시도했어요")
           }
           onCancel={(id) =>
             runAction(
               cancelPostingsAction,
               [id],
-              "취소",
-              "이 포스팅의 발행을 취소할까요?",
+              "발행을 취소했어요",
+              "이 발행을 취소할까요?",
+            )
+          }
+          onHide={(id) =>
+            runAction(
+              deletePostingsAction,
+              [id],
+              "목록에서 숨겼어요",
+              "이 발행을 배포 관리 목록에서 숨길까요? 콘텐츠와 SNS 게시물은 지워지지 않아요.",
             )
           }
         />
       )}
+
+      {/* 결과 토스트 — 오른쪽 아래, 4초 (DESIGN.md 6장) */}
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed right-4 bottom-4 z-[70] flex flex-col gap-2"
+      >
+        {actionMessage?.ok && (
+          <div className="flex max-w-[400px] items-center gap-2.5 rounded-[10px] bg-foreground px-3.5 py-2.5 text-[13px] text-background shadow-[0_8px_24px_rgb(16_24_40/0.12),0_2px_6px_rgb(16_24_40/0.08)]">
+            <CircleCheck className="size-4 shrink-0" />
+            {actionMessage.text}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 상태 배지
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STATUS_ICON: Record<DisplayStatus, typeof Clock> = {
+  scheduled: Clock,
+  uploading: Loader2,
+  completed: CircleCheck,
+  failed: OctagonAlert,
+  pending: Hourglass,
+  cancelled: Ban,
+};
+
+function StatusBadge({ status }: { status: DisplayStatus }) {
+  const Icon = STATUS_ICON[status];
+  return (
+    <Badge variant={STATUS_BADGE_VARIANT[status]}>
+      <Icon className={cn(status === "uploading" && "animate-spin")} />
+      {STATUS_LABEL[status]}
+    </Badge>
   );
 }
 
@@ -595,50 +711,143 @@ export function PostingsPage({
 
 function SummaryCards({
   summary,
-  statusFilter,
+  activeTab,
+  nextScheduled,
+  periodLabel,
   onJump,
 }: {
   summary: Record<DisplayStatus | "total", number>;
-  statusFilter: Set<DisplayStatus>;
+  activeTab: DisplayStatus | "all" | null;
+  nextScheduled: string | null;
+  periodLabel: string;
   onJump: (s: DisplayStatus) => void;
 }) {
-  const cards: Array<{
-    key: DisplayStatus | "total";
-    label: string;
-    accent?: string;
-  }> = [
-    { key: "total", label: "전체" },
-    { key: "scheduled", label: "예약중", accent: "text-warn" },
-    { key: "uploading", label: "업로드중", accent: "text-primary" },
-    { key: "completed", label: "완료", accent: "text-ok" },
-    { key: "failed", label: "실패", accent: "text-destructive" },
+  const cards: Array<{ key: DisplayStatus; label: string; foot: React.ReactNode }> = [
+    {
+      key: "failed",
+      label: "실패",
+      foot: summary.failed > 0 ? "지금 확인" : "없어요",
+    },
+    {
+      key: "scheduled",
+      label: "예약중",
+      foot: nextScheduled ? (
+        <>
+          다음 <RelativeTime iso={nextScheduled} />
+        </>
+      ) : (
+        "예약 없음"
+      ),
+    },
+    { key: "uploading", label: "올리는 중", foot: "10초마다 새로 불러와요" },
+    { key: "completed", label: "완료", foot: periodLabel },
   ];
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {cards.map((c) => {
         const count = summary[c.key];
-        const isClickable = c.key !== "total";
-        const isActive =
-          c.key !== "total" &&
-          statusFilter.size === 1 &&
-          statusFilter.has(c.key as DisplayStatus);
+        const hot = c.key === "failed" && count > 0;
+        const active = activeTab === c.key;
         return (
           <button
             key={c.key}
             type="button"
-            onClick={
-              isClickable ? () => onJump(c.key as DisplayStatus) : undefined
-            }
-            disabled={!isClickable}
+            onClick={() => onJump(c.key)}
+            aria-pressed={active}
             className={cn(
-              "rounded-md border p-3 text-left transition",
-              isClickable && "hover:bg-accent/40 cursor-pointer",
-              isActive && "ring-2 ring-primary",
-              c.key === "failed" && count > 0 && "border-destructive/40 bg-destructive/5",
+              "min-w-0 rounded-lg border bg-card px-[18px] py-4 text-left transition-colors hover:border-line-strong",
+              hot && "border-risk hover:border-risk",
+              active && "border-primary ring-1 ring-inset ring-primary hover:border-primary",
             )}
           >
-            <p className="text-xs text-muted-foreground">{c.label}</p>
-            <p className={cn("mt-1 text-2xl font-bold", c.accent)}>{count}</p>
+            <p className="text-xs font-medium text-muted-foreground">{c.label}</p>
+            <p
+              className={cn(
+                "mt-1.5 mb-1 text-2xl leading-tight font-bold tracking-[-0.02em] tabular-nums",
+                hot && "text-risk",
+              )}
+            >
+              {count}
+              <small className="ml-0.5 text-[13px] font-semibold text-muted-foreground">
+                건
+              </small>
+            </p>
+            <p
+              className={cn(
+                "truncate text-xs",
+                hot ? "font-medium text-risk" : "text-muted-foreground",
+              )}
+            >
+              {c.foot}
+            </p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 상태 탭 — 상태 하나만 보거나 전체
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TAB_ORDER: DisplayStatus[] = [
+  "failed",
+  "scheduled",
+  "uploading",
+  "pending",
+  "completed",
+  "cancelled",
+];
+
+function StatusTabs({
+  summary,
+  activeTab,
+  onSelectAll,
+  onSelect,
+}: {
+  summary: Record<DisplayStatus | "total", number>;
+  activeTab: DisplayStatus | "all" | null;
+  onSelectAll: () => void;
+  onSelect: (s: DisplayStatus) => void;
+}) {
+  const tabs: Array<{ key: DisplayStatus | "all"; label: string; count: number }> = [
+    { key: "all", label: "전체", count: summary.total },
+    ...TAB_ORDER.map((s) => ({ key: s, label: STATUS_LABEL[s], count: summary[s] })),
+  ];
+  return (
+    <div
+      role="tablist"
+      aria-label="상태"
+      className="flex items-end gap-1.5 overflow-x-auto border-b px-4 pt-3"
+    >
+      {tabs.map((t) => {
+        const on = activeTab === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            onClick={() => (t.key === "all" ? onSelectAll() : onSelect(t.key))}
+            className={cn(
+              "relative -mb-px inline-flex h-11 shrink-0 items-center gap-2 rounded-t-[10px] border border-b-0 px-4 text-sm font-semibold whitespace-nowrap transition-colors sm:px-5",
+              on
+                ? "bg-card text-foreground"
+                : "bg-surface-2 text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t.label}
+            <span
+              className={cn(
+                "rounded-full px-[7px] text-xs leading-5 font-semibold tabular-nums",
+                on
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-surface-2 text-muted-foreground",
+              )}
+            >
+              {t.count}
+            </span>
           </button>
         );
       })}
@@ -650,126 +859,99 @@ function SummaryCards({
 // Filters bar
 // ─────────────────────────────────────────────────────────────────────────────
 
+const PLATFORM_LABEL: Record<Platform, string> = {
+  INSTAGRAM: "인스타그램",
+  YOUTUBE: "유튜브",
+  TIKTOK: "틱톡",
+};
+
+const PERIOD_SHORT: Record<PeriodPreset, string> = {
+  today: "오늘",
+  "7d": "7일",
+  "30d": "30일",
+  all: "전체",
+};
+
 function FiltersBar({
-  statusFilter,
   platformFilter,
   period,
   sortKey,
   searchInput,
-  onToggleStatus,
   onTogglePlatform,
   onChangePeriod,
   onChangeSort,
   onChangeSearch,
 }: {
-  statusFilter: Set<DisplayStatus>;
   platformFilter: Set<Platform>;
   period: PeriodPreset;
   sortKey: SortKey;
   searchInput: string;
-  onToggleStatus: (s: DisplayStatus) => void;
   onTogglePlatform: (p: Platform) => void;
   onChangePeriod: (p: PeriodPreset) => void;
   onChangeSort: (k: SortKey) => void;
   onChangeSearch: (v: string) => void;
 }) {
   return (
-    <Card>
-      <CardContent className="space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground">
-            상태
-          </span>
-          {ALL_STATUSES.map((s) => {
-            const on = statusFilter.has(s);
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => onToggleStatus(s)}
-                className={cn(
-                  "rounded-full border px-3 py-1 text-xs transition",
-                  on
-                    ? STATUS_BADGE_CLASS[s]
-                    : "border-border bg-card text-muted-foreground hover:bg-accent/40",
-                )}
-              >
-                {STATUS_LABEL[s]}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground">
-            플랫폼
-          </span>
-          {ALL_PLATFORMS.map((p) => {
-            const on = platformFilter.has(p);
-            return (
-              <button
-                key={p}
-                type="button"
-                onClick={() => onTogglePlatform(p)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition",
-                  on
-                    ? "border-foreground bg-foreground/5"
-                    : "border-border bg-card text-muted-foreground hover:bg-accent/40",
-                )}
-              >
-                <PlatformIcon platform={p} size={14} />
-                {p}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Label htmlFor="period" className="text-xs">
-              기간
-            </Label>
-            <select
-              id="period"
-              value={period}
-              onChange={(e) => onChangePeriod(e.target.value as PeriodPreset)}
-              className="rounded-md border bg-card px-2 py-1 text-sm"
+    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
+      <div
+        role="group"
+        aria-label="플랫폼"
+        className="inline-flex items-center gap-0.5 rounded-md border bg-card p-[2px]"
+      >
+        {ALL_PLATFORMS.map((p) => {
+          const on = platformFilter.has(p);
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onTogglePlatform(p)}
+              aria-pressed={on}
+              aria-label={PLATFORM_LABEL[p]}
+              title={PLATFORM_LABEL[p]}
+              className={cn(
+                "rounded-[6px] p-[5px] leading-none transition-opacity hover:opacity-100",
+                on ? "bg-surface-2 opacity-100" : "opacity-35",
+              )}
             >
-              {(Object.keys(PERIOD_LABEL) as PeriodPreset[]).map((p) => (
-                <option key={p} value={p}>
-                  {PERIOD_LABEL[p]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="sort" className="text-xs">
-              정렬
-            </Label>
-            <select
-              id="sort"
-              value={sortKey}
-              onChange={(e) => onChangeSort(e.target.value as SortKey)}
-              className="rounded-md border bg-card px-2 py-1 text-sm"
-            >
-              {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
-                <option key={k} value={k}>
-                  {SORT_LABEL[k]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex flex-1 min-w-[200px] items-center gap-2">
-            <Input
-              type="search"
-              placeholder="콘텐츠·계정·캡션 검색..."
-              value={searchInput}
-              onChange={(e) => onChangeSearch(e.target.value)}
-              className="h-8 text-sm"
-            />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+              <PlatformIcon platform={p} size={20} />
+            </button>
+          );
+        })}
+      </div>
+      <Segmented<PeriodPreset>
+        ariaLabel="기간"
+        value={period}
+        onChange={onChangePeriod}
+        options={(Object.keys(PERIOD_SHORT) as PeriodPreset[]).map((p) => ({
+          value: p,
+          label: PERIOD_SHORT[p],
+        }))}
+      />
+      <label className="relative flex min-w-[200px] flex-1 items-center sm:max-w-xs">
+        <Search className="pointer-events-none absolute left-2.5 size-4 text-faint" />
+        <span className="sr-only">검색</span>
+        <Input
+          type="search"
+          placeholder="콘텐츠 · 계정 · 캡션 검색"
+          value={searchInput}
+          onChange={(e) => onChangeSearch(e.target.value)}
+          className="pl-8"
+        />
+      </label>
+      <span className="hidden flex-1 sm:block" />
+      <select
+        aria-label="정렬"
+        value={sortKey}
+        onChange={(e) => onChangeSort(e.target.value as SortKey)}
+        className="h-9 rounded-md border border-input bg-card px-2.5 text-base sm:text-[13px]"
+      >
+        {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
+          <option key={k} value={k}>
+            {SORT_LABEL[k]}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -797,42 +979,33 @@ function BulkActionBar({
   onClear: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 p-3">
-      <div className="flex items-center gap-2 text-sm">
-        <Badge variant="secondary">{selectedCount}건 선택</Badge>
-        <Button variant="ghost" size="sm" onClick={onClear}>
-          <XIcon className="size-3" /> 해제
-        </Button>
-      </div>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onRetry}
-          disabled={failedCount === 0 || isPending}
-          title={failedCount === 0 ? "실패 항목이 없습니다" : undefined}
-        >
-          <RefreshCw className="size-3.5" /> 재시도 {failedCount}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onCancel}
-          disabled={scheduledCount === 0 || isPending}
-          title={scheduledCount === 0 ? "취소할 수 있는 항목이 없습니다" : undefined}
-        >
-          <X className="size-3.5" /> 취소 {scheduledCount}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onDelete}
-          disabled={isPending}
-          className="text-destructive hover:text-destructive"
-        >
-          <Trash2 className="size-3.5" /> 삭제
-        </Button>
-      </div>
+    <div className="flex flex-wrap items-center gap-2 border-b bg-brand-soft px-4 py-2 text-[13px]">
+      <b className="mr-2 text-primary tabular-nums">{selectedCount}건 선택</b>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onRetry}
+        disabled={failedCount === 0 || isPending}
+        title={failedCount === 0 ? "고른 것 중 실패한 건이 없어요" : undefined}
+      >
+        <RefreshCw /> 재시도 {failedCount}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onCancel}
+        disabled={scheduledCount === 0 || isPending}
+        title={scheduledCount === 0 ? "고른 것 중 취소할 수 있는 건이 없어요" : undefined}
+      >
+        <X /> 발행 취소 {scheduledCount}
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onDelete} disabled={isPending}>
+        <EyeOff /> 목록에서 숨기기
+      </Button>
+      <span className="flex-1" />
+      <Button variant="ghost" size="sm" onClick={onClear}>
+        선택 해제
+      </Button>
     </div>
   );
 }
@@ -845,6 +1018,8 @@ interface TableItem extends PostingItem {
   displayStatus: DisplayStatus;
 }
 
+const TH = "h-11 px-3.5 text-left text-xs font-semibold whitespace-nowrap text-ink-2";
+
 function PostingsTable({
   items,
   selected,
@@ -855,7 +1030,6 @@ function PostingsTable({
   onSelectDetail,
   onRetry,
   onCancel,
-  onDelete,
 }: {
   items: TableItem[];
   selected: Set<string>;
@@ -866,17 +1040,14 @@ function PostingsTable({
   onSelectDetail: (item: PostingItem) => void;
   onRetry: (id: string) => void;
   onCancel: (id: string) => void;
-  onDelete: (id: string) => void;
 }) {
   if (items.length === 0) {
     return (
-      <Card>
-        <CardContent className="py-16 text-center text-sm text-muted-foreground">
-          조건에 맞는 포스팅이 없어요.
-          <br />
-          필터를 조정하거나 새 콘텐츠를 등록해보세요.
-        </CardContent>
-      </Card>
+      <div className="px-4 py-16 text-center text-[13px] text-muted-foreground">
+        조건에 맞는 발행이 없어요.
+        <br />
+        탭 · 플랫폼 · 기간을 바꾸거나 새 콘텐츠를 만들어 보세요.
+      </div>
     );
   }
 
@@ -884,55 +1055,56 @@ function PostingsTable({
   const someSelected = !allSelected && items.some((i) => selected.has(i.id));
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <ScrollArea className="w-full">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/30 text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                {canManage && (
-                  <th className="w-10 px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      ref={(el) => {
-                        if (el) el.indeterminate = someSelected;
-                      }}
-                      onChange={(e) => onToggleAll(e.target.checked)}
-                      className="size-4"
-                    />
-                  </th>
-                )}
-                <th className="px-3 py-2 text-left">콘텐츠</th>
-                <th className="px-3 py-2 text-left">플랫폼</th>
-                <th className="px-3 py-2 text-left">계정</th>
-                <th className="px-3 py-2 text-left">상태</th>
-                <th className="px-3 py-2 text-left">예약</th>
-                <th className="px-3 py-2 text-left">게시</th>
-                <th className="px-3 py-2 text-right">액션</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <Row
-                  key={item.id}
-                  item={item}
-                  selected={selected.has(item.id)}
-                  canManage={canManage}
-                  isPending={isPending}
-                  onToggle={onToggleOne}
-                  onSelectDetail={onSelectDetail}
-                  onRetry={onRetry}
-                  onCancel={onCancel}
-                  onDelete={onDelete}
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[880px] border-collapse text-[13px]">
+        <thead className="bg-surface-2">
+          <tr>
+            {canManage && (
+              <th className="h-11 w-12 pr-0 pl-3.5">
+                <input
+                  type="checkbox"
+                  aria-label="보이는 줄 모두 선택"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected;
+                  }}
+                  onChange={(e) => onToggleAll(e.target.checked)}
+                  className="size-4 accent-primary"
                 />
-              ))}
-            </tbody>
-          </table>
-        </ScrollArea>
-      </CardContent>
-    </Card>
+              </th>
+            )}
+            <th className={TH}>콘텐츠</th>
+            <th className={TH}>계정</th>
+            <th className={TH}>상태</th>
+            <th className={TH}>예약</th>
+            <th className={TH}>올라감</th>
+            <th className={cn(TH, "text-right")}>
+              <span className="sr-only">할 일</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <Row
+              key={item.id}
+              item={item}
+              selected={selected.has(item.id)}
+              canManage={canManage}
+              isPending={isPending}
+              onToggle={onToggleOne}
+              onSelectDetail={onSelectDetail}
+              onRetry={onRetry}
+              onCancel={onCancel}
+            />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
+}
+
+function mediaSummary(item: { mediaType: "IMAGE" | "VIDEO"; mediaCount: number }) {
+  return item.mediaType === "VIDEO" ? "영상" : `사진 ${item.mediaCount}장`;
 }
 
 function Row({
@@ -944,7 +1116,6 @@ function Row({
   onSelectDetail,
   onRetry,
   onCancel,
-  onDelete,
 }: {
   item: TableItem;
   selected: boolean;
@@ -954,36 +1125,70 @@ function Row({
   onSelectDetail: (item: PostingItem) => void;
   onRetry: (id: string) => void;
   onCancel: (id: string) => void;
-  onDelete: (id: string) => void;
 }) {
   const isFailed = item.displayStatus === "failed";
-  const canRetry = isFailed;
   const canCancel = canCancelPosting(item);
+  const label = displayLabel(item);
+
+  // 줄마다 할 일 버튼은 하나만: 실패 → 재시도, 예약 · 대기 → 취소, 올라감 → 게시 글.
+  let action: React.ReactNode = <span className="text-faint">—</span>;
+  if (canManage && isFailed) {
+    action = (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => onRetry(item.id)}
+        disabled={isPending}
+      >
+        <RefreshCw /> 재시도
+      </Button>
+    );
+  } else if (canManage && canCancel) {
+    action = (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => onCancel(item.id)}
+        disabled={isPending}
+      >
+        취소
+      </Button>
+    );
+  } else if (item.platformPostUrl) {
+    action = (
+      <a
+        href={item.platformPostUrl}
+        target="_blank"
+        rel="noreferrer"
+        className={buttonVariants({ variant: "ghost", size: "sm" })}
+      >
+        <ExternalLink /> 게시 글
+      </a>
+    );
+  }
 
   return (
     <tr
       className={cn(
-        "border-b transition hover:bg-accent/30",
-        isFailed && "bg-destructive/5",
+        "border-t transition-colors hover:bg-surface-2",
+        isFailed && "bg-risk-soft hover:bg-risk-soft",
+        selected && "bg-brand-soft hover:bg-brand-soft",
       )}
     >
       {canManage && (
-        <td className="px-3 py-2">
+        <td className="h-[52px] w-12 pr-0 pl-3.5">
           <input
             type="checkbox"
+            aria-label={`${label} 선택`}
             checked={selected}
             onChange={(e) => onToggle(item.id, e.target.checked)}
-            className="size-4"
+            className="size-4 accent-primary"
           />
         </td>
       )}
-      <td className="px-3 py-2">
-        <button
-          type="button"
-          onClick={() => onSelectDetail(item)}
-          className="flex items-center gap-2 text-left"
-        >
-          <div className="relative size-10 shrink-0 overflow-hidden rounded border bg-muted">
+      <td className="px-3.5 py-2">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <div className="size-9 shrink-0 overflow-hidden rounded-md border bg-surface-2">
             {item.thumbnailUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -993,152 +1198,84 @@ function Row({
               />
             ) : null}
           </div>
-          <div className="min-w-0">
-            <p className="truncate text-xs font-medium">
-              {displayLabel(item)}
-            </p>
-            <p className="line-clamp-1 text-[10px] text-muted-foreground">
+          <div className="flex min-w-0 flex-col leading-snug">
+            <button
+              type="button"
+              onClick={() => onSelectDetail(item)}
+              className="max-w-[260px] truncate text-left font-medium hover:text-primary hover:underline hover:underline-offset-[3px]"
+            >
+              {label}
+            </button>
+            <span className="max-w-[260px] truncate text-xs text-muted-foreground">
               {item.internalTitle
-                ? captionPreview(item.captions)
-                : item.mediaType === "VIDEO"
-                  ? "영상"
-                  : `이미지 ${item.mediaCount}장`}
-            </p>
+                ? `${mediaSummary(item)} · ${captionPreview(item.captions)}`
+                : mediaSummary(item)}
+            </span>
           </div>
-        </button>
-      </td>
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          <PlatformIcon platform={item.account.platform} size={16} />
-          <span className="text-xs">{item.account.platform}</span>
         </div>
       </td>
-      <td className="px-3 py-2">
-        <div className="flex items-center gap-1.5">
-          {item.account.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={item.account.avatarUrl}
-              alt=""
-              className="size-5 rounded-full object-cover"
-            />
-          ) : (
-            <div className="size-5 rounded-full bg-muted" />
-          )}
-          <span className="truncate text-xs">
+      <td className="px-3.5 py-2">
+        <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+          <PlatformIcon platform={item.account.platform} size={20} />
+          <span className="max-w-[160px] truncate">
             {item.account.displayName ?? "(이름 없음)"}
           </span>
           {item.account.disconnected && (
-            <span className="shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              연결 해제됨
+            <Badge variant="secondary">연결 해제됨</Badge>
+          )}
+        </div>
+      </td>
+      <td className="px-3.5 py-2">
+        <div className="flex flex-col items-start gap-0.5">
+          <StatusBadge status={item.displayStatus} />
+          {isFailed && item.lastError && (
+            <span
+              className="line-clamp-1 max-w-[220px] text-xs font-medium text-risk"
+              title={item.lastError}
+            >
+              {item.lastError}
             </span>
           )}
         </div>
       </td>
-      <td className="px-3 py-2">
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
-            STATUS_BADGE_CLASS[item.displayStatus],
-          )}
-        >
-          {STATUS_LABEL[item.displayStatus]}
-        </span>
-        {isFailed && item.lastError && (
-          <p
-            className="mt-1 line-clamp-1 text-[10px] text-destructive"
-            title={item.lastError}
-          >
-            {item.lastError}
-          </p>
-        )}
-      </td>
-      <td className="px-3 py-2 text-xs text-muted-foreground">
+      <td className="px-3.5 py-2 whitespace-nowrap tabular-nums">
         {item.scheduledFor ? (
           <RelativeTime iso={item.scheduledFor} />
         ) : (
           // 즉시 발행은 요청(등록) 시각이 곧 게시하려던 시각 — 취소·실패 건도 언제
           // 올리려던 건지 알 수 있게 함께 보여준다.
           <>
-            즉시
-            <span className="block text-[10px]">
+            <span className="text-muted-foreground">바로</span>
+            <span className="block text-xs text-muted-foreground">
               <RelativeTime iso={item.createdAt} />
             </span>
           </>
         )}
       </td>
-      <td className="px-3 py-2 text-xs text-muted-foreground">
-        {item.completedAt ? <RelativeTime iso={item.completedAt} /> : "-"}
+      <td className="px-3.5 py-2 whitespace-nowrap tabular-nums">
+        {item.completedAt ? (
+          <RelativeTime iso={item.completedAt} />
+        ) : (
+          <span className="text-faint">—</span>
+        )}
       </td>
-      <td className="px-3 py-2 text-right">
-        <div className="flex justify-end gap-1">
-          {item.platformPostUrl && (
-            <a
-              href={item.platformPostUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "sm" }),
-                "h-7 px-2",
-              )}
-              title="게시 글 열기"
-            >
-              <ExternalLink className="size-3.5" />
-            </a>
-          )}
-          {canManage && canRetry && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2"
-              onClick={() => onRetry(item.id)}
-              disabled={isPending}
-              title="재시도"
-            >
-              <RefreshCw className="size-3.5" />
-            </Button>
-          )}
-          {canManage && canCancel && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2"
-              onClick={() => onCancel(item.id)}
-              disabled={isPending}
-              title="발행 취소"
-            >
-              <X className="size-3.5" />
-            </Button>
-          )}
-          {canManage && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-destructive hover:text-destructive"
-              onClick={() => onDelete(item.id)}
-              disabled={isPending}
-              title="삭제(soft)"
-            >
-              <Trash2 className="size-3.5" />
-            </Button>
-          )}
-        </div>
-      </td>
+      <td className="px-3.5 py-2 text-right whitespace-nowrap">{action}</td>
     </tr>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Detail dialog
+// Detail drawer — 오른쪽 서랍 (DESIGN.md 1장: 상세는 오른쪽 서랍)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DetailDialog({
+function DetailDrawer({
   item,
   canManage,
   isPending,
   onClose,
   onRetry,
   onCancel,
+  onHide,
   onDeleteContent,
 }: {
   item: PostingItem;
@@ -1147,9 +1284,11 @@ function DetailDialog({
   onClose: () => void;
   onRetry: (id: string) => void;
   onCancel: (id: string) => void;
+  onHide: (id: string) => void;
   onDeleteContent: (contentId: string, label: string) => void;
 }) {
   const displayStatus = getDisplayStatus(item.status, item.scheduledFor);
+  const canCancel = canCancelPosting({ status: item.status, displayStatus });
 
   // ESC 닫기
   useEffect(() => {
@@ -1173,98 +1312,137 @@ function DetailDialog({
       >
     | null;
 
+  const info: Array<{ label: string; value: React.ReactNode }> = [
+    {
+      label: "계정",
+      value: `${PLATFORM_LABEL[item.account.platform]} · ${item.account.displayName ?? "(이름 없음)"}${item.account.disconnected ? " (연결 해제됨)" : ""}`,
+    },
+    {
+      label: "예약",
+      value: item.scheduledFor ? <RelativeTime iso={item.scheduledFor} /> : "바로 올리기",
+    },
+    {
+      label: "올라감",
+      value: item.completedAt ? <RelativeTime iso={item.completedAt} /> : "—",
+    },
+    { label: "시도", value: `${item.attempts}회` },
+    { label: "만든 시각", value: <RelativeTime iso={item.createdAt} /> },
+  ];
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
-    >
+    <>
       <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border bg-card shadow-xl"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-40 bg-black/40"
+        onClick={onClose}
+        aria-hidden
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label="발행 자세히"
+        className="fixed inset-y-0 right-0 z-50 flex w-[440px] max-w-full flex-col border-l bg-card shadow-[0_8px_24px_rgb(16_24_40/0.12),0_2px_6px_rgb(16_24_40/0.08)]"
       >
-        <div className="flex items-start justify-between gap-2 border-b p-4">
-          <div>
-            <h2 className="text-lg font-semibold">
-              {item.internalTitle?.trim() || "포스팅 상세"}
-            </h2>
-            <p className="text-xs text-muted-foreground">
-              {item.account.platform} · {item.account.displayName}
-              {item.account.disconnected && " (연결 해제됨)"}
-            </p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <XIcon className="size-4" />
+        <div className="flex items-center justify-between gap-3 border-b px-4 py-3.5">
+          <h2 className="min-w-0 truncate text-base font-semibold">
+            {item.internalTitle?.trim() || "발행 자세히"}
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            aria-label="닫기"
+            autoFocus
+          >
+            <XIcon />
           </Button>
         </div>
-        <div className="space-y-4 p-4">
-          {item.thumbnailUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={item.thumbnailUrl}
-              alt=""
-              className="mx-auto max-h-72 rounded border object-contain"
-            />
-          )}
 
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span
-              className={cn(
-                "rounded-full border px-2 py-0.5 font-medium",
-                STATUS_BADGE_CLASS[displayStatus],
-              )}
-            >
-              {STATUS_LABEL[displayStatus]}
+        <div className="flex-1 space-y-5 overflow-y-auto p-4">
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <PlatformIcon platform={item.account.platform} size={20} />
+              <span className="truncate">
+                {item.account.displayName ?? "(이름 없음)"}
+              </span>
             </span>
-            <span className="text-muted-foreground">
-              생성: <RelativeTime iso={item.createdAt} />
-            </span>
-            {item.scheduledFor && (
-              <span className="text-muted-foreground">
-                예약: <RelativeTime iso={item.scheduledFor} />
-              </span>
-            )}
-            {item.completedAt && (
-              <span className="text-muted-foreground">
-                완료: <RelativeTime iso={item.completedAt} />
-              </span>
-            )}
-            {item.attempts > 0 && (
-              <span className="text-muted-foreground">
-                시도 {item.attempts}회
-              </span>
+            <StatusBadge status={displayStatus} />
+            {item.account.disconnected && (
+              <Badge variant="secondary">연결 해제됨</Badge>
             )}
           </div>
 
-          {item.platformPostUrl && (
-            <a
-              href={item.platformPostUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-            >
-              <ExternalLink className="size-3.5" /> 게시 글 열기
-            </a>
-          )}
-
           {item.lastError && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3">
-              <div className="mb-1 flex items-center gap-1 text-xs font-medium text-destructive">
-                <AlertTriangle className="size-3.5" /> 마지막 에러
-              </div>
-              <pre className="whitespace-pre-wrap break-all text-[11px] text-destructive">
+            <div className="space-y-2 rounded-lg bg-risk-soft px-3.5 py-3 text-[13px] text-ink-2">
+              <p className="flex items-center gap-2 font-semibold text-foreground">
+                <OctagonAlert className="size-4 shrink-0 text-risk" />
+                마지막 오류
+              </p>
+              <pre className="font-sans text-xs break-all whitespace-pre-wrap text-risk">
                 {item.lastError}
               </pre>
+              <p className="text-xs">
+                계정 연결 문제면{" "}
+                <Link href="/accounts" className="font-medium text-primary underline-offset-2 hover:underline">
+                  계정 연동
+                </Link>
+                에서 다시 연결한 뒤 재시도하세요.
+              </p>
             </div>
           )}
 
-          {captions && (
-            <div className="space-y-3">
-              <p className="text-xs font-medium text-muted-foreground">
-                캡션
+          <div className="grid grid-cols-[72px_minmax(0,1fr)] items-start gap-3">
+            <div className="h-24 w-[72px] overflow-hidden rounded-md border bg-surface-2">
+              {item.thumbnailUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={item.thumbnailUrl}
+                  alt=""
+                  className="size-full object-cover"
+                />
+              )}
+            </div>
+            <div className="min-w-0 text-[13px]">
+              <b>{mediaSummary(item)}</b>
+              <p className="mt-1 line-clamp-4 text-xs whitespace-pre-wrap text-ink-2">
+                {captionPreview(item.captions, 200)}
               </p>
+            </div>
+          </div>
+
+          <section>
+            <h3 className="mb-2 text-xs font-semibold text-muted-foreground">
+              발행 정보
+            </h3>
+            <dl className="grid grid-cols-[96px_minmax(0,1fr)] overflow-hidden rounded-lg border text-[13px]">
+              {info.map((r, i) => (
+                <div key={r.label} className="contents">
+                  <dt
+                    className={cn(
+                      "bg-surface-2 px-3 py-2.5 text-muted-foreground",
+                      i < info.length - 1 && "border-b",
+                    )}
+                  >
+                    {r.label}
+                  </dt>
+                  <dd
+                    className={cn(
+                      "min-w-0 px-3 py-2.5 tabular-nums",
+                      i < info.length - 1 && "border-b",
+                    )}
+                  >
+                    {r.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
+          {captions && (
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold text-muted-foreground">캡션</h3>
               {captions.youtube && (
                 <CaptionBlock
-                  title="YouTube"
+                  title="유튜브"
                   primary={captions.youtube.title ?? ""}
                   body={captions.youtube.description ?? ""}
                   tags={captions.youtube.hashtags ?? []}
@@ -1272,7 +1450,7 @@ function DetailDialog({
               )}
               {captions.instagram && (
                 <CaptionBlock
-                  title="Instagram"
+                  title="인스타그램"
                   primary=""
                   body={captions.instagram.caption ?? ""}
                   tags={captions.instagram.hashtags ?? []}
@@ -1280,66 +1458,111 @@ function DetailDialog({
               )}
               {captions.tiktok && (
                 <CaptionBlock
-                  title="TikTok"
+                  title="틱톡"
                   primary=""
                   body={captions.tiktok.caption ?? ""}
                   tags={captions.tiktok.hashtags ?? []}
                 />
               )}
-            </div>
+            </section>
           )}
 
           {canManage && (
-            <div className="flex items-center justify-between gap-2 border-t pt-4">
-              {/* 콘텐츠 완전 삭제 — 이 콘텐츠의 모든 포스팅에 영향을 주므로
-                  포스팅 단위 액션(재시도/취소)과 시각적으로 분리한다. */}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  onDeleteContent(
-                    item.contentId,
-                    item.internalTitle?.trim() || "이 콘텐츠",
-                  )
-                }
-                disabled={isPending}
-                className="text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="size-3.5" /> 콘텐츠 삭제
-              </Button>
-              <div className="flex gap-2">
-              {displayStatus === "failed" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    onRetry(item.id);
-                    onClose();
-                  }}
-                  disabled={isPending}
-                >
-                  <RefreshCw className="size-3.5" /> 재시도
-                </Button>
-              )}
-              {canCancelPosting({ status: item.status, displayStatus }) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    onCancel(item.id);
-                    onClose();
-                  }}
-                  disabled={isPending}
-                >
-                  <X className="size-3.5" /> 발행 취소
-                </Button>
-              )}
+            <section>
+              <h3 className="mb-2 text-xs font-semibold text-muted-foreground">
+                그 밖의 작업
+              </h3>
+              {/* 콘텐츠 완전 삭제 — 이 콘텐츠의 모든 발행에 영향을 주므로
+                  발행 단위 작업(재시도/취소)과 떨어뜨려 설명과 함께 둔다. */}
+              <div className="divide-y rounded-lg border text-[13px]">
+                <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+                  <span className="min-w-0">
+                    목록에서 숨기기
+                    <span className="block text-xs text-muted-foreground">
+                      배포 관리에서만 안 보여요. 게시물과 이력은 그대로예요.
+                    </span>
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      onHide(item.id);
+                      onClose();
+                    }}
+                    disabled={isPending}
+                  >
+                    <EyeOff /> 숨기기
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between gap-3 px-3.5 py-3">
+                  <span className="min-w-0">
+                    콘텐츠 삭제
+                    <span className="block text-xs text-muted-foreground">
+                      올린 파일과 이 콘텐츠의 모든 발행 이력이 지워지고 되돌릴 수 없어요.
+                    </span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      onDeleteContent(
+                        item.contentId,
+                        item.internalTitle?.trim() || "이 콘텐츠",
+                      )
+                    }
+                    disabled={isPending}
+                    className="text-risk hover:bg-risk-soft hover:text-risk"
+                  >
+                    <Trash2 /> 삭제
+                  </Button>
+                </div>
               </div>
-            </div>
+            </section>
           )}
         </div>
-      </div>
-    </div>
+
+        {(item.platformPostUrl ||
+          (canManage && (displayStatus === "failed" || canCancel))) && (
+          <div className="flex justify-end gap-2 border-t px-4 py-3">
+            {item.platformPostUrl && (
+              <a
+                href={item.platformPostUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={buttonVariants({
+                  variant: displayStatus === "failed" ? "outline" : "default",
+                })}
+              >
+                <ExternalLink /> 게시 글 열기
+              </a>
+            )}
+            {canManage && canCancel && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  onCancel(item.id);
+                  onClose();
+                }}
+                disabled={isPending}
+              >
+                <X /> 발행 취소
+              </Button>
+            )}
+            {canManage && displayStatus === "failed" && (
+              <Button
+                onClick={() => {
+                  onRetry(item.id);
+                  onClose();
+                }}
+                disabled={isPending}
+              >
+                <RefreshCw /> 재시도
+              </Button>
+            )}
+          </div>
+        )}
+      </aside>
+    </>
   );
 }
 
@@ -1355,10 +1578,10 @@ function CaptionBlock({
   tags: string[];
 }) {
   return (
-    <div className="rounded-md border bg-muted/20 p-3 text-xs">
-      <p className="mb-1 font-medium">{title}</p>
-      {primary && <p className="mb-1 font-semibold">{primary}</p>}
-      <p className="whitespace-pre-wrap">{body}</p>
+    <div className="rounded-lg border bg-surface-2 px-3.5 py-3 text-xs">
+      <p className="mb-1 font-semibold text-muted-foreground">{title}</p>
+      {primary && <p className="mb-1 text-[13px] font-semibold">{primary}</p>}
+      <p className="whitespace-pre-wrap text-ink-2">{body}</p>
       {tags.length > 0 && (
         <p className="mt-2 text-primary">{tags.join(" ")}</p>
       )}

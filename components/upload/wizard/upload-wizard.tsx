@@ -5,9 +5,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  CalendarCheck,
   Check,
   CircleAlert,
+  CircleCheck,
+  ImageIcon,
+  Info,
+  OctagonAlert,
   Pencil,
+  RefreshCw,
+  Send,
   Sparkles,
 } from "lucide-react";
 import {
@@ -18,15 +25,9 @@ import { ImageDropzone } from "@/components/upload/image-dropzone";
 import { VideoDropzone } from "@/components/upload/video-dropzone";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { PlatformIcon } from "@/components/ui/platform-icon";
+import { Segmented } from "@/components/ui/segmented";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
@@ -55,12 +56,18 @@ import { extractFirstFrame } from "@/lib/video/extract-frame";
 import { StepIndicator } from "./step-indicator";
 
 const STEPS = [
-  { key: 1, label: "계정" },
-  { key: 2, label: "미디어" },
-  { key: 3, label: "캡션" },
-  { key: 4, label: "검토" },
-  { key: 5, label: "예약" },
+  { key: 1, label: "계정 고르기", description: "올릴 계정을 고르세요. 그룹마다 한 번에 고를 수 있어요." },
+  { key: 2, label: "사진 · 영상", description: "계정마다 올릴 수 있는 형식인지 바로 확인해요." },
+  { key: 3, label: "캡션 쓰기", description: "플랫폼마다 글자 수 · 해시태그 규칙에 맞춰 따로 써요." },
+  { key: 4, label: "미리 보기", description: "계정마다 어떻게 보일지 확인하세요." },
+  { key: 5, label: "올릴 시각", description: "바로 올리거나 시각을 정하세요." },
 ];
+
+const PLATFORM_LABEL: Record<Platform, string> = {
+  INSTAGRAM: "인스타그램",
+  YOUTUBE: "유튜브",
+  TIKTOK: "틱톡",
+};
 
 interface SocialAccountSummary {
   id: string;
@@ -521,39 +528,42 @@ export function UploadWizard({
     router.refresh();
   }
 
+  // 끝낸 단계로만 되돌아간다. 업로드 · 캡션 생성 · 등록 중에는 막는다.
+  const busy = uploading || generating || completing;
+  const currentStep = STEPS[step - 1];
+
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <CardTitle>콘텐츠 생성</CardTitle>
-            <CardDescription>
-              5단계로 계정 선택, 미디어 업로드, 캡션 작성, 검토, 예약을 진행합니다.
-            </CardDescription>
+    <div className="grid items-start gap-4 lg:grid-cols-[188px_minmax(0,1fr)] xl:grid-cols-[188px_minmax(0,1fr)_300px]">
+      <StepIndicator
+        current={step}
+        steps={STEPS}
+        onJump={setStep}
+        disabled={busy}
+      />
+
+      <section className="min-w-0 rounded-lg border bg-card">
+        <header className="flex flex-wrap items-start justify-between gap-2 border-b px-4 py-3.5">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold">
+              {step}. {currentStep.label}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {currentStep.description}
+            </p>
           </div>
-        </div>
-        <div className="mt-3 space-y-1">
-          <Label htmlFor="internal-title" className="text-xs">
-            내부 타이틀 (선택)
-          </Label>
-          <input
-            id="internal-title"
-            type="text"
-            value={internalTitle}
-            onChange={(e) => setInternalTitle(e.target.value)}
-            maxLength={200}
-            placeholder="예) 한강 카페 1편 — 보관함/포스팅 관리에서 식별용 라벨"
-            className="w-full rounded-md border bg-card px-3 py-2 text-sm"
-          />
-        </div>
-        <div className="pt-4">
-          <StepIndicator current={step} steps={STEPS} />
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-6">
+          {step === 1 && selectedAccountIds.length > 0 && (
+            <Badge className="tabular-nums">
+              {selectedAccountIds.length}개 고름
+            </Badge>
+          )}
+        </header>
+
         {error && (
-          <div className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-            <CircleAlert className="size-4 shrink-0" />
+          <div
+            role="alert"
+            className="mx-4 mt-4 flex gap-2.5 rounded-lg bg-risk-soft px-3.5 py-3 text-[13px] text-ink-2"
+          >
+            <CircleAlert className="mt-0.5 size-4 shrink-0 text-risk" />
             <p>{error}</p>
           </div>
         )}
@@ -563,6 +573,8 @@ export function UploadWizard({
             socialAccounts={socialAccounts}
             accountGroups={accountGroups}
             selectedAccountIds={selectedAccountIds}
+            internalTitle={internalTitle}
+            onChangeInternalTitle={setInternalTitle}
             onToggle={toggleAccount}
             onSetSelection={(ids) => {
               setSelectedAccountIds(ids);
@@ -625,12 +637,14 @@ export function UploadWizard({
         {step === 4 && (
           <Step4Review
             selectedAccounts={selectedAccounts}
+            selectedPlatforms={selectedPlatforms}
             captions={captions}
             validation={validation}
             mediaType={mediaType}
             mediaCount={
               mediaType === "IMAGE" ? files.length : videoFile ? 1 : 0
             }
+            thumbnailUrl={thumbnailUrls[0] ?? null}
             onJump={setStep}
             onPrev={() => setStep(3)}
             onNext={() => setStep(5)}
@@ -661,8 +675,206 @@ export function UploadWizard({
             onComplete={handleComplete}
           />
         )}
-      </CardContent>
-    </Card>
+      </section>
+
+      <WizardSummary
+        className="lg:col-span-2 xl:col-span-1"
+        step={step}
+        internalTitle={internalTitle}
+        selectedAccounts={selectedAccounts}
+        mediaType={mediaType}
+        fileCount={files.length}
+        videoName={videoFile?.name ?? null}
+        captions={captions}
+        captionMode={captionMode}
+        scheduleMode={scheduleMode}
+        scheduledAt={scheduledAt}
+      />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 패널 본문 · 아래 버튼 줄 (DESIGN.md 6장 카드 = 패널)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function StepBody({ children }: { children: React.ReactNode }) {
+  return <div className="space-y-5 p-4">{children}</div>;
+}
+
+function StepFooter({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3">
+      {children}
+    </div>
+  );
+}
+
+function FieldLabel({
+  htmlFor,
+  children,
+  optional,
+}: {
+  htmlFor?: string;
+  children: React.ReactNode;
+  optional?: boolean;
+}) {
+  return (
+    <Label htmlFor={htmlFor} className="text-[13px] font-semibold text-ink-2">
+      {children}
+      {optional && (
+        <span className="text-xs font-normal text-faint">선택</span>
+      )}
+    </Label>
+  );
+}
+
+const SELECT_CLASS =
+  "h-9 w-full rounded-md border border-input bg-card px-2.5 text-base sm:text-[13px]";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 오른쪽 요약 — 어느 단계에서든 고른 것을 확인한다
+// ─────────────────────────────────────────────────────────────────────────────
+
+// "2026-11-04T12:00" → "11월 4일 12:00". Date를 거치지 않아 시간대 · 하이드레이션 영향이 없다.
+function formatLocalInput(v: string): string {
+  const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) return v;
+  return `${Number(m[2])}월 ${Number(m[3])}일 ${m[4]}:${m[5]}`;
+}
+
+function WizardSummary({
+  className,
+  step,
+  internalTitle,
+  selectedAccounts,
+  mediaType,
+  fileCount,
+  videoName,
+  captions,
+  captionMode,
+  scheduleMode,
+  scheduledAt,
+}: {
+  className?: string;
+  step: number;
+  internalTitle: string;
+  selectedAccounts: SocialAccountSummary[];
+  mediaType: MediaType;
+  fileCount: number;
+  videoName: string | null;
+  captions: Captions | null;
+  captionMode: CaptionMode;
+  scheduleMode: ScheduleMode;
+  scheduledAt: string;
+}) {
+  const captionPlatforms = captions
+    ? [captions.youtube, captions.instagram, captions.tiktok].filter(Boolean)
+        .length
+    : 0;
+  const rows: Array<{ label: string; value: React.ReactNode }> = [
+    {
+      label: "이름",
+      value: internalTitle.trim() || <span className="text-faint">없음</span>,
+    },
+    {
+      label: "계정",
+      value:
+        selectedAccounts.length > 0 ? (
+          <ul className="space-y-1">
+            {selectedAccounts.map((a) => (
+              <li key={a.id} className="flex min-w-0 items-center gap-1.5">
+                <PlatformIcon platform={a.platform} size={16} />
+                <span className="truncate">{a.display_name ?? "(이름 없음)"}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="text-faint">고르지 않았어요</span>
+        ),
+    },
+    {
+      label: "올릴 것",
+      value:
+        mediaType === "IMAGE" ? (
+          fileCount > 0 ? (
+            `사진 ${fileCount}장`
+          ) : (
+            <span className="text-faint">사진 · 아직 없어요</span>
+          )
+        ) : videoName ? (
+          <>
+            영상 1개
+            <span className="block truncate text-xs text-muted-foreground">
+              {videoName}
+            </span>
+          </>
+        ) : (
+          <span className="text-faint">영상 · 아직 없어요</span>
+        ),
+    },
+    {
+      label: "캡션",
+      value: captions ? (
+        `${captionMode === "ai" ? "AI가 썼어요" : "직접 써요"} · 플랫폼 ${captionPlatforms}개`
+      ) : (
+        <span className="text-faint">아직 안 썼어요</span>
+      ),
+    },
+    {
+      label: "올릴 때",
+      value:
+        scheduleMode === "now" ? (
+          "바로 올리기"
+        ) : scheduledAt ? (
+          `${formatLocalInput(scheduledAt)} 예약`
+        ) : (
+          <span className="text-faint">시각을 골라 주세요</span>
+        ),
+    },
+  ];
+  return (
+    <aside
+      aria-label="올릴 내용"
+      className={cn(
+        "min-w-0 rounded-lg border bg-card xl:sticky xl:top-[76px]",
+        className,
+      )}
+    >
+      <div className="flex items-center justify-between gap-2 border-b px-4 py-3.5">
+        <h3 className="text-[15px] font-semibold">올릴 내용</h3>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {step}/{STEPS.length}단계
+        </span>
+      </div>
+      <div className="p-4">
+        <dl className="grid grid-cols-[84px_minmax(0,1fr)] overflow-hidden rounded-lg border text-[13px]">
+          {rows.map((r, i) => (
+            <div key={r.label} className="contents">
+              <dt
+                className={cn(
+                  "bg-surface-2 px-3 py-2.5 text-muted-foreground",
+                  i < rows.length - 1 && "border-b",
+                )}
+              >
+                {r.label}
+              </dt>
+              <dd
+                className={cn(
+                  "min-w-0 px-3 py-2.5",
+                  i < rows.length - 1 && "border-b",
+                )}
+              >
+                {r.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+      <p className="border-t px-4 py-3 text-xs text-muted-foreground">
+        완료하면 배포 관리에서 계정마다 진행을 볼 수 있어요.
+      </p>
+    </aside>
   );
 }
 
@@ -670,6 +882,7 @@ export function UploadWizard({
 // Step 1 — 계정 선택
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 계정 그룹 색 — 사용자가 고른 팔레트 값이라 토큰으로 바꾸지 않는다(DESIGN.md 2장 예외).
 const GROUP_DOT_COLOR: Record<string, string> = {
   zinc: "bg-zinc-400",
   red: "bg-red-500",
@@ -680,12 +893,12 @@ const GROUP_DOT_COLOR: Record<string, string> = {
   purple: "bg-purple-500",
 };
 
-const GROUP_BAR_COLOR: Record<string, string> = GROUP_DOT_COLOR;
-
 function Step1Accounts({
   socialAccounts,
   accountGroups,
   selectedAccountIds,
+  internalTitle,
+  onChangeInternalTitle,
   onToggle,
   onSetSelection,
   onNext,
@@ -700,6 +913,8 @@ function Step1Accounts({
   }[];
   accountGroups: { id: string; name: string; color: string }[];
   selectedAccountIds: string[];
+  internalTitle: string;
+  onChangeInternalTitle: (v: string) => void;
   onToggle: (id: string, checked: boolean) => void;
   onSetSelection: (ids: string[]) => void;
   onNext: () => void;
@@ -718,20 +933,28 @@ function Step1Accounts({
 
   if (socialAccounts.length === 0) {
     return (
-      <div className="space-y-4">
-        <div className="rounded-md border bg-muted/30 p-8 text-center">
-          <p className="text-sm">아직 연동된 계정이 없어요.</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            먼저 게시할 플랫폼 계정을 연결해주세요.
-          </p>
-          <Link
-            href="/accounts"
-            className={cn(buttonVariants({ size: "sm" }), "mt-4")}
-          >
-            계정 관리로 이동
-          </Link>
-        </div>
-      </div>
+      <>
+        <StepBody>
+          <div className="rounded-lg border border-dashed bg-surface-2 p-8 text-center">
+            <p className="text-sm font-medium">아직 연결한 계정이 없어요.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              먼저 올릴 플랫폼 계정을 연결해 주세요.
+            </p>
+            <Link
+              href="/accounts"
+              className={cn(buttonVariants({ size: "sm" }), "mt-4")}
+            >
+              계정 연동으로 가기
+            </Link>
+          </div>
+        </StepBody>
+        <StepFooter>
+          <span />
+          <Button onClick={onNext} disabled>
+            다음: {STEPS[1].label}
+          </Button>
+        </StepFooter>
+      </>
     );
   }
 
@@ -779,118 +1002,150 @@ function Step1Accounts({
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        그룹 헤더의 체크박스로 한 번에 선택하거나, 개별 계정을 직접 체크할 수 있어요.
-      </p>
+    <>
+      <StepBody>
+        <div className="max-w-xl space-y-1.5">
+          <FieldLabel htmlFor="internal-title" optional>
+            구분용 이름
+          </FieldLabel>
+          <input
+            id="internal-title"
+            type="text"
+            value={internalTitle}
+            onChange={(e) => onChangeInternalTitle(e.target.value)}
+            maxLength={200}
+            placeholder="예) 한강 카페 1편"
+            className="h-9 w-full rounded-md border border-input bg-card px-3 text-base sm:text-[13px]"
+          />
+          <p className="text-xs text-muted-foreground">
+            보관함 · 배포 관리에서 찾을 때 쓰는 이름이에요. 게시물에는 보이지 않아요.
+          </p>
+        </div>
 
-      <div className="space-y-3">
-        {sections.map((section) => {
-          const eligible = section.list.filter((a) => a.is_active);
-          const selectedInGroup = eligible.filter((a) =>
-            selectedAccountIds.includes(a.id),
-          );
-          const allSelected =
-            eligible.length > 0 && selectedInGroup.length === eligible.length;
-          const partial =
-            selectedInGroup.length > 0 && !allSelected;
-          const bar = GROUP_BAR_COLOR[section.color] ?? GROUP_BAR_COLOR.zinc;
-          return (
-            <div
-              key={section.key}
-              className={cn(
-                "relative overflow-hidden rounded-md border",
-                section.isUnassigned && "border-dashed",
-              )}
-            >
-              <div className={cn("absolute inset-y-0 left-0 w-1", bar)} />
-              {/* Section header — 클릭으로 전체 토글 */}
-              <button
-                type="button"
-                onClick={() => toggleGroup(section.list)}
-                disabled={eligible.length === 0}
+        {/* 아주 넓은 화면에선 그룹을 두 줄로 나란히 (시안 8 — 계정 고르기 카드) */}
+        <div className="grid items-start gap-3 2xl:grid-cols-2">
+          {sections.map((section) => {
+            const eligible = section.list.filter((a) => a.is_active);
+            const selectedInGroup = eligible.filter((a) =>
+              selectedAccountIds.includes(a.id),
+            );
+            const allSelected =
+              eligible.length > 0 && selectedInGroup.length === eligible.length;
+            const partial = selectedInGroup.length > 0 && !allSelected;
+            const dot = GROUP_DOT_COLOR[section.color] ?? GROUP_DOT_COLOR.zinc;
+            return (
+              <div
+                key={section.key}
                 className={cn(
-                  "flex w-full items-center gap-3 px-4 py-2.5 text-left transition",
-                  eligible.length === 0
-                    ? "cursor-not-allowed opacity-60"
-                    : "hover:bg-accent/30",
+                  "overflow-hidden rounded-lg border bg-card",
+                  section.isUnassigned && "border-dashed",
                 )}
               >
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  ref={(el) => {
-                    if (el) el.indeterminate = partial;
-                  }}
-                  readOnly
+                {/* 그룹 머리 — 누르면 이 그룹 전체 선택/해제 */}
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(section.list)}
                   disabled={eligible.length === 0}
-                  className="size-4 pointer-events-none"
-                />
-                <p className="flex-1 text-sm font-semibold">
-                  {section.title}
-                  <span className="ml-1.5 text-xs font-normal text-muted-foreground">
-                    {selectedInGroup.length}/{eligible.length}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors",
+                    eligible.length === 0
+                      ? "cursor-not-allowed opacity-60"
+                      : "hover:bg-surface-2",
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = partial;
+                    }}
+                    readOnly
+                    tabIndex={-1}
+                    aria-hidden
+                    disabled={eligible.length === 0}
+                    className="pointer-events-none size-4 accent-primary"
+                  />
+                  <span className={cn("size-2.5 shrink-0 rounded-[3px]", dot)} />
+                  <span className="flex-1 text-[13px] font-semibold">
+                    {section.title}
+                    <span className="ml-1.5 text-xs font-medium text-muted-foreground tabular-nums">
+                      {selectedInGroup.length}/{eligible.length}
+                    </span>
                   </span>
-                </p>
-              </button>
+                  <span className="text-xs text-muted-foreground">
+                    {allSelected ? "모두 빼기" : "모두 고르기"}
+                  </span>
+                </button>
 
-              {/* Account rows */}
-              <ul className="space-y-1 border-t bg-muted/10 px-3 py-2">
-                {section.list.map((acc) => {
-                  const checked = selectedAccountIds.includes(acc.id);
-                  const disabled = !acc.is_active;
-                  return (
-                    <li key={acc.id}>
-                      <label
-                        className={cn(
-                          "flex items-center gap-2.5 rounded px-2 py-1.5 text-sm transition",
-                          disabled
-                            ? "cursor-not-allowed opacity-50"
-                            : "cursor-pointer hover:bg-accent/40",
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={disabled}
-                          onChange={(e) =>
-                            onToggle(acc.id, e.target.checked)
-                          }
-                          className="size-4"
-                        />
-                        <PlatformIcon platform={acc.platform} size={20} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium leading-tight">
-                            {acc.display_name ?? "(이름 없음)"}
-                          </p>
-                          <p className="text-[10px] leading-tight text-muted-foreground">
-                            {acc.platform}
-                          </p>
-                        </div>
-                        {disabled && (
-                          <Badge
-                            variant="destructive"
-                            className="text-[10px]"
-                          >
-                            비활성
-                          </Badge>
-                        )}
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="flex justify-end">
+                {/* 계정 카드 — 누르면 선택, 고른 카드는 파란 테두리 + ✓ */}
+                <ul className="grid gap-2 border-t p-3 sm:grid-cols-2">
+                  {section.list.map((acc) => {
+                    const checked = selectedAccountIds.includes(acc.id);
+                    const disabled = !acc.is_active;
+                    return (
+                      <li key={acc.id} className="min-w-0">
+                        <label
+                          className={cn(
+                            "relative flex min-w-0 items-center gap-2.5 rounded-md border px-3 py-2.5 transition focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary",
+                            checked
+                              ? "border-primary bg-brand-soft pr-10 ring-1 ring-inset ring-primary"
+                              : "border-input bg-card",
+                            disabled
+                              ? "cursor-not-allowed opacity-55"
+                              : "cursor-pointer hover:bg-surface-2",
+                            checked && !disabled && "hover:bg-brand-soft",
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={disabled}
+                            onChange={(e) => onToggle(acc.id, e.target.checked)}
+                            className="sr-only"
+                          />
+                          <PlatformIcon platform={acc.platform} size={20} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[13px] font-semibold leading-tight">
+                              {acc.display_name ?? "(이름 없음)"}
+                            </p>
+                            <p
+                              className={cn(
+                                "mt-0.5 text-xs leading-tight",
+                                disabled ? "text-risk" : "text-muted-foreground",
+                              )}
+                            >
+                              {disabled
+                                ? "연결이 끊겼어요 · 계정 연동에서 다시 연결"
+                                : PLATFORM_LABEL[acc.platform]}
+                            </p>
+                          </div>
+                          {checked && (
+                            <span
+                              aria-hidden
+                              className="absolute right-3 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full bg-primary text-primary-foreground"
+                            >
+                              <Check className="size-3" />
+                            </span>
+                          )}
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      </StepBody>
+      <StepFooter>
+        <span className="text-xs text-muted-foreground">
+          연결이 끊긴 계정은 고를 수 없어요.
+        </span>
         <Button onClick={onNext} disabled={!canAdvance}>
-          다음 단계 ({selectedAccountIds.length}개 선택)
+          다음: {STEPS[1].label}
         </Button>
-      </div>
-    </div>
+      </StepFooter>
+    </>
   );
 }
 
@@ -932,64 +1187,80 @@ function Step2Media({
   canAdvance: boolean;
 }) {
   return (
-    <div className="space-y-4">
-      {includesTiktok && (
-        <div className="flex gap-2 rounded-md border border-warn/40 bg-warn-soft p-3 text-xs text-warn">
-          <CircleAlert className="size-4 shrink-0" />
-          <p>
-            TikTok 계정이 포함되어 있어 <strong>영상만 업로드 가능</strong>해요.
-            (Content Posting API는 이미지 게시를 지원하지 않습니다.)
-          </p>
+    <>
+      <StepBody>
+        <div className="flex flex-wrap items-center gap-3">
+          <Segmented<MediaType>
+            ariaLabel="올릴 것"
+            value={mediaType}
+            onChange={onSwitchType}
+            disabled={uploading}
+            options={[
+              { value: "IMAGE", label: "사진 1~10장", disabled: includesTiktok },
+              { value: "VIDEO", label: "영상 1개" },
+            ]}
+          />
+          {includesTiktok && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Info className="size-3.5 shrink-0" />
+              틱톡 계정이 있어서 영상만 올릴 수 있어요 (틱톡은 사진 게시를 지원하지 않아요)
+            </span>
+          )}
         </div>
-      )}
-      <div className="flex gap-2">
-        <Button
-          variant={mediaType === "IMAGE" ? "default" : "outline"}
-          onClick={() => onSwitchType("IMAGE")}
-          disabled={uploading || includesTiktok}
-          className="flex-1"
-        >
-          이미지 (1~10장)
-        </Button>
-        <Button
-          variant={mediaType === "VIDEO" ? "default" : "outline"}
-          onClick={() => onSwitchType("VIDEO")}
-          disabled={uploading}
-          className="flex-1"
-        >
-          영상 (1개)
-        </Button>
-      </div>
-      {mediaType === "IMAGE" ? (
-        <ImageDropzone onChange={onChangeFiles} />
-      ) : (
-        <VideoDropzone
-          onChange={onChangeVideo}
-          coverSeconds={coverSeconds}
-          onCoverChange={onChangeCover}
-        />
-      )}
-      {validation && (
-        <ValidationPanel
-          validation={validation}
-          selectedPlatforms={selectedPlatforms}
-        />
-      )}
-      <div className="flex justify-between">
+        {mediaType === "IMAGE" ? (
+          <ImageDropzone onChange={onChangeFiles} />
+        ) : (
+          <VideoDropzone
+            onChange={onChangeVideo}
+            coverSeconds={coverSeconds}
+            onCoverChange={onChangeCover}
+          />
+        )}
+        {validation && (
+          <ValidationPanel
+            validation={validation}
+            selectedPlatforms={selectedPlatforms}
+          />
+        )}
+      </StepBody>
+      <StepFooter>
         <Button variant="outline" onClick={onPrev} disabled={uploading}>
           이전
         </Button>
         <Button onClick={onNext} disabled={!canAdvance || uploading}>
           {uploading
             ? mediaType === "VIDEO"
-              ? "업로드 + 프레임 추출 중..."
-              : `업로드 중... (${files.length}장)`
-            : mediaType === "VIDEO"
-              ? "다음 단계"
-              : `다음 단계 (${files.length}장)`}
+              ? "영상 올리는 중…"
+              : `사진 올리는 중… (${files.length}장)`
+            : `다음: ${STEPS[2].label}`}
         </Button>
-      </div>
-    </div>
+      </StepFooter>
+    </>
+  );
+}
+
+const VERDICT_BADGE: Record<
+  PlatformVerdict["status"],
+  { variant: "ok" | "warn" | "destructive"; label: string }
+> = {
+  ok: { variant: "ok", label: "올릴 수 있어요" },
+  warning: { variant: "warn", label: "확인 필요" },
+  blocked: { variant: "destructive", label: "올릴 수 없어요" },
+};
+
+function VerdictBadge({ status }: { status: PlatformVerdict["status"] }) {
+  const b = VERDICT_BADGE[status];
+  return (
+    <Badge variant={b.variant}>
+      {status === "ok" ? (
+        <CircleCheck />
+      ) : status === "warning" ? (
+        <AlertTriangle />
+      ) : (
+        <OctagonAlert />
+      )}
+      {b.label}
+    </Badge>
   );
 }
 
@@ -1001,11 +1272,11 @@ function ValidationPanel({
   selectedPlatforms: Platform[];
 }) {
   return (
-    <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-      <p className="text-xs font-medium text-muted-foreground">
-        플랫폼별 적합성
+    <div className="space-y-1.5">
+      <p className="text-[13px] font-semibold text-ink-2">
+        계정마다 올릴 수 있는지
       </p>
-      <ul className="space-y-2">
+      <ul className="overflow-hidden rounded-lg border">
         {selectedPlatforms.map((p) => {
           const v = validation.perPlatform.find((x) => x.platform === p);
           if (!v) return null;
@@ -1017,37 +1288,28 @@ function ValidationPanel({
 }
 
 function PlatformVerdictRow({ verdict }: { verdict: PlatformVerdict }) {
-  const icon =
-    verdict.status === "ok" ? (
-      <Check className="size-4 text-ok" />
-    ) : verdict.status === "warning" ? (
-      <AlertTriangle className="size-4 text-warn" />
-    ) : (
-      <CircleAlert className="size-4 text-destructive" />
-    );
   return (
-    <li className="space-y-1">
-      <div className="flex items-center gap-2 text-sm">
-        {icon}
-        <span className="font-medium">{verdict.platform}</span>
-        <Badge
-          variant={
-            verdict.status === "blocked" ? "destructive" : "outline"
-          }
-          className="text-[10px]"
-        >
-          {verdict.status === "ok"
-            ? "적합"
-            : verdict.status === "warning"
-              ? "경고"
-              : "게시 불가"}
-        </Badge>
+    <li
+      className={cn(
+        "flex flex-col gap-2 border-b px-3.5 py-2.5 last:border-b-0 sm:flex-row sm:items-start sm:gap-3",
+        verdict.status === "blocked" && "bg-risk-soft",
+      )}
+    >
+      <div className="flex shrink-0 items-center gap-2 sm:w-40 sm:pt-0.5">
+        <PlatformIcon platform={verdict.platform} size={20} />
+        <span className="text-[13px] font-semibold">
+          {PLATFORM_LABEL[verdict.platform]}
+        </span>
       </div>
+      <VerdictBadge status={verdict.status} />
       {verdict.issues.length > 0 && (
-        <ul className="ml-6 space-y-0.5 text-xs text-muted-foreground">
+        <ul className="min-w-0 flex-1 space-y-0.5 text-xs sm:pt-1">
           {verdict.issues.map((iss, i) => (
-            <li key={i}>
-              {iss.severity === "error" ? "❌" : "⚠️"} {iss.message}
+            <li
+              key={i}
+              className={iss.severity === "error" ? "text-risk" : "text-ink-2"}
+            >
+              {iss.message}
             </li>
           ))}
         </ul>
@@ -1108,123 +1370,158 @@ function Step3Caption({
   canAdvance: boolean;
 }) {
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
-        <Button
-          variant={captionMode === "ai" ? "default" : "outline"}
-          onClick={() => onSwitchMode("ai")}
-          disabled={generating}
-          className="flex-1"
-        >
-          <Sparkles className="size-4" /> AI 자동 생성
-        </Button>
-        <Button
-          variant={captionMode === "manual" ? "default" : "outline"}
-          onClick={() => onSwitchMode("manual")}
-          disabled={generating}
-          className="flex-1"
-        >
-          <Pencil className="size-4" /> 직접 작성
-        </Button>
-      </div>
+    <>
+      <StepBody>
+        <div className="flex flex-wrap items-center gap-3">
+          <Segmented<CaptionMode>
+            ariaLabel="캡션 쓰는 방법"
+            value={captionMode}
+            onChange={onSwitchMode}
+            disabled={generating}
+            options={[
+              {
+                value: "ai",
+                label: (
+                  <>
+                    <Sparkles /> AI로 쓰기
+                  </>
+                ),
+              },
+              {
+                value: "manual",
+                label: (
+                  <>
+                    <Pencil /> 직접 쓰기
+                  </>
+                ),
+              },
+            ]}
+          />
+          {captions && (
+            <span className="text-xs text-muted-foreground">
+              방법을 바꾸면 지금 쓴 캡션이 지워져요
+            </span>
+          )}
+        </div>
 
-      {!captions ? (
-        captionMode === "ai" ? (
-          <>
-            {presets.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="preset">캡션 프리셋 (선택)</Label>
-                <select
-                  id="preset"
-                  value={presetId}
-                  onChange={(e) => onChangePreset(e.target.value)}
-                  disabled={generating}
-                  className="w-full rounded-md border bg-card px-3 py-2 text-sm"
-                >
-                  <option value="">— 사용 안 함 —</option>
-                  {presets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-                {selectedPreset?.description && (
-                  <p className="text-xs text-muted-foreground">
-                    {selectedPreset.description}
-                  </p>
+        {!captions ? (
+          captionMode === "ai" ? (
+            <div className="space-y-4 rounded-lg border bg-surface-2 p-4">
+              <div
+                className={cn(
+                  "grid gap-4",
+                  presets.length > 0 && "md:grid-cols-2",
                 )}
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="description">기본 설명 (선택)</Label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => onChangeDescription(e.target.value)}
-                placeholder="예) 홍대 브런치 카페 후기, 톤은 따뜻하고 일상적으로"
-                rows={3}
-                disabled={generating}
-              />
-              <p className="text-xs text-muted-foreground">
-                설명을 입력하면 AI가 더 정확한 톤의 캡션을 생성합니다.
-              </p>
-            </div>
-            <Button onClick={onGenerate} disabled={generating}>
-              <Sparkles className="size-4" />
-              {generating ? "AI 분석 중..." : "AI 캡션 생성"}
-            </Button>
-          </>
-        ) : (
-          <>
-            <p className="text-sm text-muted-foreground">
-              빈 캡션으로 시작해서 플랫폼별 탭에서 직접 작성합니다. 시작하면
-              임시 콘텐츠가 보관함에 저장돼요.
-            </p>
-            <Button onClick={onStartManual} disabled={generating}>
-              <Pencil className="size-4" />
-              {generating ? "준비 중..." : "직접 작성 시작"}
-            </Button>
-          </>
-        )
-      ) : (
-        contentId &&
-        savedAt && (
-          <>
-            <CaptionResult
-              ref={captionRef}
-              contentId={contentId}
-              captions={captions}
-              savedAt={savedAt}
-              thumbnails={thumbnailUrls}
-              initialEditing={captionMode === "manual"}
-              onSaved={(c, at) => {
-                onCaptionsSaved(c);
-                onSavedAtChange(at);
-              }}
-            />
-            {captionMode === "ai" && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onRegenerate}
-                disabled={generating}
               >
-                <Sparkles className="size-4" />
-                {generating ? "다른 스타일로 생성 중..." : "다시 생성 (다른 스타일)"}
+                {presets.length > 0 && (
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="preset" optional>
+                      AI 프리셋
+                    </FieldLabel>
+                    <select
+                      id="preset"
+                      value={presetId}
+                      onChange={(e) => onChangePreset(e.target.value)}
+                      disabled={generating}
+                      className={SELECT_CLASS}
+                    >
+                      <option value="">사용 안 함</option>
+                      {presets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedPreset?.description && (
+                      <p className="text-xs text-muted-foreground">
+                        {selectedPreset.description}
+                      </p>
+                    )}
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <FieldLabel htmlFor="description" optional>
+                    어떤 내용인지
+                  </FieldLabel>
+                  <Textarea
+                    id="description"
+                    value={description}
+                    onChange={(e) => onChangeDescription(e.target.value)}
+                    placeholder="예) 홍대 브런치 카페 후기, 따뜻하고 일상적인 말투로"
+                    rows={2}
+                    disabled={generating}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  사진 · 영상과 설명을 보고 플랫폼마다 따로 써요.
+                </p>
+                <Button onClick={onGenerate} disabled={generating}>
+                  <Sparkles className="size-4" />
+                  {generating ? "캡션 쓰는 중…" : "캡션 만들기"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-brand-soft px-3.5 py-3">
+              <p className="flex gap-2.5 text-[13px] text-ink-2">
+                <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+                빈 캡션으로 시작해 플랫폼마다 직접 써요. 시작하면 임시 콘텐츠가
+                보관함에 저장돼요.
+              </p>
+              <Button onClick={onStartManual} disabled={generating}>
+                <Pencil className="size-4" />
+                {generating ? "준비 중…" : "직접 쓰기 시작"}
               </Button>
-            )}
-          </>
-        )
-      )}
-      <div className="flex justify-between">
+            </div>
+          )
+        ) : (
+          contentId &&
+          savedAt && (
+            <div className="space-y-3">
+              {captionMode === "ai" && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Badge>
+                    <Sparkles />
+                    AI가 썼어요
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onRegenerate}
+                    disabled={generating}
+                  >
+                    <RefreshCw className={cn(generating && "animate-spin")} />
+                    {generating ? "다시 쓰는 중…" : "다른 스타일로 다시 쓰기"}
+                  </Button>
+                </div>
+              )}
+              <CaptionResult
+                ref={captionRef}
+                contentId={contentId}
+                captions={captions}
+                savedAt={savedAt}
+                thumbnails={thumbnailUrls}
+                initialEditing={captionMode === "manual"}
+                onSaved={(c, at) => {
+                  onCaptionsSaved(c);
+                  onSavedAtChange(at);
+                }}
+              />
+            </div>
+          )
+        )}
+      </StepBody>
+      <StepFooter>
         <Button variant="outline" onClick={onPrev} disabled={generating}>
           이전
         </Button>
         <Button onClick={onNext} disabled={!canAdvance}>
-          다음 단계
+          다음: {STEPS[3].label}
         </Button>
-      </div>
-    </div>
+      </StepFooter>
+    </>
   );
 }
 
@@ -1235,15 +1532,17 @@ interface PresetSummary {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 4 — 최종 검토
+// Step 4 — 미리 보기
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Step4Review({
   selectedAccounts,
+  selectedPlatforms,
   captions,
   validation,
   mediaType,
   mediaCount,
+  thumbnailUrl,
   onJump,
   onPrev,
   onNext,
@@ -1254,173 +1553,205 @@ function Step4Review({
     platform: Platform;
     display_name: string | null;
   }[];
+  selectedPlatforms: Platform[];
   captions: Captions | null;
   validation: ValidationResult | null;
   mediaType: MediaType;
   mediaCount: number;
+  thumbnailUrl: string | null;
   onJump: (step: number) => void;
   onPrev: () => void;
   onNext: () => void;
   canAdvance: boolean;
 }) {
+  const verdicts = validation?.perPlatform ?? [];
+  const blocked = verdicts.filter((v) => v.status === "blocked").length;
+  const warned = verdicts.filter((v) => v.status === "warning").length;
+  const captionCount = captions
+    ? [captions.youtube, captions.instagram, captions.tiktok].filter(Boolean)
+        .length
+    : 0;
   return (
-    <div className="space-y-4">
-      <ReviewSection
-        title="미디어"
-        onEdit={() => onJump(2)}
-        summary={
-          mediaType === "IMAGE"
-            ? `이미지 ${mediaCount}장`
-            : `영상 1개`
-        }
-      />
-      <ReviewSection
-        title="계정"
-        onEdit={() => onJump(1)}
-        summary={`${selectedAccounts.length}개 계정 선택`}
-      >
-        <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-          {selectedAccounts.map((acc) => {
-            const verdict = validation?.perPlatform.find(
-              (v) => v.platform === acc.platform,
-            );
-            return (
-              <li key={acc.id} className="flex items-center gap-2">
-                <PlatformIcon platform={acc.platform} size={14} />
-                <span>{acc.display_name ?? "(이름 없음)"}</span>
-                <span>·</span>
-                <span>{acc.platform}</span>
-                {verdict && (
-                  <Badge
-                    variant={
-                      verdict.status === "blocked"
-                        ? "destructive"
-                        : verdict.status === "warning"
-                          ? "outline"
-                          : "secondary"
-                    }
-                    className="ml-1 text-[10px]"
-                  >
-                    {verdict.status === "ok"
-                      ? "✅"
-                      : verdict.status === "warning"
-                        ? "⚠️"
-                        : "❌"}
-                  </Badge>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </ReviewSection>
-      <ReviewSection
-        title="캡션"
-        onEdit={() => onJump(3)}
-        summary={
-          captions
-            ? `${[
-                captions.youtube && "YouTube",
-                captions.instagram && "Instagram",
-                captions.tiktok && "TikTok",
-              ]
-                .filter(Boolean)
-                .join(", ")} 캡션 작성됨`
-            : "캡션 미작성"
-        }
-      >
-        {captions && <CaptionPreview captions={captions} />}
-      </ReviewSection>
-      {!canAdvance && (
-        <div className="flex gap-2 rounded-md border border-warn/40 bg-warn-soft p-3 text-xs text-warn">
-          <AlertTriangle className="size-4 shrink-0" />
-          <p>
-            게시 불가 항목이 있어요. 위의 "수정" 링크로 돌아가 문제를
-            해결해주세요.
-          </p>
+    <>
+      <StepBody>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {blocked > 0 ? (
+            <Badge variant="destructive">
+              <OctagonAlert />
+              올릴 수 없는 플랫폼 {blocked}개
+            </Badge>
+          ) : warned > 0 ? (
+            <Badge variant="warn">
+              <AlertTriangle />
+              확인 필요 {warned}개
+            </Badge>
+          ) : (
+            <Badge variant="ok">
+              <CircleCheck />
+              미디어 규격 맞아요
+            </Badge>
+          )}
+          {captions ? (
+            <Badge variant="ok">
+              <CircleCheck />
+              캡션 {captionCount}개 플랫폼 썼어요
+            </Badge>
+          ) : (
+            <Badge variant="destructive">
+              <OctagonAlert />
+              캡션을 아직 안 썼어요
+            </Badge>
+          )}
+          <span className="ml-auto flex gap-1">
+            <Button variant="ghost" size="sm" onClick={() => onJump(1)}>
+              계정 바꾸기
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => onJump(2)}>
+              {mediaType === "IMAGE" ? "사진" : "영상"} 바꾸기
+            </Button>
+          </span>
         </div>
-      )}
-      <div className="flex justify-between">
+
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-[repeat(auto-fill,200px)]">
+          {selectedPlatforms.map((p) => (
+            <PreviewCard
+              key={p}
+              platform={p}
+              accounts={selectedAccounts.filter((a) => a.platform === p)}
+              captions={captions}
+              verdict={verdicts.find((v) => v.platform === p)}
+              mediaType={mediaType}
+              mediaCount={mediaCount}
+              thumbnailUrl={thumbnailUrl}
+              onEdit={() => onJump(3)}
+            />
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          실제 앱 화면과 줄바꿈 · 잘리는 위치가 조금 다를 수 있어요.
+        </p>
+
+        {!canAdvance && (
+          <div className="flex gap-2.5 rounded-lg bg-warn-soft px-3.5 py-3 text-[13px] text-ink-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warn" />
+            <p>
+              올릴 수 없는 항목이 있어요. 위 버튼으로 해당 단계로 돌아가 고쳐
+              주세요.
+            </p>
+          </div>
+        )}
+      </StepBody>
+      <StepFooter>
         <Button variant="outline" onClick={onPrev}>
           이전
         </Button>
         <Button onClick={onNext} disabled={!canAdvance}>
-          다음 단계
+          다음: {STEPS[4].label}
         </Button>
-      </div>
-    </div>
+      </StepFooter>
+    </>
   );
 }
 
-function ReviewSection({
-  title,
-  summary,
+function PreviewCard({
+  platform,
+  accounts,
+  captions,
+  verdict,
+  mediaType,
+  mediaCount,
+  thumbnailUrl,
   onEdit,
-  children,
 }: {
-  title: string;
-  summary: string;
+  platform: Platform;
+  accounts: { id: string; display_name: string | null }[];
+  captions: Captions | null;
+  verdict: PlatformVerdict | undefined;
+  mediaType: MediaType;
+  mediaCount: number;
+  thumbnailUrl: string | null;
   onEdit: () => void;
-  children?: React.ReactNode;
 }) {
+  const text =
+    platform === "YOUTUBE"
+      ? captions?.youtube?.title
+      : platform === "INSTAGRAM"
+        ? captions?.instagram?.caption
+        : captions?.tiktok?.caption;
+  const firstLine = (text ?? "").split("\n")[0];
+  const who = accounts[0]?.display_name ?? "";
   return (
-    <div className="rounded-md border p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-xs font-medium text-muted-foreground">{title}</p>
-          <p className="text-sm">{summary}</p>
+    <div className="flex min-w-0 flex-col gap-2">
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-lg border bg-surface-2",
+          mediaType === "VIDEO" ? "aspect-[9/16]" : "aspect-[4/5]",
+        )}
+      >
+        {thumbnailUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumbnailUrl} alt="" className="size-full object-cover" />
+        ) : (
+          <div className="grid size-full place-items-center text-faint">
+            <ImageIcon className="size-8" />
+          </div>
+        )}
+        {mediaType === "IMAGE" && mediaCount > 1 && (
+          <span className="absolute top-2 right-2 rounded-md bg-card px-1.5 text-xs font-semibold tabular-nums">
+            1 / {mediaCount}
+          </span>
+        )}
+        {/* 캡션 미리보기: 어두운 미리보기 위 흰 글자 (DESIGN.md 2장 예외) */}
+        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3 pt-10 text-xs text-white">
+          <p className="truncate font-semibold">
+            {who}
+            {accounts.length > 1 && ` 외 ${accounts.length - 1}개`}
+          </p>
+          {firstLine && (
+            <p
+              className={cn(
+                "mt-0.5 line-clamp-3",
+                platform === "YOUTUBE" && "font-semibold",
+              )}
+            >
+              {firstLine}
+            </p>
+          )}
         </div>
-        <Button variant="ghost" size="sm" onClick={onEdit} className="-mt-1">
-          <Pencil className="size-3.5" /> 수정
+      </div>
+      <div className="flex items-center justify-between gap-1">
+        <span className="flex min-w-0 items-center gap-1.5 text-xs">
+          <PlatformIcon platform={platform} size={16} />
+          <b className="truncate">{PLATFORM_LABEL[platform]}</b>
+          <span className="shrink-0 text-muted-foreground tabular-nums">
+            {accounts.length}개 계정
+          </span>
+        </span>
+        <Button variant="ghost" size="sm" onClick={onEdit} className="shrink-0 px-2">
+          <Pencil />
+          고치기
         </Button>
       </div>
-      {children}
+      {verdict && verdict.status !== "ok" && (
+        <VerdictBadge status={verdict.status} />
+      )}
     </div>
   );
 }
 
-function CaptionPreview({ captions }: { captions: Captions }) {
-  return (
-    <ul className="mt-2 space-y-2 text-xs">
-      {captions.youtube && (
-        <li className="rounded bg-muted/40 p-2">
-          <p className="font-medium">YouTube</p>
-          <p className="line-clamp-1 text-muted-foreground">
-            {captions.youtube.title}
-          </p>
-          <p className="text-[10px] text-muted-foreground">
-            해시태그 {captions.youtube.hashtags.length}개
-          </p>
-        </li>
-      )}
-      {captions.instagram && (
-        <li className="rounded bg-muted/40 p-2">
-          <p className="font-medium">Instagram</p>
-          <p className="line-clamp-2 text-muted-foreground">
-            {captions.instagram.caption}
-          </p>
-          <p className="text-[10px] text-muted-foreground">
-            해시태그 {captions.instagram.hashtags.length}개
-          </p>
-        </li>
-      )}
-      {captions.tiktok && (
-        <li className="rounded bg-muted/40 p-2">
-          <p className="font-medium">TikTok</p>
-          <p className="line-clamp-2 text-muted-foreground">
-            {captions.tiktok.caption}
-          </p>
-          <p className="text-[10px] text-muted-foreground">
-            해시태그 {captions.tiktok.hashtags.length}개 (본문 인라인)
-          </p>
-        </li>
-      )}
-    </ul>
-  );
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 5 — 올릴 시각
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Step 5 — 예약 및 업로드
-// ─────────────────────────────────────────────────────────────────────────────
+// 자주 쓰는 시각 — 편성 칸(08 · 12 · 18 · 21시)과 같은 시각. 늘 미래가 되도록 내일만 둔다.
+const QUICK_TIMES = [8, 12, 18, 21] as const;
+
+function tomorrowAt(hour: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(hour)}:00`;
+}
 
 function Step5Schedule({
   scheduleMode,
@@ -1451,114 +1782,164 @@ function Step5Schedule({
   onPrev: () => void;
   onComplete: () => void;
 }) {
+  // 누른 빠른 시각 — 날짜를 직접 바꾸면 해제한다. (값 비교에 현재 시각이 필요 없게 따로 기억)
+  const [quickHour, setQuickHour] = useState<number | null>(null);
+  // 예약을 골랐는데 시각이 비어 있으면 완료를 막는다 — 비어 있으면 바로 올라가 버린다.
+  const missingTime = scheduleMode === "scheduled" && !scheduledAt;
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <Label>업로드 시점</Label>
-        <div className="flex gap-2">
-          <Button
-            variant={scheduleMode === "now" ? "default" : "outline"}
-            onClick={() => onChangeMode("now")}
-            className="flex-1"
-          >
-            즉시 업로드
-          </Button>
-          <Button
-            variant={scheduleMode === "scheduled" ? "default" : "outline"}
-            onClick={() => onChangeMode("scheduled")}
-            className="flex-1"
-          >
-            예약 업로드
-          </Button>
-        </div>
-        {scheduleMode === "scheduled" && (
-          <input
-            type="datetime-local"
-            value={scheduledAt}
-            onChange={(e) => onChangeScheduledAt(e.target.value)}
-            className={cn(
-              "mt-2 w-full rounded-md border bg-card px-3 py-2 text-sm",
-            )}
-          />
-        )}
-      </div>
+    <>
+      <StepBody>
+        <Segmented<ScheduleMode>
+          ariaLabel="올릴 때"
+          value={scheduleMode}
+          onChange={onChangeMode}
+          disabled={completing}
+          options={[
+            { value: "now", label: "바로 올리기" },
+            { value: "scheduled", label: "시각 정해서 올리기" },
+          ]}
+        />
 
-      {seriesRows.length > 0 && (
-        <div className="space-y-3 rounded-md border p-4">
-          <div>
-            <Label>다음 화로 올리기 (선택)</Label>
-            <p className="mt-1 text-xs text-muted-foreground">
-              시리즈의 다음 화라면 골라주세요. 회차로 추가되고, 답글은 꺼진 상태로 시작해요.
-            </p>
-          </div>
-          <ul className="space-y-3">
-            {seriesRows.map(({ account, options }) => {
-              const chosen = options.find((o) => o.id === seriesChoice[account.id]);
-              return (
-                <li key={account.id} className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <PlatformIcon platform="INSTAGRAM" size={16} />
-                    <span className="min-w-0 truncate text-sm">
-                      @{account.display_name ?? "(이름 없음)"}
-                    </span>
-                    <select
-                      id={`series-choice-${account.id}`}
-                      aria-label={`@${account.display_name ?? ""} 시리즈`}
-                      value={seriesChoice[account.id] ?? ""}
-                      onChange={(e) => onChangeSeries(account.id, e.target.value)}
-                      className="ml-auto max-w-full rounded-md border bg-card px-2 py-1.5 text-sm"
+        {scheduleMode === "scheduled" ? (
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <p className="text-[13px] font-semibold text-ink-2">
+                자주 쓰는 시각
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {QUICK_TIMES.map((h) => {
+                  const on = quickHour === h && !!scheduledAt;
+                  return (
+                    <Button
+                      key={h}
+                      variant="outline"
+                      size="sm"
+                      aria-pressed={on}
+                      disabled={completing}
+                      onClick={() => {
+                        setQuickHour(h);
+                        onChangeScheduledAt(tomorrowAt(h));
+                      }}
+                      className={cn(
+                        "tabular-nums",
+                        on &&
+                          "border-primary bg-brand-soft font-semibold text-primary hover:bg-brand-soft",
+                      )}
                     >
-                      <option value="">시리즈 아님</option>
-                      {options.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.name} · {o.nextEpisodeNo}화
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {chosen && chosen.nextEpisodeNo > 1 && (
-                    <label className="flex cursor-pointer items-start gap-2.5 rounded-md bg-muted/40 px-3 py-2">
-                      <input
-                        type="checkbox"
-                        id={`series-reply-${account.id}`}
-                        checked={replyChoice[account.id] === true}
-                        onChange={(e) => onChangeReply(account.id, e.target.checked)}
-                        className="mt-0.5 size-4"
-                      />
-                      <span className="min-w-0 text-sm">
-                        올라가면 바로 {chosen.nextEpisodeNo - 1}화 댓글에 답글 달기
-                        <span className="block text-xs text-muted-foreground">
-                          꺼두면 나중에 시리즈 댓글 자동화에서 켤 수 있어요.
+                      내일 {String(h).padStart(2, "0")}:00
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="max-w-xs space-y-1.5">
+              <FieldLabel htmlFor="scheduled-at">날짜 · 시각</FieldLabel>
+              <input
+                id="scheduled-at"
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={(e) => {
+                  setQuickHour(null);
+                  onChangeScheduledAt(e.target.value);
+                }}
+                disabled={completing}
+                className="h-9 w-full rounded-md border border-input bg-card px-3 text-base sm:text-[13px]"
+              />
+              {missingTime && (
+                <p className="text-xs text-risk">
+                  날짜와 시각을 골라 주세요. 바로 올리려면 &lsquo;바로 올리기&rsquo;를 고르세요.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-[13px] text-ink-2">
+            <Send className="mt-0.5 size-4 shrink-0 text-primary" />
+            <p>완료를 누르면 곧 올리기 시작해요. 진행은 배포 관리에서 볼 수 있어요.</p>
+          </div>
+        )}
+
+        {seriesRows.length > 0 && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <div>
+              <p className="text-[13px] font-semibold text-ink-2">
+                시리즈 다음 화로 올리기{" "}
+                <span className="text-xs font-normal text-faint">선택</span>
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                시리즈의 다음 화라면 골라 주세요. 회차로 추가되고, 답글은 꺼진 상태로 시작해요.
+              </p>
+            </div>
+            <ul className="space-y-3">
+              {seriesRows.map(({ account, options }) => {
+                const chosen = options.find(
+                  (o) => o.id === seriesChoice[account.id],
+                );
+                return (
+                  <li key={account.id} className="space-y-2">
+                    <div className="grid items-center gap-2 sm:grid-cols-[180px_minmax(0,1fr)]">
+                      <span className="flex min-w-0 items-center gap-2 text-[13px] font-semibold">
+                        <PlatformIcon platform="INSTAGRAM" size={16} />
+                        <span className="truncate">
+                          @{account.display_name ?? "(이름 없음)"}
                         </span>
                       </span>
-                    </label>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-
-      <div className="rounded-md border bg-muted/30 p-4 text-sm">
-        <div className="flex items-center justify-between gap-2">
-          <span>선택된 계정</span>
-          <Badge variant="outline">{selectedAccountCount}개</Badge>
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          각 계정별 publish_job이 PENDING 상태로 등록됩니다. 워커가 활성화되면
-          자동 게시 (Phase 4b).
-        </p>
-      </div>
-
-      <div className="flex justify-between">
+                      <select
+                        id={`series-choice-${account.id}`}
+                        aria-label={`@${account.display_name ?? ""} 시리즈`}
+                        value={seriesChoice[account.id] ?? ""}
+                        onChange={(e) =>
+                          onChangeSeries(account.id, e.target.value)
+                        }
+                        className={SELECT_CLASS}
+                      >
+                        <option value="">시리즈 아님</option>
+                        {options.map((o) => (
+                          <option key={o.id} value={o.id}>
+                            {o.name} · {o.nextEpisodeNo}화
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {chosen && chosen.nextEpisodeNo > 1 && (
+                      <label className="flex cursor-pointer items-start gap-2.5 rounded-md bg-surface-2 px-3 py-2 sm:ml-[188px]">
+                        <input
+                          type="checkbox"
+                          id={`series-reply-${account.id}`}
+                          checked={replyChoice[account.id] === true}
+                          onChange={(e) =>
+                            onChangeReply(account.id, e.target.checked)
+                          }
+                          className="mt-0.5 size-4 accent-primary"
+                        />
+                        <span className="min-w-0 text-[13px]">
+                          올라가면 바로 {chosen.nextEpisodeNo - 1}화 댓글에 답글 달기
+                          <span className="block text-xs text-muted-foreground">
+                            꺼 두면 나중에 시리즈 댓글 자동화에서 켤 수 있어요.
+                          </span>
+                        </span>
+                      </label>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </StepBody>
+      <StepFooter>
         <Button variant="outline" onClick={onPrev} disabled={completing}>
           이전
         </Button>
-        <Button onClick={onComplete} disabled={completing}>
-          {completing ? "등록 중..." : "완료"}
+        <Button onClick={onComplete} disabled={completing || missingTime}>
+          {scheduleMode === "scheduled" ? <CalendarCheck /> : <Send />}
+          {completing
+            ? "등록 중…"
+            : scheduleMode === "scheduled"
+              ? `${selectedAccountCount}개 계정에 예약하기`
+              : `${selectedAccountCount}개 계정에 바로 올리기`}
         </Button>
-      </div>
-    </div>
+      </StepFooter>
+    </>
   );
 }

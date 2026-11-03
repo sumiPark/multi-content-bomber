@@ -4,7 +4,7 @@
 
 - 기준: **Marketing Hub 디자인 규칙**(`D:/project_program/marketing-hub/DESIGN.md`)과 같은 토큰 · 컴포넌트 규칙을 쓴다(2026-11-03 사용자 결정). 두 서비스가 같은 생김새를 갖는다.
 - 실제 구현: `app/globals.css`(shadcn 기본 이름에 매핑 + `bg-surface-2` · `text-ink-2` · `bg-ok-soft` 같은 확장 토큰), `components/ui/*`(버튼 · 카드 · 배지 · 입력 · 탭).
-- 시안: `local/design-mockups-v2/7-marketing-hub.html` (git 제외)
+- 시안: `local/design-mockups-v2/7-marketing-hub.html`, 콘텐츠 생성 · 배포 관리는 `8-upload-postings.html` (git 제외)
 
 ---
 
@@ -116,6 +116,8 @@
 
 ### 탭 (`components/ui/tabs.tsx`)
 - 세그먼트: `bg-surface-2` + 테두리, 선택 칸 흰 바탕 + 굵게
+- 탭 패널 없이 값 하나만 고르는 버튼 묶음(사진/영상, 기간, 바로/예약)은 `components/ui/segmented.tsx`
+- 표 위 상태 탭: 건수 pill이 붙은 폴더형 탭(선택 탭 흰 바탕 + 파란 건수) — 배포 관리
 
 ### 알림 상자
 - 멈춤 · 오류: `bg-risk-soft` + `text-risk` 아이콘 + 문구 + 고치는 버튼
@@ -127,5 +129,6 @@
 
 ## 7. 변경 기록
 
+- 2026-11-03 콘텐츠 생성 · 배포 관리를 시안 8로 바꿈: 마법사는 왼쪽 단계 목록 + 가운데 패널 + 오른쪽 요약, 배포 관리는 숫자 카드 · 상태 탭 · 일괄 작업 바 · 오른쪽 서랍 · 토스트. `Segmented` 부품 추가
 - 2026-11-03 본문 폭 제한(`max-w-4xl~7xl`) 없앰 — 시안처럼 본문이 화면 전체 폭을 쓴다(사용자 요청)
 - 2026-11-03 처음 작성. Marketing Hub 디자인 규칙으로 전환(토큰 · Pretendard · 버튼 36px · 카드 테두리 · 칩 배지 · 240px 사이드바 + 60px 상단바 · 제목 20px · 본문 여백 24px). 화면의 직접 색 지정(호박 · 초록 · 빨강 · 파랑)을 의미 토큰으로 바꿈(그룹 색 팔레트 · 플랫폼 색 · 캡션 미리보기는 예외)

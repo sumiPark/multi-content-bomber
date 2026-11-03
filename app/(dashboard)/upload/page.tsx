@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { Badge } from "@/components/ui/badge";
 import { UploadWizard } from "@/components/upload/wizard/upload-wizard";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
@@ -11,12 +10,6 @@ export default async function UploadPage() {
   if (!profile?.organization_id) redirect("/onboarding");
 
   const supabase = await getServerSupabase();
-
-  const { data: organization } = await supabase
-    .from("organizations")
-    .select("name")
-    .eq("id", profile.organization_id)
-    .single();
 
   // group_id / account_groups는 0009 마이그레이션 이후. 타입 재생성 전이라 cast.
   type AccountRow = {
@@ -81,22 +74,11 @@ export default async function UploadPage() {
 
   return (
     <main className="p-4 sm:p-6 space-y-6">
-      <header className="flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold tracking-[-0.01em]">
-            콘텐츠 생성
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            이미지 1~10장 또는 영상 1개를 업로드하면 AI가 플랫폼별 캡션을
-            생성합니다.
-          </p>
-        </div>
-        {organization && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>{organization.name}</span>
-            <Badge variant="outline">{profile.role}</Badge>
-          </div>
-        )}
+      <header>
+        <h1 className="text-xl font-bold tracking-[-0.01em]">콘텐츠 생성</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          사진이나 영상을 한 번 올리고, 계정마다 캡션을 맞춰 동시에 올려요.
+        </p>
       </header>
       <UploadWizard
         organizationId={profile.organization_id}

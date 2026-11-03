@@ -79,7 +79,7 @@ export default async function Page() {
   if (error) {
     return (
       <main className="p-4 sm:p-6">
-        <h1 className="text-xl font-bold tracking-[-0.01em]">포스팅 관리</h1>
+        <h1 className="text-xl font-bold tracking-[-0.01em]">배포 관리</h1>
         <p className="mt-4 text-sm text-destructive">
           데이터 조회 실패: {error.message}
         </p>
