@@ -7,6 +7,7 @@ import {
   type BaselinePost,
 } from "@/components/analytics/account-baseline";
 import { collectMetricsNowAction } from "@/app/(dashboard)/analytics/actions";
+import { ProfileScoreCard, type ReviewRow } from "@/components/account-review/profile-review";
 import { CollectNowButton } from "@/components/analytics/collect-now-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +19,7 @@ import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth
 
 const BASELINE_POSTS = 30;
 const FOLLOWER_COMPARE_DAYS = 7;
+const PROFILE_HISTORY = 4;
 
 export default async function AnalyticsPage() {
   const user = await getSessionUser();
@@ -30,7 +32,7 @@ export default async function AnalyticsPage() {
 
   const { data: accountRows } = await supabase
     .from("social_accounts")
-    .select("id, display_name, role_focus, role_note, created_at")
+    .select("id, display_name, role_focus, role_note, created_at, is_active")
     .eq("platform", "INSTAGRAM")
     .is("disconnected_at", null)
     .order("created_at", { ascending: true });
@@ -106,6 +108,21 @@ export default async function AnalyticsPage() {
 
   const collected = baselines.some((b) => b.lastCollectedOn);
 
+  // 프로필 점수(0034) — 계정마다 최근 채점 몇 개 (점수 변화 · 캡처 값 이어받기용)
+  const reviewsByAccount = new Map<string, ReviewRow[]>(
+    await Promise.all(
+      accounts.map(async (acc) => {
+        const { data } = await supabase
+          .from("profile_reviews")
+          .select("id, status, total_score, rescore, items, rewrites, summary, manual_input, error, created_at, started_at, finished_at")
+          .eq("social_account_id", acc.id)
+          .order("created_at", { ascending: false })
+          .limit(PROFILE_HISTORY);
+        return [acc.id, (data ?? []) as unknown as ReviewRow[]] as const;
+      }),
+    ),
+  );
+
   return (
     <main className="space-y-6 p-4 sm:p-6">
       <header className="flex items-start justify-between gap-3">
@@ -159,6 +176,27 @@ export default async function AnalyticsPage() {
             <AccountBaselineCard key={b.id} account={b} />
           ))}
         </div>
+      )}
+
+      {accounts.length > 0 && (
+        <section id="profile-score" aria-labelledby="profile-score-title" className="scroll-mt-20 space-y-3">
+          <div>
+            <h2 id="profile-score-title" className="text-base font-semibold">
+              프로필 점수
+            </h2>
+            <p className="mt-0.5 max-w-3xl text-[13px] text-muted-foreground">
+              프로필을 12개 기준으로 매일 04:30에 자동 채점하고, 점수를 가장 많이 깎는 곳부터 고칠 문구를 드려요.
+              인스타에는 아무것도 바꾸지 않아요. 마음에 드는 문구를 직접 붙여 넣으세요.
+            </p>
+          </div>
+          {accounts.map((a) => (
+            <ProfileScoreCard
+              key={a.id}
+              account={{ id: a.id, name: a.display_name ?? "(이름 없음)", active: a.is_active }}
+              history={reviewsByAccount.get(a.id) ?? []}
+            />
+          ))}
+        </section>
       )}
     </main>
   );

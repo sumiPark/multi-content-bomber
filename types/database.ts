@@ -115,6 +115,45 @@ export type Database = {
           },
         ]
       }
+      account_story_days: {
+        Row: {
+          checked_at: string
+          day: string
+          organization_id: string
+          social_account_id: string
+          stories_count: number
+        }
+        Insert: {
+          checked_at?: string
+          day: string
+          organization_id: string
+          social_account_id: string
+          stories_count?: number
+        }
+        Update: {
+          checked_at?: string
+          day?: string
+          organization_id?: string
+          social_account_id?: string
+          stories_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_story_days_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "account_story_days_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_feedback: {
         Row: {
           agent: string

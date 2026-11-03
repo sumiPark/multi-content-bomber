@@ -1,9 +1,14 @@
 name: profile-review
 
-# 계정 점검 워커 — 프로필 점수(worker/review-profiles.ts). 화면의 "채점하기"가 profile-review로 깨운다.
+# 프로필 자동 채점 워커(worker/review-profiles.ts).
+#   · schedule 매일 04:30 KST — 계정마다 스토리 기록 + 바뀐 게 있거나 7일 지났으면 채점
+#   · repository_dispatch(profile-review) — 분석 화면에서 프로필 캡처를 저장한 직후
 # 규칙 채점 스크립트(.claude/skills/ig-profile-ko/profile_ko.py)가 파이썬이라 러너의 python3를 쓴다.
-# 인스타는 읽기만 한다. 정해진 시각에 도는 schedule은 없다(사람이 누를 때만).
+# 인스타는 읽기만 한다.
 on:
+  schedule:
+    # 04:30 KST(19:30 UTC) — 성과 수집(04:00) 뒤
+    - cron: "30 19 * * *"
   repository_dispatch:
     types: [profile-review]
   workflow_dispatch: {}
@@ -18,7 +23,7 @@ permissions:
 jobs:
   profile-review:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,8 +32,10 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Score profiles
-        run: npm run worker:profile-review
+        # payload 값은 명령에 바로 넣지 않고 환경변수로(주입 방지)
+        run: npm run worker:profile-review -- ${ACCOUNT:+--account "$ACCOUNT"}
         env:
+          ACCOUNT: ${{ github.event.client_payload.account }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}

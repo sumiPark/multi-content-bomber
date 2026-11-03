@@ -6,7 +6,8 @@ import { listRecentMedia, type InstagramMedia } from "@/lib/platforms/instagram-
 //
 // 기본 권한(instagram_business_basic)으로 읽는다. 성과 권한은 필요 없다.
 // 소개(biography) · 링크(website)는 API 판에 따라 안 줄 수 있어, 못 받으면 칸을 빼고 다시 묻는다 —
-// 그때는 화면에서 사람이 직접 넣는다. 하이라이트 · 고정 게시물 · 스토리 빈도는 API에 아예 없다.
+// 그때는 프로필 캡처에서 읽은 값으로 채운다. 하이라이트 · 고정 게시물 · 연락 버튼은 API에 아예 없다.
+// 스토리는 "지금 떠 있는 것"만 보여서, 워커가 매일 세어 account_story_days(0035)에 쌓는다.
 
 const GRAPH_API_BASE = "https://graph.instagram.com/v23.0";
 const DAY_MS = 24 * 60 * 60_000;
@@ -34,6 +35,8 @@ export interface ProfileDetails {
   grid: Pick<InstagramMedia, "id" | "thumbnailUrl" | "caption" | "mediaProductType" | "timestamp">[];
   daysSinceLastPost: number | null;
   unansweredComments: number | null;
+  // 지금 떠 있는 스토리 수 = 지난 24시간에 올린 것. 못 읽으면 null
+  liveStories: number | null;
 }
 
 function url(path: string, token: string, params: Record<string, string>) {
@@ -89,6 +92,17 @@ async function countUnanswered(token: string, handle: string, media: InstagramMe
   return total;
 }
 
+/** 지금 떠 있는 스토리 수. 권한 · 판 차이로 못 읽으면 null(모름). */
+async function countLiveStories(token: string): Promise<number | null> {
+  try {
+    const res = await instagramRequest<{ data: { id: string }[] }>(url("/me/stories", token, { fields: "id,timestamp" }));
+    return res.data.length;
+  } catch (err) {
+    if (err instanceof InstagramApiError && (err.kind === "TOKEN" || err.kind === "RATE_LIMIT")) throw err;
+    return null;
+  }
+}
+
 export async function getProfileDetails(token: string, now = Date.now()): Promise<ProfileDetails> {
   const { me, fields } = await getMe(token);
   const media = await listRecentMedia(token, GRID);
@@ -113,5 +127,6 @@ export async function getProfileDetails(token: string, now = Date.now()): Promis
     })),
     daysSinceLastPost: Number.isFinite(lastAt) ? Math.max(0, Math.floor((now - lastAt) / DAY_MS)) : null,
     unansweredComments: await countUnanswered(token, me.username, media),
+    liveStories: await countLiveStories(token),
   };
 }

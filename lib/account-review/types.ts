@@ -31,6 +31,8 @@ export interface ProfileSnapshot {
   followers_count: number | null;
   media_count: number | null;
   profile_picture_url: string | null;
+  // 다시 채점할지 정하는 기준 (score-profile.ts profileFingerprint)
+  fingerprint?: string;
   // 어디서 온 값인지 — 화면에서 "API" / "직접 입력" 표시
   source: Record<string, "api" | "manual">;
 }

@@ -87,9 +87,9 @@ export async function triggerShootEditRun(reason: string): Promise<void> {
   await dispatch(SHOOT_EDIT_DISPATCH_EVENT, reason);
 }
 
-/** 계정 점검 프로필 점수 — "채점하기" 직후. 채점 스크립트가 파이썬이라 Actions에서만. */
-export async function triggerProfileReviewRun(reason: string): Promise<void> {
-  await dispatch(PROFILE_REVIEW_DISPATCH_EVENT, reason);
+/** 프로필 자동 채점 — 분석 화면에서 프로필 캡처를 저장한 직후(그 계정만). 평소엔 매일 04:30 schedule. */
+export async function triggerProfileReviewRun(reason: string, accountId?: string): Promise<void> {
+  await dispatch(PROFILE_REVIEW_DISPATCH_EVENT, reason, accountId ? { account: accountId } : {});
 }
 
 async function dispatch(eventType: string, reason: string, extra: Record<string, string> = {}): Promise<void> {

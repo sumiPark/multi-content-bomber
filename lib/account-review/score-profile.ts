@@ -71,6 +71,8 @@ export interface ProfileReviewResult {
   items: ReviewItem[];
   rewrites: ReviewRewrite[];
   total: number;
+  // 확인된 항목 만점 (모르는 항목은 뺌)
+  max: number;
   rescore: number;
   summary: string;
   model: string;
@@ -82,11 +84,20 @@ function clean(s: string | null | undefined): string | null {
   return t ? t : null;
 }
 
-/** API 값과 사람 입력을 합친다. 사람이 넣은 값이 API 값보다 먼저다(API가 옛 값을 줄 때 고칠 수 있게). */
+/** API 값과 캡처에서 읽은 값을 합친다. 이름 칸 · 소개 · 링크는 API가 먼저, 나머지(API에 없음)는 캡처 값. */
+/** 다시 채점할지 정하는 기준 — 이름 칸 · 소개 · 링크(API) + 캡처에서 읽은 값이 바뀌었나. */
+export function profileFingerprint(api: Pick<ProfileDetails, "name" | "biography" | "website">, manual: ProfileManualInput): string {
+  const keys = Object.keys(manual).sort() as (keyof ProfileManualInput)[];
+  const m = keys.map((k) => [k, manual[k]]);
+  return JSON.stringify([api.name ?? "", api.biography ?? "", api.website ?? "", m]);
+}
+
 export function buildSnapshot(
   account: AccountForReview,
   api: ProfileDetails,
   manual: ProfileManualInput,
+  // 최근 7일 중 스토리 올린 날 (account_story_days). 기록이 없으면 null
+  storyDays: number | null = null,
 ): { snapshot: ProfileSnapshot; unknown: Set<"name" | "bio" | "links"> } {
   const source: ProfileSnapshot["source"] = {};
   const unknown = new Set<"name" | "bio" | "links">();
@@ -102,16 +113,25 @@ export function buildSnapshot(
     return null;
   };
 
-  const name = pick("name", clean(manual.name), clean(api.name), api.fields.includes("name"));
+  // 이름 칸 · 소개 · 링크는 인스타 값이 먼저 — 캡처 값은 오래되면 틀리므로 인스타가 안 줄 때만 쓴다
+  const apiFirst = <T,>(key: string, a: T, apiHas: boolean, m: T | null): T | null => {
+    if (apiHas) {
+      source[key] = "api";
+      return a;
+    }
+    if (m != null) source[key] = "manual";
+    return m;
+  };
+  const name = apiFirst("name", clean(api.name), api.fields.includes("name"), clean(manual.name));
   if (name == null && !api.fields.includes("name")) unknown.add("name");
-  const bio = pick("bio", clean(manual.bio), api.biography ?? "", api.fields.includes("biography"));
+  const bio = apiFirst("bio", api.biography ?? "", api.fields.includes("biography"), clean(manual.bio));
   if (bio == null) unknown.add("bio");
   const manualLinks = (manual.links ?? []).map((l) => l.trim()).filter(Boolean);
-  const links = pick(
+  const links = apiFirst(
     "links",
-    manualLinks.length ? manualLinks : null,
     clean(api.website) ? [clean(api.website) as string] : [],
     api.fields.includes("website"),
+    manualLinks.length ? manualLinks : null,
   );
   if (links == null) unknown.add("links");
 
@@ -129,11 +149,12 @@ export function buildSnapshot(
     grid_covers: null, // 표지 글자는 API에 없다 — 이미지로 AI가 본다
     days_since_last_post: api.daysSinceLastPost,
     unanswered_comments: api.unansweredComments,
-    story_days_per_week: pick("story_days_per_week", manual.storyDaysPerWeek ?? null, null, false),
+    story_days_per_week: pick("story_days_per_week", manual.storyDaysPerWeek ?? null, storyDays, storyDays != null),
     role_focus: role,
     followers_count: api.followersCount,
     media_count: api.mediaCount,
     profile_picture_url: api.profilePictureUrl,
+    fingerprint: profileFingerprint(api, manual),
     source,
   };
   for (const k of ["account_type", "days_since_last_post", "unanswered_comments"]) source[k] = "api";
@@ -168,6 +189,16 @@ function itemFromCheck(c: ProfileCheckItem): ReviewItem {
 
 const UNKNOWN_NOTE = { name: "이름 칸", bio: "소개", links: "링크" } as const;
 
+function unknownItem(it: ReviewItem, note: string) {
+  it.score = null;
+  it.findings = [note];
+}
+
+/** 확인된 항목(점수가 있는 항목) 만점 합 — 모르는 항목은 빼고 센다. */
+export function knownMax(items: Pick<ReviewItem, "score" | "max">[]): number {
+  return items.reduce((s, i) => s + (i.score == null ? 0 : i.max), 0);
+}
+
 function systemPrompt(): string {
   const rubric = profileRubric();
   const judged = rubric.items.filter((i) => (JUDGED as readonly string[]).includes(i.id));
@@ -186,6 +217,7 @@ ${judged.map((i) => `- ${i.id} (${i.label}, ${i.points}점): 만점 = ${i.full_m
 
 다시 쓰기:
 - 잃은 점수(만점 - 점수)가 큰 항목부터. 규칙 채점 항목(고정 게시물 · 하이라이트 · 링크 · 스토리 등)도 고칠 일이 크면 넣는다.
+- 점수가 "?"인 항목은 정보가 없어 모르는 것이다. 감점으로 보지 말고 고칠 일에도 넣지 않는다.
 - 이름 칸은 ${NAME_MAX}자 안에서 "{브랜드} | {검색되는 상품 단어}" 형식으로 3개. 소개는 줄바꿈 포함 ${BIO_MAX}자 안에서 2개.
 - 문구에 없는 사실(후기 수 · 재구매율 · 수상 · 순위)을 지어내지 않는다. 숫자가 필요하면 "{실제 후기 수}"처럼 빈칸으로 둔다.
 - 최고 · 유일 · 100% · 치료 · 완치 · 1위 같은 표현을 쓰지 않는다. 건강기능식품 기능성 표현도 쓰지 않는다.
@@ -193,7 +225,14 @@ ${judged.map((i) => `- ${i.id} (${i.label}, ${i.points}점): 만점 = ${i.full_m
 - 하이라이트 · 고정 게시물은 할 일로 쓴다 (예: "고정 1: 후기 모음 릴스", "하이라이트 이름: 주문방법 · 배송 · 후기 · 상품정보").`;
 }
 
-function userPrompt(account: AccountForReview, snap: ProfileSnapshot, items: ReviewItem[], ruleHits: string[], images: { photo: boolean; grid: number }): string {
+function userPrompt(
+  account: AccountForReview,
+  snap: ProfileSnapshot,
+  items: ReviewItem[],
+  ruleHits: string[],
+  images: { photo: boolean; grid: number },
+  toJudge: readonly string[],
+): string {
   const role = snap.role_focus === "PRODUCT" ? "상품 중심" : snap.role_focus === "PERSON" ? "사람 중심" : "모름";
   const lines = [
     `계정: @${snap.handle} (${account.display_name ?? ""}) · 역할: ${role}${account.role_note ? ` · ${account.role_note}` : ""}`,
@@ -203,7 +242,10 @@ function userPrompt(account: AccountForReview, snap: ProfileSnapshot, items: Rev
     `링크: ${snap.links.length ? snap.links.join(", ") : "(없음)"}`,
     "",
     "[항목별 근거 — 규칙 채점 결과 포함]",
-    ...items.map((i) => `- ${i.id} ${i.label} ${i.score == null ? "?" : i.score}/${i.max}: ${i.findings.join(" · ")}`),
+    ...items.map((i) => {
+      const s = i.score != null ? String(i.score) : toJudge.includes(i.id) ? "판단할 것" : "?";
+      return `- ${i.id} ${i.label} ${s}/${i.max}: ${i.findings.join(" · ")}`;
+    }),
   ];
   if (ruleHits.length) lines.push("", "[광고 문구 규칙에 걸린 표현]", ...ruleHits.map((h) => `- ${h}`));
   lines.push(
@@ -219,9 +261,10 @@ export async function scoreProfile(opts: {
   account: AccountForReview;
   api: ProfileDetails;
   manual: ProfileManualInput;
+  storyDays: number | null;
   rules: ContentRule[];
 }): Promise<ProfileReviewResult> {
-  const { snapshot, unknown } = buildSnapshot(opts.account, opts.api, opts.manual);
+  const { snapshot, unknown } = buildSnapshot(opts.account, opts.api, opts.manual, opts.storyDays);
 
   // 2. 규칙 채점 — 모르는 칸은 빼고 넘긴다(빈 값으로 넘기면 "없음"으로 감점되므로)
   const { source: _source, ...forScript } = snapshot;
@@ -247,7 +290,16 @@ export async function scoreProfile(opts: {
     if (what) {
       it.score = null;
       it.auto = it.id === "link";
-      it.findings = [`${what}을(를) API가 주지 않아요 - 아래 "직접 넣는 정보"에 붙여 넣고 다시 채점하세요`];
+      it.findings = [`${what}을(를) 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요`];
+    }
+  }
+  // 캡처 · 기록이 없어 모르는 항목은 0점 대신 "모름" — 점수는 확인된 항목 기준으로 센다
+  for (const it of items) {
+    if (it.id === "pinned_three" && snapshot.pinned_count == null) unknownItem(it, "고정 게시물은 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");
+    if (it.id === "highlights" && snapshot.highlights == null) unknownItem(it, "하이라이트는 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");
+    if (it.id === "story_presence" && snapshot.story_days_per_week == null) unknownItem(it, "스토리 기록이 아직 없어요 - 매일 확인해서 쌓여요");
+    if (it.id === "category_contact" && snapshot.contact == null && snapshot.category == null) {
+      unknownItem(it, "연락 버튼 · 카테고리는 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");
     }
   }
 
@@ -306,7 +358,7 @@ export async function scoreProfile(opts: {
 
   try {
     const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-      { type: "text", text: userPrompt(opts.account, snapshot, items, ruleHits, { photo: !!photo, grid: gridImages.length }) },
+      { type: "text", text: userPrompt(opts.account, snapshot, items, ruleHits, { photo: !!photo, grid: gridImages.length }, toJudge) },
       ...[photo, ...gridImages]
         .filter((u): u is string => !!u)
         .map((url) => ({ type: "image_url" as const, image_url: { url, detail: "low" as const } })),
@@ -378,6 +430,7 @@ export async function scoreProfile(opts: {
       items,
       rewrites,
       total,
+      max: knownMax(items),
       rescore: Math.max(total, rescore),
       summary: out.summary.trim(),
       model,
