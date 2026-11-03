@@ -116,3 +116,54 @@ export function hookFormulas(): { rules: string[]; hooks: HookFormula[] } {
   };
   return formulasCache;
 }
+
+export interface ProfileCheckItem {
+  id: string;
+  label: string;
+  max: number;
+  score: number | null; // null = 판단 채점 필요
+  auto: boolean;
+  findings: string[];
+}
+
+export interface ProfileCheck {
+  items: ProfileCheckItem[];
+  autoScore: number;
+  autoMax: number;
+  pending: string[];
+  banned: string[];
+}
+
+/** 프로필 규칙 채점 (profile_ko.py) — 12개 중 7개는 점수까지, 5개는 근거만. 입력은 스크립트 설명의 JSON. */
+export function checkProfile(profile: Record<string, unknown>): ProfileCheck {
+  const r = runPy("ig-profile-ko/profile_ko.py", JSON.stringify(profile)) as {
+    items: ProfileCheckItem[];
+    auto_score: number;
+    auto_max: number;
+    pending: string[];
+    banned: string[];
+  };
+  return { items: r.items, autoScore: r.auto_score, autoMax: r.auto_max, pending: r.pending, banned: r.banned };
+}
+
+export interface RubricItem {
+  id: string;
+  label: string;
+  points: number;
+  full_marks: string;
+  common_fail: string;
+}
+
+let rubricCache: { note: string; roleNote: string; items: RubricItem[] } | null = null;
+
+/** 프로필 채점 기준 12개 (rubric_ko.json). */
+export function profileRubric(): { note: string; roleNote: string; items: RubricItem[] } {
+  if (rubricCache) return rubricCache;
+  const raw = JSON.parse(readFileSync(path.join(SKILLS_DIR, "ig-profile-ko", "rubric_ko.json"), "utf8")) as {
+    note: string;
+    role_note: string;
+    items: RubricItem[];
+  };
+  rubricCache = { note: raw.note, roleNote: raw.role_note, items: raw.items };
+  return rubricCache;
+}

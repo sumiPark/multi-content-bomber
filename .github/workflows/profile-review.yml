@@ -1,0 +1,36 @@
+name: profile-review
+
+# 계정 점검 워커 — 프로필 점수(worker/review-profiles.ts). 화면의 "채점하기"가 profile-review로 깨운다.
+# 규칙 채점 스크립트(.claude/skills/ig-profile-ko/profile_ko.py)가 파이썬이라 러너의 python3를 쓴다.
+# 인스타는 읽기만 한다. 정해진 시각에 도는 schedule은 없다(사람이 누를 때만).
+on:
+  repository_dispatch:
+    types: [profile-review]
+  workflow_dispatch: {}
+
+concurrency:
+  group: profile-review-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  profile-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Score profiles
+        run: npm run worker:profile-review
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}

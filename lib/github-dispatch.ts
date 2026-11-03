@@ -23,6 +23,8 @@ export const SHOOT_PLAN_DISPATCH_EVENT = "plan-a";
 export const SHOTLIST_DISPATCH_EVENT = "a-shotlist";
 // 직접 촬영 편집 워크플로(.github/workflows/shoot-edit.yml).
 export const SHOOT_EDIT_DISPATCH_EVENT = "shoot-edit";
+// 계정 점검 — 프로필 점수 워크플로(.github/workflows/profile-review.yml).
+export const PROFILE_REVIEW_DISPATCH_EVENT = "profile-review";
 
 /**
  * publish 워크플로를 즉시 실행시킨다.
@@ -83,6 +85,11 @@ export async function triggerShotlistRun(reason: string): Promise<void> {
 /** 직접 촬영 편집 — "다 올렸어요" · "고친 문구로 다시 편집" 직후. 편집은 FFmpeg라 Actions에서만. */
 export async function triggerShootEditRun(reason: string): Promise<void> {
   await dispatch(SHOOT_EDIT_DISPATCH_EVENT, reason);
+}
+
+/** 계정 점검 프로필 점수 — "채점하기" 직후. 채점 스크립트가 파이썬이라 Actions에서만. */
+export async function triggerProfileReviewRun(reason: string): Promise<void> {
+  await dispatch(PROFILE_REVIEW_DISPATCH_EVENT, reason);
 }
 
 async function dispatch(eventType: string, reason: string, extra: Record<string, string> = {}): Promise<void> {

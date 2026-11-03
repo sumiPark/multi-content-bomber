@@ -990,6 +990,87 @@ export type Database = {
           },
         ]
       }
+      profile_reviews: {
+        Row: {
+          created_at: string
+          error: string | null
+          finished_at: string | null
+          id: string
+          items: Json | null
+          manual_input: Json
+          model: string | null
+          organization_id: string
+          requested_by: string | null
+          rescore: number | null
+          rewrites: Json | null
+          snapshot: Json | null
+          social_account_id: string
+          started_at: string | null
+          status: string
+          summary: string | null
+          tokens_input: number | null
+          tokens_output: number | null
+          total_score: number | null
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          items?: Json | null
+          manual_input?: Json
+          model?: string | null
+          organization_id: string
+          requested_by?: string | null
+          rescore?: number | null
+          rewrites?: Json | null
+          snapshot?: Json | null
+          social_account_id: string
+          started_at?: string | null
+          status?: string
+          summary?: string | null
+          tokens_input?: number | null
+          tokens_output?: number | null
+          total_score?: number | null
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          items?: Json | null
+          manual_input?: Json
+          model?: string | null
+          organization_id?: string
+          requested_by?: string | null
+          rescore?: number | null
+          rewrites?: Json | null
+          snapshot?: Json | null
+          social_account_id?: string
+          started_at?: string | null
+          status?: string
+          summary?: string | null
+          tokens_input?: number | null
+          tokens_output?: number | null
+          total_score?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_reviews_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_reviews_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
