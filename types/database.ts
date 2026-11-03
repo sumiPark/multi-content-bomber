@@ -472,6 +472,7 @@ export type Database = {
           analysis_attempts: number
           analysis_error: string | null
           analysis_locked_until: string | null
+          analysis_note: string | null
           analysis_next_at: string
           analysis_state: string
           category_id: number | null
@@ -500,6 +501,7 @@ export type Database = {
           analysis_attempts?: number
           analysis_error?: string | null
           analysis_locked_until?: string | null
+          analysis_note?: string | null
           analysis_next_at?: string
           analysis_state?: string
           category_id?: number | null
@@ -528,6 +530,7 @@ export type Database = {
           analysis_attempts?: number
           analysis_error?: string | null
           analysis_locked_until?: string | null
+          analysis_note?: string | null
           analysis_next_at?: string
           analysis_state?: string
           category_id?: number | null

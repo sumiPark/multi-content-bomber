@@ -87,6 +87,8 @@ create table if not exists public.products (
   analysis_attempts   int not null default 0,
   analysis_next_at    timestamptz not null default now(),
   analysis_error      text,
+  -- review · insufficient인 이유 (예: "건강기능식품 — 기능성 문구 확인 필요")
+  analysis_note       text,
   -- 분석기가 잡고 있는 동안의 잠금 (워커가 죽으면 locked_until이 지나 다시 집힌다)
   analysis_locked_until timestamptz,
   first_seen_at       timestamptz not null default now(),
@@ -156,6 +158,8 @@ create table if not exists public.product_analyses (
 
 -- ---------------------------------------------------------------------
 -- 6. 분석 대기 상품 선점 (FOR UPDATE SKIP LOCKED — 분석기 여러 개가 겹쳐도 중복 없음)
+--    판매 중인 상품만 (2026-11-03 사용자 결정). 일시 품절 상품은 queued로 남아 있다가 다시
+--    판매되면 그때 분석한다 — 오늘과일은 일시 품절이 대부분(제철 지난 과일)이라 비용을 아낀다.
 -- ---------------------------------------------------------------------
 create or replace function public.claim_products_for_analysis(
   p_limit int,
@@ -174,7 +178,7 @@ begin
    where p.id in (
      select id from public.products
       where not excluded
-        and stock_status in ('available', 'temporarily_out')
+        and stock_status = 'available'
         and (
           (analysis_state = 'queued' and analysis_next_at <= now())
           or (analysis_state = 'analyzing' and analysis_locked_until < now())

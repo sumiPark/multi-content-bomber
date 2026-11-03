@@ -1,7 +1,7 @@
 name: products
 
 # 상품 수집 워커(worker/collect-products.ts) — 오늘과일 · 쿠마마켓 · 리유 상품을 공개 API로 받는다.
-# 수집이 끝나면 같은 run에서 상세 이미지 분석(2-3)을 이어 붙인다.
+# 수집이 끝나면 같은 run에서 상세 이미지 분석(worker/analyze-products.ts)을 이어 붙인다.
 on:
   # 매일 03시(KST) = 18시(UTC). 하루 한 번이면 되고, 몇 시간 밀려도 괜찮다.
   schedule:
@@ -22,7 +22,8 @@ permissions:
 jobs:
   collect-products:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 수집(1~2분) + 상세 이미지 분석(analyze-products가 45분 예산 안에서 스스로 멈춤).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,3 +37,13 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      # 수집이 일부 실패해도 이미 쌓인 대기분은 분석한다.
+      - name: Analyze product detail pages
+        if: ${{ !cancelled() }}
+        run: npm run worker:analyze
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # 비우면 기본 gpt-4.1-mini (Settings → Variables에서 바꿀 수 있음)
+          PRODUCT_ANALYSIS_MODEL: ${{ vars.PRODUCT_ANALYSIS_MODEL }}

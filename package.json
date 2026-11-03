@@ -13,7 +13,8 @@
     "worker:due": "tsx worker/process-due.ts",
     "worker:alerts": "tsx worker/process-alerts.ts",
     "worker:metrics": "tsx worker/collect-metrics.ts",
-    "worker:products": "tsx worker/collect-products.ts"
+    "worker:products": "tsx worker/collect-products.ts",
+    "worker:analyze": "tsx worker/analyze-products.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
@@ -31,6 +32,7 @@
     "react-dropzone": "^15.0.0",
     "server-only": "^0.0.1",
     "shadcn": "^4.7.0",
+    "sharp": "^0.34.5",
     "tailwind-merge": "^3.5.0",
     "tsx": "^4.21.0",
     "tw-animate-css": "^1.4.0",
