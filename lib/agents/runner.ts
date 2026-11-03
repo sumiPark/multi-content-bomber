@@ -2,7 +2,7 @@ import type OpenAI from "openai";
 import { zodFunction, zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
 import { getOpenAI } from "@/lib/openai";
-import { callOptions } from "@/lib/products/analysis/analyze";
+import { callOptions, isReasoningModel } from "@/lib/products/analysis/analyze";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -100,6 +100,9 @@ export async function runAgent<T>(opts: {
       const completion = await getOpenAI().chat.completions.parse({
         model,
         ...callOptions(model, 6000),
+        // chat completions에서는 추론 모델이 함수 호출(스킬)과 reasoning_effort를 같이 못 쓴다(400) —
+        // 스킬을 쓰는 에이전트는 'none'으로 둔다. 판단 근거는 스킬 결과로 충분히 준다.
+        ...(isReasoningModel(model) ? { reasoning_effort: "none" as const } : {}),
         messages,
         tools,
         response_format: zodResponseFormat(opts.outputSchema as z.ZodType, opts.outputName),
