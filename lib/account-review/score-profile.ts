@@ -452,9 +452,10 @@ export async function scoreProfile(opts: {
     // 이름 칸 · 소개 문구는 규칙 스크립트의 금지 표현 사전으로 한 번 더 (DB 규칙에 없는 최상급 등)
     for (const r of rewrites) {
       if (r.itemId !== "name_field" && !r.itemId.startsWith("bio_")) continue;
-      const text = r.options.join("\n");
-      const again = checkProfile(r.itemId === "name_field" ? { handle: snapshot.handle, name: text } : { handle: snapshot.handle, bio: text });
-      for (const b of again.banned) r.warnings.push(`금지 표현일 수 있어요: ${b}`);
+      r.options.forEach((o, i) => {
+        const again = checkProfile(r.itemId === "name_field" ? { handle: snapshot.handle, name: o } : { handle: snapshot.handle, bio: o });
+        for (const b of again.banned) r.warnings.push(`${i + 1}번 문구에 금지 표현일 수 있는 말: ${b}`);
+      });
     }
 
     const total = items.reduce((s, i) => s + (i.score ?? 0), 0);
