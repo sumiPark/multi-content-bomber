@@ -16,8 +16,10 @@ concurrency:
   group: products-worker
   cancel-in-progress: false
 
+# 분석이 시간 예산에 걸리면 워커가 GITHUB_TOKEN으로 repository_dispatch를 보내 다음 run을 깨운다.
+# (repository_dispatch는 GITHUB_TOKEN으로 만든 이벤트도 새 run을 띄우는 예외 이벤트 — episode-alerts.yml과 같은 방식)
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   collect-products:
@@ -47,3 +49,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           # 비우면 기본 gpt-6.1-terra (Settings → Variables에서 바꿀 수 있음)
           PRODUCT_ANALYSIS_MODEL: ${{ vars.PRODUCT_ANALYSIS_MODEL }}
+          # 다음 run 깨우기용 — 별도 PAT 없이 기본 토큰을 쓴다.
+          GITHUB_DISPATCH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}

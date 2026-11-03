@@ -1,6 +1,7 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
 
+import { triggerProductsRun } from "@/lib/github-dispatch";
 import { analysisModel, emptyUsage, type TokenUsage } from "@/lib/products/analysis/analyze";
 import { analyzeProduct, type AnalysisResult, type StoredExtract } from "@/lib/products/analysis/run";
 import { fetchProduct } from "@/lib/products/shop-api";
@@ -27,7 +28,8 @@ const RUN_DEADLINE_MS = 45 * 60_000;
 const CLAIM_BATCH = 4;
 const LOCK_MINUTES = 30;
 const MAX_ATTEMPTS = 3;
-const PRODUCT_CONCURRENCY = 2;
+// 첫 run 실측(2026-11-03, gpt-6.1-terra): 동시 2개로 45분에 76개. 3개로 올린다.
+const PRODUCT_CONCURRENCY = 3;
 
 type Service = ReturnType<typeof createServiceClient>;
 type ProductRow = Database["public"]["Tables"]["products"]["Row"];
@@ -241,6 +243,18 @@ async function main() {
   }
 
   printUsage(usage);
+  const stoppedByDeadline = Date.now() - startedAt >= RUN_DEADLINE_MS;
+  // 시간 예산에 걸려 남은 대기분이 있으면 다음 run을 바로 깨운다(concurrency 그룹이라 이 run 뒤에 시작).
+  // 다음 run은 수집(1~2분)부터 다시 돌지만 바뀐 게 없으면 분석 대기만 이어 간다.
+  // 첫 대량 분석이 하루 1회(03시)씩 며칠에 걸쳐 나뉘지 않게 하려는 것. 실패해도 다음 03시에 이어진다.
+  if (stoppedByDeadline && !fatal) {
+    try {
+      await triggerProductsRun("continue");
+      console.log("[analyze-products] 남은 대기분 — 다음 run 예약");
+    } catch (err) {
+      console.error("[analyze-products] 다음 run dispatch 실패:", err instanceof Error ? err.message : err);
+    }
+  }
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`[analyze-products] 완료 ${done}개 ${JSON.stringify(tally)} | ${elapsed}s`);
   await log.finish(fatal ? "failed" : "success", {
@@ -249,7 +263,7 @@ async function main() {
     model: analysisModel(),
     tokens: { input: usage.input, output: usage.output, calls: usage.calls },
     // 시간 예산에 걸려 남은 대기분은 다음 run(다음 날 03시 또는 지금 수집)이 이어 간다.
-    stoppedByDeadline: Date.now() - startedAt >= RUN_DEADLINE_MS,
+    stoppedByDeadline,
   }, fatal);
 }
 

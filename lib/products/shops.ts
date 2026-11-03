@@ -88,10 +88,13 @@ const ASSET_PREFIXES = [
   "https://dsvf2lcz6s8aj.cloudfront.net/",
 ];
 
-// 오늘과일의 예전 상품은 몰 전용 버킷에 몰 코드 없이 올라가 있다 (2026-11-03 확인:
-// .../cuma.co.kr/resources/products/{id}/productImages/...). 몰마다 이런 예전 위치를 따로 둔다.
+// 예전 상품은 몰 코드 없이 올라가 있다 (2026-11-03 확인):
+//   오늘과일 .../cuma.co.kr/resources/products/{id}/productImages/...
+//   쿠마마켓 .../cumamarket.co.kr/resources/products/{id}/{detailImage|productImages}/...
+// 리유는 예전 경로가 없다(판매 · 품절 상품 284개 모두 ru/products/).
 const LEGACY_PREFIXES: Partial<Record<ShopCode, string>> = {
   cuma: "https://s3.ap-northeast-2.amazonaws.com/cuma.co.kr/resources/products/",
+  cm: "https://s3.ap-northeast-2.amazonaws.com/cumamarket.co.kr/resources/products/",
 };
 
 export function isShopAsset(url: string, shop: ShopCode, productId?: number): boolean {
