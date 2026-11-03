@@ -2,6 +2,7 @@
 import "./load-env";
 
 import { selectProducts, type ProductScope } from "@/lib/agents/select";
+import { isPastDeadline } from "@/lib/automation/deadline";
 import { kstDate } from "@/lib/automation/time";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
@@ -30,8 +31,26 @@ async function main() {
 
   const { data: settings, error } = await service
     .from("track_settings")
-    .select("social_account_id, organization_id, product_scopes, b_full_auto, repeat_gap_days, social_accounts!inner(display_name, role_focus, role_note, is_active, disconnected_at)");
+    .select("social_account_id, organization_id, product_scopes, b_full_auto, b_confirm_deadline, repeat_gap_days, social_accounts!inner(display_name, role_focus, role_note, is_active, disconnected_at)");
   if (error) throw new Error(`track_settings 조회 실패: ${error.message}`);
+
+  // 컨펌 마감이 지난 제안은 건너뜀으로 (사람이 안 봤으면 B 영상을 만들지 않는다)
+  if (!dryRun) {
+    const { data: open } = await service
+      .from("content_plans")
+      .select("id, slot_date, social_account_id")
+      .eq("track", "B")
+      .eq("status", "PROPOSED");
+    const deadlineOf = new Map((settings ?? []).map((s) => [s.social_account_id, s.b_confirm_deadline ?? "18:00"]));
+    const expired = (open ?? []).filter((p) => isPastDeadline(p.slot_date, deadlineOf.get(p.social_account_id) ?? "18:00"));
+    if (expired.length) {
+      await service
+        .from("content_plans")
+        .update({ status: "SKIPPED", note: "컨펌 마감이 지나 건너뜀" })
+        .in("id", expired.map((p) => p.id));
+      console.log(`[plan-b] 마감 지난 제안 ${expired.length}개 건너뜀`);
+    }
+  }
 
   const picked = new Set<string>();
   let created = 0;

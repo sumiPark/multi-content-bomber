@@ -14,7 +14,8 @@
     "worker:alerts": "tsx worker/process-alerts.ts",
     "worker:metrics": "tsx worker/collect-metrics.ts",
     "worker:products": "tsx worker/collect-products.ts",
-    "worker:analyze": "tsx worker/analyze-products.ts"
+    "worker:analyze": "tsx worker/analyze-products.ts",
+    "worker:plan-b": "tsx worker/plan-b-slots.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

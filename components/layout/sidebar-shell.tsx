@@ -7,6 +7,7 @@ import {
   Archive,
   BarChart3,
   BellRing,
+  CalendarCheck,
   CalendarClock,
   Link2,
   LayoutDashboard,
@@ -62,6 +63,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "자동화",
     items: [
+      // B 트랙 상품 컨펌 (콘텐츠 자동화 3단계). 사이드바 전체 개편은 5단계.
+      { href: "/auto/confirm", label: "B 상품 컨펌", icon: CalendarCheck },
       {
         href: "/episode-alerts",
         label: "시리즈 댓글 자동화",
