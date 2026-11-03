@@ -107,11 +107,11 @@ export default async function AnalyticsPage() {
   const collected = baselines.some((b) => b.lastCollectedOn);
 
   return (
-    <main className="container mx-auto max-w-6xl space-y-6 px-6 py-10">
+    <main className="max-w-6xl space-y-6 p-4 sm:p-6">
       <header className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-bold tracking-tight">분석</h1>
+            <h1 className="text-xl font-bold tracking-[-0.01em]">분석</h1>
             <Badge variant="outline">인스타 계정별 지금 수준</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">

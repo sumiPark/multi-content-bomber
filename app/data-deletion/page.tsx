@@ -91,7 +91,7 @@ export default function DataDeletionPage() {
           <p className="mt-2">
             <strong>본문 양식</strong>:
           </p>
-          <pre className="mt-2 whitespace-pre-wrap rounded bg-background p-3 text-xs">
+          <pre className="mt-2 whitespace-pre-wrap rounded bg-card p-3 text-xs">
 {`계정 삭제를 요청합니다.
 
 - 가입 이메일: <가입 시 사용한 이메일>

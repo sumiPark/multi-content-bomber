@@ -171,7 +171,7 @@ export function TemplateEditor({
         {value.map((t, i) => (
           <li
             key={i}
-            className="rounded-lg border bg-background transition focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15"
+            className="rounded-lg border bg-card transition focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/15"
           >
             <div className="flex items-start gap-1 p-2">
               <textarea
@@ -248,7 +248,7 @@ export function TemplateEditor({
         </p>
       ))}
       {warnings.map((w) => (
-        <p key={w} className="text-xs text-amber-700 dark:text-amber-300">
+        <p key={w} className="text-xs text-warn">
           {w}
         </p>
       ))}

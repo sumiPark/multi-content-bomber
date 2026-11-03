@@ -129,11 +129,11 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const pages = Math.max(1, Math.ceil((total ?? 0) / PAGE_SIZE));
 
   return (
-    <main className="container mx-auto max-w-6xl space-y-6 px-6 py-10">
+    <main className="max-w-6xl space-y-6 p-4 sm:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-bold tracking-tight">상품 분석</h1>
+            <h1 className="text-xl font-bold tracking-[-0.01em]">상품 분석</h1>
             <Badge variant="outline">오늘과일 · 쿠마마켓 · 리유</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -220,7 +220,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
               <input
                 name="q"
                 defaultValue={sp.q}
-                className="h-8 w-48 rounded-md border bg-background px-2"
+                className="h-8 w-48 rounded-md border bg-card px-2"
                 placeholder="검색"
               />
             </label>
@@ -263,7 +263,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                           {p.category_name && ` · ${p.category_name}`} · {won(p.price)} · {STOCK_LABEL[p.stock_status] ?? p.stock_status}
                         </p>
                         {(p.analysis_note || p.analysis_error) && (
-                          <p className={cn("truncate text-xs", p.analysis_error ? "text-destructive" : "text-amber-700 dark:text-amber-400")}>
+                          <p className={cn("truncate text-xs", p.analysis_error ? "text-destructive" : "text-warn")}>
                             {p.analysis_error ?? p.analysis_note}
                           </p>
                         )}
@@ -319,7 +319,7 @@ function Select({
   return (
     <label className="flex flex-col gap-1">
       <span className="text-muted-foreground">{label}</span>
-      <select name={name} defaultValue={value ?? ""} className="h-8 rounded-md border bg-background px-2">
+      <select name={name} defaultValue={value ?? ""} className="h-8 rounded-md border bg-card px-2">
         {!noAll && <option value="">전체</option>}
         {options.map(([v, l]) => (
           <option key={v} value={v}>

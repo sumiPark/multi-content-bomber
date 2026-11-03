@@ -57,7 +57,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   ]);
 
   return (
-    <main className="container mx-auto max-w-6xl space-y-8 px-6 py-10">
+    <main className="max-w-6xl space-y-8 p-4 sm:p-6">
       <DashboardHeader summary={buildHeaderSummary(data)} />
       <FailureAlertBar
         failedCount={data.failedCount}
@@ -109,7 +109,7 @@ function LandingHero() {
         </Link>
         <Link
           href="/signup"
-          className="inline-flex h-11 items-center justify-center rounded-md border border-input bg-background px-6 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="inline-flex h-11 items-center justify-center rounded-md border border-input bg-card px-6 text-sm font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
         >
           회원가입
         </Link>
@@ -157,9 +157,9 @@ async function renderContentDetail(
   }
 
   return (
-    <main className="container mx-auto max-w-5xl space-y-6 px-6 py-10">
+    <main className="max-w-5xl space-y-6 p-4 sm:p-6">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight">콘텐츠 보기</h1>
+        <h1 className="text-xl font-bold tracking-[-0.01em]">콘텐츠 보기</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           저장된 콘텐츠를 보거나 수정하세요.
         </p>

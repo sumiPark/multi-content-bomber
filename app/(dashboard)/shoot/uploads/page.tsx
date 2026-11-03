@@ -69,10 +69,10 @@ export default async function ShootUploadsPage() {
   const open = cards.filter((c) => c.status === "OPEN").length;
 
   return (
-    <main className="container mx-auto max-w-4xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
+    <main className="max-w-4xl space-y-6 p-4 sm:p-6">
       <header>
         <div className="flex items-center gap-2">
-          <h1 className="text-3xl font-bold tracking-tight">촬영 · 올리기</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">촬영 · 올리기</h1>
           {open > 0 && <Badge>찍을 것 {open}건</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">

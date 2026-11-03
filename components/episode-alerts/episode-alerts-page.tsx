@@ -73,15 +73,15 @@ export function EpisodeAlertsPage({
   }, [live, router]);
 
   return (
-    <main className="container mx-auto max-w-6xl space-y-8 px-6 py-10">
+    <main className="max-w-6xl space-y-8 p-4 sm:p-6">
       <header className="space-y-3">
-        <h1 className="text-3xl font-bold tracking-tight">시리즈 댓글 자동화</h1>
+        <h1 className="text-xl font-bold tracking-[-0.01em]">시리즈 댓글 자동화</h1>
         <p className="text-sm text-muted-foreground">
           회차의 답글을 켜면, 이전 화에 댓글 단 사람들에게 시리즈 문구로 대댓글을 달아요.
         </p>
         <ul className="flex flex-wrap gap-2">
           {HOW_IT_WORKS.map((text) => (
-            <li key={text} className="rounded-full border bg-background px-3 py-1 text-xs text-muted-foreground">
+            <li key={text} className="rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground">
               {text}
             </li>
           ))}
@@ -175,7 +175,7 @@ function AccountNav({
           id="account-select"
           value={selectedId}
           onChange={(e) => router.push(`/episode-alerts?account=${e.target.value}`, { scroll: false })}
-          className="w-full rounded-lg border bg-background px-3 py-2.5 text-sm"
+          className="w-full rounded-lg border bg-card px-3 py-2.5 text-sm"
         >
           {active.map((a) => (
             <option key={a.id} value={a.id}>
@@ -278,7 +278,7 @@ function AccountItem({ account, selected }: { account: AlertAccountView; selecte
         </span>
       </span>
       {account.isActive && account.replyOnCount > 0 && (
-        <span className="size-2 shrink-0 rounded-full bg-emerald-500" aria-label="답글 켜진 회차 있음" />
+        <span className="size-2 shrink-0 rounded-full bg-ok" aria-label="답글 켜진 회차 있음" />
       )}
     </Link>
   );
@@ -349,7 +349,7 @@ function AccountHeader({
               autoFocus
               disabled={isPending}
               onChange={(e) => setValue(e.target.value)}
-              className="w-20 rounded-md border bg-background px-2 py-1 tabular-nums"
+              className="w-20 rounded-md border bg-card px-2 py-1 tabular-nums"
             />
             <span className="text-muted-foreground">개</span>
             <Button type="submit" size="xs" disabled={isPending || invalid}>
@@ -382,7 +382,7 @@ function AccountHeader({
         )}
         {editing && invalid && <p className="text-xs text-destructive">1~1000 사이로 정해주세요.</p>}
         {editing && !invalid && n > SAFE_DAILY_LIMIT && (
-          <p className="max-w-xs text-xs text-amber-700 dark:text-amber-300">
+          <p className="max-w-xs text-xs text-warn">
             하루 {SAFE_DAILY_LIMIT}개를 넘기면 인스타가 댓글 활동을 잠시 제한할 수 있어요.
           </p>
         )}

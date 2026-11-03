@@ -10,15 +10,15 @@ export type TaskStatus =
 export const TASK_STATUS: Record<TaskStatus, { label: string; className: string }> = {
   COLLECTING: {
     label: "대상 모으는 중",
-    className: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+    className: "border-border bg-surface-2 text-ink-2",
   },
   SENDING: {
     label: "보내는 중",
-    className: "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300",
+    className: "border-primary/30 bg-brand-soft text-primary",
   },
   DONE: {
     label: "완료",
-    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    className: "border-ok/30 bg-ok-soft text-ok",
   },
   FAILED: {
     label: "실패",
@@ -34,7 +34,7 @@ export type ReplyStatus = "PENDING" | "SENT" | "SKIPPED" | "EXCLUDED" | "FAILED"
 
 export const REPLY_STATUS: Record<ReplyStatus, { label: string; className: string }> = {
   PENDING: { label: "보낼 예정", className: "text-muted-foreground" },
-  SENT: { label: "보냄", className: "text-emerald-700 dark:text-emerald-300" },
+  SENT: { label: "보냄", className: "text-ok" },
   SKIPPED: { label: "건너뜀", className: "text-muted-foreground" },
   EXCLUDED: { label: "제외", className: "text-muted-foreground" },
   FAILED: { label: "실패", className: "text-destructive" },

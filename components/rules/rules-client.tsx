@@ -132,7 +132,7 @@ export function AddRuleForm() {
       }}
     >
       <Labeled label="적용">
-        <select value={scope} onChange={(e) => setScope(e.target.value)} className="h-8 rounded-md border bg-background px-2">
+        <select value={scope} onChange={(e) => setScope(e.target.value)} className="h-8 rounded-md border bg-card px-2">
           {Object.entries(SCOPE_LABEL).map(([v, l]) => (
             <option key={v} value={v}>
               {l}
@@ -144,7 +144,7 @@ export function AddRuleForm() {
         <select
           value={ruleType}
           onChange={(e) => setRuleType(e.target.value as "BANNED" | "REQUIRED")}
-          className="h-8 rounded-md border bg-background px-2"
+          className="h-8 rounded-md border bg-card px-2"
         >
           <option value="BANNED">금지 표현</option>
           <option value="REQUIRED">꼭 넣을 문구</option>
@@ -157,7 +157,7 @@ export function AddRuleForm() {
         <select
           value={matchType}
           onChange={(e) => setMatchType(e.target.value as "CONTAINS" | "REGEX")}
-          className="h-8 rounded-md border bg-background px-2"
+          className="h-8 rounded-md border bg-card px-2"
         >
           <option value="CONTAINS">글자 포함</option>
           <option value="REGEX">정규식</option>
@@ -214,8 +214,8 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
       {product.approved.length > 0 && (
         <ul className="space-y-1 text-xs">
           {product.approved.map((a) => (
-            <li key={a.id} className="flex items-start gap-2 rounded bg-green-500/10 px-2 py-1">
-              <Check className="mt-0.5 size-3.5 shrink-0 text-green-700" />
+            <li key={a.id} className="flex items-start gap-2 rounded bg-ok-soft px-2 py-1">
+              <Check className="mt-0.5 size-3.5 shrink-0 text-ok" />
               <span className="flex-1">{a.claim}</span>
               <span className="text-[10px] text-muted-foreground">{a.source === "MANUAL" ? "직접 입력" : "분석 후보"}</span>
               {canManage && (
@@ -303,7 +303,7 @@ export function PreviewCheck() {
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value as typeof kind)}
-          className="h-8 rounded-md border bg-background px-2 text-xs"
+          className="h-8 rounded-md border bg-card px-2 text-xs"
         >
           {Object.entries(SCOPE_LABEL)
             .filter(([v]) => v !== "ALL")
@@ -331,7 +331,7 @@ export function PreviewCheck() {
       {error && <p className="text-xs text-destructive">{error}</p>}
       {hits &&
         (hits.length === 0 ? (
-          <p className="text-xs text-green-700 dark:text-green-400">걸린 규칙이 없어요.</p>
+          <p className="text-xs text-ok">걸린 규칙이 없어요.</p>
         ) : (
           <ul className="space-y-1 text-xs">
             {hits.map((h) => (

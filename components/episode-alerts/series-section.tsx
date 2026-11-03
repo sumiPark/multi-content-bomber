@@ -213,7 +213,7 @@ function SeriesCard({
             <p className="mt-1 text-sm text-muted-foreground">
               {lastNo > 0 ? `${lastNo}화까지` : "아직 회차 없음"}
               {onCount > 0 && (
-                <span className="text-emerald-700 dark:text-emerald-300"> · 답글 켜진 회차 {onCount}개</span>
+                <span className="text-ok"> · 답글 켜진 회차 {onCount}개</span>
               )}
             </p>
           </div>
@@ -300,9 +300,9 @@ type Tone = "off" | "active" | "waiting" | "done" | "error";
 
 const TONE_CLASS: Record<Tone, string> = {
   off: "bg-muted text-muted-foreground",
-  active: "bg-blue-500/10 text-blue-700 dark:text-blue-300",
-  waiting: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-  done: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  active: "bg-brand-soft text-primary",
+  waiting: "bg-warn-soft text-warn",
+  done: "bg-ok-soft text-ok",
   error: "bg-destructive/10 text-destructive",
 };
 
@@ -598,7 +598,7 @@ function ReplySwitch({
     >
       <span
         className={cn(
-          "inline-block rounded-full bg-background shadow transition",
+          "inline-block rounded-full bg-card shadow transition",
           sm ? "size-4" : "size-5",
           checked ? (sm ? "translate-x-[18px]" : "translate-x-[22px]") : "translate-x-0.5",
         )}
@@ -760,7 +760,7 @@ function Modal({
         aria-modal="true"
         aria-label={title}
         className={cn(
-          "flex max-h-[90vh] w-full flex-col overflow-hidden rounded-lg border bg-background shadow-xl",
+          "flex max-h-[90vh] w-full flex-col overflow-hidden rounded-lg border bg-card shadow-xl",
           size === "md" ? "max-w-md" : "max-w-2xl",
         )}
         onClick={(e) => e.stopPropagation()}

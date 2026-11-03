@@ -2,13 +2,16 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* 색 · 모서리 값의 기준은 /DESIGN.md (3 · 5장, Marketing Hub 디자인 규칙과 같은 토큰).
+   여기 값을 바꾸면 DESIGN.md도 같이 고친다. */
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -39,82 +42,149 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* DESIGN.md 확장 토큰: bg-surface-2, text-ink-2, bg-ok-soft 처럼 쓴다 */
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-ink-2: var(--ink-2);
+  --color-faint: var(--faint);
+  --color-line-strong: var(--line-strong);
+  --color-brand-soft: var(--brand-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-risk: var(--risk);
+  --color-risk-soft: var(--risk-soft);
+  --color-caution: var(--caution);
+  --color-caution-ink: var(--caution-ink);
+  --color-lv-ai: var(--lv-ai);
+  --color-lv-ai-soft: var(--lv-ai-soft);
+  --color-lv-shoot: var(--lv-shoot);
+  --color-lv-shoot-soft: var(--lv-shoot-soft);
+  --color-platform-instagram: #e1306c;
+  --color-platform-youtube: #ff0033;
+  --color-platform-tiktok: #111111;
+
+  /* 모서리: 컨트롤 8 · 패널 12 · 모달/드로어 16 (DESIGN.md 5장) */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  --radius-4xl: 28px;
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 12px;
+
+  /* shadcn 기본 이름 ← DESIGN.md 토큰 */
+  --background: #f4f6f9; /* --bg */
+  --foreground: #191f28; /* --ink */
+  --card: #ffffff; /* --surface */
+  --card-foreground: #191f28;
+  --popover: #ffffff;
+  --popover-foreground: #191f28;
+  --primary: #1f6fff; /* --accent */
+  --primary-foreground: #ffffff;
+  --secondary: #f5f6f8; /* --surface-2 */
+  --secondary-foreground: #191f28;
+  --muted: #f5f6f8;
+  --muted-foreground: #6b7684; /* --muted */
+  --accent: #e8ebef; /* hover = --surface-3 */
+  --accent-foreground: #191f28;
+  --destructive: #e5384a; /* --risk */
+  --border: #e5e8eb; /* --line */
+  --input: #d1d6db; /* --line-strong */
+  --ring: #1f6fff;
+  --chart-1: #1f6fff;
+  --chart-2: #e8710a;
+  --chart-3: #18a050;
+  --chart-4: #6e56cf;
+  --chart-5: #a2aab5;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #333d4b;
+  --sidebar-primary: #1f6fff;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eaf2ff; /* 선택 메뉴 = --accent-soft */
+  --sidebar-accent-foreground: #1f6fff;
+  --sidebar-border: #e5e8eb;
+  --sidebar-ring: #1f6fff;
+
+  /* DESIGN.md 확장 토큰 */
+  --surface-2: #f5f6f8;
+  --surface-3: #e8ebef;
+  --ink-2: #333d4b;
+  --faint: #a2aab5;
+  --line-strong: #d1d6db;
+  --brand-soft: #eaf2ff; /* --accent-soft */
+  --ok: #18a050;
+  --ok-soft: #e8f8ee;
+  --warn: #e8710a;
+  --warn-soft: #fff3e0;
+  --risk: #e5384a;
+  --risk-soft: #ffecee;
+  --caution: #ffc400;
+  --caution-ink: #191f28;
+  /* 콘텐츠 방식 배지: AI 자동 업로드(보라) · 직접 촬영(초록) */
+  --lv-ai: #6e56cf;
+  --lv-ai-soft: #f0edff;
+  --lv-shoot: #18a050;
+  --lv-shoot-soft: #e8f8ee;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: #0f1218;
+  --foreground: #eef1f5;
+  --card: #171b23;
+  --card-foreground: #eef1f5;
+  --popover: #171b23;
+  --popover-foreground: #eef1f5;
+  --primary: #5c95ff;
+  --primary-foreground: #0f1218;
+  --secondary: #1e232d;
+  --secondary-foreground: #eef1f5;
+  --muted: #1e232d;
+  --muted-foreground: #9aa3b0;
+  --accent: #2a303c;
+  --accent-foreground: #eef1f5;
+  --destructive: #ff6b78;
+  --border: #2a303b;
+  --input: #3a4250;
+  --ring: #5c95ff;
+  --chart-1: #5c95ff;
+  --chart-2: #ff9f43;
+  --chart-3: #4cd07d;
+  --chart-4: #a594ff;
+  --chart-5: #6c7584;
+  --sidebar: #171b23;
+  --sidebar-foreground: #c9cfd8;
+  --sidebar-primary: #5c95ff;
+  --sidebar-primary-foreground: #0f1218;
+  --sidebar-accent: #172645;
+  --sidebar-accent-foreground: #5c95ff;
+  --sidebar-border: #2a303b;
+  --sidebar-ring: #5c95ff;
+
+  --surface-2: #1e232d;
+  --surface-3: #2a303c;
+  --ink-2: #c9cfd8;
+  --faint: #6c7584;
+  --line-strong: #3a4250;
+  --brand-soft: #172645;
+  --ok: #4cd07d;
+  --ok-soft: #13281c;
+  --warn: #ff9f43;
+  --warn-soft: #2e2112;
+  --risk: #ff6b78;
+  --risk-soft: #341a1e;
+  --caution: #ffc400;
+  --caution-ink: #191f28;
+  --lv-ai: #a594ff;
+  --lv-ai-soft: #241f42;
+  --lv-shoot: #4cd07d;
+  --lv-shoot-soft: #13281c;
 }
 
 @layer base {
@@ -123,8 +193,18 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: 14px;
+    line-height: 1.6;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    -webkit-font-smoothing: antialiased;
   }
   html {
     @apply font-sans;
+  }
+  /* 숫자가 나오는 곳은 자릿수를 맞춘다 (DESIGN.md 4장) */
+  td,
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
   }
 }

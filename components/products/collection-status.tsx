@@ -100,7 +100,7 @@ export function CollectionStatus({
                 <li key={s.shop} className={s.failed ? "text-destructive" : undefined}>
                   {SHOPS[s.shop as ShopCode]?.name ?? s.shop}:{" "}
                   {s.failed ? "실패" : `${s.saved ?? 0}개 받음 · 새로 분석할 것 ${s.queued ?? 0}개`}
-                  {!!s.errorCount && !s.failed && <span className="text-amber-700 dark:text-amber-400"> · 오류 {s.errorCount}건</span>}
+                  {!!s.errorCount && !s.failed && <span className="text-warn"> · 오류 {s.errorCount}건</span>}
                 </li>
               ))}
             </ul>
@@ -135,7 +135,7 @@ export function CollectionStatus({
             </p>
           )}
           {as.stoppedByDeadline && (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
+            <p className="text-xs text-warn">
               실행 시간 한도(45분)에 걸려 멈췄어요. 남은 것은 다음 실행이 이어서 읽습니다.
             </p>
           )}

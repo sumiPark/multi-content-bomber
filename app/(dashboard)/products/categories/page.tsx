@@ -44,12 +44,12 @@ export default async function ProductCategoriesPage() {
   }
 
   return (
-    <main className="container mx-auto max-w-4xl space-y-6 px-6 py-10">
+    <main className="max-w-4xl space-y-6 p-4 sm:p-6">
       <Link href="/products" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> 상품 분석
       </Link>
       <header>
-        <h1 className="text-2xl font-bold tracking-tight">수집 카테고리</h1>
+        <h1 className="text-xl font-bold tracking-[-0.01em]">수집 카테고리</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           켠 카테고리의 상품만 받아 옵니다. 하위 카테고리는 따로 끌 수 있고, 종류에 따라 상세페이지를 읽는
           항목(과일: 산지 · 당도 / 화장품: 성분 / 건기식: 기능성 문구 / 의류: 소재 · 사이즈)이 달라져요.

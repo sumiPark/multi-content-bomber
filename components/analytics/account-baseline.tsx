@@ -95,7 +95,7 @@ export function AccountBaselineCard({ account }: { account: BaselineAccount }) {
           </span>
         </div>
         {!account.hasInsights && account.lastCollectedOn && (
-          <p className="text-xs text-amber-700 dark:text-amber-400">
+          <p className="text-xs text-warn">
             성과 권한이 없어 팔로워 · 좋아요 · 댓글만 보여요.{" "}
             <Link href="/accounts" className="underline underline-offset-2">
               계정 연동
@@ -173,7 +173,7 @@ function Stat({
       <p
         className={cn(
           "truncate text-[11px] text-muted-foreground",
-          tone === "up" && "text-green-700 dark:text-green-400",
+          tone === "up" && "text-ok",
           tone === "down" && "text-destructive",
         )}
       >

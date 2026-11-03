@@ -11,12 +11,14 @@ export default async function DashboardLayout({
   // No user yet (e.g. mid-redirect from a protected page) — render bare.
   if (!user) return <>{children}</>;
 
-  const failedJobCount = await loadFailedJobCount();
+  const [failedJobCount, org] = await Promise.all([loadFailedJobCount(), loadOrganization()]);
 
   return (
     <SidebarShell
       userEmail={user.email ?? null}
       failedJobCount={failedJobCount}
+      orgName={org?.name ?? null}
+      role={org?.role ?? null}
     >
       {children}
     </SidebarShell>
@@ -37,4 +39,14 @@ async function loadFailedJobCount(): Promise<number> {
     .is("deleted_at", null);
 
   return count ?? 0;
+}
+
+// 사이드바 조직 카드(조직 이름 + 내 역할). 못 읽어도 화면은 그대로 뜬다.
+async function loadOrganization(): Promise<{ name: string | null; role: string } | null> {
+  const profile = await getCurrentProfile();
+  if (!profile) return null;
+  if (!profile.organization_id) return { name: null, role: profile.role };
+  const supabase = await getServerSupabase();
+  const { data } = await supabase.from("organizations").select("name").eq("id", profile.organization_id).maybeSingle();
+  return { name: data?.name ?? null, role: profile.role };
 }

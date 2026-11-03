@@ -84,10 +84,10 @@ export default async function ContentsPage() {
   }
 
   return (
-    <main className="container mx-auto max-w-4xl px-6 py-10 space-y-6">
+    <main className="max-w-4xl p-4 sm:p-6 space-y-6">
       <header className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">콘텐츠 보관함</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">콘텐츠 보관함</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             아직 발행하지 않은 콘텐츠 ({list.length}개
             {list.length === PAGE_LIMIT ? "+" : ""}) — 발행한 콘텐츠는 배포

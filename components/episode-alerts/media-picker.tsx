@@ -138,7 +138,7 @@ export function MediaPicker({
                       )}
                     </p>
                     {(locked || m.usedIn.length > 0) && (
-                      <p className="line-clamp-1 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                      <p className="line-clamp-1 text-[10px] font-medium text-warn">
                         {locked ??
                           m.usedIn.map((u) => `${u.seriesName} ${u.episodeNo}화`).join(", ")}
                       </p>

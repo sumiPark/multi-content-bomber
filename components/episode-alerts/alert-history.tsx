@@ -154,7 +154,7 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
   ].filter((c, i) => i === 0 || c.value > 0);
 
   return (
-    <div className="space-y-2 rounded-md border bg-background p-3">
+    <div className="space-y-2 rounded-md border bg-card p-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <StatusPill status={task.status} />
         <p className="min-w-0 text-sm font-medium">
@@ -208,7 +208,7 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
         <p
           className={cn(
             "text-xs",
-            task.status === "FAILED" ? "text-destructive" : "text-amber-700 dark:text-amber-300",
+            task.status === "FAILED" ? "text-destructive" : "text-warn",
           )}
         >
           {task.lastError}

@@ -80,10 +80,10 @@ export default async function UploadPage() {
   }));
 
   return (
-    <main className="container mx-auto max-w-5xl px-6 py-10 space-y-6">
+    <main className="max-w-5xl p-4 sm:p-6 space-y-6">
       <header className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
+          <h1 className="text-xl font-bold tracking-[-0.01em]">
             콘텐츠 생성
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">

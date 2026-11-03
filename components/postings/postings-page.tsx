@@ -95,10 +95,10 @@ const STATUS_LABEL: Record<DisplayStatus, string> = {
 };
 
 const STATUS_BADGE_CLASS: Record<DisplayStatus, string> = {
-  scheduled: "bg-amber-100 text-amber-800 border-amber-300",
-  uploading: "bg-blue-100 text-blue-800 border-blue-300",
-  completed: "bg-green-100 text-green-800 border-green-300",
-  failed: "bg-red-100 text-red-800 border-red-300",
+  scheduled: "bg-warn-soft text-warn border-warn/30",
+  uploading: "bg-brand-soft text-primary border-primary/30",
+  completed: "bg-ok-soft text-ok border-ok/30",
+  failed: "bg-risk-soft text-risk border-risk/30",
   pending: "bg-zinc-100 text-zinc-700 border-zinc-300",
   cancelled: "bg-zinc-100 text-zinc-500 border-zinc-300",
 };
@@ -217,7 +217,9 @@ function captionPreview(captions: unknown, maxLen = 30): string {
     c.instagram?.caption ??
     c.tiktok?.caption ??
     "(캡션 없음)";
-  return text.length > maxLen ? text.slice(0, maxLen) + "…" : text;
+  // 글자 단위(코드 포인트)로 자른다 — 이모지 가운데가 잘리면 깨진 글자가 생기고 서버 · 브라우저 렌더가 달라진다
+  const chars = Array.from(text);
+  return chars.length > maxLen ? chars.slice(0, maxLen).join("") + "…" : text;
 }
 
 function displayLabel(item: { internalTitle: string | null; captions: unknown }): string {
@@ -456,7 +458,7 @@ export function PostingsPage({
     <div className="space-y-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">포스팅 관리</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">포스팅 관리</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             예약·업로드·실패 상태를 한눈에 확인하고 일괄 작업할 수 있어요.
           </p>
@@ -606,9 +608,9 @@ function SummaryCards({
     accent?: string;
   }> = [
     { key: "total", label: "전체" },
-    { key: "scheduled", label: "예약중", accent: "text-amber-600" },
-    { key: "uploading", label: "업로드중", accent: "text-blue-600" },
-    { key: "completed", label: "완료", accent: "text-green-600" },
+    { key: "scheduled", label: "예약중", accent: "text-warn" },
+    { key: "uploading", label: "업로드중", accent: "text-primary" },
+    { key: "completed", label: "완료", accent: "text-ok" },
     { key: "failed", label: "실패", accent: "text-destructive" },
   ];
   return (
@@ -689,7 +691,7 @@ function FiltersBar({
                   "rounded-full border px-3 py-1 text-xs transition",
                   on
                     ? STATUS_BADGE_CLASS[s]
-                    : "border-border bg-background text-muted-foreground hover:bg-accent/40",
+                    : "border-border bg-card text-muted-foreground hover:bg-accent/40",
                 )}
               >
                 {STATUS_LABEL[s]}
@@ -712,7 +714,7 @@ function FiltersBar({
                   "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition",
                   on
                     ? "border-foreground bg-foreground/5"
-                    : "border-border bg-background text-muted-foreground hover:bg-accent/40",
+                    : "border-border bg-card text-muted-foreground hover:bg-accent/40",
                 )}
               >
                 <PlatformIcon platform={p} size={14} />
@@ -730,7 +732,7 @@ function FiltersBar({
               id="period"
               value={period}
               onChange={(e) => onChangePeriod(e.target.value as PeriodPreset)}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              className="rounded-md border bg-card px-2 py-1 text-sm"
             >
               {(Object.keys(PERIOD_LABEL) as PeriodPreset[]).map((p) => (
                 <option key={p} value={p}>
@@ -747,7 +749,7 @@ function FiltersBar({
               id="sort"
               value={sortKey}
               onChange={(e) => onChangeSort(e.target.value as SortKey)}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
+              className="rounded-md border bg-card px-2 py-1 text-sm"
             >
               {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
                 <option key={k} value={k}>
@@ -1177,7 +1179,7 @@ function DetailDialog({
       onClick={onClose}
     >
       <div
-        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border bg-background shadow-xl"
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border bg-card shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-2 border-b p-4">
@@ -1358,7 +1360,7 @@ function CaptionBlock({
       {primary && <p className="mb-1 font-semibold">{primary}</p>}
       <p className="whitespace-pre-wrap">{body}</p>
       {tags.length > 0 && (
-        <p className="mt-2 text-sky-700">{tags.join(" ")}</p>
+        <p className="mt-2 text-primary">{tags.join(" ")}</p>
       )}
     </div>
   );

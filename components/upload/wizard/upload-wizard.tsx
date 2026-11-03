@@ -543,7 +543,7 @@ export function UploadWizard({
             onChange={(e) => setInternalTitle(e.target.value)}
             maxLength={200}
             placeholder="예) 한강 카페 1편 — 보관함/포스팅 관리에서 식별용 라벨"
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            className="w-full rounded-md border bg-card px-3 py-2 text-sm"
           />
         </div>
         <div className="pt-4">
@@ -934,7 +934,7 @@ function Step2Media({
   return (
     <div className="space-y-4">
       {includesTiktok && (
-        <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700">
+        <div className="flex gap-2 rounded-md border border-warn/40 bg-warn-soft p-3 text-xs text-warn">
           <CircleAlert className="size-4 shrink-0" />
           <p>
             TikTok 계정이 포함되어 있어 <strong>영상만 업로드 가능</strong>해요.
@@ -1019,9 +1019,9 @@ function ValidationPanel({
 function PlatformVerdictRow({ verdict }: { verdict: PlatformVerdict }) {
   const icon =
     verdict.status === "ok" ? (
-      <Check className="size-4 text-green-600" />
+      <Check className="size-4 text-ok" />
     ) : verdict.status === "warning" ? (
-      <AlertTriangle className="size-4 text-amber-600" />
+      <AlertTriangle className="size-4 text-warn" />
     ) : (
       <CircleAlert className="size-4 text-destructive" />
     );
@@ -1139,7 +1139,7 @@ function Step3Caption({
                   value={presetId}
                   onChange={(e) => onChangePreset(e.target.value)}
                   disabled={generating}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  className="w-full rounded-md border bg-card px-3 py-2 text-sm"
                 >
                   <option value="">— 사용 안 함 —</option>
                   {presets.map((p) => (
@@ -1331,7 +1331,7 @@ function Step4Review({
         {captions && <CaptionPreview captions={captions} />}
       </ReviewSection>
       {!canAdvance && (
-        <div className="flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700">
+        <div className="flex gap-2 rounded-md border border-warn/40 bg-warn-soft p-3 text-xs text-warn">
           <AlertTriangle className="size-4 shrink-0" />
           <p>
             게시 불가 항목이 있어요. 위의 "수정" 링크로 돌아가 문제를
@@ -1477,7 +1477,7 @@ function Step5Schedule({
             value={scheduledAt}
             onChange={(e) => onChangeScheduledAt(e.target.value)}
             className={cn(
-              "mt-2 w-full rounded-md border bg-background px-3 py-2 text-sm",
+              "mt-2 w-full rounded-md border bg-card px-3 py-2 text-sm",
             )}
           />
         )}
@@ -1506,7 +1506,7 @@ function Step5Schedule({
                       aria-label={`@${account.display_name ?? ""} 시리즈`}
                       value={seriesChoice[account.id] ?? ""}
                       onChange={(e) => onChangeSeries(account.id, e.target.value)}
-                      className="ml-auto max-w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+                      className="ml-auto max-w-full rounded-md border bg-card px-2 py-1.5 text-sm"
                     >
                       <option value="">시리즈 아님</option>
                       {options.map((o) => (

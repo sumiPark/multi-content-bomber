@@ -70,7 +70,7 @@ export function DashboardHeader({ summary }: { summary: string }) {
   return (
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">대시보드</h1>
+        <h1 className="text-xl font-bold tracking-[-0.01em]">대시보드</h1>
         <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
       </div>
       <div className="flex items-center gap-2">
@@ -207,7 +207,7 @@ function StatTile({
     destructive
       ? "text-destructive"
       : hintTone === "positive"
-        ? "text-emerald-600 dark:text-emerald-400"
+        ? "text-ok"
         : hintTone === "negative"
           ? "text-destructive"
           : "text-muted-foreground";
@@ -235,7 +235,7 @@ function StatTile({
       </div>
       <p
         className={cn(
-          "mt-2 text-3xl font-bold tracking-tight tabular-nums",
+          "mt-2 text-xl font-bold tracking-[-0.01em] tabular-nums",
           destructive && "text-destructive",
         )}
       >
@@ -253,9 +253,9 @@ const STATUS_BADGE: Record<
   "scheduled" | "uploading" | "failed" | "pending",
   { label: string; className: string }
 > = {
-  scheduled: { label: "예약중", className: "bg-amber-100 text-amber-800 border-amber-300" },
-  uploading: { label: "업로드중", className: "bg-blue-100 text-blue-800 border-blue-300" },
-  failed: { label: "실패", className: "bg-red-100 text-red-800 border-red-300" },
+  scheduled: { label: "예약중", className: "bg-warn-soft text-warn border-warn/30" },
+  uploading: { label: "업로드중", className: "bg-brand-soft text-primary border-primary/30" },
+  failed: { label: "실패", className: "bg-risk-soft text-risk border-risk/30" },
   pending: { label: "대기", className: "bg-zinc-100 text-zinc-700 border-zinc-300" },
 };
 
@@ -381,7 +381,7 @@ const PLATFORM_LABEL: Record<Platform, string> = {
 };
 
 const PLATFORM_BG: Record<Platform, string> = {
-  YOUTUBE: "bg-red-50 dark:bg-red-950/40",
+  YOUTUBE: "bg-risk-soft",
   INSTAGRAM: "bg-fuchsia-50 dark:bg-fuchsia-950/40",
   TIKTOK: "bg-zinc-100 dark:bg-zinc-900/60",
 };
@@ -461,7 +461,7 @@ function AccountCard({ summary }: { summary: AccountSummary }) {
           </>
         ) : (
           <>
-            <span className="size-1.5 rounded-full bg-emerald-500" />
+            <span className="size-1.5 rounded-full bg-ok" />
             <span className="text-muted-foreground">
               {summary.active}개 활성
             </span>

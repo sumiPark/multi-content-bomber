@@ -146,7 +146,7 @@ function RoleRow({
         value={focus}
         onChange={(e) => setFocus(e.target.value as RoleFocus | "")}
         disabled={!canManage || isPending}
-        className="h-8 rounded-md border bg-background px-2 text-xs"
+        className="h-8 rounded-md border bg-card px-2 text-xs"
         aria-label="계정 역할"
       >
         {FOCUS_OPTIONS.map((o) => (

@@ -22,17 +22,17 @@ export function ComingSoon({
   primaryLabel = "대시보드로",
 }: ComingSoonProps) {
   return (
-    <main className="container mx-auto max-w-2xl px-6 py-16">
+    <main className="max-w-2xl px-6 py-16">
       <Card>
         <CardContent className="flex flex-col items-center gap-5 px-8 py-12 text-center">
-          <div className="grid size-14 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-300">
+          <div className="grid size-14 place-items-center rounded-full bg-ok-soft text-ok">
             <Icon className="size-7" aria-hidden />
           </div>
           <div className="flex flex-col items-center gap-2">
-            <Badge className="border-emerald-500/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+            <Badge className="border-ok/40 bg-ok-soft text-ok">
               soon
             </Badge>
-            <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+            <h1 className="text-xl font-bold tracking-[-0.01em]">{title}</h1>
             <p className="max-w-md text-sm text-muted-foreground">
               {description}
             </p>
@@ -42,7 +42,7 @@ export function ComingSoon({
             <ul className="w-full max-w-md space-y-2 rounded-lg border bg-muted/30 p-4 text-left text-sm text-muted-foreground">
               {highlights.map((line) => (
                 <li key={line} className="flex gap-2">
-                  <span aria-hidden className="mt-1 size-1.5 shrink-0 rounded-full bg-emerald-500" />
+                  <span aria-hidden className="mt-1 size-1.5 shrink-0 rounded-full bg-ok" />
                   <span>{line}</span>
                 </li>
               ))}

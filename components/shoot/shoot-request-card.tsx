@@ -125,11 +125,11 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
       {request.hook && (
         <p className="rounded-md bg-muted/40 px-3 py-2 text-sm">
           첫 장면: <b>{request.hook.spoken}</b>
-          {request.hook.onScreen && <span className="ml-1 rounded bg-background px-1 text-xs">{request.hook.onScreen}</span>}
+          {request.hook.onScreen && <span className="ml-1 rounded bg-card px-1 text-xs">{request.hook.onScreen}</span>}
         </p>
       )}
       {request.issues.length > 0 && open && (
-        <details className="rounded-md border border-amber-400/50 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+        <details className="rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">
           <summary className="cursor-pointer font-semibold">찍을 때 고칠 것 {request.issues.length}개 (점검 결과)</summary>
           <ul className="mt-1 space-y-0.5">
             {request.issues.map((i) => (
@@ -241,7 +241,7 @@ function CutRow({
   const uploading = progress != null;
 
   return (
-    <li className={cn("rounded-md border p-2.5", clip && "border-emerald-500/40 bg-emerald-500/5")}>
+    <li className={cn("rounded-md border p-2.5", clip && "border-ok/40 bg-ok-soft")}>
       <div className="flex items-start gap-2">
         <button
           type="button"
@@ -250,7 +250,7 @@ function CutRow({
           className="mt-0.5 shrink-0 text-muted-foreground disabled:opacity-50"
           aria-label={cut.done ? "찍음 표시 풀기" : "찍음으로 표시"}
         >
-          {cut.done || clip ? <CheckCircle2 className="size-5 text-emerald-600" /> : <Circle className="size-5" />}
+          {cut.done || clip ? <CheckCircle2 className="size-5 text-ok" /> : <Circle className="size-5" />}
         </button>
         <div className="min-w-0 flex-1 space-y-0.5">
           <p className="text-sm">
@@ -264,7 +264,7 @@ function CutRow({
 
       <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
         {clip && !uploading && (
-          <span className="min-w-0 truncate text-xs text-emerald-700 dark:text-emerald-400">
+          <span className="min-w-0 truncate text-xs text-ok">
             올림 · {clip.name} ({mb(clip.size)})
           </span>
         )}

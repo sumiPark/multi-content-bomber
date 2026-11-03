@@ -215,10 +215,10 @@ export function AccountsPage({
   }
 
   return (
-    <main className="container mx-auto max-w-5xl space-y-6 px-6 py-10">
+    <main className="max-w-5xl space-y-6 p-4 sm:p-6">
       <header className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">계정 관리</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">계정 관리</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             소셜 계정을 그룹으로 묶어 관리하세요. 새 콘텐츠 만들 때 그룹
             단위로 한 번에 선택할 수 있어요.
@@ -637,7 +637,7 @@ function AccountItem({
     account.platform,
   );
   return (
-    <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-sm transition hover:bg-accent/30">
+    <div className="flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-sm transition hover:bg-accent/30">
       <PlatformIcon platform={account.platform} size={22} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium leading-tight">
@@ -660,7 +660,7 @@ function AccountItem({
               onChangeAccountGroup(account.id, e.target.value || null)
             }
             disabled={isPending}
-            className="rounded border bg-background px-1.5 py-0.5 text-[11px]"
+            className="rounded border bg-card px-1.5 py-0.5 text-[11px]"
             aria-label="그룹 이동"
             title="그룹 이동"
           >

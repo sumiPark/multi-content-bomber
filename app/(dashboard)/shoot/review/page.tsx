@@ -114,10 +114,10 @@ export default async function ShootReviewPage() {
   const toReview = cards.filter((c) => c.status === "RENDERED").length;
 
   return (
-    <main className="container mx-auto max-w-5xl space-y-6 px-4 py-8 sm:px-6 sm:py-10">
+    <main className="max-w-5xl space-y-6 p-4 sm:p-6">
       <header>
         <div className="flex items-center gap-2">
-          <h1 className="text-3xl font-bold tracking-tight">완성본 확인</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">완성본 확인</h1>
           {toReview > 0 && <Badge>확인할 것 {toReview}개</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">

@@ -15,7 +15,7 @@ export function CollectionHealthBar({ warnings }: { warnings: HealthWarning[] })
             "flex items-center justify-between gap-3 rounded-lg border px-4 py-2.5 text-sm",
             w.level === "error"
               ? "border-destructive/30 bg-destructive/10 text-destructive"
-              : "border-amber-400/40 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200",
+              : "border-warn/40 bg-warn-soft text-warn",
           )}
         >
           <span className="flex min-w-0 items-center gap-3">

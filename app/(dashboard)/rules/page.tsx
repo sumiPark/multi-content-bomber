@@ -69,10 +69,10 @@ export default async function RulesPage() {
   const scopes = Object.keys(SCOPE_LABEL);
 
   return (
-    <main className="container mx-auto max-w-5xl space-y-8 px-6 py-10">
+    <main className="max-w-5xl space-y-8 p-4 sm:p-6">
       <header>
         <div className="flex items-center gap-2">
-          <h1 className="text-3xl font-bold tracking-tight">광고 문구 규칙</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">광고 문구 규칙</h1>
           <Badge variant="outline">사람만 수정</Badge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">

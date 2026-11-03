@@ -135,7 +135,7 @@ export function ProductReviewPanel(props: {
         <div
           className={cn(
             "rounded-md border px-3 py-2 text-xs",
-            props.healthFunctional ? "border-amber-400/60 bg-amber-50 dark:bg-amber-950/30" : "bg-muted/30",
+            props.healthFunctional ? "border-warn/40 bg-warn-soft" : "bg-muted/30",
           )}
         >
           <p className="font-semibold">
@@ -154,7 +154,7 @@ export function ProductReviewPanel(props: {
         </div>
       )}
       {props.kind !== "HEALTH_FOOD" && props.isKindMatch === false && (
-        <p className="rounded-md border border-amber-400/60 px-3 py-2 text-xs">
+        <p className="rounded-md border border-warn/40 px-3 py-2 text-xs">
           카테고리와 상품 종류가 달라 보여요. 수집 카테고리 설정을 확인해 주세요.
         </p>
       )}

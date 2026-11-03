@@ -57,7 +57,7 @@ export function CategoryRow({
         value={item.kind ?? ""}
         disabled={!canManage || isPending || !item.collect}
         onChange={(e) => save({ kind: (e.target.value || null) as ProductKind | null })}
-        className="h-7 rounded-md border bg-background px-1.5 text-xs"
+        className="h-7 rounded-md border bg-card px-1.5 text-xs"
         aria-label="상품 종류"
       >
         <option value="">종류 없음</option>

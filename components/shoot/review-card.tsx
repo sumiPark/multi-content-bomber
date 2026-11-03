@@ -105,7 +105,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
           </ul>
         )}
         {reviewable && card.warnings.length > 0 && (
-          <details className="rounded-md border border-amber-400/50 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          <details className="rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">
             <summary className="cursor-pointer font-semibold">AI 점검이 짚은 것 {card.warnings.length}개 — 보고 판단하세요</summary>
             <ul className="mt-1 space-y-0.5">
               {card.warnings.map((w) => (
@@ -115,7 +115,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
           </details>
         )}
         {reviewable && card.blocking.length === 0 && card.warnings.length === 0 && (
-          <p className="text-xs text-emerald-700 dark:text-emerald-400">광고 문구 규칙 ✓ · 판매 중 ✓ · AI 점검 ✓</p>
+          <p className="text-xs text-ok">광고 문구 규칙 ✓ · 판매 중 ✓ · AI 점검 ✓</p>
         )}
 
         {(reviewable || editing) && canManage && (

@@ -42,7 +42,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const rejected = (Array.isArray(analysis?.rejected_claims) ? analysis.rejected_claims : []) as unknown as ReviewClaim[];
 
   return (
-    <main className="container mx-auto max-w-7xl space-y-5 px-6 py-8">
+    <main className="max-w-7xl space-y-5 p-4 sm:p-6">
       <Link href="/products" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> 상품 목록
       </Link>
@@ -67,7 +67,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           </p>
           {product.summary_title && <p className="mt-1 text-sm">{product.summary_title}</p>}
           {(product.analysis_note || product.analysis_error) && (
-            <p className={product.analysis_error ? "mt-1 text-sm text-destructive" : "mt-1 text-sm text-amber-700 dark:text-amber-400"}>
+            <p className={product.analysis_error ? "mt-1 text-sm text-destructive" : "mt-1 text-sm text-warn"}>
               {product.analysis_error ?? product.analysis_note}
             </p>
           )}
@@ -96,7 +96,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             return (
               <div key={url} className="grid gap-2 rounded-lg border p-2 md:grid-cols-2">
                 <div className="max-h-[640px] overflow-y-auto rounded bg-muted/30">
-                  <p className="sticky top-0 bg-background/90 px-2 py-1 text-[11px] text-muted-foreground">image-{i}</p>
+                  <p className="sticky top-0 bg-card/90 px-2 py-1 text-[11px] text-muted-foreground">image-{i}</p>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={url} alt={`상세 이미지 ${i + 1}`} loading="lazy" className="w-full" />
                 </div>
@@ -105,7 +105,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                     <>
                       <p className="whitespace-pre-wrap text-xs leading-relaxed">{e.text || "(글자 없음 — 사진만 있는 이미지)"}</p>
                       {e.uncertainties.length > 0 && (
-                        <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-400">
+                        <p className="mt-2 text-[11px] text-warn">
                           확실하지 않음: {e.uncertainties.join(" · ")}
                         </p>
                       )}
