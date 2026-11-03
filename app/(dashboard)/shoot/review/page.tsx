@@ -121,7 +121,7 @@ export default async function ShootReviewPage() {
           {toReview > 0 && <Badge>확인할 것 {toReview}개</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          직접 찍은 영상을 AI가 편집한 완성본이에요. 보고 <b>확인하면 그 칸 시각(12시 · 18시)에 자동으로 올라가요.</b> 화면 문구 · 자막이 틀리면 고쳐서 다시
+          직접 찍은 영상을 AI가 편집한 완성본이에요. 보고 <b>확인하면 그 칸 시각에 자동으로 올라가요.</b> 화면 문구 · 자막이 틀리면 고쳐서 다시
           편집하고, 캡션은 바로 고칠 수 있어요. 지금은 배경 음악 없이 촬영 원본 소리로 나가요.
         </p>
       </header>

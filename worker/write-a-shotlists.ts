@@ -6,7 +6,8 @@ import { scoreHooks } from "@/lib/agents/ko-skills";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { PlanAIdea } from "@/lib/agents/plan-a";
 import { shotlistAsScript, writeShotlist, type ShotlistOutput } from "@/lib/agents/shotlist";
-import { addDays, kstDate, kstToIso } from "@/lib/automation/time";
+import { kstDate } from "@/lib/automation/time";
+import { shootDueIso } from "@/lib/schedule/slot-admin";
 import type { ContentRule } from "@/lib/rules/check";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
@@ -29,12 +30,10 @@ function arg(argv: string[], flag: string): string | undefined {
   return v && !v.startsWith("--") ? v : undefined;
 }
 
-/** 촬영 마감 — 올리기 전날 a_shoot_deadline. 이미 지났으면 올릴 시각 3시간 전, 그것도 지났으면 없음. */
-function shootDueIso(slotDate: string, slotTime: string, deadline: string): string | null {
-  const dayBefore = kstToIso(addDays(slotDate, -1), deadline);
-  if (Date.parse(dayBefore) > Date.now()) return dayBefore;
-  const threeHoursBefore = new Date(Date.parse(kstToIso(slotDate, slotTime)) - 3 * 3600_000).toISOString();
-  return Date.parse(threeHoursBefore) > Date.now() ? threeHoursBefore : null;
+/** 촬영 마감(안내용) — 올리기 3시간 전(편성표에서 시각을 바꿀 수 있어 칸 시각 기준). 이미 지났으면 없음. */
+function shootDue(slotDate: string, slotTime: string): string | null {
+  const due = shootDueIso(slotDate, slotTime);
+  return Date.parse(due) > Date.now() ? due : null;
 }
 
 async function main() {
@@ -70,12 +69,6 @@ async function main() {
     console.log("[a-shotlist] 컷 리스트를 쓸 칸 없음");
     return;
   }
-
-  const { data: settings } = await service
-    .from("track_settings")
-    .select("social_account_id, a_shoot_deadline")
-    .in("social_account_id", [...new Set(plans.map((p) => p.social_account_id))]);
-  const deadlineOf = new Map((settings ?? []).map((s) => [s.social_account_id, s.a_shoot_deadline]));
 
   for (const plan of plans) {
     if (!plan.product_id) continue;
@@ -164,7 +157,7 @@ async function main() {
             status: "OPEN",
             cuts: shotlist.cuts.map((c, i) => ({ no: i + 1, ...c, done: false })) as unknown as Json,
             clips: [] as unknown as Json,
-            due_at: shootDueIso(plan.slot_date, plan.slot_time, deadlineOf.get(plan.social_account_id) ?? "14:00"),
+            due_at: shootDue(plan.slot_date, plan.slot_time),
             edit: null,
             rendered_path: null,
             error: null,

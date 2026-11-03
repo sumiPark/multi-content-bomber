@@ -21,7 +21,7 @@ const TONE_CLASS: Record<CellTone, string> = {
 const TASKS: { key: CellTask; label: string; due: string }[] = [
   { key: "confirm", label: "상품 확인", due: "올리는 날 07시까지" },
   { key: "plans", label: "촬영 기획 고르기", due: "올리기 전날까지" },
-  { key: "shoot", label: "촬영 · 올리기", due: "전날 14시까지 (안내)" },
+  { key: "shoot", label: "촬영 · 올리기", due: "올리기 3시간 전까지 (안내)" },
   { key: "review", label: "완성본 확인", due: "올릴 시각 전까지" },
 ];
 
@@ -140,7 +140,7 @@ export function DayBoardTable({ board, today, tomorrow }: { board: DayBoard; tod
             {isToday ? "오늘" : "내일"} 발행 칸 <span className="font-normal text-muted-foreground tabular-nums">· {label}</span>
           </CardTitle>
           <CardDescription className="mt-1">
-            {board.total}칸 · 08 · 21시는 AI가 만들고, 12 · 18시는 직접 찍어요
+            {board.total}칸 · AI 자동 {board.rows.filter((r) => r.track === "B").length}칸 · 직접 촬영 {board.rows.filter((r) => r.track === "A").length}칸
             {board.empty > 0 && <span className="text-risk"> · 기획 없는 빈 칸 {board.empty}개</span>}
           </CardDescription>
         </div>

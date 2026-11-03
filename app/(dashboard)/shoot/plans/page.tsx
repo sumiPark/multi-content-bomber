@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { loadTrackTimes } from "@/lib/schedule/track-times";
 import { isPastSlot } from "@/lib/automation/deadline";
 import { addDays, kstDate } from "@/lib/automation/time";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,8 @@ export default async function ShootPlansPage({ searchParams }: { searchParams: P
   const tomorrow = kstDate(1);
   const slotDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : tomorrow;
   const supabase = await getServerSupabase();
+  // 안내 문구의 칸 시각 — 편성표에서 바뀐다
+  const times = await loadTrackTimes(supabase);
 
   const { data: plans } = await supabase
     .from("content_plans")
@@ -93,10 +96,10 @@ export default async function ShootPlansPage({ searchParams }: { searchParams: P
       <header>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold tracking-[-0.01em]">촬영 기획 고르기</h1>
-          <Badge variant="outline">매일 12시 · 18시</Badge>
+          <Badge variant="outline">매일 {times.A}</Badge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          12시 · 18시 칸은 직접 찍어 올려요. AI가 칸마다 찍을 거리 2~3개를 골라 두니 <b>하나를 고르거나 상품을 직접 지정</b>하세요.
+          직접 촬영 칸({times.A})은 직접 찍어 올려요. AI가 칸마다 찍을 거리 2~3개를 골라 두니 <b>하나를 고르거나 상품을 직접 지정</b>하세요.
           고르면 AI가 찍을 컷 목록을 만들어 <Link href="/shoot/uploads" className="underline">촬영 · 올리기</Link>에 올려 둡니다.
           {toChoose > 0 && <b> 고를 칸 {toChoose}개.</b>}
         </p>
@@ -120,7 +123,7 @@ export default async function ShootPlansPage({ searchParams }: { searchParams: P
             <Clapperboard className="size-10 text-muted-foreground" />
             <h2 className="text-lg font-semibold">{slotDate}에 찍을 기획안이 아직 없어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
-              AI가 매일 새벽 5시에 다음 날 12시 · 18시 칸의 기획안 후보를 만들어 둬요. 판매 중이고 상세페이지 분석이 끝난 상품만 후보가 됩니다.
+              AI가 매일 새벽 5시에 다음 날 직접 촬영 칸의 기획안 후보를 만들어 둬요. 판매 중이고 상세페이지 분석이 끝난 상품만 후보가 됩니다.
             </p>
           </CardContent>
         </Card>

@@ -7,6 +7,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { loadTrackTimes } from "@/lib/schedule/track-times";
 import { confirmDeadlineIso, isPastDeadline } from "@/lib/automation/deadline";
 import { addDays, kstDate } from "@/lib/automation/time";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,8 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const tomorrow = kstDate(1);
   const slotDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : tomorrow;
   const supabase = await getServerSupabase();
+  // 안내 문구의 칸 시각 — 편성표에서 바뀐다
+  const times = await loadTrackTimes(supabase);
 
   const { data: plans } = await supabase
     .from("content_plans")
@@ -125,10 +128,10 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold tracking-[-0.01em]">AI 자동 업로드</h1>
-            <Badge variant="outline">매일 08시 · 21시</Badge>
+            <Badge variant="outline">매일 {times.B}</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            매일 08시 · 21시에 AI가 릴스를 만들어 자동으로 올려요. 여기서는 <b>어떤 상품으로 만들지만 확인</b>하면 됩니다. 대본 ·
+            AI 자동 업로드 칸({times.B})은 AI가 릴스를 만들어 자동으로 올려요. 여기서는 <b>어떤 상품으로 만들지만 확인</b>하면 됩니다. 대본 ·
             영상 · 점검 · 예약은 그 뒤에 자동으로 진행돼요. 올리는 날 오전 7시까지 확인하지 않은 칸은 건너뜁니다.
           </p>
         </div>
