@@ -73,7 +73,7 @@ export function EpisodeAlertsPage({
   }, [live, router]);
 
   return (
-    <main className="max-w-6xl space-y-8 p-4 sm:p-6">
+    <main className="space-y-8 p-4 sm:p-6">
       <header className="space-y-3">
         <h1 className="text-xl font-bold tracking-[-0.01em]">시리즈 댓글 자동화</h1>
         <p className="text-sm text-muted-foreground">

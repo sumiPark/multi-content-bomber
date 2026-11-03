@@ -42,7 +42,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const rejected = (Array.isArray(analysis?.rejected_claims) ? analysis.rejected_claims : []) as unknown as ReviewClaim[];
 
   return (
-    <main className="max-w-7xl space-y-5 p-4 sm:p-6">
+    <main className="space-y-5 p-4 sm:p-6">
       <Link href="/products" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> 상품 목록
       </Link>

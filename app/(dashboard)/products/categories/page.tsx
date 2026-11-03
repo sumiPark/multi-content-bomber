@@ -44,7 +44,7 @@ export default async function ProductCategoriesPage() {
   }
 
   return (
-    <main className="max-w-4xl space-y-6 p-4 sm:p-6">
+    <main className="space-y-6 p-4 sm:p-6">
       <Link href="/products" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" /> 상품 분석
       </Link>

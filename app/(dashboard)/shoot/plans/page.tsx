@@ -89,7 +89,7 @@ export default async function ShootPlansPage({ searchParams }: { searchParams: P
   const dates = [kstDate(0), tomorrow, addDays(tomorrow, 1)];
 
   return (
-    <main className="max-w-6xl space-y-6 p-4 sm:p-6">
+    <main className="space-y-6 p-4 sm:p-6">
       <header>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold tracking-[-0.01em]">촬영 기획 고르기</h1>

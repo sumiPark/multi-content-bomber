@@ -57,7 +57,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   ]);
 
   return (
-    <main className="max-w-6xl space-y-8 p-4 sm:p-6">
+    <main className="space-y-8 p-4 sm:p-6">
       <DashboardHeader summary={buildHeaderSummary(data)} />
       <FailureAlertBar
         failedCount={data.failedCount}
@@ -157,7 +157,7 @@ async function renderContentDetail(
   }
 
   return (
-    <main className="max-w-5xl space-y-6 p-4 sm:p-6">
+    <main className="space-y-6 p-4 sm:p-6">
       <header>
         <h1 className="text-xl font-bold tracking-[-0.01em]">콘텐츠 보기</h1>
         <p className="mt-1 text-sm text-muted-foreground">

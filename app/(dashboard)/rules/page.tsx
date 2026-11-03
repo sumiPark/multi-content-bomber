@@ -69,7 +69,7 @@ export default async function RulesPage() {
   const scopes = Object.keys(SCOPE_LABEL);
 
   return (
-    <main className="max-w-5xl space-y-8 p-4 sm:p-6">
+    <main className="space-y-8 p-4 sm:p-6">
       <header>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold tracking-[-0.01em]">광고 문구 규칙</h1>

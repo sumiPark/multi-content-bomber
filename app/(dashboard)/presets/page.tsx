@@ -17,7 +17,7 @@ export default async function PresetsPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <main className="max-w-4xl p-4 sm:p-6 space-y-6">
+    <main className="p-4 sm:p-6 space-y-6">
       <header>
         <h1 className="text-xl font-bold tracking-[-0.01em]">캡션 프리셋</h1>
         <p className="mt-1 text-sm text-muted-foreground">

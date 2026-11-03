@@ -80,7 +80,7 @@ export default async function UploadPage() {
   }));
 
   return (
-    <main className="max-w-5xl p-4 sm:p-6 space-y-6">
+    <main className="p-4 sm:p-6 space-y-6">
       <header className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold tracking-[-0.01em]">

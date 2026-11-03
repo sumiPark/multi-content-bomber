@@ -129,7 +129,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const pages = Math.max(1, Math.ceil((total ?? 0) / PAGE_SIZE));
 
   return (
-    <main className="max-w-6xl space-y-6 p-4 sm:p-6">
+    <main className="space-y-6 p-4 sm:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">

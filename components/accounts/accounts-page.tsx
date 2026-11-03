@@ -215,7 +215,7 @@ export function AccountsPage({
   }
 
   return (
-    <main className="max-w-5xl space-y-6 p-4 sm:p-6">
+    <main className="space-y-6 p-4 sm:p-6">
       <header className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold tracking-[-0.01em]">계정 관리</h1>
