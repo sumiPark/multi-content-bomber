@@ -224,6 +224,8 @@ export async function selectProducts(
     outputSchema: pickSchema,
     outputName: "product_picks",
     service: opts.log ? ctx.service : null,
+    readService: ctx.service,
+    accountId: ctx.accountId,
     input: { account: ctx.accountName, slotDate: ctx.slotDate, slotTimes: ctx.slotTimes, slotTopics: ctx.slotTopics ?? {} },
   });
 

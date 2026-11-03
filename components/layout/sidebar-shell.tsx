@@ -7,6 +7,7 @@ import {
   Archive,
   BarChart3,
   BellRing,
+  Bot,
   CalendarCheck,
   CalendarClock,
   Clapperboard,
@@ -51,6 +52,8 @@ const NAV_GROUPS: NavGroup[] = [
       // 편성표(5단계) — 예전 "예약 규칙(준비 중)" 자리. 계정별 하루 칸 · 주제 · 주간 진행
       { href: "/schedule", label: "편성표", icon: CalendarClock },
       { href: "/analytics", label: "분석", icon: BarChart3 },
+      // 에이전트 · 학습(5단계) — 에이전트별 반영 방식 · 플레이북 · 피드백 제안 · 실행 기록
+      { href: "/agents", label: "에이전트 · 학습", icon: Bot },
     ],
   },
   {

@@ -163,6 +163,7 @@ export async function writeScript(ctx: ScriptContext, opts: { log: boolean }): P
     outputName: "reel_script",
     maxSteps: 14,
     service: opts.log ? ctx.service : null,
+    readService: ctx.service,
     planId: ctx.planId,
     input: { product: ctx.facts.name, slotTime: ctx.slotTime, fixRequests: ctx.fixRequests ?? [] },
   });

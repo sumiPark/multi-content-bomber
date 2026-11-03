@@ -101,6 +101,7 @@ export async function writeShotlist(ctx: ShotlistContext, opts: { log: boolean }
     outputName: "shot_list",
     maxSteps: 14,
     service: opts.log ? ctx.service : null,
+    readService: ctx.service,
     planId: ctx.planId,
     input: { track: "A", product: ctx.facts.name, slotTime: ctx.slotTime, idea: ctx.idea, brief: ctx.brief, fixRequests: ctx.fixRequests ?? [] },
   });

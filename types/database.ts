@@ -115,6 +115,127 @@ export type Database = {
           },
         ]
       }
+      agent_feedback: {
+        Row: {
+          agent: string
+          applied_version: number | null
+          created_at: string
+          decided_at: string | null
+          decided_by: string | null
+          evidence: Json
+          id: string
+          organization_id: string
+          proposed_body: string
+          reject_reason: string | null
+          status: string
+          title: string
+        }
+        Insert: {
+          agent: string
+          applied_version?: number | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          evidence?: Json
+          id?: string
+          organization_id: string
+          proposed_body: string
+          reject_reason?: string | null
+          status?: string
+          title: string
+        }
+        Update: {
+          agent?: string
+          applied_version?: number | null
+          created_at?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          evidence?: Json
+          id?: string
+          organization_id?: string
+          proposed_body?: string
+          reject_reason?: string | null
+          status?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_feedback_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_feedback_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_playbooks: {
+        Row: {
+          agent: string
+          body: string
+          created_at: string
+          created_by: string | null
+          feedback_id: string | null
+          id: string
+          note: string | null
+          organization_id: string
+          source: string
+          version: number
+        }
+        Insert: {
+          agent: string
+          body: string
+          created_at?: string
+          created_by?: string | null
+          feedback_id?: string | null
+          id?: string
+          note?: string | null
+          organization_id: string
+          source: string
+          version: number
+        }
+        Update: {
+          agent?: string
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          feedback_id?: string | null
+          id?: string
+          note?: string | null
+          organization_id?: string
+          source?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_playbooks_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_playbooks_feedback_id_fkey"
+            columns: ["feedback_id"]
+            isOneToOne: false
+            referencedRelation: "agent_feedback"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_playbooks_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_runs: {
         Row: {
           agent: string
@@ -170,6 +291,45 @@ export type Database = {
             columns: ["plan_id"]
             isOneToOne: false
             referencedRelation: "content_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      agent_settings: {
+        Row: {
+          agent: string
+          approval_mode: string
+          organization_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          agent: string
+          approval_mode?: string
+          organization_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          agent?: string
+          approval_mode?: string
+          organization_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]

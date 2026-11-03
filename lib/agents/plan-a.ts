@@ -57,6 +57,8 @@ export async function planShootIdeas(ctx: PlanAContext, opts: { log: boolean }):
     outputName: "shoot_ideas",
     maxSteps: 10,
     service: opts.log ? ctx.service : null,
+    readService: ctx.service,
+    accountId: ctx.accountId,
     input: { track: "A", account: ctx.accountName, slotDate: ctx.slotDate, slotTimes: ctx.slotTimes, slotTopics: ctx.slotTopics ?? {} },
   });
 

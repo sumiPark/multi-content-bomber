@@ -1,6 +1,7 @@
 import type OpenAI from "openai";
 import { zodFunction, zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
+import { loadActivePlaybook, playbookBlock } from "@/lib/agents/playbook";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions, isReasoningModel } from "@/lib/products/analysis/analyze";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -9,7 +10,8 @@ import type { Json } from "@/types/database";
 // 에이전트 실행기 — 지시문 + 스킬(함수 호출) + 구조화된 최종 답.
 // 에이전트는 스킬을 몇 번 불러 근거를 모은 뒤 정해진 형식(outputSchema)으로 답한다.
 // 실행마다 agent_runs(0028)에 어떤 스킬을 어떤 입력으로 불렀는지 · 토큰 · 결과를 남긴다.
-// 스킬은 코드라 피드백으로 바뀌지 않고, 바뀌는 건 지시문(플레이북)뿐이다(5단계).
+// 스킬은 코드라 피드백으로 바뀌지 않고, 바뀌는 건 지시문 끝에 붙는 플레이북(0032, 사람이 정한 추가 지침)뿐이다.
+// 플레이북이 비어 있으면 지시문은 코드 그대로다. 쓴 플레이북 버전은 agent_runs.playbook_version에 남는다.
 
 export type AgentName = "select" | "plan" | "edit" | "check" | "upload" | "analyze";
 type Service = ReturnType<typeof createServiceClient>;
@@ -53,7 +55,11 @@ export async function runAgent<T>(opts: {
   maxSteps?: number;
   // null이면 기록하지 않음(--dry-run)
   service: Service | null;
+  // 플레이북 읽기용 — 기록을 안 하는 dry-run에서도 플레이북은 읽는다
+  readService?: Service;
   planId?: string | null;
+  // 플레이북을 찾을 조직 — planId가 없을 때 계정으로
+  accountId?: string;
   input?: Record<string, unknown>;
 }): Promise<AgentResult<T>> {
   const model = agentModel();
@@ -61,11 +67,20 @@ export async function runAgent<T>(opts: {
   const skillCalls: SkillCall[] = [];
   const tokens = { input: 0, output: 0 };
 
+  const reader = opts.readService ?? opts.service;
+  const playbook = reader ? await loadActivePlaybook(reader, opts.agent, { planId: opts.planId, accountId: opts.accountId }) : null;
+
   let runId: string | null = null;
   if (opts.service) {
     const { data } = await opts.service
       .from("agent_runs")
-      .insert({ agent: opts.agent, plan_id: opts.planId ?? null, model, input: (opts.input ?? {}) as Json })
+      .insert({
+        agent: opts.agent,
+        plan_id: opts.planId ?? null,
+        model,
+        playbook_version: playbook?.version ?? null,
+        input: (opts.input ?? {}) as Json,
+      })
       .select("id")
       .single();
     runId = data?.id ?? null;
@@ -91,7 +106,7 @@ export async function runAgent<T>(opts: {
     zodFunction({ name: s.name, description: s.description, parameters: s.input }),
   );
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    { role: "system", content: opts.system },
+    { role: "system", content: opts.system + playbookBlock(playbook) },
     { role: "user", content: opts.user },
   ];
 
