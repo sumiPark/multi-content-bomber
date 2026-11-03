@@ -14,7 +14,7 @@ import {
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
-// 편성표 칸 설정 (slot_rules 0031, track_settings 0028) — ADMIN · MANAGER.
+// 편성표 "편성 관리" (slot_rules 0031, track_settings 0028) — ADMIN · MANAGER.
 //   · 칸: 주제 · 켜기/끄기 · 시각 · 방식 바꾸기, 칸 추가 · 삭제
 //   · 계정: 편성에 넣기(쓸 상품 + 기본 칸) · 쓸 상품 바꾸기 · 빼기
 // 시각을 바꾸면 앞으로의 기획도 새 시각으로 옮기고, 칸 · 계정을 빼면 앞으로의 기획 · 예약 발행을 취소한다

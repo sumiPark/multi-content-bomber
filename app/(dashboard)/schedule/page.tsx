@@ -11,8 +11,9 @@ import { cellStatus, TONE_LABEL, type CellStatus, type CellTone } from "@/lib/sc
 import { AUTO_EARLIEST, MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, SHOOT_LEAD_HOURS, trackTimesLabel } from "@/lib/schedule/slot-admin";
 import { cn } from "@/lib/utils";
 
-// 편성표 — 계정 × 하루 칸이 한 주 동안 어디까지 왔는지 보고, 칸 설정(계정 넣기 · 빼기, 쓸 상품,
-// 칸 시각 · 방식 · 주제 · 켜기/끄기)을 바꾼다. AI 자동 업로드의 상품 선정과 직접 촬영 기획안 후보가 이 표를 보고 만들어진다.
+// 편성표 — 탭 두 개(주소 ?tab=manage로 구분 — 새로 고침 · 링크 공유해도 그 탭):
+//   주간 현황  계정 × 하루 칸이 한 주 동안 어디까지 왔는지
+//   편성 관리  계정 넣기 · 빼기, 쓸 상품, 칸 시각 · 방식 · 주제 · 켜기/끄기 AI 자동 업로드의 상품 선정과 직접 촬영 기획안 후보가 이 표를 보고 만들어진다.
 
 export const metadata = { title: "편성표 | MCB" };
 
@@ -44,7 +45,7 @@ function StatusChip({ status }: { status: CellStatus }) {
   );
 }
 
-export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ week?: string }> }) {
+export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ week?: string; tab?: string }> }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
   const profile = await getCurrentProfile();
@@ -52,7 +53,8 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   const canManage = profile.role === "ADMIN" || profile.role === "MANAGER";
   const supabase = await getServerSupabase();
 
-  const { week } = await searchParams;
+  const { week, tab: tabParam } = await searchParams;
+  const tab = tabParam === "manage" ? "manage" : "board";
   const today = kstDate(0);
   const start = mondayOf(week && /^\d{4}-\d{2}-\d{2}$/.test(week) && !Number.isNaN(Date.parse(week)) ? week : today);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
@@ -73,7 +75,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
     supabase.from("social_accounts").select("id, display_name").eq("platform", "INSTAGRAM").is("disconnected_at", null).order("display_name"),
   ]);
 
-  // 편성 계정(track_settings) — 칸이 아직 없는 계정도 칸 설정에 보인다. 연결 끊긴 계정은 뺀다
+  // 편성 계정(track_settings) — 칸이 아직 없는 계정도 편성 관리에 보인다. 연결 끊긴 계정은 뺀다
   const accounts = new Map<string, { name: string; scopes: string[]; rules: NonNullable<typeof ruleRows> }>();
   for (const t of settingRows ?? []) {
     if (!t.social_accounts || t.social_accounts.disconnected_at) continue;
@@ -121,150 +123,170 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
       <header>
         <h1 className="text-xl font-bold tracking-[-0.01em]">편성표</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          계정마다 하루 칸을 정해요. 지금 <b>AI 자동 업로드</b>는 {trackTimesLabel(activeRules, "B")}, <b>직접 촬영</b>은 {trackTimesLabel(activeRules, "A")}예요. 칸마다
+          어느 계정이 몇 시에 무엇을 올리는지 정하고, 한 주가 어디까지 왔는지 봐요. 지금 <b>AI 자동 업로드</b>는 {trackTimesLabel(activeRules, "B")}, <b>직접 촬영</b>은 {trackTimesLabel(activeRules, "A")}예요. 칸마다
           주제를 적어 두면 AI가 상품 · 기획을 고를 때 참고해요.
         </p>
       </header>
 
-      {accountList.length === 0 ? (
-        <Card>
-          <CardContent className="space-y-4 py-10 text-center text-sm text-muted-foreground">
-            <p>편성된 계정이 없어요.</p>
-            {canManage && (
-              <div className="mx-auto max-w-xl text-left">
-                <AddAccountPanel candidates={candidates} options={SCOPE_OPTIONS} limits={limits} />
-              </div>
+      <nav className="inline-flex rounded-lg border bg-surface-2 p-1" aria-label="편성표 보기">
+        {(
+          [
+            { key: "board", label: "주간 현황", href: "/schedule", count: null },
+            { key: "manage", label: "편성 관리", href: "/schedule?tab=manage", count: accountList.length },
+          ] as const
+        ).map((t) => (
+          <Link
+            key={t.key}
+            href={t.href}
+            aria-current={tab === t.key ? "page" : undefined}
+            className={cn(
+              "inline-flex h-9 items-center gap-1.5 rounded-md px-4 text-[13px] transition-colors",
+              tab === t.key ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
             )}
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <Card>
-            <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <CardTitle>주간 진행</CardTitle>
-                <CardDescription className="mt-1 tabular-nums">
-                  {dayLabel(start)} – {dayLabel(end)} · {total}칸
-                </CardDescription>
-              </div>
-              <nav className="flex items-center gap-1.5" aria-label="주 이동">
-                <Link href={`/schedule?week=${addDays(start, -7)}`} className={buttonVariants({ variant: "outline", size: "icon" })} aria-label="지난주">
-                  <ChevronLeft className="size-4" />
-                </Link>
-                <Link
-                  href="/schedule"
-                  className={buttonVariants({ variant: start === thisWeek ? "default" : "outline", size: "sm" })}
-                  aria-current={start === thisWeek ? "page" : undefined}
-                >
-                  이번 주
-                </Link>
-                <Link href={`/schedule?week=${addDays(start, 7)}`} className={buttonVariants({ variant: "outline", size: "icon" })} aria-label="다음 주">
-                  <ChevronRight className="size-4" />
-                </Link>
-              </nav>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <ul className="flex flex-wrap gap-2 text-xs">
-                {(["todo", "wait", "ok", "risk", "idle"] as CellTone[]).map((t) => (
-                  <li key={t} className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1">
-                    <span className={cn("size-2 rounded-full", t === "todo" ? "bg-primary" : t === "wait" ? "bg-ink-2/40" : t === "ok" ? "bg-ok" : t === "risk" ? "bg-risk" : "bg-faint")} />
-                    {TONE_LABEL[t]} <b className="tabular-nums">{counts[t]}</b>
-                  </li>
-                ))}
-              </ul>
+          >
+            {t.label}
+            {t.count != null && <span className="text-xs font-medium tabular-nums text-muted-foreground">계정 {t.count}</span>}
+          </Link>
+        ))}
+      </nav>
 
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full min-w-[960px] table-fixed border-collapse text-[13px]">
-                  <thead className="bg-surface-2 text-xs text-muted-foreground">
-                    <tr className="h-11">
-                      <th scope="col" className="w-32 px-3.5 text-left font-medium">
-                        계정
-                      </th>
-                      <th scope="col" className="w-24 px-3.5 text-left font-medium">
-                        칸
-                      </th>
-                      {days.map((d) => (
-                        <th key={d} scope="col" className={cn("px-2 text-left font-medium tabular-nums", d === today && "text-primary")}>
-                          {dayLabel(d)}
-                          {d === today && <span className="ml-1">· 오늘</span>}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {grid.map((acc) =>
-                      acc.rows.map(({ rule, cells }, i) => (
-                        <tr key={rule.id} className={cn("border-t align-top", i === 0 && "border-t-line-strong")}>
-                          {i === 0 && (
-                            <th scope="rowgroup" rowSpan={acc.rows.length} className="border-r px-3.5 py-3 text-left font-semibold">
-                              @{acc.name}
-                            </th>
-                          )}
-                          <th scope="row" className="px-3.5 py-2.5 text-left font-normal">
-                            <div className="font-semibold tabular-nums">{rule.slot_time}</div>
-                            <div className="mt-1">
-                              <TrackBadge track={rule.track} />
-                            </div>
+      {tab === "board" ? (
+        accountList.length === 0 ? (
+          <Card>
+            <CardContent className="space-y-3 py-10 text-center text-sm text-muted-foreground">
+              <p>편성된 계정이 없어요.</p>
+              <Link href="/schedule?tab=manage" className={buttonVariants({ variant: "outline", size: "sm" })}>
+                편성 관리에서 계정 넣기
+              </Link>
+            </CardContent>
+          </Card>
+        ) : (
+              <Card>
+                <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <CardTitle>주간 현황</CardTitle>
+                    <CardDescription className="mt-1 tabular-nums">
+                      {dayLabel(start)} – {dayLabel(end)} · {total}칸
+                    </CardDescription>
+                  </div>
+                  <nav className="flex items-center gap-1.5" aria-label="주 이동">
+                    <Link href={`/schedule?week=${addDays(start, -7)}`} className={buttonVariants({ variant: "outline", size: "icon" })} aria-label="지난주">
+                      <ChevronLeft className="size-4" />
+                    </Link>
+                    <Link
+                      href="/schedule"
+                      className={buttonVariants({ variant: start === thisWeek ? "default" : "outline", size: "sm" })}
+                      aria-current={start === thisWeek ? "page" : undefined}
+                    >
+                      이번 주
+                    </Link>
+                    <Link href={`/schedule?week=${addDays(start, 7)}`} className={buttonVariants({ variant: "outline", size: "icon" })} aria-label="다음 주">
+                      <ChevronRight className="size-4" />
+                    </Link>
+                  </nav>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <ul className="flex flex-wrap gap-2 text-xs">
+                    {(["todo", "wait", "ok", "risk", "idle"] as CellTone[]).map((t) => (
+                      <li key={t} className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1">
+                        <span className={cn("size-2 rounded-full", t === "todo" ? "bg-primary" : t === "wait" ? "bg-ink-2/40" : t === "ok" ? "bg-ok" : t === "risk" ? "bg-risk" : "bg-faint")} />
+                        {TONE_LABEL[t]} <b className="tabular-nums">{counts[t]}</b>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full min-w-[960px] table-fixed border-collapse text-[13px]">
+                      <thead className="bg-surface-2 text-xs text-muted-foreground">
+                        <tr className="h-11">
+                          <th scope="col" className="w-32 px-3.5 text-left font-medium">
+                            계정
                           </th>
-                          {cells.map((c) => {
-                            const body = (
-                              <>
-                                <StatusChip status={c.status} />
-                                {c.product && <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{c.product}</span>}
-                              </>
-                            );
-                            return (
-                              <td key={c.date} className={cn("px-2 py-2.5", c.date === today && "bg-brand-soft/40")}>
-                                {c.status.href ? (
-                                  <Link href={c.status.href} className="-m-1 block rounded-md p-1 hover:bg-surface-3">
-                                    {body}
-                                  </Link>
-                                ) : (
-                                  <div>{body}</div>
-                                )}
-                              </td>
-                            );
-                          })}
+                          <th scope="col" className="w-24 px-3.5 text-left font-medium">
+                            칸
+                          </th>
+                          {days.map((d) => (
+                            <th key={d} scope="col" className={cn("px-2 text-left font-medium tabular-nums", d === today && "text-primary")}>
+                              {dayLabel(d)}
+                              {d === today && <span className="ml-1">· 오늘</span>}
+                            </th>
+                          ))}
                         </tr>
-                      )),
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                칸을 누르면 그 칸의 할 일 화면으로 가요. AI는 기획을 하루 전에 만들어요. 그 전까지는 “기획 전”, 오늘 칸인데 기획이 없으면 “빈 칸”(이대로면 그 시각에 아무것도 안 올라가요)으로 보여요.
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <CardTitle>칸 설정</CardTitle>
-                <CardDescription className="mt-1">
-                  계정마다 쓸 상품과 하루 칸(시각 · 방식 · 주제)을 정해요. 시각을 바꾸면 앞으로의 기획도 새 시각으로 옮겨요. 끈 칸은 기획하지 않아요. 하루{" "}
-                  {MAX_SLOTS_PER_DAY}칸까지, 같은 계정 칸 사이 {MIN_GAP_MINUTES / 60}시간 이상, AI 자동 칸은 {AUTO_EARLIEST} 이후.
-                  {!canManage && " 관리자 · 매니저만 바꿀 수 있어요."}
-                </CardDescription>
-              </div>
-              {canManage && <AddAccountPanel candidates={candidates} options={SCOPE_OPTIONS} limits={limits} />}
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {accountList.map(([accountId, acc]) => (
-                <AccountScheduleCard
-                  key={accountId}
-                  accountId={accountId}
-                  name={acc.name}
-                  scopes={acc.scopes}
-                  rules={acc.rules.map((r) => ({ id: r.id, time: r.slot_time, track: r.track, topic: r.topic, active: r.active }))}
-                  options={SCOPE_OPTIONS}
-                  limits={limits}
-                  canManage={canManage}
-                />
-              ))}
-            </CardContent>
-          </Card>
-        </>
+                      </thead>
+                      <tbody>
+                        {grid.map((acc) =>
+                          acc.rows.map(({ rule, cells }, i) => (
+                            <tr key={rule.id} className={cn("border-t align-top", i === 0 && "border-t-line-strong")}>
+                              {i === 0 && (
+                                <th scope="rowgroup" rowSpan={acc.rows.length} className="border-r px-3.5 py-3 text-left font-semibold">
+                                  @{acc.name}
+                                </th>
+                              )}
+                              <th scope="row" className="px-3.5 py-2.5 text-left font-normal">
+                                <div className="font-semibold tabular-nums">{rule.slot_time}</div>
+                                <div className="mt-1">
+                                  <TrackBadge track={rule.track} />
+                                </div>
+                              </th>
+                              {cells.map((c) => {
+                                const body = (
+                                  <>
+                                    <StatusChip status={c.status} />
+                                    {c.product && <span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">{c.product}</span>}
+                                  </>
+                                );
+                                return (
+                                  <td key={c.date} className={cn("px-2 py-2.5", c.date === today && "bg-brand-soft/40")}>
+                                    {c.status.href ? (
+                                      <Link href={c.status.href} className="-m-1 block rounded-md p-1 hover:bg-surface-3">
+                                        {body}
+                                      </Link>
+                                    ) : (
+                                      <div>{body}</div>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          )),
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    칸을 누르면 그 칸의 할 일 화면으로 가요. AI는 기획을 하루 전에 만들어요. 그 전까지는 “기획 전”, 오늘 칸인데 기획이 없으면 “빈 칸”(이대로면 그 시각에 아무것도 안 올라가요)으로 보여요.
+                  </p>
+                </CardContent>
+              </Card>
+        )
+      ) : (
+            <Card>
+              <CardHeader className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle>편성 관리</CardTitle>
+                  <CardDescription className="mt-1">
+                    계정마다 쓸 상품과 하루 칸(시각 · 방식 · 주제)을 정해요. 시각을 바꾸면 앞으로의 기획도 새 시각으로 옮겨요. 끈 칸은 기획하지 않아요. 하루{" "}
+                    {MAX_SLOTS_PER_DAY}칸까지, 같은 계정 칸 사이 {MIN_GAP_MINUTES / 60}시간 이상, AI 자동 칸은 {AUTO_EARLIEST} 이후.
+                    {!canManage && " 관리자 · 매니저만 바꿀 수 있어요."}
+                  </CardDescription>
+                </div>
+                {canManage && <AddAccountPanel candidates={candidates} options={SCOPE_OPTIONS} limits={limits} />}
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {accountList.map(([accountId, acc]) => (
+                  <AccountScheduleCard
+                    key={accountId}
+                    accountId={accountId}
+                    name={acc.name}
+                    scopes={acc.scopes}
+                    rules={acc.rules.map((r) => ({ id: r.id, time: r.slot_time, track: r.track, topic: r.topic, active: r.active }))}
+                    options={SCOPE_OPTIONS}
+                    limits={limits}
+                    canManage={canManage}
+                  />
+                ))}
+              </CardContent>
+            </Card>
       )}
     </main>
   );

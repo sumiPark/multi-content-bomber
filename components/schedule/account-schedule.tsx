@@ -8,7 +8,7 @@ import { SlotRuleCell, useScheduleRun, type SlotRuleCellData } from "@/component
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-// 편성표 "칸 설정" — 계정마다 쓸 상품 · 하루 칸, 계정 넣기 · 빼기. 규칙(하루 최대 칸 · 칸 사이 간격 · AI 자동은 08시 이후)은
+// 편성표 "편성 관리" 탭 — 계정마다 쓸 상품 · 하루 칸, 계정 넣기 · 빼기. 규칙(하루 최대 칸 · 칸 사이 간격 · AI 자동은 08시 이후)은
 // 서버(lib/schedule/slot-admin.ts)가 다시 확인하고, 여기서는 미리 알려 주기만 한다.
 
 export interface ScopeOptionData {
