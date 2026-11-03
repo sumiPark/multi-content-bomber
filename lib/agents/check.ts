@@ -1,0 +1,117 @@
+import { zodResponseFormat } from "openai/helpers/zod";
+import { z } from "zod";
+import { checkCaption, checkTone, scoreHooks, timeScript } from "@/lib/agents/ko-skills";
+import type { ProductFacts } from "@/lib/agents/product-facts";
+import { agentModel } from "@/lib/agents/runner";
+import type { ScriptOutput } from "@/lib/agents/script";
+import { getOpenAI } from "@/lib/openai";
+import { callOptions } from "@/lib/products/analysis/analyze";
+import { checkText, type ContentRule } from "@/lib/rules/check";
+
+// 점검 에이전트(4) — AI 자동 업로드는 사람이 영상을 보지 않고 나가므로, 올리기 전에 여기서 걸러 멈춘다.
+// 점검 기준은 잠긴 항목: 피드백(자동 승인 포함)으로 바뀌지 않는다. 기준값은 이 파일 상수와 광고 문구 규칙(0026).
+//   코드로 재는 것: 훅 점수 · 길이 · 광고 문구 규칙 · AI 말투 · 캡션 형식 · 판매 상태
+//   AI가 판단하는 것: 문장마다 상세페이지 근거가 있는지, 1인칭 체험 · 후기를 지어냈는지
+
+const MIN_HOOK_SCORE = 50;
+const MIN_HUMAN_SCORE = 55;
+const LENGTH_RANGE: [number, number] = [12, 40];
+
+export interface CheckIssue {
+  kind: "hook" | "length" | "rules" | "tone" | "caption" | "stock" | "grounding" | "fabrication";
+  detail: string;
+}
+
+export interface CheckResult {
+  passed: boolean;
+  issues: CheckIssue[];
+  scores: { hook: number | null; humanScore: number | null; seconds: number | null; caption: string | null };
+  tokens: { input: number; output: number };
+}
+
+const groundingSchema = z.object({
+  unsupported: z
+    .array(z.object({ sentence: z.string(), why: z.string() }))
+    .describe("상품 사실 · 원문에 근거가 없는 사실 주장(숫자 · 성분 · 효과 · 산지 · 구성). 없으면 빈 배열"),
+  fabricated: z
+    .array(z.object({ sentence: z.string(), why: z.string() }))
+    .describe("사람이 직접 써 본 것처럼 꾸민 1인칭 체험 · 지어낸 후기 · 가짜 고객 이야기. 없으면 빈 배열"),
+});
+
+export async function checkScript(script: ScriptOutput, facts: ProductFacts, rules: ContentRule[], handle: string): Promise<CheckResult> {
+  const issues: CheckIssue[] = [];
+  const spoken = script.beats.map((b) => b.spoken);
+  const onScreen = script.beats.map((b) => b.on_screen).filter(Boolean);
+
+  // 1. 훅 — 고른 훅(첫 비트)을 다시 채점한다(작가 에이전트의 자기 채점을 믿지 않음)
+  const [hook] = scoreHooks([spoken[0] ?? ""]);
+  if (!hook || hook.score < MIN_HOOK_SCORE) {
+    issues.push({ kind: "hook", detail: `훅 점수 ${hook?.score ?? 0}점 (기준 ${MIN_HOOK_SCORE}점) — 가장 약한 축: ${hook?.weakest ?? "?"}` });
+  }
+
+  // 2. 길이 · 비트
+  const timing = timeScript(spoken, 20);
+  if (timing.totalSeconds < LENGTH_RANGE[0] || timing.totalSeconds > LENGTH_RANGE[1]) {
+    issues.push({ kind: "length", detail: `길이 ${timing.totalSeconds.toFixed(1)}초 (기준 ${LENGTH_RANGE[0]}~${LENGTH_RANGE[1]}초)` });
+  }
+  const longBeats = timing.beats.filter((b) => b.dur > 4.5);
+  if (longBeats.length) issues.push({ kind: "length", detail: `4초 넘는 비트 ${longBeats.length}개: "${longBeats[0].text.slice(0, 30)}…"` });
+
+  // 3. 광고 문구 규칙 — 내레이션 · 화면 문구 · 캡션 전부
+  const allText = [...spoken, ...onScreen, script.caption.text].join("\n");
+  for (const h of checkText(allText, facts.kind, rules, facts.approvedClaims)) {
+    issues.push({
+      kind: "rules",
+      detail: h.rule.ruleType === "BANNED" ? `금지 표현 "${h.matched}" — ${h.rule.reason ?? ""}` : `필수 문구 빠짐 "${h.rule.phrase}" — ${h.rule.reason ?? ""}`,
+    });
+  }
+
+  // 4. AI 말투 — 내레이션과 캡션 각각
+  const toneSpoken = checkTone(spoken.join("\n"));
+  const toneCaption = checkTone(script.caption.text);
+  const human = Math.min(toneSpoken.humanScore, toneCaption.humanScore);
+  if (human < MIN_HUMAN_SCORE) {
+    const worst = toneSpoken.humanScore <= toneCaption.humanScore ? "내레이션" : "캡션";
+    issues.push({ kind: "tone", detail: `${worst}의 AI 말투 점수 ${human}점 (기준 ${MIN_HUMAN_SCORE}점)` });
+  }
+
+  // 5. 캡션 형식
+  const cap = checkCaption(script.caption.text, script.caption.keywords, handle);
+  if (cap.verdict !== "READY") issues.push({ kind: "caption", detail: `캡션 점검 ${cap.verdict}` });
+
+  // 6. 판매 상태 — 판매 중이 아닌 상품을 판매 중처럼 올리지 않는다
+  if (facts.stockStatus !== "available") issues.push({ kind: "stock", detail: `지금 판매 중이 아님 (${facts.stockStatus})` });
+
+  // 7. 근거 · 지어낸 체험 (AI 판단)
+  const model = agentModel();
+  const completion = await getOpenAI().chat.completions.parse({
+    model,
+    ...callOptions(model, 3000),
+    messages: [
+      {
+        role: "system",
+        content: `너는 쇼핑몰 릴스의 광고 심의 담당이다. 대본 · 화면 문구 · 캡션의 문장을 하나씩 상품 사실과 원문에 대조한다.
+- 사실 주장(숫자 · 성분 · 효과 · 산지 · 구성 · 가격)이 상품 사실이나 원문에 없으면 unsupported.
+- 말투 · 감탄 · 권유(예: "가볍게 써 보세요")는 사실 주장이 아니니 괜찮다.
+- 실제 사람이 써 본 것처럼 꾸민 1인칭 체험("써 봤는데", "제 피부가"), 지어낸 고객 후기는 fabricated. 이 영상은 AI가 만들고 사람이 써 본 적이 없다.
+- 애매하면 통과시키지 말고 적는다.`,
+      },
+      {
+        role: "user",
+        content: `상품 사실:\n${JSON.stringify({ name: facts.name, price: facts.price, oneLine: facts.oneLine, claims: facts.claims, details: facts.details, usage: facts.usage, cautions: facts.cautions, approvedClaims: facts.approvedClaims })}\n\n상세페이지 원문(일부):\n${facts.sourceText}\n\n점검할 글:\n[내레이션]\n${spoken.join("\n")}\n[화면 문구]\n${onScreen.join("\n")}\n[캡션]\n${script.caption.text}`,
+      },
+    ],
+    response_format: zodResponseFormat(groundingSchema, "grounding"),
+  });
+  const g = completion.choices[0]?.message?.parsed;
+  if (!g) throw new Error("근거 점검 응답이 비어 있음");
+  for (const u of g.unsupported) issues.push({ kind: "grounding", detail: `근거 없음: "${u.sentence}" — ${u.why}` });
+  for (const fb of g.fabricated) issues.push({ kind: "fabrication", detail: `지어낸 체험: "${fb.sentence}" — ${fb.why}` });
+
+  return {
+    passed: issues.length === 0,
+    issues,
+    scores: { hook: hook?.score ?? null, humanScore: human, seconds: timing.totalSeconds, caption: cap.verdict },
+    tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },
+  };
+}

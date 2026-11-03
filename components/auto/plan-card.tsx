@@ -37,12 +37,15 @@ export interface PlanCardData {
   alternatives: { reason: string; product: ProductBrief }[];
   // 서버에서 계산 — 렌더 중 시계를 읽으면 서버 · 클라이언트 결과가 갈린다
   pastDeadline: boolean;
+  // 대본 · 점검 결과 (확인 뒤 AI가 씀)
+  script: { hookScore: number | null; beats: { spoken: string; onScreen: string }[]; caption: string } | null;
+  issues: string[];
 }
 
 const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
   PROPOSED: { label: "확인 대기", variant: "default" },
   CONFIRMED: { label: "확인됨 · 제작 대기", variant: "secondary" },
-  SCRIPTED: { label: "대본 완료", variant: "secondary" },
+  SCRIPTED: { label: "대본 완료 · 영상 대기", variant: "secondary" },
   RENDERED: { label: "영상 완료", variant: "secondary" },
   BLOCKED: { label: "점검에 걸림", variant: "destructive" },
   SCHEDULED: { label: "예약됨", variant: "secondary" },
@@ -85,6 +88,31 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
       )}
       {plan.reason && <p className="rounded-md bg-muted/40 px-3 py-2 text-xs leading-relaxed">AI 이유: {plan.reason}</p>}
       {plan.note && <p className="text-xs text-muted-foreground">{plan.note}</p>}
+
+      {plan.issues.length > 0 && (
+        <ul className="space-y-0.5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          {plan.issues.map((i) => (
+            <li key={i}>✗ {i}</li>
+          ))}
+        </ul>
+      )}
+
+      {plan.script && (
+        <details className="rounded-md border px-3 py-2 text-xs">
+          <summary className="cursor-pointer font-semibold">
+            AI가 쓴 대본 · 캡션{plan.script.hookScore != null && ` (훅 ${Math.round(plan.script.hookScore)}점)`}
+          </summary>
+          <ol className="mt-2 space-y-1">
+            {plan.script.beats.map((b, i) => (
+              <li key={i}>
+                <span className="text-muted-foreground">{i === 0 ? "훅" : i}.</span> {b.spoken}
+                {b.onScreen && <span className="ml-1 rounded bg-muted px-1 text-[11px]">{b.onScreen}</span>}
+              </li>
+            ))}
+          </ol>
+          <p className="mt-2 whitespace-pre-wrap rounded bg-muted/40 p-2">{plan.script.caption}</p>
+        </details>
+      )}
 
       {canManage && plan.pastDeadline && (plan.status === "PROPOSED" || plan.status === "CONFIRMED") && (
         <p className="rounded-md border border-amber-400/50 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">

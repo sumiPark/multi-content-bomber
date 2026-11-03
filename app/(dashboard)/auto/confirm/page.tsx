@@ -16,6 +16,23 @@ import { cn } from "@/lib/utils";
 
 type Proposal = { reason?: string; alternatives?: { product_id: string; reason: string }[] };
 
+type SavedScript = {
+  beats?: { spoken: string; on_screen: string }[];
+  caption?: { text: string };
+  hooks?: { spoken: string; score?: number | null }[];
+  chosen_hook?: number;
+};
+
+function summarizeScript(raw: unknown): PlanCardData["script"] {
+  const s = raw as SavedScript | null;
+  if (!s?.beats?.length) return null;
+  return {
+    hookScore: s.hooks?.[s.chosen_hook ?? 0]?.score ?? null,
+    beats: s.beats.map((b) => ({ spoken: b.spoken, onScreen: b.on_screen })),
+    caption: s.caption?.text ?? "",
+  };
+}
+
 export default async function ConfirmPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   const sp = await searchParams;
   const user = await getSessionUser();
@@ -30,7 +47,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
 
   const { data: plans } = await supabase
     .from("content_plans")
-    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, social_accounts(display_name)")
+    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, script, check_result, social_accounts(display_name)")
     .eq("slot_date", slotDate)
     .eq("track", "B")
     .order("slot_time", { ascending: true });
@@ -90,6 +107,8 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         .map((a) => ({ reason: a.reason, product: brief(a.product_id) }))
         .filter((a): a is { reason: string; product: NonNullable<ReturnType<typeof brief>> } => !!a.product),
       pastDeadline: isPastDeadline(slotDate, deadline),
+      script: summarizeScript(p.script),
+      issues: ((p.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),
     });
     byAccount.set(p.social_account_id, group);
   }
