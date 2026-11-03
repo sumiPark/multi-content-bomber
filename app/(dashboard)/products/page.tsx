@@ -133,8 +133,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-bold tracking-tight">상품</h1>
-            <Badge variant="outline">2단계 · 수집 · 상세페이지 분석</Badge>
+            <h1 className="text-3xl font-bold tracking-tight">상품 분석</h1>
+            <Badge variant="outline">오늘과일 · 쿠마마켓 · 리유</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             오늘과일 · 쿠마마켓 · 리유 상품을 매일 03시에 받아 오고, 판매 중인 상품의 상세페이지(이미지)를

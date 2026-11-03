@@ -94,7 +94,10 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     byAccount.set(p.social_account_id, group);
   }
 
-  const proposed = (plans ?? []).filter((p) => p.status === "PROPOSED").length;
+  // 마감 전인 제안만 — 마감이 지나면 하나씩도, 모두도 컨펌할 수 없다
+  const proposed = (plans ?? []).filter(
+    (p) => p.status === "PROPOSED" && !isPastDeadline(slotDate, deadlineBy.get(p.social_account_id) ?? "18:00"),
+  ).length;
   const dates = [kstDate(0), tomorrow, addDays(tomorrow, 1)];
 
   return (
@@ -102,12 +105,12 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-bold tracking-tight">B 상품 컨펌</h1>
-            <Badge variant="outline">B 트랙 · AI 자동 생성</Badge>
+            <h1 className="text-3xl font-bold tracking-tight">AI 자동 업로드</h1>
+            <Badge variant="outline">매일 08시 · 21시</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            AI가 고른 상품을 확인만 하면 대본 · 영상 · 점검 · 예약은 자동으로 진행돼요. 발행 전날 마감(기본 18시)이 지나면 그
-            칸은 건너뜁니다.
+            매일 08시 · 21시에 AI가 릴스를 만들어 자동으로 올려요. 여기서는 <b>어떤 상품으로 만들지만 확인</b>하면 됩니다. 대본 ·
+            영상 · 점검 · 예약은 그 뒤에 자동으로 진행돼요. 올리기 전날 18시까지 확인하지 않은 칸은 건너뜁니다.
           </p>
         </div>
         {canManage && proposed > 0 && <ConfirmAllButton slotDate={slotDate} count={proposed} />}
@@ -129,9 +132,9 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <CalendarCheck className="size-10 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">{slotDate} B 칸 제안이 아직 없어요</h2>
+            <h2 className="text-lg font-semibold">{slotDate}에 올릴 상품 제안이 아직 없어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
-              상품 선정 에이전트가 매일 아침 내일 칸을 채워요. 판매 중이고 상세페이지 분석이 끝난 상품만 후보가 됩니다.
+              AI가 매일 아침 9시에 다음 날 올릴 상품을 골라 둬요. 판매 중이고 상세페이지 분석이 끝난 상품만 후보가 됩니다.
             </p>
           </CardContent>
         </Card>
@@ -141,7 +144,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
             <div className="flex items-baseline gap-2">
               <h2 className="text-lg font-semibold">@{g.name}</h2>
               <span className="text-xs text-muted-foreground">
-                컨펌 마감 <RelativeTime iso={g.deadlineIso} />
+                확인 마감 <RelativeTime iso={g.deadlineIso} />
               </span>
             </div>
             <div className="grid gap-3 md:grid-cols-2">

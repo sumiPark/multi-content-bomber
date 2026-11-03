@@ -46,7 +46,7 @@ export default async function ProductCategoriesPage() {
   return (
     <main className="container mx-auto max-w-4xl space-y-6 px-6 py-10">
       <Link href="/products" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> 상품
+        <ArrowLeft className="size-4" /> 상품 분석
       </Link>
       <header>
         <h1 className="text-2xl font-bold tracking-tight">수집 카테고리</h1>

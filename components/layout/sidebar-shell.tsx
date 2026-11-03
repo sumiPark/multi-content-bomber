@@ -56,15 +56,21 @@ const NAV_GROUPS: NavGroup[] = [
         badgeKind: "count",
       },
       { href: "/contents", label: "보관함", icon: Archive },
-      // 세 몰 상품 + 상세페이지 분석 (콘텐츠 자동화 2단계). 사이드바 전체 개편은 5단계.
-      { href: "/products", label: "상품", icon: Package },
+    ],
+  },
+  // AI 자동 콘텐츠(2026-11 신규) — 기존 메뉴와 섞지 않고 따로 묶는다(사용자 요청).
+  // 메뉴 이름에 내부 용어(B 트랙 등)를 쓰지 않는다 — 처음 보는 사람도 뭘 하는 곳인지 알게.
+  {
+    label: "AI 자동 콘텐츠",
+    items: [
+      { href: "/auto/confirm", label: "AI 자동 업로드", icon: CalendarCheck },
+      { href: "/products", label: "상품 분석", icon: Package },
+      { href: "/rules", label: "광고 문구 규칙", icon: ShieldCheck },
     ],
   },
   {
     label: "자동화",
     items: [
-      // B 트랙 상품 컨펌 (콘텐츠 자동화 3단계). 사이드바 전체 개편은 5단계.
-      { href: "/auto/confirm", label: "B 상품 컨펌", icon: CalendarCheck },
       {
         href: "/episode-alerts",
         label: "시리즈 댓글 자동화",
@@ -88,8 +94,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "설정",
     items: [
       { href: "/accounts", label: "계정 연동", icon: Link2 },
-      // 금지 표현 · 건기식 심의 문구 (콘텐츠 자동화 2단계)
-      { href: "/rules", label: "표현 규칙", icon: ShieldCheck },
       { href: "/presets", label: "AI 프리셋", icon: Sparkles },
     ],
   },

@@ -112,7 +112,7 @@ export default async function AnalyticsPage() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-3xl font-bold tracking-tight">분석</h1>
-            <Badge variant="outline">1단계 · 계정 기준선</Badge>
+            <Badge variant="outline">인스타 계정별 지금 수준</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             인스타 계정마다 지금 수준을 숫자로 잡아 둡니다. 매일 04시에 팔로워와

@@ -40,8 +40,8 @@ export interface PlanCardData {
 }
 
 const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
-  PROPOSED: { label: "컨펌 대기", variant: "default" },
-  CONFIRMED: { label: "컨펌됨", variant: "secondary" },
+  PROPOSED: { label: "확인 대기", variant: "default" },
+  CONFIRMED: { label: "확인됨 · 제작 대기", variant: "secondary" },
   SCRIPTED: { label: "대본 완료", variant: "secondary" },
   RENDERED: { label: "영상 완료", variant: "secondary" },
   BLOCKED: { label: "점검에 걸림", variant: "destructive" },
@@ -86,11 +86,18 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
       {plan.reason && <p className="rounded-md bg-muted/40 px-3 py-2 text-xs leading-relaxed">AI 이유: {plan.reason}</p>}
       {plan.note && <p className="text-xs text-muted-foreground">{plan.note}</p>}
 
+      {canManage && plan.pastDeadline && (plan.status === "PROPOSED" || plan.status === "CONFIRMED") && (
+        <p className="rounded-md border border-amber-400/50 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          확인 마감(올리기 전날 18시)이 지나 바꿀 수 없어요.{" "}
+          {plan.status === "PROPOSED" ? "확인하지 않은 이 칸은 건너뜁니다." : "확인한 상품으로 만들어 올립니다."}
+        </p>
+      )}
+
       {editable && (
         <div className="flex flex-wrap gap-2">
           {plan.status === "PROPOSED" && (
             <Button size="sm" disabled={isPending} onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: null }))}>
-              <Check className="size-4" /> 이 상품으로 컨펌
+              <Check className="size-4" /> 이 상품으로 확인
             </Button>
           )}
           <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => skipPlanAction({ planId: plan.id }))}>
@@ -112,7 +119,7 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
                 disabled={isPending}
                 onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: a.product.id }))}
               >
-                이걸로 컨펌
+                이걸로 바꾸기
               </Button>
             </div>
           ))}
@@ -155,7 +162,7 @@ export function ConfirmAllButton({ slotDate, count }: { slotDate: string; count:
   return (
     <div className="flex flex-col items-end gap-1">
       <Button disabled={isPending} onClick={() => run(() => confirmAllAction({ slotDate }))}>
-        <Check className="size-4" /> 제안 {count}개 모두 컨펌
+        <Check className="size-4" /> {count}개 모두 그대로 확인
       </Button>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

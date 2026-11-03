@@ -72,12 +72,12 @@ export default async function RulesPage() {
     <main className="container mx-auto max-w-5xl space-y-8 px-6 py-10">
       <header>
         <div className="flex items-center gap-2">
-          <h1 className="text-3xl font-bold tracking-tight">표현 규칙</h1>
-          <Badge variant="outline">사람만 수정 · 잠김</Badge>
+          <h1 className="text-3xl font-bold tracking-tight">광고 문구 규칙</h1>
+          <Badge variant="outline">사람만 수정</Badge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          B 트랙은 사람이 영상을 보지 않고 나가서, 발행 전에 이 규칙으로 자동 검사하고 걸리면 멈춥니다. 에이전트
-          피드백으로는 바뀌지 않아요.
+          AI 자동 업로드 영상은 사람이 보지 않고 올라가서, 올리기 전에 이 규칙으로 자동 검사하고 걸리면 멈춥니다. AI가
+          스스로 이 규칙을 바꾸지는 못해요.
         </p>
       </header>
 
@@ -115,7 +115,7 @@ export default async function RulesPage() {
           <h2 className="text-lg font-semibold">건기식 심의 문구</h2>
           <p className="text-sm text-muted-foreground">
             상세페이지 분석이 건강기능식품으로 판정한 상품입니다. 확정한 기능성 문구만 영상 · 캡션에 쓰고, 확정 문구가
-            없는 상품은 B 트랙 추천에서 뺍니다.
+            없는 상품은 AI 자동 업로드 후보에서 뺍니다.
             {unconfirmed > 0 && (
               <>
                 {" "}
