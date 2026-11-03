@@ -217,7 +217,13 @@ export async function fetchProduct(shop: ShopCode, id: number): Promise<ShopProd
   const images = [...(d.productDetail?.productImages ?? [])]
     .sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
     .map((i) => i.bucketUrl)
-    .filter((u) => isShopAsset(u, shop, id) && u.includes("/detailImage/"));
+    // 상세페이지 이미지는 새 상품은 detailImage/, 예전 상품(오늘과일)은 productImages/에 있다.
+    // productImages에는 상세 내용이 들어 있어 둘 다 받는다(대표 이미지는 represent/라 빠진다).
+    .filter(
+      (u) =>
+        isShopAsset(u, shop, id) &&
+        (u.includes("/detailImage/") || u.includes("/productImages/")),
+    );
   if (images.length > MAX_DETAIL_IMAGES) {
     throw new ShopApiError(`${shop} 상품 ${id}: 상세 이미지 ${images.length}장 — 상한 초과`, null);
   }
