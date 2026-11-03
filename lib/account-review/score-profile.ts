@@ -189,9 +189,27 @@ function itemFromCheck(c: ProfileCheckItem): ReviewItem {
 
 const UNKNOWN_NOTE = { name: "이름 칸", bio: "소개", links: "링크" } as const;
 
+// 정보가 없어 모르는 항목 — 모두 규칙 채점 항목이라 "규칙"으로 표시한다
 function unknownItem(it: ReviewItem, note: string) {
   it.score = null;
+  it.auto = true;
   it.findings = [note];
+}
+
+// 스토리 기록이 이만큼 쌓여야 채점한다(하루 · 이틀은 우연이 크다)
+const STORY_MIN_DAYS = 3;
+
+/** 스토리 기록 → 일주일에 며칠 꼴인지. 기록이 적으면 null(모름). */
+export function storyDaysPerWeek(story: { days: number; observed: number } | null): { perWeek: number | null; note: string | null } {
+  if (!story || story.observed === 0) return { perWeek: null, note: null };
+  if (story.observed < STORY_MIN_DAYS) {
+    return { perWeek: null, note: `스토리 기록 ${story.observed}일째 - ${STORY_MIN_DAYS}일 쌓이면 채점해요` };
+  }
+  if (story.observed >= 7) return { perWeek: story.days, note: null };
+  return {
+    perWeek: Math.round((story.days / story.observed) * 7),
+    note: `기록 ${story.observed}일 중 ${story.days}일 올림 - 일주일로 환산한 추정이에요`,
+  };
 }
 
 /** 확인된 항목(점수가 있는 항목) 만점 합 — 모르는 항목은 빼고 센다. */
@@ -209,6 +227,11 @@ ${rubric.roleNote}
 [판단 채점할 5개 항목 — 만점 기준과 흔한 실패]
 ${judged.map((i) => `- ${i.id} (${i.label}, ${i.points}점): 만점 = ${i.full_marks} / 흔한 실패 = ${i.common_fail}`).join("\n")}
 
+자동 채점이라 물어볼 사람이 없다:
+- 되묻지 않는다. summary에 질문을 쓰지 않는다. "판단할 것" 항목은 judged에 빠짐없이 넣는다.
+- 계정 역할이 "모름"이면 한쪽으로 단정하지 말고 공통 기준으로 매긴다: 프로필 사진은 로고든 얼굴이든 원 안에서
+  알아볼 수 있는지, 이름 칸 · 소개는 무엇을 파는 곳인지(또는 누구인지) 3초 안에 보이는지.
+
 규칙:
 - 점수는 0 ~ 그 항목 만점 사이 정수. 근거(findings)와 이미지에 보이는 것만으로 매긴다. 후하게 주지 않는다.
 - 광고 표현 규칙 위반(최고 · 유일 · 100% · 치료 · 근거 없는 순위 · 심의 없는 기능성)이 소개에 있으면 bio_body는 0~2점.
@@ -218,7 +241,8 @@ ${judged.map((i) => `- ${i.id} (${i.label}, ${i.points}점): 만점 = ${i.full_m
 다시 쓰기:
 - 잃은 점수(만점 - 점수)가 큰 항목부터. 규칙 채점 항목(고정 게시물 · 하이라이트 · 링크 · 스토리 등)도 고칠 일이 크면 넣는다.
 - 점수가 "?"인 항목은 정보가 없어 모르는 것이다. 감점으로 보지 말고 고칠 일에도 넣지 않는다.
-- 이름 칸은 ${NAME_MAX}자 안에서 "{브랜드} | {검색되는 상품 단어}" 형식으로 3개. 소개는 줄바꿈 포함 ${BIO_MAX}자 안에서 2개.
+- 이름 칸은 ${NAME_MAX}자 안에서 "{브랜드} | {검색되는 상품 단어}" 형식으로 3개.
+- 소개는 itemId bio_first_line 하나로 묶어 소개 전체(줄바꿈 포함 ${BIO_MAX}자 안) 2개를 준다. bio_body는 따로 만들지 않는다.
 - 문구에 없는 사실(후기 수 · 재구매율 · 수상 · 순위)을 지어내지 않는다. 숫자가 필요하면 "{실제 후기 수}"처럼 빈칸으로 둔다.
 - 최고 · 유일 · 100% · 치료 · 완치 · 1위 같은 표현을 쓰지 않는다. 건강기능식품 기능성 표현도 쓰지 않는다.
 - 사람이 쓴 것처럼: em dash(—) 금지, "다양한 · 놓치지 마세요 · 특별한" 같은 상투어 금지, 번역투 금지.
@@ -261,10 +285,12 @@ export async function scoreProfile(opts: {
   account: AccountForReview;
   api: ProfileDetails;
   manual: ProfileManualInput;
-  storyDays: number | null;
+  // account_story_days 최근 7일: 올린 날 · 기록한 날
+  story: { days: number; observed: number } | null;
   rules: ContentRule[];
 }): Promise<ProfileReviewResult> {
-  const { snapshot, unknown } = buildSnapshot(opts.account, opts.api, opts.manual, opts.storyDays);
+  const story = storyDaysPerWeek(opts.story);
+  const { snapshot, unknown } = buildSnapshot(opts.account, opts.api, opts.manual, story.perWeek);
 
   // 2. 규칙 채점 — 모르는 칸은 빼고 넘긴다(빈 값으로 넘기면 "없음"으로 감점되므로)
   const { source: _source, ...forScript } = snapshot;
@@ -297,7 +323,8 @@ export async function scoreProfile(opts: {
   for (const it of items) {
     if (it.id === "pinned_three" && snapshot.pinned_count == null) unknownItem(it, "고정 게시물은 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");
     if (it.id === "highlights" && snapshot.highlights == null) unknownItem(it, "하이라이트는 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");
-    if (it.id === "story_presence" && snapshot.story_days_per_week == null) unknownItem(it, "스토리 기록이 아직 없어요 - 매일 확인해서 쌓여요");
+    if (it.id === "story_presence" && snapshot.story_days_per_week == null) unknownItem(it, story.note ?? "스토리 기록이 아직 없어요 - 매일 확인해서 쌓여요");
+    else if (it.id === "story_presence" && story.note) it.findings.push(story.note);
     if (it.id === "category_contact" && snapshot.contact == null && snapshot.category == null) {
       unknownItem(it, "연락 버튼 · 카테고리는 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");
     }
@@ -321,8 +348,13 @@ export async function scoreProfile(opts: {
     (id) => !blocked.has(id) && !(id === "photo" && !photo) && !(id === "grid_legibility" && gridImages.length === 0),
   );
   for (const it of items) {
-    if (it.id === "photo" && !photo) it.findings.push("프로필 사진을 받지 못해 채점 못 함");
-    if (it.id === "grid_legibility" && gridImages.length === 0) it.findings.push("피드 표지를 받지 못해 채점 못 함");
+    if (it.id === "photo") {
+      if (!photo) it.findings = ["프로필 사진을 받지 못해 채점 못 함"];
+      else if (!snapshot.role_focus) it.findings = ["계정 역할이 정해지지 않아 공통 기준(원 안에서 알아볼 수 있나)으로 봤어요 - 계정 연동에서 역할을 정하면 더 정확해요"];
+    }
+    if (it.id === "grid_legibility") {
+      it.findings = gridImages.length ? [`최근 게시물 표지 ${gridImages.length}장을 보고 판단`] : ["피드 표지를 받지 못해 채점 못 함"];
+    }
   }
 
   const model = agentModel();
@@ -391,8 +423,16 @@ export async function scoreProfile(opts: {
       const it = byId.get(id);
       return it ? it.max - (it.score ?? 0) : 0;
     };
+    const seen = new Set<string>();
     const rewrites: ReviewRewrite[] = out.rewrites
       .filter((r) => r.options.some((o) => o.trim()))
+      // 소개는 첫 줄 · 나머지가 같은 문구로 두 번 나오기 쉽다 — 같은 문구 묶음은 한 번만
+      .filter((r) => {
+        const key = r.options.map((o) => o.trim()).join("\n\u0000");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
       .sort((a, b) => lost(b.itemId) - lost(a.itemId))
       .slice(0, 6)
       .map((r) => {
@@ -400,7 +440,8 @@ export async function scoreProfile(opts: {
         const warnings: string[] = [];
         const limit = r.itemId === "name_field" ? NAME_MAX : r.itemId.startsWith("bio_") ? BIO_MAX : null;
         options.forEach((o, i) => {
-          if (limit && o.length > limit) warnings.push(`${i + 1}번 문구가 ${o.length}자 - ${limit}자를 넘어 인스타에 저장이 안 돼요`);
+          if (limit === BIO_MAX && o.length > limit) warnings.push(`${i + 1}번 문구가 ${o.length}자 - 소개는 ${limit}자까지만 저장돼요`);
+          if (limit === NAME_MAX && o.length > limit) warnings.push(`${i + 1}번 문구가 ${o.length}자 - 이름 칸은 ${limit}자 안이 한눈에 읽혀요`);
           for (const h of checkText(o, "OTHER", opts.rules)) {
             if (h.rule.ruleType === "BANNED") warnings.push(`${i + 1}번 문구에 금지 표현 "${h.matched}"`);
           }

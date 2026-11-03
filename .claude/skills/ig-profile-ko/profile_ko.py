@@ -49,7 +49,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUBRIC = os.path.join(HERE, "rubric_ko.json")
 
-NAME_MAX = 30      # 이름 칸 글자 수 제한
+NAME_MAX = 30      # 이름 칸 권장 글자 수 (실제로는 더 길게도 저장된다 - 2026-11 실측 32자)
 BIO_MAX = 150      # 소개 글자 수 제한
 
 # 광고 표현 규칙에서 소개 글에 자주 걸리는 것만 추린다 (전체 규칙은 MCB 광고 문구 규칙).
@@ -116,7 +116,7 @@ def check_name(p, rub):
         n = clen(name)
         f.append(f"{n}/{NAME_MAX}자")
         if n > NAME_MAX:
-            f.append("30자를 넘음 - 인스타에서 저장이 안 된다")
+            f.append("30자를 넘음 - 길면 한눈에 안 읽힌다. 검색되는 단어를 앞쪽에")
         words = [w for w in re.split(r"[\s|·/,]+", name) if w]
         if len(words) <= 1:
             f.append("단어가 하나뿐 - 브랜드 이름만 있고 상품 단어가 없음")

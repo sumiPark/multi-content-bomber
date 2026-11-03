@@ -55,8 +55,17 @@ export async function readProfileScreenshotAction(formData: FormData): Promise<S
     const buf = Buffer.from(await file.arrayBuffer());
     const read = await readProfileScreenshot(`data:${file.type};base64,${buf.toString("base64")}`);
     const notes = [...read.notes];
-    // 인스타 계정의 display_name은 아이디다
-    const name = auth.account.display_name?.replace(/^@/, "").toLowerCase();
+    // 진짜 아이디는 마지막 채점의 인스타 값(display_name은 연결 때 이름이라 다를 수 있다)
+    const { data: last } = await createServiceClient()
+      .from("profile_reviews")
+      .select("snapshot")
+      .eq("social_account_id", auth.account.id)
+      .eq("status", "DONE")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const handle = (last?.snapshot as { handle?: string } | null)?.handle ?? auth.account.display_name;
+    const name = handle?.replace(/^@/, "").toLowerCase();
     if (read.handle && name && read.handle.toLowerCase() !== name) {
       notes.unshift(`캡처의 아이디(@${read.handle})가 이 계정(@${name})과 달라요. 다른 계정 캡처인지 확인하세요`);
     }

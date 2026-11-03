@@ -69,8 +69,8 @@ async function loadRules(service: Service): Promise<ContentRule[]> {
   }));
 }
 
-/** 최근 7일 중 스토리를 올린 날 수. 기록이 하루도 없으면 null(모름). */
-async function storyDays(service: Service, accountId: string): Promise<number | null> {
+/** 최근 7일 스토리 기록 — 올린 날 수 · 기록한 날 수. 기록이 하루도 없으면 null. */
+async function storyRecord(service: Service, accountId: string): Promise<{ days: number; observed: number } | null> {
   const since = kstDate(-(STORY_WINDOW_DAYS - 1));
   const { data } = await service
     .from("account_story_days")
@@ -78,7 +78,7 @@ async function storyDays(service: Service, accountId: string): Promise<number | 
     .eq("social_account_id", accountId)
     .gte("day", since);
   if (!data?.length) return null;
-  return data.filter((d) => d.stories_count > 0).length;
+  return { days: data.filter((d) => d.stories_count > 0).length, observed: data.length };
 }
 
 interface AccountRow {
@@ -191,7 +191,7 @@ async function reviewAccount(
       account,
       api,
       manual,
-      storyDays: await storyDays(service, account.id),
+      story: await storyRecord(service, account.id),
       rules,
     });
     if (opts.dryRun) {

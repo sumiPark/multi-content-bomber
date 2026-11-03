@@ -11,7 +11,12 @@ on:
     - cron: "30 19 * * *"
   repository_dispatch:
     types: [profile-review]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "바뀐 게 없어도 모든 계정 다시 채점"
+        type: boolean
+        default: false
 
 concurrency:
   group: profile-review-worker
@@ -33,9 +38,10 @@ jobs:
       - run: npm ci
       - name: Score profiles
         # payload 값은 명령에 바로 넣지 않고 환경변수로(주입 방지)
-        run: npm run worker:profile-review -- ${ACCOUNT:+--account "$ACCOUNT"}
+        run: npm run worker:profile-review -- ${ACCOUNT:+--account "$ACCOUNT"} ${FORCE:+--force}
         env:
           ACCOUNT: ${{ github.event.client_payload.account }}
+          FORCE: ${{ inputs.force && 'true' || '' }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
