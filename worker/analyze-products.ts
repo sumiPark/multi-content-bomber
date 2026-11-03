@@ -18,7 +18,7 @@ import type { Database, Json } from "@/types/database";
 // 옵션:
 //   --dry-run --shop ru --ids 1100,1098   DB 없이 몰 API에서 바로 받아 분석하고 결과 · 토큰만 출력
 //   --limit N                              이번 run에서 분석할 상품 수 상한
-// 모델: PRODUCT_ANALYSIS_MODEL (기본 gpt-4.1-mini)
+// 모델: PRODUCT_ANALYSIS_MODEL (기본 gpt-6.1-terra)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // products.yml job timeout(60분) 안에서 스스로 끝낸다. 수집에 쓰는 시간을 빼고.

@@ -10,10 +10,25 @@ import type { ImagePart } from "./images";
 // 2에서 AI가 쓴 근거 문장(quote)은 1의 원문에 실제로 있는지 코드가 다시 확인하고, 없으면 버린다
 // (rejected). 상세페이지에 없는 효능을 지어내는 것을 막는 핵심 장치다.
 
-export const DEFAULT_ANALYSIS_MODEL = "gpt-4.1-mini";
+// 2026-11-03 비교(같은 상품 3개): gpt-4.1-mini는 일반 식품(홍삼음료)의 안내 문구를 기능성으로
+// 잘못 뽑았고, gpt-6.1-terra · gpt-5.6-terra는 둘 다 "건기식 아님"으로 맞게 판정 · 근거 구절도 더 정확.
+// 둘 중 6.1-terra가 값이 절반($1/$5 per 1M)이라 기본값. 상품당 약 50~90원.
+export const DEFAULT_ANALYSIS_MODEL = "gpt-6.1-terra";
 
 export function analysisModel(): string {
   return process.env.PRODUCT_ANALYSIS_MODEL || DEFAULT_ANALYSIS_MODEL;
+}
+
+// GPT-5 이후(추론) 모델은 temperature를 받지 않고, max_completion_tokens에 추론 토큰이 포함된다.
+// 받아 적기 · 요약은 깊은 추론이 필요 없어 effort를 낮게 두고, 상한은 넉넉히.
+function isReasoningModel(model: string): boolean {
+  return /^(gpt-5|gpt-6|o\d)/.test(model);
+}
+
+function callOptions(model: string, maxTokens: number) {
+  return isReasoningModel(model)
+    ? { reasoning_effort: "low" as const, max_completion_tokens: maxTokens * 3 }
+    : { temperature: 0, max_completion_tokens: maxTokens };
 }
 
 export interface TokenUsage {
@@ -57,10 +72,10 @@ export async function extractImagePart(
   context: { productName: string; imageIndex: number; imageCount: number },
   usage: TokenUsage,
 ): Promise<ImageExtract> {
+  const model = analysisModel();
   const completion = await getOpenAI().chat.completions.parse({
-    model: analysisModel(),
-    temperature: 0,
-    max_completion_tokens: 6000,
+    model,
+    ...callOptions(model, 6000),
     messages: [
       { role: "system", content: EXTRACT_PROMPT },
       {
@@ -206,10 +221,10 @@ export async function summarizeProduct(
     .join("\n\n")
     .slice(0, 70_000);
 
+  const model = analysisModel();
   const completion = await getOpenAI().chat.completions.parse({
-    model: analysisModel(),
-    temperature: 0,
-    max_completion_tokens: 5000,
+    model,
+    ...callOptions(model, 5000),
     messages: [
       {
         role: "system",

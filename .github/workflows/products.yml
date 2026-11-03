@@ -45,5 +45,5 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          # 비우면 기본 gpt-4.1-mini (Settings → Variables에서 바꿀 수 있음)
+          # 비우면 기본 gpt-6.1-terra (Settings → Variables에서 바꿀 수 있음)
           PRODUCT_ANALYSIS_MODEL: ${{ vars.PRODUCT_ANALYSIS_MODEL }}
