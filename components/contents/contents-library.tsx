@@ -147,7 +147,7 @@ export function ContentsLibrary({
       </div>
 
       <ScrollArea className="h-[calc(100vh-280px)] rounded-md">
-        <ul className="space-y-3 pr-3">
+        <ul className="grid gap-3 pr-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {items.map((c) => {
             const captionPreview = c.caption_preview;
             const internal = c.internal_title;
@@ -158,15 +158,15 @@ export function ContentsLibrary({
             const isSelected = selected.has(c.id);
 
             return (
-              <li key={c.id}>
+              <li key={c.id} className="min-w-0">
                 <Card
                   className={
                     isSelected
-                      ? "border-primary/50 bg-primary/5 transition"
-                      : "transition hover:bg-accent/40"
+                      ? "h-full border-primary/50 bg-primary/5 transition"
+                      : "h-full transition hover:bg-accent/40"
                   }
                 >
-                  <CardContent className="flex gap-3 p-4">
+                  <CardContent className="flex h-full gap-3 p-4">
                     <div className="flex items-start pt-1">
                       <input
                         type="checkbox"
