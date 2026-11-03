@@ -11,7 +11,9 @@
     "start": "next start",
     "lint": "eslint",
     "worker:due": "tsx worker/process-due.ts",
-    "worker:alerts": "tsx worker/process-alerts.ts"
+    "worker:alerts": "tsx worker/process-alerts.ts",
+    "worker:metrics": "tsx worker/collect-metrics.ts",
+    "worker:products": "tsx worker/collect-products.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

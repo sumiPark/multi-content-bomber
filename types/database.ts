@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_daily: {
+        Row: {
+          accounts_engaged: number | null
+          collected_at: string
+          day: string
+          followers_count: number | null
+          follows_count: number | null
+          media_count: number | null
+          organization_id: string
+          raw: Json
+          reach: number | null
+          social_account_id: string
+          total_interactions: number | null
+          views: number | null
+        }
+        Insert: {
+          accounts_engaged?: number | null
+          collected_at?: string
+          day: string
+          followers_count?: number | null
+          follows_count?: number | null
+          media_count?: number | null
+          organization_id: string
+          raw?: Json
+          reach?: number | null
+          social_account_id: string
+          total_interactions?: number | null
+          views?: number | null
+        }
+        Update: {
+          accounts_engaged?: number | null
+          collected_at?: string
+          day?: string
+          followers_count?: number | null
+          follows_count?: number | null
+          media_count?: number | null
+          organization_id?: string
+          raw?: Json
+          reach?: number | null
+          social_account_id?: string
+          total_interactions?: number | null
+          views?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "account_daily_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "account_daily_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       account_groups: {
         Row: {
           color: string
@@ -234,6 +294,273 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      post_metrics: {
+        Row: {
+          avg_watch_time_ms: number | null
+          collected_at: string
+          collected_on: string
+          comments: number | null
+          likes: number | null
+          post_id: string
+          raw: Json
+          reach: number | null
+          saved: number | null
+          shares: number | null
+          total_interactions: number | null
+          total_watch_time_ms: number | null
+          views: number | null
+        }
+        Insert: {
+          avg_watch_time_ms?: number | null
+          collected_at?: string
+          collected_on: string
+          comments?: number | null
+          likes?: number | null
+          post_id: string
+          raw?: Json
+          reach?: number | null
+          saved?: number | null
+          shares?: number | null
+          total_interactions?: number | null
+          total_watch_time_ms?: number | null
+          views?: number | null
+        }
+        Update: {
+          avg_watch_time_ms?: number | null
+          collected_at?: string
+          collected_on?: string
+          comments?: number | null
+          likes?: number | null
+          post_id?: string
+          raw?: Json
+          reach?: number | null
+          saved?: number | null
+          shares?: number | null
+          total_interactions?: number | null
+          total_watch_time_ms?: number | null
+          views?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_metrics_post_id_fkey"
+            columns: ["post_id"]
+            isOneToOne: false
+            referencedRelation: "social_posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_analyses: {
+        Row: {
+          analyzed_at: string
+          approved_at: string | null
+          approved_by: string | null
+          claims: Json
+          edited: boolean
+          functional_claims: string[]
+          health_functional: boolean | null
+          kind: string
+          model: string | null
+          product_id: string
+          rejected_claims: Json
+          source_hash: string
+          summary: Json
+          uncertainties: string[]
+        }
+        Insert: {
+          analyzed_at?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          claims?: Json
+          edited?: boolean
+          functional_claims?: string[]
+          health_functional?: boolean | null
+          kind: string
+          model?: string | null
+          product_id: string
+          rejected_claims?: Json
+          source_hash: string
+          summary?: Json
+          uncertainties?: string[]
+        }
+        Update: {
+          analyzed_at?: string
+          approved_at?: string | null
+          approved_by?: string | null
+          claims?: Json
+          edited?: boolean
+          functional_claims?: string[]
+          health_functional?: boolean | null
+          kind?: string
+          model?: string | null
+          product_id?: string
+          rejected_claims?: Json
+          source_hash?: string
+          summary?: Json
+          uncertainties?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_analyses_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_analyses_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: true
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_image_extracts: {
+        Row: {
+          analyzed_at: string
+          data: Json
+          height: number | null
+          image_index: number
+          image_url: string
+          model: string | null
+          part_count: number
+          product_id: string
+          text: string
+          uncertainties: string[]
+          width: number | null
+        }
+        Insert: {
+          analyzed_at?: string
+          data?: Json
+          height?: number | null
+          image_index: number
+          image_url: string
+          model?: string | null
+          part_count?: number
+          product_id: string
+          text?: string
+          uncertainties?: string[]
+          width?: number | null
+        }
+        Update: {
+          analyzed_at?: string
+          data?: Json
+          height?: number | null
+          image_index?: number
+          image_url?: string
+          model?: string | null
+          part_count?: number
+          product_id?: string
+          text?: string
+          uncertainties?: string[]
+          width?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_image_extracts_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          analysis_attempts: number
+          analysis_error: string | null
+          analysis_locked_until: string | null
+          analysis_next_at: string
+          analysis_state: string
+          category_id: number | null
+          category_name: string | null
+          detail_image_urls: string[]
+          excluded: boolean
+          first_seen_at: string
+          id: string
+          kind: string | null
+          last_seen_at: string
+          name: string
+          price: number | null
+          product_status: string | null
+          raw: Json
+          represent_image_url: string | null
+          shop_code: string
+          shop_product_id: number
+          source_hash: string
+          source_updated_at: string | null
+          stock_status: string
+          summary_title: string | null
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          analysis_attempts?: number
+          analysis_error?: string | null
+          analysis_locked_until?: string | null
+          analysis_next_at?: string
+          analysis_state?: string
+          category_id?: number | null
+          category_name?: string | null
+          detail_image_urls?: string[]
+          excluded?: boolean
+          first_seen_at?: string
+          id?: string
+          kind?: string | null
+          last_seen_at?: string
+          name: string
+          price?: number | null
+          product_status?: string | null
+          raw?: Json
+          represent_image_url?: string | null
+          shop_code: string
+          shop_product_id: number
+          source_hash: string
+          source_updated_at?: string | null
+          stock_status?: string
+          summary_title?: string | null
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          analysis_attempts?: number
+          analysis_error?: string | null
+          analysis_locked_until?: string | null
+          analysis_next_at?: string
+          analysis_state?: string
+          category_id?: number | null
+          category_name?: string | null
+          detail_image_urls?: string[]
+          excluded?: boolean
+          first_seen_at?: string
+          id?: string
+          kind?: string | null
+          last_seen_at?: string
+          name?: string
+          price?: number | null
+          product_status?: string | null
+          raw?: Json
+          represent_image_url?: string | null
+          shop_code?: string
+          shop_product_id?: number
+          source_hash?: string
+          source_updated_at?: string | null
+          stock_status?: string
+          summary_title?: string | null
+          updated_at?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "products_shop_code_fkey"
+            columns: ["shop_code"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["code"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -671,6 +998,73 @@ export type Database = {
           },
         ]
       }
+      shop_categories: {
+        Row: {
+          category_id: number
+          collect: boolean
+          kind: string | null
+          name: string
+          parent_id: number | null
+          seen_at: string
+          shop_code: string
+        }
+        Insert: {
+          category_id: number
+          collect?: boolean
+          kind?: string | null
+          name: string
+          parent_id?: number | null
+          seen_at?: string
+          shop_code: string
+        }
+        Update: {
+          category_id?: number
+          collect?: boolean
+          kind?: string | null
+          name?: string
+          parent_id?: number | null
+          seen_at?: string
+          shop_code?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shop_categories_shop_code_fkey"
+            columns: ["shop_code"]
+            isOneToOne: false
+            referencedRelation: "shops"
+            referencedColumns: ["code"]
+          },
+        ]
+      }
+      shops: {
+        Row: {
+          api_base: string
+          code: string
+          created_at: string
+          enabled: boolean
+          name: string
+          site_base: string
+        }
+        Insert: {
+          api_base: string
+          code: string
+          created_at?: string
+          enabled?: boolean
+          name: string
+          site_base: string
+        }
+        Update: {
+          api_base?: string
+          code?: string
+          created_at?: string
+          enabled?: boolean
+          name?: string
+          site_base?: string
+        }
+        Relationships: [
+
+        ]
+      }
       social_accounts: {
         Row: {
           access_token_encrypted: string | null
@@ -688,6 +1082,9 @@ export type Database = {
           refresh_token_encrypted: string | null
           token_expires_at: string | null
           updated_at: string
+          granted_scopes: string[] | null
+          role_focus: string | null
+          role_note: string | null
         }
         Insert: {
           access_token_encrypted?: string | null
@@ -705,6 +1102,9 @@ export type Database = {
           refresh_token_encrypted?: string | null
           token_expires_at?: string | null
           updated_at?: string
+          granted_scopes?: string[] | null
+          role_focus?: string | null
+          role_note?: string | null
         }
         Update: {
           access_token_encrypted?: string | null
@@ -722,6 +1122,9 @@ export type Database = {
           refresh_token_encrypted?: string | null
           token_expires_at?: string | null
           updated_at?: string
+          granted_scopes?: string[] | null
+          role_focus?: string | null
+          role_note?: string | null
         }
         Relationships: [
           {
@@ -747,6 +1150,76 @@ export type Database = {
           },
         ]
       }
+      social_posts: {
+        Row: {
+          caption: string | null
+          first_seen_at: string
+          id: string
+          media_product_type: string | null
+          media_type: string | null
+          organization_id: string
+          permalink: string | null
+          platform_media_id: string
+          posted_at: string | null
+          publish_job_id: string | null
+          social_account_id: string
+          thumbnail_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          caption?: string | null
+          first_seen_at?: string
+          id?: string
+          media_product_type?: string | null
+          media_type?: string | null
+          organization_id: string
+          permalink?: string | null
+          platform_media_id: string
+          posted_at?: string | null
+          publish_job_id?: string | null
+          social_account_id: string
+          thumbnail_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          caption?: string | null
+          first_seen_at?: string
+          id?: string
+          media_product_type?: string | null
+          media_type?: string | null
+          organization_id?: string
+          permalink?: string | null
+          platform_media_id?: string
+          posted_at?: string | null
+          publish_job_id?: string | null
+          social_account_id?: string
+          thumbnail_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_posts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_posts_publish_job_id_fkey"
+            columns: ["publish_job_id"]
+            isOneToOne: false
+            referencedRelation: "publish_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_posts_social_account_id_fkey"
+            columns: ["social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       episode_alert_task_stats: {
@@ -759,6 +1232,21 @@ export type Database = {
           skipped: number | null
           task_id: string | null
           total: number | null
+        }
+        Relationships: []
+      }
+      post_latest_metrics: {
+        Row: {
+          avg_watch_time_ms: number | null
+          collected_on: string | null
+          comments: number | null
+          likes: number | null
+          post_id: string | null
+          reach: number | null
+          saved: number | null
+          shares: number | null
+          total_interactions: number | null
+          views: number | null
         }
         Relationships: []
       }
@@ -785,6 +1273,10 @@ export type Database = {
           p_stale_minutes?: number
         }
         Returns: Database["public"]["Tables"]["publish_jobs"]["Row"][]
+      }
+      claim_products_for_analysis: {
+        Args: { p_limit: number; p_lock_minutes: number }
+        Returns: Database["public"]["Tables"]["products"]["Row"][]
       }
       claim_episode_alert_tasks: {
         Args: { p_limit?: number; p_stale_minutes?: number }

@@ -1,0 +1,41 @@
+name: metrics
+
+# 성과 수집 워커(worker/collect-metrics.ts) — 인스타 계정 · 게시물 성과 하루 스냅샷.
+# 발행 · 댓글 워크플로와 분리: 수집이 길어져도 즉시 발행이 줄을 서지 않게.
+on:
+  # 매일 04시(KST) = 19시(UTC). GitHub schedule은 몇 시간씩 밀릴 수 있지만 하루 스냅샷이라
+  # 그날 안에만 돌면 된다(같은 날 다시 돌면 덮어쓴다).
+  schedule:
+    - cron: "0 19 * * *"
+  # 분석 화면의 "지금 수집" 버튼.
+  repository_dispatch:
+    types: [collect-metrics]
+  # 수동 실행(디버깅용).
+  workflow_dispatch: {}
+
+concurrency:
+  group: metrics-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  collect-metrics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 22 필수 — @supabase/realtime-js가 전역 WebSocket을 요구한다.
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Collect metrics
+        run: npm run worker:metrics
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 토큰 AES-256-GCM 복호화 키 (Vercel과 반드시 같은 값이어야 함).
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}

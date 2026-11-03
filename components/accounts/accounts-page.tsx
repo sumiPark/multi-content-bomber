@@ -21,6 +21,10 @@ import {
   updateGroupAction,
   type GroupActionResult,
 } from "@/app/(dashboard)/accounts/actions";
+import {
+  AccountRolesCard,
+  type InstagramRoleRow,
+} from "@/components/accounts/account-roles";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -59,6 +63,7 @@ export interface GroupRow {
 interface AccountsPageProps {
   accounts: AccountRow[];
   groups: GroupRow[];
+  instagramRoles: InstagramRoleRow[];
   canManage: boolean;
   flashMessage: string | null;
   flashError: string | null;
@@ -170,6 +175,7 @@ function getStatus(
 export function AccountsPage({
   accounts,
   groups,
+  instagramRoles,
   canManage,
   flashMessage,
   flashError,
@@ -348,6 +354,8 @@ export function AccountsPage({
           )}
         </div>
       </section>
+
+      <AccountRolesCard accounts={instagramRoles} canManage={canManage} />
     </main>
   );
 }

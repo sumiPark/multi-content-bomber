@@ -72,6 +72,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+// 성과 API(instagram-insights.ts)도 같은 에러 분류를 쓴다.
+export { request as instagramRequest };
+
 function getUrl(path: string, token: string, params: Record<string, string>) {
   const url = new URL(`${GRAPH_API_BASE}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);

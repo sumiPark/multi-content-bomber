@@ -99,6 +99,8 @@ export async function GET(
         access_token_encrypted: accessEnc,
         refresh_token_encrypted: refreshEnc,
         token_expires_at: tokens.expiresAt?.toISOString() ?? null,
+        // 다시 연결하면 새 동의 목록으로 덮는다(성과 권한을 새로 받는 경로).
+        granted_scopes: tokens.grantedScopes ?? null,
         is_active: true,
         disconnected_at: null,
       },

@@ -14,6 +14,10 @@ const GITHUB_API = "https://api.github.com";
 export const PUBLISH_DISPATCH_EVENT = "publish-now";
 // 시리즈 댓글 자동화 워크플로(.github/workflows/episode-alerts.yml).
 export const EPISODE_ALERTS_DISPATCH_EVENT = "episode-alerts";
+// 성과 수집 워크플로(.github/workflows/metrics.yml).
+export const METRICS_DISPATCH_EVENT = "collect-metrics";
+// 상품 수집 · 상세 이미지 분석 워크플로(.github/workflows/products.yml).
+export const PRODUCTS_DISPATCH_EVENT = "collect-products";
 
 /**
  * publish 워크플로를 즉시 실행시킨다.
@@ -40,6 +44,22 @@ export async function triggerPublishRun(reason: string): Promise<void> {
  */
 export async function triggerEpisodeAlertRun(reason: string): Promise<void> {
   await dispatch(EPISODE_ALERTS_DISPATCH_EVENT, reason);
+}
+
+/**
+ * 성과 수집 워크플로를 즉시 실행시킨다 — 분석 화면의 "지금 수집" 버튼.
+ * 평소엔 매일 04시(KST) schedule이 돈다.
+ */
+export async function triggerMetricsRun(reason: string): Promise<void> {
+  await dispatch(METRICS_DISPATCH_EVENT, reason);
+}
+
+/**
+ * 상품 수집(+ 이어서 상세 이미지 분석) 워크플로를 즉시 실행시킨다 — 상품 화면의 "지금 수집".
+ * 평소엔 매일 03시(KST) schedule이 돈다.
+ */
+export async function triggerProductsRun(reason: string): Promise<void> {
+  await dispatch(PRODUCTS_DISPATCH_EVENT, reason);
 }
 
 async function dispatch(eventType: string, reason: string): Promise<void> {

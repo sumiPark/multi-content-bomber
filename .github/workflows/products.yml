@@ -1,0 +1,38 @@
+name: products
+
+# 상품 수집 워커(worker/collect-products.ts) — 오늘과일 · 쿠마마켓 · 리유 상품을 공개 API로 받는다.
+# 수집이 끝나면 같은 run에서 상세 이미지 분석(2-3)을 이어 붙인다.
+on:
+  # 매일 03시(KST) = 18시(UTC). 하루 한 번이면 되고, 몇 시간 밀려도 괜찮다.
+  schedule:
+    - cron: "0 18 * * *"
+  # 상품 화면의 "지금 수집" 버튼.
+  repository_dispatch:
+    types: [collect-products]
+  # 수동 실행(디버깅용).
+  workflow_dispatch: {}
+
+concurrency:
+  group: products-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  collect-products:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node 22 필수 — @supabase/realtime-js가 전역 WebSocket을 요구한다.
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Collect products
+        run: npm run worker:products
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

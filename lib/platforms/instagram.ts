@@ -17,11 +17,23 @@ import type { Json } from "@/types/database";
 // Instagram Login (Instagram Graph API용). Meta 개발자 콘솔에서 앱 생성 후
 // "Instagram > API setup with Instagram login" 흐름을 따름.
 // Required scopes: 콘텐츠 게시는 instagram_business_content_publish 필수.
-const SCOPES = [
-  "instagram_business_basic",
-  "instagram_business_content_publish",
-  "instagram_business_manage_comments",
-].join(",");
+// 성과 권한 이름 — 계정 연동 화면의 "다시 연결 필요" 판단에도 쓴다.
+export const INSTAGRAM_INSIGHTS_SCOPE = "instagram_business_manage_insights";
+
+// 성과(조회 · 도달 · 저장 · 공유 · 팔로워 증감) 읽기 — 콘텐츠 자동화 1단계 계정 분석.
+// ⚠️ Meta 앱에 이 권한을 추가하기 전에 요청하면 인스타 로그인이 "Invalid Scopes"로 막혀
+//    기존 계정 연결까지 안 된다. 그래서 INSTAGRAM_REQUEST_INSIGHTS=true 일 때만 요청한다.
+//    0024 이전에 연결한 계정은 이 권한이 없어, 켠 뒤 다시 연결해야 한다.
+function scopes(): string {
+  return [
+    "instagram_business_basic",
+    "instagram_business_content_publish",
+    "instagram_business_manage_comments",
+    ...(process.env.INSTAGRAM_REQUEST_INSIGHTS === "true"
+      ? [INSTAGRAM_INSIGHTS_SCOPE]
+      : []),
+  ].join(",");
+}
 
 const AUTH_URL = "https://www.instagram.com/oauth/authorize";
 const TOKEN_URL = "https://api.instagram.com/oauth/access_token";
@@ -126,7 +138,7 @@ export const instagram: PlatformAdapter = {
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
-      scope: SCOPES,
+      scope: scopes(),
       response_type: "code",
       state,
     });
@@ -224,6 +236,14 @@ export const instagram: PlatformAdapter = {
       username: string;
     };
 
+    // 사용자가 동의 화면에서 권한 일부를 끌 수 있어서, 요청한 목록이 아니라 실제 동의된
+    // 목록을 남긴다. 응답에 없으면 null(모름) — 화면은 "확인 불가"로 보여준다.
+    const grantedScopes = Array.isArray(shortLived.permissions)
+      ? shortLived.permissions
+      : typeof shortLived.permissions === "string"
+        ? shortLived.permissions.split(",").map((p) => p.trim()).filter(Boolean)
+        : null;
+
     return {
       // long-lived가 publish/refresh가 통하는 유일한 토큰. short-lived는 버린다.
       accessToken: longData.access_token,
@@ -240,6 +260,7 @@ export const instagram: PlatformAdapter = {
         displayName: me.username,
         avatarUrl: null,
       },
+      grantedScopes,
     };
   },
 

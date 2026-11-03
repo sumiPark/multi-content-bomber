@@ -1,11 +1,22 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BarChart3, Clock, LineChart, Sparkles } from "lucide-react";
+import { BarChart3 } from "lucide-react";
+import {
+  AccountBaselineCard,
+  type BaselineAccount,
+  type BaselinePost,
+} from "@/components/analytics/account-baseline";
+import { CollectNowButton } from "@/components/analytics/collect-now-button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
-// Phase 1: 화면 골격 + 빈 상태. 데이터 수집 cron + posting_metrics 테이블은
-// docs/functional-specification.md §7.7 Phase 2에서 BullMQ 워커와 함께 진행.
+// 분석 — 콘텐츠 자동화 1단계: 인스타 계정별 기준선.
+// 데이터는 성과 수집 워커(worker/collect-metrics.ts)가 매일 04시(KST)에 쌓는다(0024).
+// 트랙(A 혼합 / B 자동)별 비교는 운영 시작 뒤(7 첫 리포트)에 붙인다.
+
+const BASELINE_POSTS = 30;
+const FOLLOWER_COMPARE_DAYS = 7;
 
 export default async function AnalyticsPage() {
   const user = await getSessionUser();
@@ -16,100 +27,145 @@ export default async function AnalyticsPage() {
 
   const supabase = await getServerSupabase();
 
-  // 게시 완료 건수 빠르게 카운트만 — Phase 2부터 실제 인사이트 수치로 대체.
-  const { count: publishedCount } = await supabase
-    .from("publish_jobs")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "SUCCESS");
+  const { data: accountRows } = await supabase
+    .from("social_accounts")
+    .select("id, display_name, role_focus, role_note, created_at")
+    .eq("platform", "INSTAGRAM")
+    .is("disconnected_at", null)
+    .order("created_at", { ascending: true });
+  const accounts = accountRows ?? [];
+
+  const baselines: BaselineAccount[] = await Promise.all(
+    accounts.map(async (acc) => {
+      const [{ data: daily }, { data: posts }] = await Promise.all([
+        supabase
+          .from("account_daily")
+          .select("day, followers_count, reach")
+          .eq("social_account_id", acc.id)
+          .order("day", { ascending: false })
+          .limit(FOLLOWER_COMPARE_DAYS + 1),
+        supabase
+          .from("social_posts")
+          .select("id, permalink, caption, thumbnail_url, media_product_type, posted_at")
+          .eq("social_account_id", acc.id)
+          .order("posted_at", { ascending: false })
+          .limit(BASELINE_POSTS),
+      ]);
+
+      const postIds = (posts ?? []).map((p) => p.id);
+      const { data: metrics } =
+        postIds.length > 0
+          ? await supabase
+              .from("post_latest_metrics")
+              .select("post_id, views, reach, likes, comments, saved, shares")
+              .in("post_id", postIds)
+          : { data: [] };
+      const metricByPost = new Map((metrics ?? []).map((m) => [m.post_id, m]));
+
+      const latest = daily?.[0] ?? null;
+      // 가장 오래된 비교 대상 (최대 7일 전). 하루치만 있으면 증감 없음.
+      const before = daily && daily.length > 1 ? daily[daily.length - 1] : null;
+
+      const baselinePosts: BaselinePost[] = (posts ?? []).map((p) => {
+        const m = metricByPost.get(p.id);
+        return {
+          id: p.id,
+          permalink: p.permalink,
+          caption: p.caption,
+          thumbnailUrl: p.thumbnail_url,
+          productType: p.media_product_type,
+          postedAt: p.posted_at,
+          views: m?.views ?? null,
+          reach: m?.reach ?? null,
+          likes: m?.likes ?? null,
+          comments: m?.comments ?? null,
+          saved: m?.saved ?? null,
+          shares: m?.shares ?? null,
+        };
+      });
+
+      return {
+        id: acc.id,
+        name: acc.display_name ?? "(이름 없음)",
+        roleFocus: (acc.role_focus as BaselineAccount["roleFocus"]) ?? null,
+        roleNote: acc.role_note,
+        followers: latest?.followers_count ?? null,
+        followersBefore:
+          before?.followers_count != null
+            ? { day: before.day, count: before.followers_count }
+            : null,
+        lastCollectedOn: latest?.day ?? null,
+        // 계정 도달이 채워졌거나 게시물 조회가 하나라도 있으면 성과 권한이 통한 것.
+        hasInsights:
+          latest?.reach != null || baselinePosts.some((p) => p.views != null),
+        posts: baselinePosts,
+      };
+    }),
+  );
+
+  const collected = baselines.some((b) => b.lastCollectedOn);
 
   return (
-    <main className="container mx-auto max-w-6xl px-6 py-10 space-y-6">
+    <main className="container mx-auto max-w-6xl space-y-6 px-6 py-10">
       <header className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">분석/리포팅</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold tracking-tight">분석</h1>
+            <Badge variant="outline">1단계 · 계정 기준선</Badge>
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            게시 후 인사이트(조회·좋아요·댓글·저장·공유)를 시각화합니다.
-            AI 캡션의 효과 측정과 Smart Scheduler 학습의 데이터 소스가 됩니다.
+            인스타 계정마다 지금 수준을 숫자로 잡아 둡니다. 매일 04시에 팔로워와
+            최근 게시물 성과를 자동으로 수집해요.
           </p>
         </div>
-        <Badge variant="outline" className="shrink-0">
-          Phase 1 · 골격
-        </Badge>
+        {accounts.length > 0 && <CollectNowButton />}
       </header>
 
-      <Card className="border-dashed">
-        <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-          <BarChart3 className="size-10 text-muted-foreground" />
-          <h2 className="text-lg font-semibold">데이터 수집 준비 중</h2>
-          <p className="max-w-md text-sm text-muted-foreground">
-            현재까지 게시 완료된 콘텐츠는{" "}
-            <strong>{publishedCount ?? 0}건</strong>입니다. 각 플랫폼
-            Insights API 연동 + 수집 cron(Phase 2)이 활성화되면 아래 차트들이
-            실제 수치로 채워집니다.
-          </p>
-          <p className="max-w-md text-xs text-muted-foreground">
-            상세 명세는{" "}
-            <code className="rounded bg-muted px-1 py-0.5">
-              docs/functional-specification.md §7
-            </code>{" "}
-            참조.
-          </p>
-        </CardContent>
-      </Card>
-
-      <section className="grid gap-4 sm:grid-cols-2">
-        <PlaceholderCard
-          icon={LineChart}
-          title="종합 대시보드"
-          desc="기간별 KPI · 플랫폼별 카드 · 시계열 차트"
-          phase="Phase 2"
+      {accounts.length === 0 ? (
+        <EmptyState
+          title="연결된 인스타 계정이 없어요"
+          body={
+            <>
+              <Link href="/accounts" className="underline underline-offset-2">
+                계정 연동
+              </Link>
+              에서 인스타 계정을 먼저 연결하세요.
+            </>
+          }
         />
-        <PlaceholderCard
-          icon={BarChart3}
-          title="콘텐츠별 상세"
-          desc="시간대별 성장 곡선 · 플랫폼 비교"
-          phase="Phase 3"
+      ) : !collected ? (
+        <EmptyState
+          title="아직 수집된 데이터가 없어요"
+          body={
+            <>
+              오른쪽 위 <b>지금 수집</b>을 누르거나 다음 04시 자동 수집을
+              기다리세요. 조회 · 도달 · 저장 · 공유까지 보려면{" "}
+              <Link href="/accounts" className="underline underline-offset-2">
+                계정 연동
+              </Link>
+              에서 성과 권한이 있는지 먼저 확인하세요.
+            </>
+          }
         />
-        <PlaceholderCard
-          icon={Sparkles}
-          title="캡션 효과 분석"
-          desc="AI vs 직접 작성 · 길이/해시태그/CTA 효과"
-          phase="Phase 3"
-        />
-        <PlaceholderCard
-          icon={Clock}
-          title="최적 시간 학습"
-          desc="요일×시간 히트맵 · Scheduler 추천 슬롯"
-          phase="Phase 3"
-        />
-      </section>
+      ) : (
+        <div className="space-y-4">
+          {baselines.map((b) => (
+            <AccountBaselineCard key={b.id} account={b} />
+          ))}
+        </div>
+      )}
     </main>
   );
 }
 
-function PlaceholderCard({
-  icon: Icon,
-  title,
-  desc,
-  phase,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  desc: string;
-  phase: string;
-}) {
+function EmptyState({ title, body }: { title: string; body: React.ReactNode }) {
   return (
-    <Card className="bg-muted/20">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Icon className="size-4" />
-          {title}
-          <Badge variant="outline" className="ml-auto text-[10px]">
-            {phase}
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="text-xs text-muted-foreground">{desc}</CardContent>
+    <Card className="border-dashed">
+      <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+        <BarChart3 className="size-10 text-muted-foreground" />
+        <h2 className="text-lg font-semibold">{title}</h2>
+        <p className="max-w-md text-sm text-muted-foreground">{body}</p>
+      </CardContent>
     </Card>
   );
 }

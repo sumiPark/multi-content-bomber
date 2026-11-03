@@ -84,6 +84,49 @@ export async function disconnectAccountAction(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 계정 역할 (0024) — 기획 에이전트가 계정마다 영상 방향(상품 중심 / 사람 중심)을 정할 때 쓴다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const roleSchema = z.object({
+  accountId: z.string().uuid(),
+  focus: z.enum(["PRODUCT", "PERSON"]).nullable(),
+  note: z.string().max(100, "메모는 100자 이내").nullable(),
+});
+
+export async function updateAccountRoleAction(
+  input: z.infer<typeof roleSchema>,
+): Promise<GroupActionResult> {
+  const parsed = roleSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  }
+
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+
+  // 역할 컬럼은 토큰 컬럼과 달리 authenticated UPDATE가 열려 있다(social_write_managers).
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("social_accounts")
+    .update({
+      role_focus: parsed.data.focus,
+      role_note: parsed.data.note?.trim() || null,
+    })
+    .eq("id", parsed.data.accountId)
+    .eq("organization_id", auth.organizationId)
+    .select("id");
+
+  if (error) return { ok: false, error: error.message };
+  if (!data || data.length === 0) {
+    return { ok: false, error: "계정을 찾을 수 없습니다." };
+  }
+
+  revalidatePath("/accounts");
+  revalidatePath("/analytics");
+  return { ok: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 계정 그룹 (account_groups) — 0009 마이그레이션 기준
 // 1:N: 계정 1개는 그룹 0~1개에 속함. 그룹 미지정도 정상.
 // ─────────────────────────────────────────────────────────────────────────────

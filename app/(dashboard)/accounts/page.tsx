@@ -1,6 +1,10 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { AccountsPage } from "@/components/accounts/accounts-page";
+import type {
+  InstagramRoleRow,
+  RoleFocus,
+} from "@/components/accounts/account-roles";
 
 interface AccountsPageProps {
   searchParams: Promise<{ connected?: string; error?: string }>;
@@ -66,10 +70,47 @@ export default async function Page({ searchParams }: AccountsPageProps) {
     .select("id, name, description, color, created_at")
     .order("created_at", { ascending: true });
 
+  // 인스타 계정 역할 · 성과 권한 (0024). 마지막 수집 행의 도달(reach)이 채워져 있으면
+  // 성과 권한이 실제로 통한 것 — 0024 이전 연결이라 동의 목록이 없는 계정의 근거로 쓴다.
+  const instagramIds = (accounts ?? [])
+    .filter((a) => a.platform === "INSTAGRAM")
+    .map((a) => a.id);
+  let instagramRoles: InstagramRoleRow[] = [];
+  if (instagramIds.length > 0) {
+    const [{ data: roleRows }, { data: dailyRows }] = await Promise.all([
+      supabase
+        .from("social_accounts")
+        .select("id, display_name, role_focus, role_note, granted_scopes")
+        .in("id", instagramIds),
+      supabase
+        .from("account_daily")
+        .select("social_account_id, day, reach")
+        .in("social_account_id", instagramIds)
+        .order("day", { ascending: false })
+        .limit(instagramIds.length * 7),
+    ]);
+    const latestDaily = new Map<string, { day: string; reach: number | null }>();
+    for (const d of dailyRows ?? []) {
+      if (!latestDaily.has(d.social_account_id)) {
+        latestDaily.set(d.social_account_id, d);
+      }
+    }
+    instagramRoles = (roleRows ?? []).map((r) => ({
+      id: r.id,
+      display_name: r.display_name,
+      role_focus: (r.role_focus as RoleFocus | null) ?? null,
+      role_note: r.role_note,
+      granted_scopes: r.granted_scopes,
+      insights_seen: latestDaily.get(r.id)?.reach != null,
+      last_collected_on: latestDaily.get(r.id)?.day ?? null,
+    }));
+  }
+
   return (
     <AccountsPage
       accounts={accounts ?? []}
       groups={groups ?? []}
+      instagramRoles={instagramRoles}
       canManage={canManage}
       flashMessage={
         params.connected

@@ -11,6 +11,8 @@ export interface OAuthTokens {
     displayName: string | null;
     avatarUrl: string | null;
   };
+  // 연결 때 실제로 동의된 권한. 플랫폼이 알려주지 않으면 null/미지정.
+  grantedScopes?: string[] | null;
 }
 
 // refreshToken() 결과 — accountInfo는 갱신 단계에선 안 받음.
