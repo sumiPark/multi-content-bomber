@@ -1,12 +1,13 @@
 name: b-plan
 
 # B 트랙 기획 워커(worker/plan-b-slots.ts) — 상품 선정 에이전트(1)가 내일 B 칸(08 · 21시) 상품을 제안한다.
-# 사람은 B 상품 컨펌 화면에서 전날 마감(기본 18시)까지 컨펌. 마감 지난 제안은 다음 실행이 건너뜀으로 바꾼다.
+# 사람은 AI 자동 업로드 화면에서 올리는 날 오전 7시(기본)까지 확인. 마감 지난 제안은 다음 실행이 건너뜀으로 바꾼다.
 on:
   schedule:
-    # 09:00 KST(00:00 UTC) 제안 · 18:30 KST(09:30 UTC) 마감 정리. GitHub schedule은 밀릴 수 있어 여유를 둔다.
+    # 09:00 KST(00:00 UTC) 다음 날 제안 · 07:10 KST(22:10 UTC) 그날 마감 정리.
+    # GitHub schedule은 밀릴 수 있다 — 마감 판단은 화면 · 서버 액션도 시각으로 직접 하므로 정리가 늦어도 확인은 막힌다.
     - cron: "0 0 * * *"
-    - cron: "30 9 * * *"
+    - cron: "10 22 * * *"
   repository_dispatch:
     types: [plan-b]
   workflow_dispatch: {}

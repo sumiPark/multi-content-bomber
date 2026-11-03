@@ -74,7 +74,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const byAccount = new Map<string, { name: string; deadlineIso: string; plans: PlanCardData[] }>();
   for (const p of plans ?? []) {
     const name = p.social_accounts?.display_name ?? "(이름 없음)";
-    const deadline = deadlineBy.get(p.social_account_id) ?? "18:00";
+    const deadline = deadlineBy.get(p.social_account_id) ?? "07:00";
     const deadlineIso = confirmDeadlineIso(slotDate, deadline);
     const group = byAccount.get(p.social_account_id) ?? { name, deadlineIso, plans: [] };
     const proposal = (p.proposal ?? {}) as Proposal;
@@ -96,7 +96,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
 
   // 마감 전인 제안만 — 마감이 지나면 하나씩도, 모두도 컨펌할 수 없다
   const proposed = (plans ?? []).filter(
-    (p) => p.status === "PROPOSED" && !isPastDeadline(slotDate, deadlineBy.get(p.social_account_id) ?? "18:00"),
+    (p) => p.status === "PROPOSED" && !isPastDeadline(slotDate, deadlineBy.get(p.social_account_id) ?? "07:00"),
   ).length;
   const dates = [kstDate(0), tomorrow, addDays(tomorrow, 1)];
 
@@ -110,7 +110,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             매일 08시 · 21시에 AI가 릴스를 만들어 자동으로 올려요. 여기서는 <b>어떤 상품으로 만들지만 확인</b>하면 됩니다. 대본 ·
-            영상 · 점검 · 예약은 그 뒤에 자동으로 진행돼요. 올리기 전날 18시까지 확인하지 않은 칸은 건너뜁니다.
+            영상 · 점검 · 예약은 그 뒤에 자동으로 진행돼요. 올리는 날 오전 7시까지 확인하지 않은 칸은 건너뜁니다.
           </p>
         </div>
         {canManage && proposed > 0 && <ConfirmAllButton slotDate={slotDate} count={proposed} />}

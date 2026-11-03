@@ -9,7 +9,7 @@ import type { Json } from "@/types/database";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // B 트랙 기획 워커 — 내일(KST) B 칸마다 상품 선정 에이전트(1)가 상품을 제안해 content_plans에 남긴다.
-// 사람은 상품 컨펌 화면에서 전날 마감(기본 18시)까지 컨펌만 하면 된다. 계정이 B 완전 자동이면
+// 사람은 AI 자동 업로드 화면에서 올리는 날 오전 7시(기본)까지 확인만 하면 된다. 계정이 B 완전 자동이면
 // 제안을 곧바로 CONFIRMED로 둔다(처음엔 모든 계정 꺼짐).
 //
 // 계정은 하나씩 차례로 — 앞 계정이 고른 상품을 다음 계정 후보에서 빼서 같은 날 겹치지 않게.
@@ -41,8 +41,8 @@ async function main() {
       .select("id, slot_date, social_account_id")
       .eq("track", "B")
       .eq("status", "PROPOSED");
-    const deadlineOf = new Map((settings ?? []).map((s) => [s.social_account_id, s.b_confirm_deadline ?? "18:00"]));
-    const expired = (open ?? []).filter((p) => isPastDeadline(p.slot_date, deadlineOf.get(p.social_account_id) ?? "18:00"));
+    const deadlineOf = new Map((settings ?? []).map((s) => [s.social_account_id, s.b_confirm_deadline ?? "07:00"]));
+    const expired = (open ?? []).filter((p) => isPastDeadline(p.slot_date, deadlineOf.get(p.social_account_id) ?? "07:00"));
     if (expired.length) {
       await service
         .from("content_plans")

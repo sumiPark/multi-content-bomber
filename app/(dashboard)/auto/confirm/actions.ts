@@ -7,7 +7,7 @@ import { isPastDeadline } from "@/lib/automation/deadline";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // B 상품 컨펌 (0028 content_plans). 사람은 상품만 확인하고, 이후 대본 · 영상 · 점검 · 예약은 자동.
-// 컨펌 마감(발행 전날 track_settings.b_confirm_deadline)이 지나면 고칠 수 없다.
+// 확인 마감(올리는 날 track_settings.b_confirm_deadline, 기본 07:00)이 지나면 고칠 수 없다.
 
 export type ConfirmResult = { ok: true; count?: number } | { ok: false; error: string };
 
@@ -24,7 +24,7 @@ async function authorize(): Promise<{ ok: true; userId: string; orgId: string } 
 
 type Service = ReturnType<typeof createServiceClient>;
 
-/** 계정별 B 컨펌 마감 (track_settings, 기본 18:00). */
+/** 계정별 확인 마감 (track_settings, 기본 07:00 — 올리는 날). */
 async function deadlines(service: Service, accountIds: string[]): Promise<Map<string, string>> {
   const { data } = await service
     .from("track_settings")
@@ -42,7 +42,7 @@ async function loadPlan(service: Service, planId: string, orgId: string) {
     .maybeSingle();
   if (!data) return null;
   const d = await deadlines(service, [data.social_account_id]);
-  return { ...data, deadline: d.get(data.social_account_id) ?? "18:00" };
+  return { ...data, deadline: d.get(data.social_account_id) ?? "07:00" };
 }
 
 const confirmSchema = z.object({
@@ -134,7 +134,7 @@ export async function confirmAllAction(input: z.infer<typeof dateSchema>): Promi
   if (error) return { ok: false, error: error.message };
   const d = await deadlines(service, [...new Set((plans ?? []).map((p) => p.social_account_id))]);
   const ids = (plans ?? [])
-    .filter((p) => !isPastDeadline(p.slot_date, d.get(p.social_account_id) ?? "18:00"))
+    .filter((p) => !isPastDeadline(p.slot_date, d.get(p.social_account_id) ?? "07:00"))
     .map((p) => p.id);
   if (ids.length === 0) return { ok: true, count: 0 };
 

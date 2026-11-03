@@ -88,7 +88,7 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
 
       {canManage && plan.pastDeadline && (plan.status === "PROPOSED" || plan.status === "CONFIRMED") && (
         <p className="rounded-md border border-amber-400/50 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-          확인 마감(올리기 전날 18시)이 지나 바꿀 수 없어요.{" "}
+          확인 마감(올리는 날 오전 7시)이 지나 바꿀 수 없어요.{" "}
           {plan.status === "PROPOSED" ? "확인하지 않은 이 칸은 건너뜁니다." : "확인한 상품으로 만들어 올립니다."}
         </p>
       )}
