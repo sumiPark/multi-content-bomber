@@ -7,7 +7,12 @@ import {
   type BaselinePost,
 } from "@/components/analytics/account-baseline";
 import { collectMetricsNowAction } from "@/app/(dashboard)/analytics/actions";
-import { ProfileScoreCard, type ReviewRow } from "@/components/account-review/profile-review";
+import {
+  ProfileScoreCard,
+  ProfileScoreOverview,
+  type ProfileScoreAccount,
+  type ReviewRow,
+} from "@/components/account-review/profile-review";
 import { CollectNowButton } from "@/components/analytics/collect-now-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -114,7 +119,7 @@ export default async function AnalyticsPage() {
       accounts.map(async (acc) => {
         const { data } = await supabase
           .from("profile_reviews")
-          .select("id, status, total_score, rescore, items, rewrites, summary, manual_input, error, created_at, started_at, finished_at")
+          .select("id, status, total_score, rescore, items, rewrites, summary, manual_input, snapshot, error, created_at, started_at, finished_at")
           .eq("social_account_id", acc.id)
           .order("created_at", { ascending: false })
           .limit(PROFILE_HISTORY);
@@ -122,6 +127,15 @@ export default async function AnalyticsPage() {
       }),
     ),
   );
+
+  // 프로필 점수 순서: 연결된 계정 먼저 → 팔로워 많은 순. 팔로워는 마지막 채점의 인스타 값, 없으면 성과 수집 값
+  const followersOf = (id: string): number | null => {
+    const snap = reviewsByAccount.get(id)?.find((r) => r.status === "DONE")?.snapshot as { followers_count?: number | null } | undefined;
+    return snap?.followers_count ?? baselines.find((b) => b.id === id)?.followers ?? null;
+  };
+  const scoreAccounts: ProfileScoreAccount[] = accounts
+    .map((a) => ({ id: a.id, name: a.display_name ?? "(이름 없음)", active: a.is_active, followers: followersOf(a.id) }))
+    .sort((a, b) => Number(b.active) - Number(a.active) || (b.followers ?? -1) - (a.followers ?? -1));
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
@@ -189,13 +203,12 @@ export default async function AnalyticsPage() {
               인스타에는 아무것도 바꾸지 않아요. 마음에 드는 문구를 직접 붙여 넣으세요.
             </p>
           </div>
-          {accounts.map((a) => (
-            <ProfileScoreCard
-              key={a.id}
-              account={{ id: a.id, name: a.display_name ?? "(이름 없음)", active: a.is_active }}
-              history={reviewsByAccount.get(a.id) ?? []}
-            />
-          ))}
+          <ProfileScoreOverview accounts={scoreAccounts} histories={reviewsByAccount} />
+          {scoreAccounts
+            .filter((a) => a.active)
+            .map((a) => (
+              <ProfileScoreCard key={a.id} account={a} history={reviewsByAccount.get(a.id) ?? []} />
+            ))}
         </section>
       )}
     </main>
