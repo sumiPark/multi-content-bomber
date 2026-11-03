@@ -49,3 +49,6 @@ supabase/.temp/
 
 # 데모 영상 (SNS 검수용, 65MB) — 워커 checkout마다 받게 되므로 저장소에 넣지 않는다
 docs/video/
+
+# 로컬 전용 기획·메모 (커밋/푸시 금지)
+/local/
