@@ -136,6 +136,9 @@ export default async function AnalyticsPage() {
   const scoreAccounts: ProfileScoreAccount[] = accounts
     .map((a) => ({ id: a.id, name: a.display_name ?? "(이름 없음)", active: a.is_active, followers: followersOf(a.id) }))
     .sort((a, b) => Number(b.active) - Number(a.active) || (b.followers ?? -1) - (a.followers ?? -1));
+  // 위쪽 계정별 기준선도 같은 순서로
+  const order = new Map(scoreAccounts.map((a, i) => [a.id, i]));
+  baselines.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
