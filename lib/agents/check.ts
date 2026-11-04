@@ -123,6 +123,7 @@ export async function checkScript(
         content: `너는 쇼핑몰 릴스의 광고 심의 담당이다. 대본 · 화면 문구 · 캡션의 문장을 하나씩 상품 사실과 원문에 대조한다.
 - 사실 주장(숫자 · 성분 · 효과 · 산지 · 구성 · 가격)이 상품 사실이나 원문에 없으면 unsupported.
 - 말투 · 감탄 · 권유(예: "가볍게 써 보세요")는 사실 주장이 아니니 괜찮다.
+- 판매처 이름(shop)을 말하거나 태그로 쓰는 것은 사실 주장이 아니니 괜찮다.
 ${
           track === "A"
             ? `- 이 영상은 사람이 직접 찍는다. 그 장면에서 실제로 보여 주는 것에 대한 1인칭("덜어 보면 묽어요", "잘라 보니 속이 노래요")은 괜찮다.
@@ -133,7 +134,7 @@ ${
       },
       {
         role: "user",
-        content: `상품 사실:\n${JSON.stringify({ name: facts.name, price: facts.price, oneLine: facts.oneLine, claims: facts.claims, details: facts.details, usage: facts.usage, cautions: facts.cautions, approvedClaims: facts.approvedClaims })}\n\n상세페이지 원문(일부):\n${facts.sourceText}\n\n점검할 글:\n[내레이션]\n${spoken.join("\n")}\n[화면 문구]\n${onScreen.join("\n")}\n[캡션]\n${script.caption.text}`,
+        content: `상품 사실:\n${JSON.stringify({ name: facts.name, shop: facts.shop, price: facts.price, oneLine: facts.oneLine, claims: facts.claims, details: facts.details, usage: facts.usage, cautions: facts.cautions, approvedClaims: facts.approvedClaims })}\n\n상세페이지 원문(일부):\n${facts.sourceText}\n\n점검할 글:\n[내레이션]\n${spoken.join("\n")}\n[화면 문구]\n${onScreen.join("\n")}\n[캡션]\n${script.caption.text}`,
       },
     ],
     response_format: zodResponseFormat(groundingSchema, "grounding"),
