@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ComponentType } from "react";
+import { useEffect, useState, useSyncExternalStore, type ComponentType } from "react";
 import {
   Archive,
   BarChart3,
@@ -31,7 +31,29 @@ import { cn } from "@/lib/utils";
 // 앱 셸 — DESIGN.md 6장(Marketing Hub와 같은 구조): 240px 사이드바(로고 → 조직 카드 → 메뉴 묶음 → 사용자) +
 // 60px 상단바(화면 이름 · 상태). 1024px 미만은 사이드바를 왼쪽에서 여는 260px 패널로.
 
-type BadgeKind = "count" | "soon";
+// count = 배포 관리 실패 건수, soon = 준비 중, new = 마지막으로 본 뒤 새 결과(파란 점)
+type BadgeKind = "count" | "soon" | "new";
+
+// "새 결과" 점 — 그 화면을 마지막으로 연 시각을 이 브라우저에 기억한다(사람마다 · 기기마다).
+const SEEN_KEY = "mcb:analytics-seen-at";
+const SEEN_EVENT = "mcb:analytics-seen";
+
+function readSeen(): string | null {
+  try {
+    return localStorage.getItem(SEEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function subscribeSeen(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(SEEN_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(SEEN_EVENT, onChange);
+  };
+}
 
 interface NavItem {
   href: string;
@@ -51,7 +73,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/", label: "대시보드", icon: LayoutDashboard },
       // 편성표(5단계) — 예전 "예약 규칙(준비 중)" 자리. 계정별 하루 칸 · 주제 · 주간 진행
       { href: "/schedule", label: "편성표", icon: CalendarClock },
-      { href: "/analytics", label: "분석", icon: BarChart3 },
+      { href: "/analytics", label: "분석", icon: BarChart3, badgeKind: "new" },
       // 에이전트 · 학습(5단계) — 에이전트별 반영 방식 · 플레이북 · 피드백 제안 · 실행 기록
       { href: "/agents", label: "에이전트 · 학습", icon: Bot },
     ],
@@ -136,6 +158,8 @@ interface SidebarShellProps {
   failedJobCount: number;
   orgName: string | null;
   role: string | null;
+  // 가장 최근 프로필 채점이 끝난 시각 — 분석 메뉴 "새 결과" 점
+  analyticsUpdatedAt?: string | null;
   children: React.ReactNode;
 }
 
@@ -144,9 +168,24 @@ export function SidebarShell({
   failedJobCount,
   orgName,
   role,
+  analyticsUpdatedAt = null,
   children,
 }: SidebarShellProps) {
   const pathname = usePathname();
+  // 서버에서는 null(점 없음) → 브라우저에서 기억한 시각과 비교
+  const seenAt = useSyncExternalStore(subscribeSeen, readSeen, () => null);
+  const onAnalytics = isActive(pathname, "/analytics");
+  useEffect(() => {
+    if (!onAnalytics) return;
+    try {
+      localStorage.setItem(SEEN_KEY, new Date().toISOString());
+      window.dispatchEvent(new Event(SEEN_EVENT));
+    } catch {
+      // 저장소를 못 쓰면 점이 계속 보일 뿐 — 화면은 그대로
+    }
+  }, [onAnalytics, analyticsUpdatedAt]);
+  const analyticsNew =
+    !!analyticsUpdatedAt && !onAnalytics && (!seenAt || Date.parse(seenAt) < Date.parse(analyticsUpdatedAt));
   // 연 화면 주소를 기억 — 다른 화면으로 가면 저절로 닫힌다(effect 없이)
   const [openedAt, setOpenedAt] = useState<string | null>(null);
   const mobileOpen = openedAt === pathname;
@@ -162,6 +201,15 @@ export function SidebarShell({
           className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-risk px-1.5 text-[11px] leading-5 font-bold text-white tabular-nums"
         >
           {display}
+        </span>
+      );
+    }
+    if (item.badgeKind === "new") {
+      if (!analyticsNew) return null;
+      return (
+        <span className="ml-auto flex items-center" title="새 결과가 있어요">
+          <span className="size-2 rounded-full bg-primary" aria-hidden />
+          <span className="sr-only">새 결과</span>
         </span>
       );
     }

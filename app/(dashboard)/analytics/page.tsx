@@ -13,25 +13,32 @@ import {
   type ProfileScoreAccount,
   type ReviewRow,
 } from "@/components/account-review/profile-review";
+import { AnalyticsTabs, type AnalyticsTab } from "@/components/analytics/analytics-tabs";
 import { CollectNowButton } from "@/components/analytics/collect-now-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
-// 분석 — 콘텐츠 자동화 1단계: 인스타 계정별 기준선.
-// 데이터는 성과 수집 워커(worker/collect-metrics.ts)가 매일 04시(KST)에 쌓는다(0024).
+// 분석 — 탭 둘: 프로필 점수(매일 04:30 자동 채점, 0034) · 게시물 성과(인스타 계정별 기준선).
+// 게시물 성과 데이터는 성과 수집 워커(worker/collect-metrics.ts)가 매일 04시(KST)에 쌓는다(0024).
 // 트랙(A 혼합 / B 자동)별 비교는 운영 시작 뒤(7 첫 리포트)에 붙인다.
 
 const BASELINE_POSTS = 30;
 const FOLLOWER_COMPARE_DAYS = 7;
 const PROFILE_HISTORY = 4;
 
-export default async function AnalyticsPage() {
+export default async function AnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
+
+  const { tab: tabParam } = await searchParams;
 
   const supabase = await getServerSupabase();
 
@@ -140,20 +147,27 @@ export default async function AnalyticsPage() {
   const order = new Map(scoreAccounts.map((a, i) => [a.id, i]));
   baselines.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 
+  // 탭 — 주소에 있으면 그대로, 없으면 데이터가 있는 탭. 둘 다 있으면 고칠 일이 보이는 프로필 점수
+  const scoredCount = scoreAccounts.filter((a) => reviewsByAccount.get(a.id)?.some((r) => r.status === "DONE")).length;
+  const collectedCount = baselines.filter((b) => b.lastCollectedOn).length;
+  const tab: AnalyticsTab =
+    tabParam === "profile" || tabParam === "posts" ? tabParam : collected && scoredCount === 0 ? "posts" : "profile";
+
   return (
-    <main className="space-y-6 p-4 sm:p-6">
+    <main className="space-y-5 p-4 sm:p-6">
       <header className="flex items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold tracking-[-0.01em]">분석</h1>
             <Badge variant="outline">인스타 계정별 지금 수준</Badge>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            인스타 계정마다 지금 수준을 숫자로 잡아 둡니다. 매일 04시에 팔로워와
-            최근 게시물 성과를 자동으로 수집해요.
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            {tab === "profile"
+              ? "프로필을 12개 기준으로 매일 04:30에 자동 채점하고, 점수를 가장 많이 깎는 곳부터 고칠 문구를 드려요. 인스타에는 아무것도 바꾸지 않아요. 마음에 드는 문구를 직접 붙여 넣으세요."
+              : "인스타 계정마다 지금 수준을 숫자로 잡아 둡니다. 매일 04시에 팔로워와 최근 게시물 성과를 자동으로 수집해요."}
           </p>
         </div>
-        {accounts.length > 0 && (
+        {tab === "posts" && accounts.length > 0 && (
           <CollectNowButton
             action={collectMetricsNowAction}
             doneText="수집을 시작했어요. 2~3분 뒤 새로고침하세요."
@@ -173,46 +187,41 @@ export default async function AnalyticsPage() {
             </>
           }
         />
-      ) : !collected ? (
-        <EmptyState
-          title="아직 수집된 데이터가 없어요"
-          body={
-            <>
-              오른쪽 위 <b>지금 수집</b>을 누르거나 다음 04시 자동 수집을
-              기다리세요. 조회 · 도달 · 저장 · 공유까지 보려면{" "}
-              <Link href="/accounts" className="underline underline-offset-2">
-                계정 연동
-              </Link>
-              에서 성과 권한이 있는지 먼저 확인하세요.
-            </>
-          }
-        />
       ) : (
-        <div className="space-y-4">
-          {baselines.map((b) => (
-            <AccountBaselineCard key={b.id} account={b} />
-          ))}
-        </div>
-      )}
+        <>
+          <AnalyticsTabs active={tab} scoredCount={scoredCount} collectedCount={collectedCount} />
 
-      {accounts.length > 0 && (
-        <section id="profile-score" aria-labelledby="profile-score-title" className="scroll-mt-20 space-y-3">
-          <div>
-            <h2 id="profile-score-title" className="text-base font-semibold">
-              프로필 점수
-            </h2>
-            <p className="mt-0.5 max-w-3xl text-[13px] text-muted-foreground">
-              프로필을 12개 기준으로 매일 04:30에 자동 채점하고, 점수를 가장 많이 깎는 곳부터 고칠 문구를 드려요.
-              인스타에는 아무것도 바꾸지 않아요. 마음에 드는 문구를 직접 붙여 넣으세요.
-            </p>
-          </div>
-          <ProfileScoreOverview accounts={scoreAccounts} histories={reviewsByAccount} />
-          {scoreAccounts
-            .filter((a) => a.active)
-            .map((a) => (
-              <ProfileScoreCard key={a.id} account={a} history={reviewsByAccount.get(a.id) ?? []} />
-            ))}
-        </section>
+          {tab === "profile" ? (
+            <section aria-label="프로필 점수" className="space-y-3">
+              <ProfileScoreOverview accounts={scoreAccounts} histories={reviewsByAccount} />
+              {scoreAccounts
+                .filter((a) => a.active)
+                .map((a) => (
+                  <ProfileScoreCard key={a.id} account={a} history={reviewsByAccount.get(a.id) ?? []} />
+                ))}
+            </section>
+          ) : !collected ? (
+            <EmptyState
+              title="아직 수집된 데이터가 없어요"
+              body={
+                <>
+                  오른쪽 위 <b>지금 수집</b>을 누르거나 다음 04시 자동 수집을
+                  기다리세요. 조회 · 도달 · 저장 · 공유까지 보려면{" "}
+                  <Link href="/accounts" className="underline underline-offset-2">
+                    계정 연동
+                  </Link>
+                  에서 성과 권한이 있는지 먼저 확인하세요.
+                </>
+              }
+            />
+          ) : (
+            <div className="space-y-4">
+              {baselines.map((b) => (
+                <AccountBaselineCard key={b.id} account={b} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </main>
   );

@@ -11,7 +11,11 @@ export default async function DashboardLayout({
   // No user yet (e.g. mid-redirect from a protected page) — render bare.
   if (!user) return <>{children}</>;
 
-  const [failedJobCount, org] = await Promise.all([loadFailedJobCount(), loadOrganization()]);
+  const [failedJobCount, org, profileScoredAt] = await Promise.all([
+    loadFailedJobCount(),
+    loadOrganization(),
+    loadProfileScoredAt(),
+  ]);
 
   return (
     <SidebarShell
@@ -19,6 +23,7 @@ export default async function DashboardLayout({
       failedJobCount={failedJobCount}
       orgName={org?.name ?? null}
       role={org?.role ?? null}
+      analyticsUpdatedAt={profileScoredAt}
     >
       {children}
     </SidebarShell>
@@ -39,6 +44,22 @@ async function loadFailedJobCount(): Promise<number> {
     .is("deleted_at", null);
 
   return count ?? 0;
+}
+
+// 사이드바 "분석" 새 결과 점 — 가장 최근 프로필 채점이 끝난 시각(0034). 못 읽으면 점 없음.
+async function loadProfileScoredAt(): Promise<string | null> {
+  const profile = await getCurrentProfile();
+  if (!profile?.organization_id) return null;
+  const supabase = await getServerSupabase();
+  const { data } = await supabase
+    .from("profile_reviews")
+    .select("finished_at")
+    .eq("status", "DONE")
+    .not("finished_at", "is", null)
+    .order("finished_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.finished_at ?? null;
 }
 
 // 사이드바 조직 카드(조직 이름 + 내 역할). 못 읽어도 화면은 그대로 뜬다.
