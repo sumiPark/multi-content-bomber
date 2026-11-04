@@ -23,6 +23,7 @@ import type { ProfileSnapshot } from "@/lib/account-review/types";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { loadBenchmark } from "@/lib/benchmark/load";
 import { loadPostPerformance } from "@/lib/post-analysis/load";
+import { parsePostPeriod, periodStart } from "@/lib/post-analysis/stats";
 import { cn } from "@/lib/utils";
 
 // 분석 — 탭 셋: 프로필 점수(매일 04:30 자동 채점, 0034) · 게시물 성과(계정별 지난 릴스 전체 + 기준선, 0040) · 다른 계정 비교(0037).
@@ -39,7 +40,7 @@ const pageNow = () => Date.now();
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; account?: string }>;
+  searchParams: Promise<{ tab?: string; account?: string; period?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
@@ -47,7 +48,7 @@ export default async function AnalyticsPage({
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
 
-  const { tab: tabParam, account: accountParam } = await searchParams;
+  const { tab: tabParam, account: accountParam, period: periodParam } = await searchParams;
 
   const supabase = await getServerSupabase();
 
@@ -61,52 +62,16 @@ export default async function AnalyticsPage({
 
   const baselines: BaselineAccount[] = await Promise.all(
     accounts.map(async (acc) => {
-      const [{ data: daily }, { data: posts }] = await Promise.all([
-        supabase
-          .from("account_daily")
-          .select("day, followers_count, reach")
-          .eq("social_account_id", acc.id)
-          .order("day", { ascending: false })
-          .limit(FOLLOWER_COMPARE_DAYS + 1),
-        supabase
-          .from("social_posts")
-          .select("id, permalink, caption, thumbnail_url, media_product_type, posted_at")
-          .eq("social_account_id", acc.id)
-          .order("posted_at", { ascending: false })
-          .limit(BASELINE_POSTS),
-      ]);
-
-      const postIds = (posts ?? []).map((p) => p.id);
-      const { data: metrics } =
-        postIds.length > 0
-          ? await supabase
-              .from("post_latest_metrics")
-              .select("post_id, views, reach, likes, comments, saved, shares")
-              .in("post_id", postIds)
-          : { data: [] };
-      const metricByPost = new Map((metrics ?? []).map((m) => [m.post_id, m]));
+      const { data: daily } = await supabase
+        .from("account_daily")
+        .select("day, followers_count, reach")
+        .eq("social_account_id", acc.id)
+        .order("day", { ascending: false })
+        .limit(FOLLOWER_COMPARE_DAYS + 1);
 
       const latest = daily?.[0] ?? null;
       // 가장 오래된 비교 대상 (최대 7일 전). 하루치만 있으면 증감 없음.
       const before = daily && daily.length > 1 ? daily[daily.length - 1] : null;
-
-      const baselinePosts: BaselinePost[] = (posts ?? []).map((p) => {
-        const m = metricByPost.get(p.id);
-        return {
-          id: p.id,
-          permalink: p.permalink,
-          caption: p.caption,
-          thumbnailUrl: p.thumbnail_url,
-          productType: p.media_product_type,
-          postedAt: p.posted_at,
-          views: m?.views ?? null,
-          reach: m?.reach ?? null,
-          likes: m?.likes ?? null,
-          comments: m?.comments ?? null,
-          saved: m?.saved ?? null,
-          shares: m?.shares ?? null,
-        };
-      });
 
       return {
         id: acc.id,
@@ -119,10 +84,9 @@ export default async function AnalyticsPage({
             ? { day: before.day, count: before.followers_count }
             : null,
         lastCollectedOn: latest?.day ?? null,
-        // 계정 도달이 채워졌거나 게시물 조회가 하나라도 있으면 성과 권한이 통한 것.
-        hasInsights:
-          latest?.reach != null || baselinePosts.some((p) => p.views != null),
-        posts: baselinePosts,
+        // 계정 도달이 채워졌으면 성과 권한이 통한 것. 게시물은 게시물 성과 탭에서 고른 계정만 아래에서 읽는다.
+        hasInsights: latest?.reach != null,
+        posts: [],
       };
     }),
   );
@@ -190,11 +154,43 @@ export default async function AnalyticsPage({
   const compareData = tab === "compare" && compareSelected ? await loadBenchmark(supabase, compareSelected.id, compareNow) : null;
   const canEditCompare = profile.role === "ADMIN" || profile.role === "MANAGER";
 
-  // 게시물 성과 — 계정 하나씩. 지난 릴스 전체를 읽으니 그 탭을 열 때만
-  const postsSelected = tab === "posts" ? (scoreAccounts.find((a) => a.id === accountParam) ?? scoreAccounts[0] ?? null) : null;
-  const postsData = postsSelected ? await loadPostPerformance(supabase, postsSelected.id) : null;
-  const postsBaseline = postsSelected ? baselines.find((b) => b.id === postsSelected.id) ?? null : null;
+  // 게시물 성과 — 계정 하나씩, 고른 기간만. 그 탭을 열 때만 읽는다
+  const postsPeriod = parsePostPeriod(periodParam);
   const postsNow = pageNow();
+  const postsSelected = tab === "posts" ? (scoreAccounts.find((a) => a.id === accountParam) ?? scoreAccounts[0] ?? null) : null;
+  const postsData = postsSelected ? await loadPostPerformance(supabase, postsSelected.id, periodStart(postsPeriod, postsNow)) : null;
+  const postsBaseline = postsSelected ? baselines.find((b) => b.id === postsSelected.id) ?? null : null;
+  if (postsBaseline) {
+    const { data: posts } = await supabase
+      .from("social_posts")
+      .select("id, permalink, caption, thumbnail_url, media_product_type, posted_at")
+      .eq("social_account_id", postsBaseline.id)
+      .order("posted_at", { ascending: false })
+      .limit(BASELINE_POSTS);
+    const postIds = (posts ?? []).map((p) => p.id);
+    const { data: metrics } = postIds.length
+      ? await supabase.from("post_latest_metrics").select("post_id, views, reach, likes, comments, saved, shares").in("post_id", postIds)
+      : { data: [] };
+    const metricByPost = new Map((metrics ?? []).map((m) => [m.post_id, m]));
+    postsBaseline.posts = (posts ?? []).map((p): BaselinePost => {
+      const m = metricByPost.get(p.id);
+      return {
+        id: p.id,
+        permalink: p.permalink,
+        caption: p.caption,
+        thumbnailUrl: p.thumbnail_url,
+        productType: p.media_product_type,
+        postedAt: p.posted_at,
+        views: m?.views ?? null,
+        reach: m?.reach ?? null,
+        likes: m?.likes ?? null,
+        comments: m?.comments ?? null,
+        saved: m?.saved ?? null,
+        shares: m?.shares ?? null,
+      };
+    });
+    postsBaseline.hasInsights = postsBaseline.hasInsights || postsBaseline.posts.some((p) => p.views != null);
+  }
 
   return (
     <main className="space-y-5 p-4 sm:p-6">
@@ -259,7 +255,7 @@ export default async function AnalyticsPage({
                   return (
                     <Link
                       key={a.id}
-                      href={`/analytics?tab=posts&account=${a.id}`}
+                      href={`/analytics?tab=posts&account=${a.id}&period=${postsPeriod}`}
                       aria-current={on ? "page" : undefined}
                       className={cn(
                         "inline-flex h-[30px] items-center rounded-[6px] px-3 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
@@ -272,9 +268,11 @@ export default async function AnalyticsPage({
                 })}
               </nav>
 
-              {postsData && postsSelected && <PostPerformance key={postsSelected.id} data={postsData} now={postsNow} />}
+              {postsData && postsSelected && <PostPerformance key={postsSelected.id} data={postsData} now={postsNow} period={postsPeriod} accountId={postsSelected.id} />}
 
-              <h2 className="pt-2 text-[15px] font-semibold">최근 게시물 · 팔로워</h2>
+              <details className="group">
+                <summary className="cursor-pointer rounded-lg border bg-card px-4 py-3 text-[13px] font-medium text-ink-2">최근 게시물 30개 · 팔로워 변화</summary>
+                <div className="mt-3">
               {!collected ? (
                 <EmptyState
                   title="아직 수집된 데이터가 없어요"
@@ -292,6 +290,8 @@ export default async function AnalyticsPage({
               ) : (
                 postsBaseline && <AccountBaselineCard account={postsBaseline} />
               )}
+                </div>
+              </details>
             </section>
           )}
         </>

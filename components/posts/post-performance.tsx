@@ -1,27 +1,26 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { ExternalLink, History, Loader2 } from "lucide-react";
+import { PostFindings } from "@/components/posts/post-findings";
 import { PostTimeline } from "@/components/posts/post-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { RelativeTime } from "@/components/ui/relative-time";
 import { Segmented } from "@/components/ui/segmented";
 import type { PerfRow, PostPerformanceData } from "@/lib/post-analysis/load";
-import { baseViews, isAdEstimated, isYoung, kstDay, perThousand } from "@/lib/post-analysis/stats";
+import { baseViews, isAdEstimated, isYoung, kstDay, periodStart, perThousand, type PostPeriod } from "@/lib/post-analysis/stats";
 
 // 분석 · 게시물 성과 — 계정의 모든 릴스를 평소 대비 배수로 본다(ig-audit-ko).
 // 배수는 고른 기간의 평소 조회수로 다시 계산한다. 전체 기간 하나로 보면 예전 이벤트가 터진 계정은
 // 최근 릴스가 전부 작게 나온다(2026-11-04 joongdi: 3배 넘은 81개 중 55개가 2024년 3~4월, 최근 90일 0개).
 
-type Period = "all" | "365" | "90" | "30";
 type Tier = "all" | "2" | "3" | "10" | "share" | "ad";
 type SortKey = "views" | "likes" | "shareRate" | "saveRate" | "watch" | "recent";
 type View = "card" | "table";
 
-const DAY_MS = 86_400_000;
-const PAGE_SIZE = 60;
+const PAGE_SIZE = 24;
 // "공유 많음" — 도달 값이 정상인 릴스 중 공유 비율 상위 10%
 const SHARE_TOP = 0.1;
 
@@ -152,18 +151,25 @@ function ReelTable({ rows }: { rows: Computed[] }) {
   );
 }
 
-export function PostPerformance({ data, now }: { data: PostPerformanceData; now: number }) {
-  const [period, setPeriod] = useState<Period>("all");
-  const [tier, setTier] = useState<Tier>("3");
+export function PostPerformance({ data, now, period, accountId }: { data: PostPerformanceData; now: number; period: PostPeriod; accountId: string }) {
+  const router = useRouter();
+  const [changing, startChange] = useTransition();
+  // 고르기 전에는 3배부터, 이 기간에 3배 넘은 릴스가 없으면 전체
+  const [tierPick, setTier] = useState<Tier | null>(null);
   const [sort, setSort] = useState<SortKey>("views");
   const [view, setView] = useState<View>("card");
   const [hideEvents, setHideEvents] = useState(false);
   const [limit, setLimit] = useState(PAGE_SIZE);
 
-  const from = period === "all" ? 0 : now - Number(period) * DAY_MS;
+  // 기간을 바꾸면 그 기간 릴스만 서버에서 다시 읽는다
+  const from = periodStart(period, now);
+  const pickPeriod = (next: PostPeriod) => {
+    setLimit(PAGE_SIZE);
+    startChange(() => router.push(`/analytics?tab=posts&account=${accountId}&period=${next}`, { scroll: false }));
+  };
 
   const { rows, base } = useMemo(() => {
-    const inPeriod = data.rows.filter((r) => r.views != null && (!from || (r.postedAt && Date.parse(r.postedAt) >= from)) && (!hideEvents || !r.eventLike));
+    const inPeriod = data.rows.filter((r) => r.views != null && (!hideEvents || !r.eventLike));
     const b = baseViews(inPeriod, now);
     const shareRates = inPeriod.map((r) => perThousand(r.shares, r)).filter((n): n is number => n != null).sort((x, y) => y - x);
     const cut = shareRates[Math.floor(shareRates.length * SHARE_TOP)] ?? Infinity;
@@ -180,12 +186,14 @@ export function PostPerformance({ data, now }: { data: PostPerformanceData; now:
       };
     });
     return { rows: computed, base: b };
-  }, [data.rows, from, hideEvents, now]);
+  }, [data.rows, hideEvents, now]);
 
   const counts = useMemo(() => {
     const n = (min: number) => rows.filter((r) => (r.x ?? 0) >= min).length;
     return { x2: n(2), x3: n(3), x10: n(10), share: rows.filter((r) => r.shareTop).length, ad: rows.filter((r) => r.ad).length };
   }, [rows]);
+
+  const tier: Tier = tierPick ?? (counts.x3 ? "3" : "all");
 
   const shown = useMemo(() => {
     const f = rows.filter((r) => {
@@ -205,10 +213,7 @@ export function PostPerformance({ data, now }: { data: PostPerformanceData; now:
     return [...f].sort((a, b) => value(b) - value(a));
   }, [rows, tier, sort]);
 
-  const total = data.rows.length;
-  const read = data.rows.filter((r) => r.views != null).length;
-
-  if (read === 0) {
+  if (data.read === 0) {
     return (
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
@@ -226,10 +231,30 @@ export function PostPerformance({ data, now }: { data: PostPerformanceData; now:
         <p className="flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-2 text-xs text-ink-2">
           <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
           {data.listed
-            ? `지난 릴스 ${num(total)}개 중 ${num(read)}개를 읽었어요. 나머지는 다음 수집에 이어서 읽어요. 지금 숫자는 일부 기준이에요.`
-            : `지난 릴스 목록을 아직 읽지 않았어요. 지금은 최근 ${num(read)}개 기준이라 평소 조회수와 배수가 달라질 수 있어요.`}
+            ? `지난 릴스 ${num(data.total)}개 중 ${num(data.read)}개를 읽었어요. 나머지는 다음 수집에 이어서 읽어요. 지금 숫자는 일부 기준이에요.`
+            : `지난 릴스 목록을 아직 읽지 않았어요. 지금은 최근 ${num(data.read)}개 기준이라 평소 조회수와 배수가 달라질 수 있어요.`}
         </p>
       )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented<PostPeriod>
+          ariaLabel="기간"
+          value={period}
+          disabled={changing}
+          onChange={pickPeriod}
+          options={[
+            { value: "90", label: "90일" },
+            { value: "30", label: "30일" },
+            { value: "365", label: "1년" },
+            { value: "all", label: "전체 기간" },
+          ]}
+        />
+        {changing && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="불러오는 중" />}
+        <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
+          <input type="checkbox" checked={hideEvents} onChange={(e) => setHideEvents(e.target.checked)} className="size-4 accent-primary" />
+          경품 · 이벤트 말 든 글 빼기
+        </label>
+      </div>
 
       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
@@ -246,71 +271,16 @@ export function PostPerformance({ data, now }: { data: PostPerformanceData; now:
         ))}
       </dl>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Segmented<Period>
-          ariaLabel="기간"
-          value={period}
-          onChange={(v) => {
-            setPeriod(v);
-            setLimit(PAGE_SIZE);
-          }}
-          options={[
-            { value: "all", label: "전체 기간" },
-            { value: "365", label: "1년" },
-            { value: "90", label: "90일" },
-            { value: "30", label: "30일" },
-          ]}
-        />
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
-          <input type="checkbox" checked={hideEvents} onChange={(e) => setHideEvents(e.target.checked)} className="size-4 accent-primary" />
-          경품 · 이벤트 말 든 글 빼기
-        </label>
-      </div>
-
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <section aria-label="언제 터졌나" className="rounded-lg border bg-card p-4">
           <h2 className="text-[15px] font-semibold">언제 터졌나</h2>
-          <p className="text-[13px] text-muted-foreground">점 하나가 릴스 하나예요. 세로축은 한 칸마다 10배씩 커지고, 점선이 평소 조회수예요. 파란 점은 3배, 더 큰 점은 10배를 넘은 릴스예요. 점을 누르면 인스타에서 열려요.</p>
+          <p className="text-[13px] text-muted-foreground">점 하나가 릴스 하나예요. 점선이 평소 조회수, 파란 점이 3배를 넘은 릴스예요. 세로축은 한 칸에 10배씩 커져요.</p>
           <div className="mt-3">
             <PostTimeline rows={rows} base={base} from={from} now={now} />
           </div>
         </section>
 
-        <section aria-label="데이터가 말하는 것" className="space-y-3 rounded-lg border bg-card p-4">
-          <div className="flex items-baseline justify-between gap-2">
-            <h2 className="text-[15px] font-semibold">데이터가 말하는 것</h2>
-            {data.analysis && (
-              <p className="shrink-0 text-xs text-muted-foreground">
-                <RelativeTime iso={data.analysis.createdAt} format="date" /> · 릴스 {num(data.analysis.reels)}개
-              </p>
-            )}
-          </div>
-          {data.analysis ? (
-            <>
-              <ul className="space-y-3">
-                {data.analysis.findings.map((f, i) => (
-                  <li key={i}>
-                    <p className="text-sm font-semibold">{f.title}</p>
-                    <p className="mt-0.5 text-[13px] text-ink-2">{f.detail}</p>
-                    {f.caveat && <p className="mt-0.5 text-xs text-muted-foreground">주의: {f.caveat}</p>}
-                  </li>
-                ))}
-              </ul>
-              {data.analysis.actions.length > 0 && (
-                <ul className="space-y-1 rounded-md bg-surface-2 px-3 py-2.5 text-[13px]">
-                  {data.analysis.actions.map((a, i) => (
-                    <li key={i}>
-                      <b className="font-semibold">{a.label}:</b> {a.text}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <p className="text-xs text-muted-foreground">숫자는 코드가 계산했고 해석만 AI가 썼어요. 통계에 없는 숫자가 든 문장은 자동으로 뺐어요. 시기가 겹친다고 원인인 건 아니에요. 전체 기간 기준이라 위에서 기간을 바꿔도 이 글은 그대로예요.</p>
-            </>
-          ) : (
-            <p className="text-[13px] text-muted-foreground">지난 릴스를 다 읽으면 해석을 써 드려요. 일주일에 한 번 새로 써요.</p>
-          )}
-        </section>
+        <PostFindings analysis={data.analysis} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

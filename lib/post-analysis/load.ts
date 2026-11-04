@@ -3,6 +3,7 @@ import { firstLine } from "@/lib/benchmark/discovery";
 import { isCtaLike, isEventLike, type ReelRow } from "./stats";
 
 // 분석 · 게시물 성과 화면 데이터 — 워커(sync-post-history)가 쌓은 값만 읽는다. 인스타를 부르지 않는다.
+// 고른 기간의 릴스만 읽는다. 전체 기간은 릴스가 1,000개 넘는 계정이 있어 화면이 느려진다(2026-11-04 fruit_cuma 1,151개).
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>;
 
@@ -17,6 +18,8 @@ export interface PerfRow extends ReelRow {
 
 export interface PerfFinding {
   title: string;
+  // 2026-11-04 이전 분석에는 없다
+  stat?: string;
   detail: string;
   caveat: string;
 }
@@ -26,31 +29,48 @@ export interface PerfAction {
   text: string;
 }
 
+export interface PostAnalysis {
+  headline: string | null;
+  findings: PerfFinding[];
+  actions: PerfAction[];
+  createdAt: string;
+  reels: number;
+}
+
 export interface PostPerformanceData {
   rows: PerfRow[];
   listed: boolean;
-  reelsListed: number | null;
+  // 기간과 상관없는 계정 전체 숫자 — 첫 수집 진행 안내용
+  total: number;
+  read: number;
   pending: number;
-  analysis: { findings: PerfFinding[]; actions: PerfAction[]; createdAt: string; reels: number } | null;
+  analysis: PostAnalysis | null;
 }
 
-export async function loadPostPerformance(supabase: Supabase, socialAccountId: string): Promise<PostPerformanceData> {
+export async function loadPostPerformance(supabase: Supabase, socialAccountId: string, from: number): Promise<PostPerformanceData> {
   type Row = {
     post_id: string; platform_media_id: string; permalink: string | null; caption: string | null; thumb_path: string | null;
-    posted_at: string | null; insights_checked_at: string | null; views: number | null; reach: number | null; likes: number | null;
+    posted_at: string | null; views: number | null; reach: number | null; likes: number | null;
     comments: number | null; saved: number | null; shares: number | null; avg_watch_time_ms: number | null;
   };
   const raw: Row[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data } = await supabase
+  for (let start = 0; ; start += PAGE) {
+    let q = supabase
       .from("account_reel_stats")
-      .select("post_id, platform_media_id, permalink, caption, thumb_path, posted_at, insights_checked_at, views, reach, likes, comments, saved, shares, avg_watch_time_ms")
-      .eq("social_account_id", socialAccountId)
-      .order("posted_at", { ascending: false })
-      .range(from, from + PAGE - 1);
+      .select("post_id, platform_media_id, permalink, caption, thumb_path, posted_at, views, reach, likes, comments, saved, shares, avg_watch_time_ms")
+      .eq("social_account_id", socialAccountId);
+    if (from) q = q.gte("posted_at", new Date(from).toISOString());
+    const { data } = await q.order("posted_at", { ascending: false }).range(start, start + PAGE - 1);
     raw.push(...((data ?? []) as Row[]));
     if (!data || data.length < PAGE) break;
   }
+
+  const counted = () => supabase.from("account_reel_stats").select("post_id", { count: "exact", head: true }).eq("social_account_id", socialAccountId);
+  const [{ count: total }, { count: read }, { count: pending }] = await Promise.all([
+    counted(),
+    counted().not("views", "is", null),
+    counted().is("views", null).is("insights_checked_at", null),
+  ]);
 
   // 공개 조회수 — 다른 계정 비교 수집이 읽은 최근 릴스만 있다
   const { data: own } = await supabase.from("benchmark_accounts").select("id").eq("own_account_id", socialAccountId).maybeSingle();
@@ -89,10 +109,10 @@ export async function loadPostPerformance(supabase: Supabase, socialAccountId: s
     };
   });
 
-  const { data: sync } = await supabase.from("post_history_sync").select("listed_at, reels_listed").eq("social_account_id", socialAccountId).maybeSingle();
+  const { data: sync } = await supabase.from("post_history_sync").select("listed_at").eq("social_account_id", socialAccountId).maybeSingle();
   const { data: analysis } = await supabase
     .from("post_analyses")
-    .select("findings, actions, created_at, reels_count")
+    .select("headline, findings, actions, created_at, reels_count")
     .eq("social_account_id", socialAccountId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -101,10 +121,12 @@ export async function loadPostPerformance(supabase: Supabase, socialAccountId: s
   return {
     rows,
     listed: !!sync?.listed_at,
-    reelsListed: sync?.reels_listed ?? null,
-    pending: raw.filter((r) => r.views == null && !r.insights_checked_at).length,
+    total: total ?? rows.length,
+    read: read ?? 0,
+    pending: pending ?? 0,
     analysis: analysis
       ? {
+          headline: analysis.headline,
           findings: (analysis.findings ?? []) as unknown as PerfFinding[],
           actions: (analysis.actions ?? []) as unknown as PerfAction[],
           createdAt: analysis.created_at,

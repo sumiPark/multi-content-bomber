@@ -29,6 +29,18 @@ const AD_RATIO = 1.1;
 
 export const TIERS = [10, 3, 2] as const;
 
+// 게시물 성과 화면의 기간 — 기본은 90일. 전체 기간은 릴스가 많은 계정에서 느리다
+export const POST_PERIODS = ["90", "30", "365", "all"] as const;
+export type PostPeriod = (typeof POST_PERIODS)[number];
+
+export function parsePostPeriod(value: string | undefined): PostPeriod {
+  return POST_PERIODS.find((p) => p === value) ?? "90";
+}
+
+export function periodStart(period: PostPeriod, now: number): number {
+  return period === "all" ? 0 : now - Number(period) * DAY_MS;
+}
+
 export function median(values: number[]): number | null {
   if (!values.length) return null;
   const s = [...values].sort((a, b) => a - b);

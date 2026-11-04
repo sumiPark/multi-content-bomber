@@ -140,6 +140,8 @@ async function main() {
             permalink: m.permalink ?? null,
             caption: m.caption?.slice(0, 2000) ?? null,
             thumbnail_url: m.thumbnail_url ?? (m.media_product_type === "REELS" ? null : m.media_url ?? null),
+            // 영상 분석용 주소(주소만, 파일은 저장 안 함). 인스타가 안 주는 릴스가 많다
+            video_url: m.media_product_type === "REELS" ? m.media_url ?? null : null,
             posted_at: m.timestamp ?? null,
             view_count: m.view_count ?? null,
             like_count: m.like_count ?? null,

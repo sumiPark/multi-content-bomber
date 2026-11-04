@@ -430,6 +430,51 @@ export type Database = {
           },
         ]
       }
+      benchmark_analyses: {
+        Row: {
+          created_at: string
+          hits_count: number
+          id: string
+          model: string | null
+          normal_count: number
+          organization_id: string
+          social_account_id: string
+          stats: Json
+          summary: Json
+          tokens_input: number | null
+          tokens_output: number | null
+          video_count: number
+        }
+        Insert: {
+          created_at?: string
+          hits_count?: number
+          id?: string
+          model?: string | null
+          normal_count?: number
+          organization_id: string
+          social_account_id: string
+          stats?: Json
+          summary?: Json
+          tokens_input?: number | null
+          tokens_output?: number | null
+          video_count?: number
+        }
+        Update: {
+          created_at?: string
+          hits_count?: number
+          id?: string
+          model?: string | null
+          normal_count?: number
+          organization_id?: string
+          social_account_id?: string
+          stats?: Json
+          summary?: Json
+          tokens_input?: number | null
+          tokens_output?: number | null
+          video_count?: number
+        }
+        Relationships: []
+      }
       benchmark_accounts: {
         Row: {
           biography: string | null
@@ -549,8 +594,12 @@ export type Database = {
           platform_media_id: string
           posted_at: string | null
           reposts_count: number | null
+          style: Json | null
+          style_analyzed_at: string | null
+          style_source: string | null
           thumbnail_url: string | null
           updated_at: string
+          video_url: string | null
           view_count: number | null
         }
         Insert: {
@@ -570,8 +619,12 @@ export type Database = {
           platform_media_id: string
           posted_at?: string | null
           reposts_count?: number | null
+          style?: Json | null
+          style_analyzed_at?: string | null
+          style_source?: string | null
           thumbnail_url?: string | null
           updated_at?: string
+          video_url?: string | null
           view_count?: number | null
         }
         Update: {
@@ -591,8 +644,12 @@ export type Database = {
           platform_media_id?: string
           posted_at?: string | null
           reposts_count?: number | null
+          style?: Json | null
+          style_analyzed_at?: string | null
+          style_source?: string | null
           thumbnail_url?: string | null
           updated_at?: string
+          video_url?: string | null
           view_count?: number | null
         }
         Relationships: [
@@ -954,6 +1011,7 @@ export type Database = {
           actions: Json
           created_at: string
           findings: Json
+          headline: string | null
           id: string
           model: string | null
           organization_id: string
@@ -967,6 +1025,7 @@ export type Database = {
           actions?: Json
           created_at?: string
           findings?: Json
+          headline?: string | null
           id?: string
           model?: string | null
           organization_id: string
@@ -980,6 +1039,7 @@ export type Database = {
           actions?: Json
           created_at?: string
           findings?: Json
+          headline?: string | null
           id?: string
           model?: string | null
           organization_id?: string

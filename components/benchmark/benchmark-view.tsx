@@ -1,10 +1,12 @@
 import { AlertTriangle, ExternalLink, Loader2, Users } from "lucide-react";
 import Link from "next/link";
 import { AddBenchmarkForm, RemoveBenchmarkButton } from "@/components/benchmark/benchmark-controls";
+import { BenchmarkInsightPanel } from "@/components/benchmark/benchmark-insight";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { RelativeTime } from "@/components/ui/relative-time";
 import type { BenchmarkData, BenchmarkHit, BenchmarkRow, GroupType } from "@/lib/benchmark/load";
+import { paceLabel } from "@/lib/benchmark/style-stats";
 import { cn } from "@/lib/utils";
 
 // 분석 · 다른 계정 비교 — 우리 계정마다 참고 계정 목록(고른 이유 + 수집 숫자 근거)과 평소보다 잘된 릴스.
@@ -133,6 +135,23 @@ function HitCard({ hit, now }: { hit: BenchmarkHit; now: number }) {
             그대로 쓰면 안 돼요. 광고 문구 규칙에 걸리는 표현: {hit.bannedPhrases.join(", ")}
           </p>
         )}
+        {hit.style && (
+          <p className="text-xs text-ink-2">
+            {hit.style.note}
+            {hit.styleSource === "COVER" && <span className="text-muted-foreground"> (표지만 봄)</span>}
+          </p>
+        )}
+        {hit.style && hit.styleSource === "VIDEO" && (
+          <div className="flex flex-wrap gap-1">
+            {[hit.style.opening, hit.style.shooting, paceLabel(hit.style.cutsPer10s), hit.style.speech ? "말함" : "말 없음", hit.style.durationSec != null ? `${Math.round(hit.style.durationSec)}초` : null]
+              .filter((v): v is string => !!v && v !== "알 수 없음" && v !== "기타")
+              .map((v) => (
+                <Badge key={v} variant="outline">
+                  {v}
+                </Badge>
+              ))}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {hit.formula && hit.formula !== "미분류" && <Badge variant="secondary">{hit.formula}</Badge>}
           {hit.permalink && (
@@ -219,6 +238,8 @@ export function BenchmarkView({
               </CardContent>
             </Card>
           )}
+
+          <BenchmarkInsightPanel insight={data.insight} hasHits={data.hits.length > 0} />
 
           <div className="space-y-2">
             <div>

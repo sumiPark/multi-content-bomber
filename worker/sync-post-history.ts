@@ -259,11 +259,12 @@ async function analyze(service: Service, account: { id: string; organization_id:
     const titles = [...usable].sort((a, b) => (b.views as number) - (a.views as number)).map((r) => r.title).filter(Boolean);
     const topics = await suggestTopics(titles, usage);
     const stats = computeStats(usable, captions, now, topics);
-    const { findings, actions, dropped } = await writeFindings(handle, account.role_note, stats, usage);
+    const { headline, findings, actions, dropped } = await writeFindings(handle, account.role_note, stats, usage);
     const { error } = await service.from("post_analyses").insert({
       organization_id: account.organization_id,
       social_account_id: account.id,
       reels_count: usable.length,
+      headline: headline || null,
       stats: stats as unknown as Json,
       findings: findings as unknown as Json,
       actions: actions as unknown as Json,

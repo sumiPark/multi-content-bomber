@@ -1,0 +1,44 @@
+name: benchmark-analysis
+
+# 다른 계정 잘된 릴스 종합 분석 워커(worker/analyze-benchmarks.ts) — 영상 스타일 판정과 종합 분석.
+#   · schedule 매일 05:30 KST — 비교 수집(04:50) 뒤. 인스타 영상 주소가 며칠 뒤 만료된다
+#   · workflow_dispatch — 수동 실행 (force_ai: 바뀐 릴스가 없어도 종합 분석을 새로)
+# 인스타는 읽지 않는다. 영상은 러너 임시 폴더에서 분석하고 지운다. 새 릴스만 판정해서 첫 실행 뒤로는 금방 끝난다.
+on:
+  schedule:
+    - cron: "30 20 * * *"
+  workflow_dispatch:
+    inputs:
+      force_ai:
+        description: "바뀐 릴스가 없어도 종합 분석을 새로"
+        type: boolean
+        default: false
+
+concurrency:
+  group: benchmark-analysis-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - name: Analyze benchmark reels
+        run: npm run worker:benchmark-analysis -- ${FORCE_AI:+--force-ai}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+          FORCE_AI: ${{ inputs.force_ai && 'true' || '' }}

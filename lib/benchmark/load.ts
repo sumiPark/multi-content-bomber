@@ -1,6 +1,7 @@
 import type { getServerSupabase } from "@/lib/auth";
 import { checkText, type ContentRule } from "@/lib/rules/check";
 import { firstLine, HIT_MULTIPLE } from "./discovery";
+import type { InsightSummary, ReelStyle, StyleSource, StyleStats } from "./style-stats";
 
 // 분석 · 다른 계정 비교 화면 데이터 (0037).
 
@@ -53,6 +54,14 @@ export interface BenchmarkHit {
   campaign: boolean;
   // 그대로 따라 쓰면 광고 문구 규칙에 걸리는 표현
   bannedPhrases: string[];
+  style: ReelStyle | null;
+  styleSource: StyleSource | null;
+}
+
+export interface BenchmarkInsight {
+  createdAt: string;
+  stats: StyleStats;
+  summary: InsightSummary;
 }
 
 export interface BenchmarkOwn {
@@ -66,6 +75,7 @@ export interface BenchmarkData {
   own: BenchmarkOwn | null;
   rows: BenchmarkRow[];
   hits: BenchmarkHit[];
+  insight: BenchmarkInsight | null;
 }
 
 export async function loadBenchmark(supabase: Supabase, socialAccountId: string, now: number): Promise<BenchmarkData> {
@@ -87,7 +97,7 @@ export async function loadBenchmark(supabase: Supabase, socialAccountId: string,
   const { data: posts } = allIds.length
     ? await supabase
         .from("benchmark_posts")
-        .select("id, benchmark_account_id, permalink, thumbnail_url, caption, posted_at, view_count, like_count, comments_count, multiple, ad_suspected, formula")
+        .select("id, benchmark_account_id, permalink, thumbnail_url, caption, posted_at, view_count, like_count, comments_count, multiple, ad_suspected, formula, style, style_source")
         .in("benchmark_account_id", allIds)
         .eq("media_product_type", "REELS")
         .gte("multiple", HIT_MULTIPLE)
@@ -178,10 +188,21 @@ export async function loadBenchmark(supabase: Supabase, socialAccountId: string,
         formula: p.formula,
         campaign: Number(p.multiple) >= CAMPAIGN_MULTIPLE,
         bannedPhrases: [...new Set(checkText(hook, "OTHER", rules).flatMap((h) => (h.matched ? [h.matched] : [])))],
+        style: (p.style ?? null) as unknown as ReelStyle | null,
+        styleSource: p.style_source as StyleSource | null,
       };
     });
 
+  const { data: analysis } = await supabase
+    .from("benchmark_analyses")
+    .select("created_at, stats, summary")
+    .eq("social_account_id", socialAccountId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   return {
+    insight: analysis ? { createdAt: analysis.created_at, stats: analysis.stats as unknown as StyleStats, summary: analysis.summary as unknown as InsightSummary } : null,
     own: ownRow
       ? { username: ownRow.username, followers: ownRow.followers_count, medianViews: ownRow.median_views, hits: hitCount.get(ownRow.id) ?? 0 }
       : null,
