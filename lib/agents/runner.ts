@@ -1,7 +1,7 @@
 import type OpenAI from "openai";
 import { zodFunction, zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
-import { loadActivePlaybook, playbookBlock } from "@/lib/agents/playbook";
+import { loadActivePlaybook, playbookBlock, resolveOrgId } from "@/lib/agents/playbook";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions, isReasoningModel } from "@/lib/products/analysis/analyze";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -68,13 +68,16 @@ export async function runAgent<T>(opts: {
   const tokens = { input: 0, output: 0 };
 
   const reader = opts.readService ?? opts.service;
-  const playbook = reader ? await loadActivePlaybook(reader, opts.agent, { planId: opts.planId, accountId: opts.accountId }) : null;
+  // 조직 — 플레이북을 고르고, 실행 기록을 같은 조직에만 보이게(0036) 남긴다
+  const orgId = reader ? await resolveOrgId(reader, { planId: opts.planId, accountId: opts.accountId }) : null;
+  const playbook = reader ? await loadActivePlaybook(reader, opts.agent, orgId) : null;
 
   let runId: string | null = null;
   if (opts.service) {
     const { data } = await opts.service
       .from("agent_runs")
       .insert({
+        organization_id: orgId,
         agent: opts.agent,
         plan_id: opts.planId ?? null,
         model,

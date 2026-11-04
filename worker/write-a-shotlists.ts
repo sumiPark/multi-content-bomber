@@ -86,7 +86,9 @@ async function main() {
               check_result: { passed: false, issues: [{ kind: "stock", detail: `지금 판매 중이 아님 (${facts.stockStatus})` }] } as unknown as Json,
               note: "고른 뒤 판매 중이 아니게 돼서 촬영 목록을 만들지 않았어요. 다른 기획을 고르거나 건너뛰세요.",
             })
-            .eq("id", plan.id);
+            .eq("id", plan.id)
+            .eq("status", "CONFIRMED")
+            .eq("product_id", plan.product_id!);
         }
         continue;
       }
@@ -139,7 +141,8 @@ async function main() {
       for (const i of check.issues) console.log(`  ✗ ${i.detail}`);
 
       if (!dryRun) {
-        const { error: upErr } = await service
+        // 쓰는 사이 사람이 다른 기획 · 상품으로 바꿨거나 건너뛰었으면 저장하지 않는다(2026-11-04, 예전엔 덮어썼다)
+        const { data: savedRows, error: upErr } = await service
           .from("content_plans")
           .update({
             status: "SCRIPTED",
@@ -148,8 +151,15 @@ async function main() {
             error: null,
             note: check.passed ? null : "컷 리스트 점검에서 걸린 게 있어요. 찍을 때 화면 문구 · 대사를 고쳐 주세요.",
           })
-          .eq("id", plan.id);
+          .eq("id", plan.id)
+          .eq("status", "CONFIRMED")
+          .eq("product_id", plan.product_id!)
+          .select("id");
         if (upErr) throw new Error(upErr.message);
+        if (!savedRows?.length) {
+          console.log(`  쓰는 사이 기획이 바뀌어 저장하지 않음 — 다음 실행이 새 기획으로 다시 써요`);
+          continue;
+        }
         const { error: srErr } = await service.from("shoot_requests").upsert(
           {
             organization_id: plan.organization_id,

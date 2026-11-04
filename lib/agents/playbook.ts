@@ -79,21 +79,22 @@ export interface ActivePlaybook {
   body: string;
 }
 
-/** 지금 쓰는 플레이북 — 칸(planId)이나 계정(accountId)으로 조직을 찾는다. 없으면 null(기본 규칙만). */
-export async function loadActivePlaybook(
-  service: Service,
-  agent: AgentName,
-  where: { planId?: string | null; accountId?: string | null },
-): Promise<ActivePlaybook | null> {
-  if (!LEARNING_AGENTS.includes(agent as LearningAgent)) return null;
-  let orgId: string | null = null;
+/** 칸(planId)이나 계정(accountId)으로 조직을 찾는다 — 플레이북 · 실행 기록(0036 organization_id)에 쓴다. */
+export async function resolveOrgId(service: Service, where: { planId?: string | null; accountId?: string | null }): Promise<string | null> {
   if (where.planId) {
     const { data } = await service.from("content_plans").select("organization_id").eq("id", where.planId).maybeSingle();
-    orgId = data?.organization_id ?? null;
-  } else if (where.accountId) {
-    const { data } = await service.from("social_accounts").select("organization_id").eq("id", where.accountId).maybeSingle();
-    orgId = data?.organization_id ?? null;
+    return data?.organization_id ?? null;
   }
+  if (where.accountId) {
+    const { data } = await service.from("social_accounts").select("organization_id").eq("id", where.accountId).maybeSingle();
+    return data?.organization_id ?? null;
+  }
+  return null;
+}
+
+/** 지금 쓰는 플레이북 — 조직별. 없으면 null(기본 규칙만). */
+export async function loadActivePlaybook(service: Service, agent: AgentName, orgId: string | null): Promise<ActivePlaybook | null> {
+  if (!LEARNING_AGENTS.includes(agent as LearningAgent)) return null;
   if (!orgId) return null;
   const { data } = await service
     .from("agent_playbooks")

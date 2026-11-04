@@ -54,7 +54,7 @@ export function useScheduleRun() {
 const selectClass = "h-8 rounded-md border border-input bg-card px-2 text-[13px] focus-visible:outline-2 focus-visible:outline-primary";
 
 export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canManage: boolean }) {
-  const { isPending, error, message, run } = useScheduleRun();
+  const { isPending, error, message, run, setError } = useScheduleRun();
   const [editing, setEditing] = useState(false);
   const [time, setTime] = useState(rule.time);
   const [track, setTrack] = useState(rule.track);
@@ -72,7 +72,9 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
   const askDelete = () =>
     startChecking(async () => {
       const r = await removalImpactAction({ ruleId: rule.id });
-      setConfirm(r.ok ? { plans: r.plans, scheduled: r.scheduled } : { plans: 0, scheduled: 0 });
+      // 확인하지 못했으면 "기획 없음"으로 안내하지 않고 지우기를 막는다(2026-11-04)
+      if (!r.ok) return setError(`앞으로의 기획을 확인하지 못했어요: ${r.error}`);
+      setConfirm({ plans: r.plans, scheduled: r.scheduled });
     });
 
   return (

@@ -2,10 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { CalendarCheck, Pencil, RotateCcw, Save, SkipForward } from "lucide-react";
+import { CalendarCheck, Pencil, RotateCcw, Save, SkipForward, Upload } from "lucide-react";
 import {
   approveShootAction,
   reEditAction,
+  reopenShootAction,
   saveCaptionAction,
   skipShootAction,
   type ShootResult,
@@ -192,6 +193,20 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
             {failed && card.requestId && (
               <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => reEditAction({ requestId: card.requestId!, cuts: [] }))}>
                 <RotateCcw className="size-4" /> 다시 편집
+              </Button>
+            )}
+            {/* 실패 원인이 촬영본(너무 짧음 등)이거나 컷 하나를 다시 찍고 싶을 때 — 촬영 · 올리기로 되돌린다 */}
+            {(failed || reviewable) && card.requestId && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isPending}
+                onClick={() => {
+                  if (!window.confirm("촬영 · 올리기로 되돌려 촬영본을 다시 올릴까요? 올린 촬영본은 남아 있어 바꿀 컷만 다시 올리면 돼요.")) return;
+                  run(() => reopenShootAction({ requestId: card.requestId! }));
+                }}
+              >
+                <Upload className="size-4" /> 촬영본 다시 올리기
               </Button>
             )}
             {card.status !== "SCHEDULED" && (

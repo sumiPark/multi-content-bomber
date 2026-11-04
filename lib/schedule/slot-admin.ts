@@ -104,12 +104,25 @@ export async function futurePlans(service: Service, accountId: string, slotTime?
   return (data ?? []).filter((p) => Date.parse(kstToIso(p.slot_date, p.slot_time)) > now);
 }
 
-/** 앞으로의 칸 취소 — 기획은 건너뜀, 촬영 요청 취소, 예약 발행(워커가 아직 안 잡은 것) 취소. */
-export async function cancelPlans(service: Service, plans: FuturePlan[], reason: string): Promise<{ plans: number; jobs: number }> {
-  if (plans.length === 0) return { plans: 0, jobs: 0 };
-  const ids = plans.map((p) => p.id);
+// 촬영 요청 중 아직 안 끝난 것 — 칸을 취소하면 함께 취소한다(편집 중 · 편집 끝 · 실패 포함, 2026-11-04)
+const OPEN_REQUEST_STATUSES = ["OPEN", "UPLOADED", "EDITING", "EDITED", "FAILED"];
+
+// 편성표에서 칸 · 계정을 빼며 취소한 기획의 메모 — 같은 칸을 다시 넣으면 이 기록을 지워 다시 기획되게 한다
+export const SCHEDULE_CANCEL_NOTE_PREFIX = "편성";
+
+/**
+ * 앞으로의 칸 취소 — 기획은 건너뜀, 촬영 요청 취소, 예약 발행(워커가 아직 안 잡은 것) 취소.
+ * 올리는 중(PROCESSING)인 발행은 막을 수 없어 그 칸은 그대로 두고 따로 센다(예전엔 칸만 "건너뜀"이 돼 실제와 달랐다).
+ */
+export async function cancelPlans(
+  service: Service,
+  plans: FuturePlan[],
+  reason: string,
+): Promise<{ plans: number; jobs: number; uploading: number }> {
+  if (plans.length === 0) return { plans: 0, jobs: 0, uploading: 0 };
   const jobIds = plans.map((p) => p.publish_job_id).filter((x): x is string => !!x);
-  let jobs = 0;
+  const cancelledJobs = new Set<string>();
+  const uploadingJobs = new Set<string>();
   if (jobIds.length) {
     const { data } = await service
       .from("publish_jobs")
@@ -118,13 +131,36 @@ export async function cancelPlans(service: Service, plans: FuturePlan[], reason:
       // 워커가 이미 잡아 간(PROCESSING) 건은 건드리지 않는다 — 결과 기록에 덮인다
       .in("status", ["PENDING", "RETRYING"])
       .select("id");
-    const cancelled = (data ?? []).map((r) => r.id);
-    if (cancelled.length) await appendPublishHistory(service, cancelled, { status: "CANCELLED", message: reason });
-    jobs = cancelled.length;
+    for (const r of data ?? []) cancelledJobs.add(r.id);
+    if (cancelledJobs.size) await appendPublishHistory(service, [...cancelledJobs], { status: "CANCELLED", message: reason });
+    const { data: rest } = await service.from("publish_jobs").select("id, status").in("id", jobIds.filter((id) => !cancelledJobs.has(id)));
+    for (const r of rest ?? []) if (r.status === "PROCESSING") uploadingJobs.add(r.id);
   }
-  await service.from("shoot_requests").update({ status: "CANCELLED" }).in("plan_id", ids).in("status", ["OPEN", "UPLOADED"]);
-  await service.from("content_plans").update({ status: "SKIPPED", note: reason }).in("id", ids);
-  return { plans: ids.length, jobs };
+  const targets = plans.filter((p) => !p.publish_job_id || !uploadingJobs.has(p.publish_job_id));
+  const ids = targets.map((p) => p.id);
+  if (ids.length) {
+    await service.from("shoot_requests").update({ status: "CANCELLED" }).in("plan_id", ids).in("status", OPEN_REQUEST_STATUSES);
+    await service.from("content_plans").update({ status: "SKIPPED", note: reason }).in("id", ids);
+  }
+  return { plans: ids.length, jobs: cancelledJobs.size, uploading: uploadingJobs.size };
+}
+
+/**
+ * 같은 칸(계정 · 시각)을 다시 넣거나 시각을 옮겨 올 때 — 앞서 편성표에서 빼며 취소한 앞으로의 기록을 지운다.
+ * 같은 계정 · 날짜 · 시각에는 기획이 하나뿐이라, 남아 있으면 기획 워커가 "이미 기획됨"으로 보고 그 칸을 채우지 않았다.
+ * 사람이 "건너뛰기"한 칸은 지우지 않는다(메모가 다르다).
+ */
+export async function clearScheduleCancelled(service: Service, accountId: string, slotTime: string, now = Date.now()): Promise<void> {
+  const { data } = await service
+    .from("content_plans")
+    .select("id, slot_date, slot_time")
+    .eq("social_account_id", accountId)
+    .eq("slot_time", slotTime)
+    .eq("status", "SKIPPED")
+    .like("note", `${SCHEDULE_CANCEL_NOTE_PREFIX}%`)
+    .gte("slot_date", kstDate(-1, now));
+  const ids = (data ?? []).filter((p) => Date.parse(kstToIso(p.slot_date, p.slot_time)) > now).map((p) => p.id);
+  if (ids.length) await service.from("content_plans").delete().in("id", ids);
 }
 
 /**
@@ -141,6 +177,15 @@ export async function movePlans(
   const plans = await futurePlans(service, accountId, fromTime, now);
   const pastNow = plans.filter((p) => Date.parse(kstToIso(p.slot_date, toTime)) <= now);
   if (pastNow.length) return { ok: false, error: `${pastNow[0].slot_date.slice(5)} 칸이 이미 지난 시각(${toTime})이 돼요. 그 칸이 끝난 뒤 바꿔 주세요.` };
+  // 지금 올리는 중인 발행이 있으면 하나도 옮기지 않는다 — 예전엔 일부만 옮기고 칸 시각은 그대로라
+  // 다음 기획이 옛 시각에 또 생겨 그날 두 번 올라갈 수 있었다(2026-11-04)
+  const jobIds = plans.map((p) => p.publish_job_id).filter((x): x is string => !!x);
+  const { data: jobs } = jobIds.length ? await service.from("publish_jobs").select("id, status").in("id", jobIds) : { data: [] };
+  const jobStatus = new Map((jobs ?? []).map((j) => [j.id, j.status]));
+  const busy = plans.find((p) => p.publish_job_id && jobStatus.get(p.publish_job_id) === "PROCESSING");
+  if (busy) return { ok: false, error: `${busy.slot_date.slice(5)} 칸이 지금 올리는 중이에요. 다 올라간 뒤 바꿔 주세요.` };
+  // 편성표에서 빼며 취소했던 새 시각 칸의 기록은 지운다(옮길 자리를 비운다)
+  await clearScheduleCancelled(service, accountId, toTime, now);
   // 새 시각에 남아 있는 예전 기록(건너뛴 칸 등)과 겹치면 옮길 수 없다(같은 계정 · 날짜 · 시각은 하나뿐)
   if (plans.length) {
     const { data: clash } = await service
@@ -151,23 +196,16 @@ export async function movePlans(
       .in("slot_date", plans.map((p) => p.slot_date));
     if (clash?.length) return { ok: false, error: `${clash[0].slot_date.slice(5)} ${toTime}에 예전 기록이 있어 옮길 수 없어요. 다른 시각을 골라 주세요.` };
   }
-  const processing: string[] = [];
   for (const p of plans) {
-    if (p.publish_job_id) {
-      const { data: job } = await service.from("publish_jobs").select("status").eq("id", p.publish_job_id).maybeSingle();
-      if (job?.status === "PROCESSING") {
-        processing.push(p.slot_date);
-        continue;
-      }
-      if (job && (job.status === "PENDING" || job.status === "RETRYING")) {
-        await service.from("publish_jobs").update({ scheduled_for: kstToIso(p.slot_date, toTime) }).eq("id", p.publish_job_id);
-        await appendPublishHistory(service, [p.publish_job_id], { status: job.status, message: `편성표에서 시각 변경 ${fromTime} → ${toTime}` });
-      }
+    const { error: planErr } = await service.from("content_plans").update({ slot_time: toTime }).eq("id", p.id);
+    if (planErr) return { ok: false, error: `${p.slot_date.slice(5)} 칸을 옮기지 못했어요: ${planErr.message}` };
+    const status = p.publish_job_id ? jobStatus.get(p.publish_job_id) : null;
+    if (p.publish_job_id && (status === "PENDING" || status === "RETRYING")) {
+      await service.from("publish_jobs").update({ scheduled_for: kstToIso(p.slot_date, toTime) }).eq("id", p.publish_job_id).in("status", ["PENDING", "RETRYING"]);
+      await appendPublishHistory(service, [p.publish_job_id], { status, message: `편성표에서 시각 변경 ${fromTime} → ${toTime}` });
     }
-    await service.from("content_plans").update({ slot_time: toTime }).eq("id", p.id);
     await service.from("shoot_requests").update({ due_at: shootDueIso(p.slot_date, toTime) }).eq("plan_id", p.id).in("status", ["OPEN", "UPLOADED"]);
   }
-  if (processing.length) return { ok: false, error: `${processing[0].slice(5)} 칸은 지금 올리는 중이라 옮기지 못했어요. 나머지는 옮겼어요.` };
   return { ok: true, moved: plans.length };
 }
 

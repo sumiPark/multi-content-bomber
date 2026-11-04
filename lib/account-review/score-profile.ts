@@ -2,6 +2,7 @@ import type OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { checkProfile, profileRubric, type ProfileCheckItem } from "@/lib/agents/ko-skills";
+import { resolveOrgId } from "@/lib/agents/playbook";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
@@ -364,6 +365,8 @@ export async function scoreProfile(opts: {
     const { data } = await opts.service
       .from("agent_runs")
       .insert({
+        // 0036 — 실행 기록은 같은 조직에만 보인다
+        organization_id: await resolveOrgId(opts.service, { accountId: opts.account.id }),
         agent: "analyze",
         model,
         input: { task: "profile_review", review_id: opts.reviewId, account: snapshot.handle } as Json,

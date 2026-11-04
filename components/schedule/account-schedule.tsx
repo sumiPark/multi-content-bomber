@@ -65,7 +65,7 @@ export function AccountScheduleCard({
   limits: LimitsData;
   canManage: boolean;
 }) {
-  const { isPending, error, message, run } = useScheduleRun();
+  const { isPending, error, message, run, setError } = useScheduleRun();
   const [editScopes, setEditScopes] = useState(false);
   const [scopeValue, setScopeValue] = useState(scopes);
   const [adding, setAdding] = useState(false);
@@ -136,7 +136,9 @@ export function AccountScheduleCard({
             onClick={() =>
               startChecking(async () => {
                 const r = await removalImpactAction({ accountId });
-                setConfirm(r.ok ? { plans: r.plans, scheduled: r.scheduled } : { plans: 0, scheduled: 0 });
+                // 확인하지 못했으면 "기획 없음"으로 안내하지 않고 지우기를 막는다(2026-11-04)
+                if (!r.ok) return setError(`앞으로의 기획을 확인하지 못했어요: ${r.error}`);
+                setConfirm({ plans: r.plans, scheduled: r.scheduled });
               })
             }
           >
@@ -194,7 +196,7 @@ export function AccountScheduleCard({
 
       <ConfirmDialog
         open={confirm !== null}
-        title={`@${name}을 편성에서 뺄까요?`}
+        title={`@${name} 계정을 편성에서 뺄까요?`}
         danger={(confirm?.plans ?? 0) > 0}
         confirmLabel={confirm && confirm.plans > 0 ? "그래도 빼고 모두 취소" : "빼기"}
         pending={isPending}

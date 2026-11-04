@@ -283,6 +283,7 @@ export type Database = {
           id: string
           input: Json
           model: string | null
+          organization_id: string | null
           output: Json | null
           plan_id: string | null
           playbook_version: number | null
@@ -299,6 +300,7 @@ export type Database = {
           id?: string
           input?: Json
           model?: string | null
+          organization_id?: string | null
           output?: Json | null
           plan_id?: string | null
           playbook_version?: number | null
@@ -315,6 +317,7 @@ export type Database = {
           id?: string
           input?: Json
           model?: string | null
+          organization_id?: string | null
           output?: Json | null
           plan_id?: string | null
           playbook_version?: number | null

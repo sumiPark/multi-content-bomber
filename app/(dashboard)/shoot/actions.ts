@@ -266,11 +266,44 @@ type Clip = { cut: number; path: string; name: string; size: number; type: strin
 async function loadRequest(service: Service, requestId: string, orgId: string) {
   const { data } = await service
     .from("shoot_requests")
-    .select("id, plan_id, status, cuts, clips")
+    .select("id, plan_id, status, cuts, clips, updated_at")
     .eq("id", requestId)
     .eq("organization_id", orgId)
     .maybeSingle();
   return data;
+}
+
+type LoadedRequest = NonNullable<Awaited<ReturnType<typeof loadRequest>>>;
+
+/**
+ * 촬영 요청의 cuts · clips(jsonb)를 읽고 → 고쳐 → 저장. 저장할 때 updated_at이 읽은 때와 같아야 한다 —
+ * 휴대폰에서 컷 여러 개를 연달아 올리면 등록이 비슷한 때 끝나, 예전엔 서로 덮어써 한 컷의 등록이 빠졌다(2026-11-04).
+ * 그사이 누가 바꿨으면 다시 읽어 다시 고친다(최대 5번). mutate가 문자열을 돌려주면 그 이유로 멈춘다.
+ */
+async function updateRequestJson(
+  service: Service,
+  requestId: string,
+  orgId: string,
+  mutate: (req: LoadedRequest) => { patch: { cuts?: Json; clips?: Json }; after?: () => Promise<void> } | string,
+): Promise<ShootResult> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const req = await loadRequest(service, requestId, orgId);
+    if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없어요. 기획이 바뀌었을 수 있으니 새로 고쳐 주세요." };
+    const r = mutate(req);
+    if (typeof r === "string") return { ok: false, error: r };
+    const { data, error } = await service
+      .from("shoot_requests")
+      .update(r.patch)
+      .eq("id", req.id)
+      .eq("updated_at", req.updated_at)
+      .select("id");
+    if (error) return { ok: false, error: error.message };
+    if (data?.length) {
+      await r.after?.();
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "다른 컷 저장과 겹쳤어요. 잠시 뒤 다시 해 주세요." };
 }
 
 const cutSchema = z.object({ requestId: z.string().uuid(), no: z.number().int().min(1).max(20), done: z.boolean() });
@@ -282,11 +315,11 @@ export async function toggleCutAction(input: z.infer<typeof cutSchema>): Promise
   const auth = await authorize("shoot");
   if (!auth.ok) return auth;
   const service = createServiceClient();
-  const req = await loadRequest(service, parsed.data.requestId, auth.orgId);
-  if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
-  const cuts = ((req.cuts ?? []) as Cut[]).map((c) => (c.no === parsed.data.no ? { ...c, done: parsed.data.done } : c));
-  const { error } = await service.from("shoot_requests").update({ cuts: cuts as unknown as Json }).eq("id", req.id);
-  if (error) return { ok: false, error: error.message };
+  const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
+    const cuts = ((req.cuts ?? []) as Cut[]).map((c) => (c.no === parsed.data.no ? { ...c, done: parsed.data.done } : c));
+    return { patch: { cuts: cuts as unknown as Json } };
+  });
+  if (!r.ok) return r;
   revalidatePath("/shoot/uploads");
   return { ok: true };
 }
@@ -309,34 +342,35 @@ export async function addClipAction(input: z.infer<typeof clipSchema>): Promise<
   const auth = await authorize("shoot");
   if (!auth.ok) return auth;
   const service = createServiceClient();
-  const req = await loadRequest(service, parsed.data.requestId, auth.orgId);
-  if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
-  if (req.status !== "OPEN") return { ok: false, error: "이미 편집으로 넘어간 촬영 요청입니다." };
-  if (!parsed.data.path.startsWith(`${auth.orgId}/${auth.userId}/shoot/${req.id}/`)) return { ok: false, error: "잘못된 파일 경로" };
-  const cuts = (req.cuts ?? []) as Cut[];
-  if (!cuts.some((c) => c.no === parsed.data.cut)) return { ok: false, error: "없는 컷입니다." };
-
-  const clips = (req.clips ?? []) as Clip[];
-  const old = clips.filter((c) => c.cut === parsed.data.cut);
-  const next: Clip[] = [
-    ...clips.filter((c) => c.cut !== parsed.data.cut),
-    {
-      cut: parsed.data.cut,
-      path: parsed.data.path,
-      name: parsed.data.name,
-      size: parsed.data.size,
-      type: parsed.data.type,
-      uploaded_at: new Date().toISOString(),
-      uploaded_by: auth.userId,
-    },
-  ].sort((a, b) => a.cut - b.cut);
-  const nextCuts = cuts.map((c) => (c.no === parsed.data.cut ? { ...c, done: true } : c));
-  const { error } = await service
-    .from("shoot_requests")
-    .update({ clips: next as unknown as Json, cuts: nextCuts as unknown as Json })
-    .eq("id", req.id);
-  if (error) return { ok: false, error: error.message };
-  if (old.length) await service.storage.from("media").remove(old.map((c) => c.path));
+  const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
+    if (req.status !== "OPEN") return "이미 편집으로 넘어간 촬영 요청입니다.";
+    if (!parsed.data.path.startsWith(`${auth.orgId}/${auth.userId}/shoot/${req.id}/`)) return "잘못된 파일 경로";
+    const cuts = (req.cuts ?? []) as Cut[];
+    if (!cuts.some((c) => c.no === parsed.data.cut)) return "없는 컷입니다.";
+    const clips = (req.clips ?? []) as Clip[];
+    const old = clips.filter((c) => c.cut === parsed.data.cut && c.path !== parsed.data.path);
+    const next: Clip[] = [
+      ...clips.filter((c) => c.cut !== parsed.data.cut),
+      {
+        cut: parsed.data.cut,
+        path: parsed.data.path,
+        name: parsed.data.name,
+        size: parsed.data.size,
+        type: parsed.data.type,
+        uploaded_at: new Date().toISOString(),
+        uploaded_by: auth.userId,
+      },
+    ].sort((a, b) => a.cut - b.cut);
+    const nextCuts = cuts.map((c) => (c.no === parsed.data.cut ? { ...c, done: true } : c));
+    return {
+      patch: { clips: next as unknown as Json, cuts: nextCuts as unknown as Json },
+      // 같은 컷의 예전 촬영본은 저장이 된 뒤에만 지운다
+      after: async () => {
+        if (old.length) await service.storage.from("media").remove(old.map((c) => c.path));
+      },
+    };
+  });
+  if (!r.ok) return r;
   revalidatePath("/shoot/uploads");
   return { ok: true };
 }
@@ -349,17 +383,20 @@ export async function removeClipAction(input: z.infer<typeof removeSchema>): Pro
   const auth = await authorize("shoot");
   if (!auth.ok) return auth;
   const service = createServiceClient();
-  const req = await loadRequest(service, parsed.data.requestId, auth.orgId);
-  if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
-  if (req.status !== "OPEN") return { ok: false, error: "이미 편집으로 넘어간 촬영 요청입니다." };
-  const clips = (req.clips ?? []) as Clip[];
-  const old = clips.filter((c) => c.cut === parsed.data.cut);
-  const { error } = await service
-    .from("shoot_requests")
-    .update({ clips: clips.filter((c) => c.cut !== parsed.data.cut) as unknown as Json })
-    .eq("id", req.id);
-  if (error) return { ok: false, error: error.message };
-  if (old.length) await service.storage.from("media").remove(old.map((c) => c.path));
+  const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
+    if (req.status !== "OPEN") return "이미 편집으로 넘어간 촬영 요청입니다.";
+    const clips = (req.clips ?? []) as Clip[];
+    const old = clips.filter((c) => c.cut === parsed.data.cut);
+    // 촬영본을 지우면 "찍음" 표시도 푼다(예전엔 체크가 남아 올린 수와 어긋났다)
+    const cuts = ((req.cuts ?? []) as Cut[]).map((c) => (c.no === parsed.data.cut ? { ...c, done: false } : c));
+    return {
+      patch: { clips: clips.filter((c) => c.cut !== parsed.data.cut) as unknown as Json, cuts: cuts as unknown as Json },
+      after: async () => {
+        if (old.length) await service.storage.from("media").remove(old.map((c) => c.path));
+      },
+    };
+  });
+  if (!r.ok) return r;
   revalidatePath("/shoot/uploads");
   return { ok: true };
 }
@@ -381,13 +418,15 @@ export async function finishUploadAction(input: z.infer<typeof finishSchema>): P
   const missing = cuts.filter((c) => !clips.some((k) => k.cut === c.no)).map((c) => c.no);
   if (missing.length) return { ok: false, error: `${missing.join(", ")}번 컷 촬영본이 아직 없어요.` };
 
-  const { error } = await service
+  const { data: moved, error } = await service
     .from("shoot_requests")
     .update({ status: "UPLOADED", uploaded_at: new Date().toISOString(), error: null })
     .eq("id", req.id)
-    .eq("status", "OPEN");
+    .eq("status", "OPEN")
+    .select("id");
   if (error) return { ok: false, error: error.message };
-  await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id);
+  if (!moved?.length) return { ok: false, error: "이미 편집으로 넘어간 촬영 요청입니다." };
+  await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id).in("status", ["SCRIPTED", "SHOT"]);
   // 실패해도 한 시간마다 도는 편집 sweep이 집어 간다 — 즉시성만 손해
   await triggerShootEditRun(`request ${req.id}`).catch((e) => console.error("[shoot] 편집 트리거 실패:", e));
   revalidatePath("/shoot/uploads");
@@ -437,26 +476,67 @@ const reEditSchema = z.object({
 export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise<ShootResult> {
   const parsed = reEditSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
-  const auth = await authorize("shoot");
+  // 완성본 확인 화면의 기능 — 화면처럼 관리자 · 매니저만(예전엔 찍는 사람도 서버에서 됐다)
+  const auth = await authorize("plan");
   if (!auth.ok) return auth;
   const service = createServiceClient();
   const req = await loadRequest(service, parsed.data.requestId, auth.orgId);
   if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
   if (req.status !== "EDITED" && req.status !== "FAILED") return { ok: false, error: "편집이 끝난 뒤에 다시 편집할 수 있어요." };
+  // 이미 예약된 칸은 다시 편집하지 않는다 — 다시 편집하면 예약된 영상 파일이 지워져 발행이 실패했다(2026-11-04)
+  const { data: planRow } = await service.from("content_plans").select("status").eq("id", req.plan_id).maybeSingle();
+  if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 예약됐거나 끝난 칸이라 다시 편집할 수 없어요." };
   const fix = new Map(parsed.data.cuts.map((c) => [c.no, c]));
   const cuts = ((req.cuts ?? []) as Cut[]).map((c) => {
     const f = fix.get(c.no);
     return f ? { ...c, on_screen_override: f.onScreen.trim(), subtitle_override: f.subtitle == null ? null : f.subtitle.trim() } : c;
   });
-  const { error } = await service
+  const { data: moved, error } = await service
     .from("shoot_requests")
     .update({ cuts: cuts as unknown as Json, status: "UPLOADED", error: null })
-    .eq("id", req.id);
+    .eq("id", req.id)
+    .in("status", ["EDITED", "FAILED"])
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
   await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id).in("status", ["RENDERED", "SHOT"]);
   await triggerShootEditRun(`re-edit ${req.id}`).catch((e) => console.error("[shoot] 편집 트리거 실패:", e));
   revalidatePath("/shoot/review");
   revalidatePath("/shoot/uploads");
+  return { ok: true };
+}
+
+const reopenSchema = z.object({ requestId: z.string().uuid() });
+
+/**
+ * 촬영본 다시 올리기 — 편집이 실패했거나(예: 컷이 너무 짧음) 완성본에서 컷 하나를 다시 찍고 싶을 때.
+ * 요청을 촬영 중(OPEN), 칸을 촬영 대기(SCRIPTED)로 되돌린다. 올린 촬영본은 남아 있어 바꿀 컷만 다시 올리면 된다.
+ * 예전엔 실패하면 같은 촬영본으로 다시 편집하거나 건너뛰는 수밖에 없었다(2026-11-04).
+ */
+export async function reopenShootAction(input: z.infer<typeof reopenSchema>): Promise<ShootResult> {
+  const parsed = reopenSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("plan");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const req = await loadRequest(service, parsed.data.requestId, auth.orgId);
+  if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
+  if (req.status !== "EDITED" && req.status !== "FAILED") return { ok: false, error: "편집이 끝났거나 실패한 칸만 다시 올릴 수 있어요." };
+  const { data: planRow } = await service.from("content_plans").select("status, slot_date, slot_time").eq("id", req.plan_id).maybeSingle();
+  if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 예약됐거나 끝난 칸이에요." };
+  if (isPastSlot(planRow.slot_date, planRow.slot_time)) return { ok: false, error: "올릴 시각이 지난 칸이에요." };
+  const { data: moved, error } = await service
+    .from("shoot_requests")
+    .update({ status: "OPEN", error: null })
+    .eq("id", req.id)
+    .in("status", ["EDITED", "FAILED"])
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
+  await service.from("content_plans").update({ status: "SCRIPTED" }).eq("id", req.plan_id).in("status", ["SHOT", "RENDERED"]);
+  revalidatePath("/shoot/review");
+  revalidatePath("/shoot/uploads");
+  revalidatePath("/shoot/plans");
   return { ok: true };
 }
 
@@ -510,6 +590,17 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
   );
   if (blocking.length) return { ok: false, error: `확인 전에 고칠 것: ${blocking.join(" · ")}` };
 
+  // 먼저 칸을 선점한다 — 관리자 두 명 · 탭 두 개에서 동시에 눌러도 예약이 하나만 생기게(2026-11-04).
+  // 아래에서 실패하면 RENDERED로 되돌린다.
+  const { data: claimed } = await service
+    .from("content_plans")
+    .update({ status: "SCHEDULED", confirmed_by: auth.userId, confirmed_at: new Date().toISOString() })
+    .eq("id", plan.id)
+    .eq("status", "RENDERED")
+    .select("id");
+  if (!claimed?.length) return { ok: false, error: "이미 확인됐거나 상태가 바뀐 칸이에요. 새로 고쳐 주세요." };
+  const release = () => service.from("content_plans").update({ status: "RENDERED", confirmed_by: null, confirmed_at: null }).eq("id", plan.id);
+
   const { caption, hashtags } = splitHashtags(captionText);
   const { data: content, error: cErr } = await service
     .from("contents")
@@ -525,7 +616,10 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
     })
     .select("id")
     .single();
-  if (cErr || !content) return { ok: false, error: `콘텐츠 저장 실패: ${cErr?.message}` };
+  if (cErr || !content) {
+    await release();
+    return { ok: false, error: `콘텐츠 저장 실패: ${cErr?.message}` };
+  }
   const { data: job, error: jErr } = await service
     .from("publish_jobs")
     .insert({
@@ -540,12 +634,16 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
     .single();
   if (jErr || !job) {
     await service.from("contents").delete().eq("id", content.id);
+    await release();
     return { ok: false, error: `발행 예약 실패: ${jErr?.message}` };
   }
-  await service
-    .from("content_plans")
-    .update({ status: "SCHEDULED", content_id: content.id, publish_job_id: job.id, confirmed_by: auth.userId, confirmed_at: new Date().toISOString() })
-    .eq("id", plan.id);
+  const { error: linkErr } = await service.from("content_plans").update({ content_id: content.id, publish_job_id: job.id }).eq("id", plan.id);
+  if (linkErr) {
+    // 칸과 예약을 잇지 못하면 발행 직전 확인 · 편성표가 이 예약을 모른다 — 예약을 취소하고 되돌린다
+    await service.from("publish_jobs").update({ status: "CANCELLED", cancelled_at: new Date().toISOString() }).eq("id", job.id);
+    await release();
+    return { ok: false, error: `예약을 칸에 잇지 못했어요: ${linkErr.message}` };
+  }
   revalidatePath("/shoot/review");
   revalidatePath("/postings");
   return { ok: true };

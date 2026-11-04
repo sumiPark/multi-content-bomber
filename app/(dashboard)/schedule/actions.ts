@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import {
   cancelPlans,
+  clearScheduleCancelled,
   futureCounts,
   futurePlans,
   movePlans,
@@ -43,6 +44,13 @@ function scopesJson(keys: string[]): Json {
 async function accountRules(service: Service, accountId: string) {
   const { data } = await service.from("slot_rules").select("id, slot_time, track").eq("social_account_id", accountId);
   return data ?? [];
+}
+
+function cancelMessage(c: { plans: number; jobs: number; uploading: number }): string | undefined {
+  const parts: string[] = [];
+  if (c.plans) parts.push(`앞으로의 기획 ${c.plans}개${c.jobs ? ` · 예약 발행 ${c.jobs}건` : ""}을 취소했어요.`);
+  if (c.uploading) parts.push(`${c.uploading}건은 지금 올리는 중이라 막지 못했어요(그대로 올라가요).`);
+  return parts.length ? parts.join(" ") : undefined;
 }
 
 function done(message?: string): ScheduleResult {
@@ -128,6 +136,7 @@ export async function addSlotAction(input: { accountId: string; time: string; tr
     track: parsed.data.track,
   });
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
+  await clearScheduleCancelled(service, parsed.data.accountId, parsed.data.time);
   return done("다음 기획부터 이 칸도 채워요.");
 }
 
@@ -167,10 +176,11 @@ export async function deleteSlotAction(input: { ruleId: string }): Promise<Sched
     .eq("organization_id", auth.orgId)
     .maybeSingle();
   if (!rule) return { ok: false, error: "칸을 찾지 못했어요." };
-  const cancelled = await cancelPlans(service, await futurePlans(service, rule.social_account_id, rule.slot_time), `편성표에서 ${rule.slot_time} 칸을 지워 취소`);
+  // 칸 규칙을 먼저 지운다 — 지우기가 실패했는데 기획 · 예약만 취소되는 일이 없게(2026-11-04)
   const { error } = await service.from("slot_rules").delete().eq("id", rule.id);
   if (error) return { ok: false, error: `지우지 못했어요: ${error.message}` };
-  return done(cancelled.plans ? `앞으로의 기획 ${cancelled.plans}개${cancelled.jobs ? ` · 예약 발행 ${cancelled.jobs}건` : ""}을 취소했어요.` : undefined);
+  const cancelled = await cancelPlans(service, await futurePlans(service, rule.social_account_id, rule.slot_time), `편성표에서 ${rule.slot_time} 칸을 지워 취소`);
+  return done(cancelMessage(cancelled));
 }
 
 // ── 계정 ─────────────────────────────────────────────────────────────────────
@@ -214,7 +224,8 @@ export async function addAccountAction(input: { accountId: string; scopes: strin
     await service.from("track_settings").delete().eq("social_account_id", acc.id);
     return { ok: false, error: `칸을 만들지 못했어요: ${rErr.message}` };
   }
-  return done(`@${acc.display_name ?? ""}을 편성에 넣었어요. 다음 기획(매일 05시 · 09시)부터 칸이 채워져요.`);
+  for (const slot of parsed.data.slots) await clearScheduleCancelled(service, acc.id, slot.time);
+  return done(`@${acc.display_name ?? ""} 계정을 편성에 넣었어요. 다음 기획(매일 05시 · 09시)부터 칸이 채워져요.`);
 }
 
 export async function updateScopesAction(input: { accountId: string; scopes: string[] }): Promise<ScheduleResult> {
@@ -246,12 +257,11 @@ export async function removeAccountAction(input: { accountId: string }): Promise
     .eq("organization_id", auth.orgId)
     .maybeSingle();
   if (!ts) return { ok: false, error: "편성에 없는 계정이에요." };
-  // 앞으로의 기획 · 예약 발행 취소(지난 기록은 남긴다) → 칸 · 계정 설정 지우기 — 기획 워커가 더는 이 계정을 돌지 않는다
-  const cancelled = await cancelPlans(service, await futurePlans(service, ts.social_account_id), "편성에서 계정을 빼 취소");
-  await service.from("slot_rules").delete().eq("social_account_id", ts.social_account_id);
+  // 계정 설정 · 칸을 먼저 지운다(기획 워커가 더는 이 계정을 돌지 않는다) → 앞으로의 기획 · 예약 발행 취소(지난 기록은 남긴다)
   const { error } = await service.from("track_settings").delete().eq("social_account_id", ts.social_account_id);
   if (error) return { ok: false, error: `빼지 못했어요: ${error.message}` };
-  return done(
-    `@${ts.social_accounts?.display_name ?? ""}을 편성에서 뺐어요.${cancelled.plans ? ` 앞으로의 기획 ${cancelled.plans}개${cancelled.jobs ? ` · 예약 발행 ${cancelled.jobs}건` : ""}을 취소했어요.` : ""}`,
-  );
+  await service.from("slot_rules").delete().eq("social_account_id", ts.social_account_id);
+  const cancelled = await cancelPlans(service, await futurePlans(service, ts.social_account_id), "편성에서 계정을 빼 취소");
+  const tail = cancelMessage(cancelled);
+  return done(`@${ts.social_accounts?.display_name ?? ""} 계정을 편성에서 뺐어요.${tail ? ` ${tail}` : ""}`);
 }

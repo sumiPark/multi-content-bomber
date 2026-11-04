@@ -167,6 +167,9 @@ async function loadRules(service: Service): Promise<ContentRule[]> {
   }));
 }
 
+// 이 시간 넘게 EDITING이면 멈춘 것으로 보고 다시 집는다 — shoot-edit.yml timeout-minutes(30)보다 길게
+const STALE_EDIT_MS = 40 * 60_000;
+
 async function main() {
   const argv = process.argv.slice(2);
   const dryRun = argv.includes("--dry-run");
@@ -177,10 +180,13 @@ async function main() {
   let q = service
     .from("shoot_requests")
     .select(
-      "id, organization_id, plan_id, status, cuts, clips, content_plans!inner(id, slot_time, product_id, script, social_accounts(display_name, role_focus))",
+      "id, organization_id, plan_id, status, updated_at, cuts, clips, content_plans!inner(id, slot_time, product_id, script, social_accounts(display_name, role_focus))",
     )
     .order("uploaded_at");
-  q = onlyRequest ? q.eq("id", onlyRequest) : q.eq("status", "UPLOADED");
+  // 편집 중(EDITING)인 채 STALE_EDIT_MS 넘게 멈춘 건 — 러너가 시간 제한 · 장애로 죽은 것 — 도 다시 집는다(2026-11-04).
+  // 예전엔 다시 집을 길이 없어 "편집 중"에 영원히 남았다. 워크플로 시간 제한(30분)보다 길게 잡는다.
+  const staleBefore = new Date(Date.now() - STALE_EDIT_MS).toISOString();
+  q = onlyRequest ? q.eq("id", onlyRequest) : q.or(`status.eq.UPLOADED,and(status.eq.EDITING,updated_at.lt.${staleBefore})`);
   const { data: requests, error } = await q;
   if (error) throw new Error(error.message);
   if (!requests?.length) {
@@ -194,12 +200,12 @@ async function main() {
     const label = `@${acc?.display_name} ${plan.slot_time} (${req.id.slice(0, 8)})`;
     // 선점 — 동시에 두 run이 같은 요청을 편집하지 않게
     if (!dryRun) {
-      const { data: claimed } = await service
-        .from("shoot_requests")
-        .update({ status: "EDITING", error: null })
-        .eq("id", req.id)
-        .in("status", onlyRequest ? ["UPLOADED", "EDITED", "FAILED"] : ["UPLOADED"])
-        .select("id");
+      let claim = service.from("shoot_requests").update({ status: "EDITING", error: null }).eq("id", req.id);
+      claim =
+        req.status === "EDITING"
+          ? claim.eq("status", "EDITING").lt("updated_at", staleBefore)
+          : claim.in("status", onlyRequest ? ["UPLOADED", "EDITED", "FAILED"] : ["UPLOADED"]);
+      const { data: claimed } = await claim.select("id");
       if (!claimed?.length) continue;
     }
 
@@ -287,11 +293,19 @@ async function main() {
         editedAt: new Date().toISOString(),
       };
       const { data: prev } = await service.from("shoot_requests").select("rendered_path, edit").eq("id", req.id).maybeSingle();
-      const { error: upErr } = await service
+      // 편집하는 사이 건너뛰기 · 취소된 요청은 되살리지 않는다(2026-11-04, 예전엔 EDITED로 덮어썼다) — 새 파일만 지운다
+      const { data: doneRows, error: upErr } = await service
         .from("shoot_requests")
         .update({ status: "EDITED", rendered_path: `${base}.mp4`, edit: edit as unknown as Json, error: null })
-        .eq("id", req.id);
+        .eq("id", req.id)
+        .eq("status", "EDITING")
+        .select("id");
       if (upErr) throw new Error(upErr.message);
+      if (!doneRows?.length) {
+        console.log(`  편집하는 사이 요청 상태가 바뀌어(건너뜀 · 취소) 결과를 버림`);
+        await service.storage.from("media").remove([`${base}.mp4`, `${base}.jpg`]);
+        continue;
+      }
       await service
         .from("content_plans")
         .update({ status: "RENDERED", check_result: edit.check as unknown as Json, error: null })
@@ -303,6 +317,7 @@ async function main() {
       if (old.length) await service.storage.from("media").remove(old);
 
       await service.from("agent_runs").insert({
+        organization_id: req.organization_id,
         agent: "edit",
         plan_id: plan.id,
         status: "success",
@@ -317,7 +332,7 @@ async function main() {
       process.exitCode = 1;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[shoot-edit] ${label} 실패: ${message}`);
-      if (!dryRun) await service.from("shoot_requests").update({ status: "FAILED", error: message.slice(0, 500) }).eq("id", req.id);
+      if (!dryRun) await service.from("shoot_requests").update({ status: "FAILED", error: message.slice(0, 500) }).eq("id", req.id).eq("status", "EDITING");
     } finally {
       if (!dryRun) rmSync(workDir, { recursive: true, force: true });
     }
