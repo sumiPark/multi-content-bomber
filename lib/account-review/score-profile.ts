@@ -217,7 +217,7 @@ const STORY_MIN_DAYS = 3;
 export function storyDaysPerWeek(story: { days: number; observed: number } | null): { perWeek: number | null; note: string | null } {
   if (!story || story.observed === 0) return { perWeek: null, note: null };
   if (story.observed < STORY_MIN_DAYS) {
-    return { perWeek: null, note: `스토리 기록 ${story.observed}일째 - ${STORY_MIN_DAYS}일 쌓이면 채점해요` };
+    return { perWeek: null, note: `스토리 기록 ${story.observed}일째 - ${STORY_MIN_DAYS}일 누적되면 채점해요` };
   }
   if (story.observed >= 7) return { perWeek: story.days, note: null };
   return {
@@ -347,7 +347,7 @@ export async function scoreProfile(opts: {
   for (const it of items) {
     if (it.id === "pinned_three" && snapshot.pinned_count == null) unknownItem(it, "고정 게시물은 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");
     if (it.id === "highlights" && snapshot.highlights == null) unknownItem(it, "하이라이트는 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");
-    if (it.id === "story_presence" && snapshot.story_days_per_week == null) unknownItem(it, story.note ?? "스토리 기록이 아직 없어요 - 매일 확인해서 쌓여요");
+    if (it.id === "story_presence" && snapshot.story_days_per_week == null) unknownItem(it, story.note ?? "스토리 기록이 아직 없어요 - 매일 확인해 누적해요");
     else if (it.id === "story_presence" && story.note) it.findings.push(story.note);
     if (it.id === "category_contact" && snapshot.contact == null && snapshot.category == null) {
       unknownItem(it, "연락 버튼 · 카테고리는 인스타가 알려 주지 않아요 - 프로필 캡처를 올리면 채워져요");

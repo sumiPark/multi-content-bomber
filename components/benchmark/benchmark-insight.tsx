@@ -35,10 +35,10 @@ function StyleRow({ d }: { d: StyleDimension }) {
       <th scope="row" className="py-2 pr-3 text-left text-xs font-medium whitespace-nowrap text-muted-foreground">
         {d.label}
       </th>
-      <td className="py-2 pr-3 text-[13px] font-semibold">
+      <td className="py-2 pr-3 text-sm font-semibold">
         {top.value} <span className="font-normal text-muted-foreground tabular-nums">{top.hit}/{d.hitTotal}</span>
       </td>
-      <td className="py-2 text-[13px] text-ink-2">
+      <td className="py-2 text-sm text-ink-2">
         {normalTop.normal > 0 ? (
           <>
             {normalTop.value} <span className="text-muted-foreground tabular-nums">{normalTop.normal}/{d.normalTotal}</span>
@@ -59,8 +59,8 @@ export function BenchmarkInsightPanel({ insight, hasHits }: { insight: Insight |
           <Sparkles className="size-4 text-primary" aria-hidden />
           잘된 릴스 종합 분석
         </h2>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          {hasHits ? "잘된 릴스의 영상을 읽는 중이에요. 매일 05:30에 이어서 분석해요." : "비교 계정에서 잘된 릴스가 5개 넘게 모이면 종합 분석을 써 드려요."}
+        <p className="mt-1 text-sm text-muted-foreground">
+          {hasHits ? "잘된 릴스의 영상을 분석하는 중이에요. 매일 05:30에 이어서 분석해요." : "비교 계정에서 잘된 릴스가 5개 넘게 모이면 종합 분석을 써 드려요."}
         </p>
       </section>
     );
@@ -108,9 +108,9 @@ export function BenchmarkInsightPanel({ insight, hasHits }: { insight: Insight |
                     <CompareBar label="평소 릴스" n={s.normal} total={s.normalTotal} />
                   </div>
                 )}
-                <p className="text-[13px] text-ink-2">{p.detail}</p>
+                <p className="text-sm text-ink-2">{p.detail}</p>
                 {p.apply && (
-                  <p className="rounded-md bg-surface-2 px-2.5 py-1.5 text-[13px]">
+                  <p className="rounded-md bg-surface-2 px-2.5 py-1.5 text-sm">
                     <b className="font-semibold">시험해 볼 일:</b> {p.apply}
                   </p>
                 )}
@@ -121,8 +121,8 @@ export function BenchmarkInsightPanel({ insight, hasHits }: { insight: Insight |
       )}
 
       <details className="rounded-md bg-surface-2 px-3 py-2.5" open={summary.points.length === 0}>
-        <summary className="cursor-pointer text-[13px] font-semibold">영상 스타일 자세히</summary>
-        {summary.styleSummary && <p className="mt-2 text-[13px] text-ink-2">{summary.styleSummary}</p>}
+        <summary className="cursor-pointer text-sm font-semibold">영상 스타일 자세히</summary>
+        {summary.styleSummary && <p className="mt-2 text-sm text-ink-2">{summary.styleSummary}</p>}
         {dimensions.length > 0 && (
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-[420px]">

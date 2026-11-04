@@ -34,7 +34,7 @@ export default async function ShootSettingsDetailPage({ params }: { params: Prom
 
   return (
     <main className="space-y-4 p-4 sm:p-6">
-      <Link href="/shoot/settings" className="inline-flex items-center gap-1 text-[13px] font-medium text-muted-foreground hover:text-foreground">
+      <Link href="/shoot/settings" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> 촬영 설정 목록
       </Link>
       <h1 className="text-xl font-bold tracking-[-0.01em]">@{name}</h1>

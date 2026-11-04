@@ -20,7 +20,7 @@ export function AccountTabs({ tabs, active, label }: { tabs: AccountTab[]; activ
             href={t.href}
             aria-current={active === t.key ? "page" : undefined}
             className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-[13px] whitespace-nowrap transition-colors",
+              "inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-sm whitespace-nowrap transition-colors",
               active === t.key ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
             )}
           >

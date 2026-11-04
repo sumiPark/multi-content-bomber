@@ -56,7 +56,7 @@ export async function loadCollectionHealth(supabase: Supabase, now: number): Pro
     if (hours >= PRODUCTS_STALE_HOURS) {
       warnings.push({
         level: "error",
-        message: `상품 수집이 ${hours}시간째 안 돌았어요 — 매일 03시 실행이 빠졌습니다.`,
+        message: `상품 수집이 ${hours}시간째 실행되지 않았어요 — 매일 03시 실행이 빠졌습니다.`,
         href: "/products",
       });
     } else if (lastProductRun?.status === "failed") {

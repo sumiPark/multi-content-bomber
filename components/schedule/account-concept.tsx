@@ -63,13 +63,13 @@ function Field({
   return (
     <label className="block space-y-1">
       <span className="flex items-baseline justify-between gap-2">
-        <span className="text-[13px] font-semibold text-ink-2">{label}</span>
+        <span className="text-sm font-semibold text-ink-2">{label}</span>
         <span className="text-xs tabular-nums text-faint">
           {value.length.toLocaleString("ko-KR")} / {max.toLocaleString("ko-KR")}
         </span>
       </span>
       {/* 예시가 저장된 값처럼 보이지 않게 "예시:"를 붙이고 글자를 더 연하게 한다 */}
-      <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows} maxLength={max} placeholder={`예시: ${placeholder}`} disabled={disabled} className="bg-card text-[13px] leading-relaxed placeholder:text-faint" />
+      <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows} maxLength={max} placeholder={`예시: ${placeholder}`} disabled={disabled} className="bg-card text-sm leading-relaxed placeholder:text-faint" />
       <span className="block text-xs text-muted-foreground">{help}</span>
     </label>
   );
@@ -78,12 +78,12 @@ function Field({
 function VoiceField({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
   return (
     <label className="block space-y-1">
-      <span className="text-[13px] font-semibold text-ink-2">음성</span>
+      <span className="text-sm font-semibold text-ink-2">음성</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-[13px] focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
       >
         <option value="AI">AI 음성</option>
         <option value="LIVE">찍을 때 말한 소리</option>
@@ -96,12 +96,12 @@ function VoiceField({ value, onChange, disabled }: { value: string; onChange: (v
 function RoleField({ value, help, onChange, disabled }: { value: string; help: string; onChange: (v: string) => void; disabled: boolean }) {
   return (
     <label className="block space-y-1">
-      <span className="text-[13px] font-semibold text-ink-2">영상 방향</span>
+      <span className="text-sm font-semibold text-ink-2">영상 방향</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-[13px] focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
       >
         <option value="">정하지 않음</option>
         <option value="PRODUCT">상품 중심</option>
@@ -166,7 +166,7 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
               help="지금은 대본의 장면 설명에 반영돼요. 영상 자동 생성을 붙이면 모든 영상을 이 지시대로 만들어요."
               placeholder={"밝은 자연광, 나무 식탁 위 클로즈업, 카메라는 천천히. 사람 얼굴은 나오지 않게."}
             />
-            <Field {...bind("autoConcept")} label="컨셉 · 자유 메모" help="상품을 고르고 대본을 쓸 때 AI가 읽어요." placeholder={"20대 후반 직장인이 보는 계정. 가격보다 맛 표현 위주로."} />
+            <Field {...bind("autoConcept")} label="컨셉 · 자유 메모" help="상품을 고르고 대본을 쓸 때 AI가 참고해요." placeholder={"20대 후반 직장인이 보는 계정. 가격보다 맛 표현 위주로."} />
           </div>
         </>
       ) : (
@@ -201,7 +201,7 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
                 </div>
               )}
             </div>
-            <Field {...bind("shootConcept")} label="컨셉 · 자유 메모" help="기획 목록과 컷 리스트를 쓸 때 AI가 읽어요." placeholder={"사장이 직접 과일을 잘라 보여 주는 계정. 손과 단면 위주로."} />
+            <Field {...bind("shootConcept")} label="컨셉 · 자유 메모" help="기획 목록과 컷 리스트를 쓸 때 AI가 참고해요." placeholder={"사장이 직접 과일을 잘라 보여 주는 계정. 손과 단면 위주로."} />
           </div>
         </>
       )}
@@ -209,7 +209,7 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
       <footer className="flex flex-wrap items-center gap-3">
         {canManage && (
           <Button size="sm" disabled={isPending || !dirty} onClick={save}>
-            <Save className="size-4" /> {isPending && editDirty ? "편집 스타일 읽는 중…" : "저장"}
+            <Save className="size-4" /> {isPending && editDirty ? "편집 스타일 반영 중…" : "저장"}
           </Button>
         )}
         {data.updatedAt && (

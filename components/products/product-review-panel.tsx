@@ -354,8 +354,8 @@ export function ProductActions({
             variant="outline"
             disabled={isPending}
             onClick={() => {
-              if (window.confirm("상세 이미지를 처음부터 다시 읽을까요? AI 비용이 다시 듭니다.")) {
-                run(() => reanalyzeAction({ productId, fromImages: true }), "이미지부터 다시 읽기 시작했어요. 판매 중인 상품이면 몇 분 뒤 결과가 나와요.");
+              if (window.confirm("상세 이미지를 처음부터 다시 분석할까요? AI 비용이 다시 듭니다.")) {
+                run(() => reanalyzeAction({ productId, fromImages: true }), "이미지부터 다시 분석을 시작했어요. 판매 중인 상품이면 몇 분 뒤 결과가 나와요.");
               }
             }}
           >

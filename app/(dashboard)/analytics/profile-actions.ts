@@ -75,7 +75,7 @@ export async function readProfileScreenshotAction(formData: FormData): Promise<S
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/insufficient_quota|exceeded your current quota/i.test(msg)) return { ok: false, error: "OpenAI 크레딧이 부족해요." };
-    return { ok: false, error: "캡처를 읽지 못했어요. 잠시 뒤 다시 올려 주세요." };
+    return { ok: false, error: "캡처를 인식하지 못했어요. 잠시 뒤 다시 올려 주세요." };
   }
 }
 

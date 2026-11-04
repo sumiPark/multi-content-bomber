@@ -83,7 +83,7 @@ function ReelCard({ r, rank }: { r: Computed; rank: number }) {
           </p>
           {r.x != null && <p className="shrink-0 text-sm font-semibold tabular-nums">평소의 {r.x.toFixed(1)}배</p>}
         </div>
-        <p className="line-clamp-2 text-[13px] text-ink-2">{r.title}</p>
+        <p className="line-clamp-2 text-sm text-ink-2">{r.title}</p>
         <p className="text-xs text-muted-foreground tabular-nums">
           좋아요 {short(r.likes)} · 댓글 {short(r.comments)} · 공유 {short(r.shares)} · 저장 {short(r.saved)}
           {r.watchSec != null && ` · 평균 ${r.watchSec.toFixed(1)}초`}
@@ -110,7 +110,7 @@ function ReelCard({ r, rank }: { r: Computed; rank: number }) {
 function ReelTable({ rows }: { rows: Computed[] }) {
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
-      <table className="w-full min-w-[980px] text-[13px]">
+      <table className="w-full min-w-[980px] text-sm">
         <thead className="bg-surface-2 text-xs text-muted-foreground">
           <tr className="h-11 text-left">
             <th scope="col" className="px-3.5 font-medium">게시물</th>
@@ -157,7 +157,7 @@ function ReelTable({ rows }: { rows: Computed[] }) {
 function FilterRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-start gap-2">
-      <span className="w-7 shrink-0 pt-[9px] text-xs font-medium text-muted-foreground">{label}</span>
+      <span className="w-8 shrink-0 pt-[9px] text-xs font-medium text-muted-foreground">{label}</span>
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{children}</div>
     </div>
   );
@@ -236,9 +236,9 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
             <History className="size-8 text-muted-foreground" aria-hidden />
-            <h2 className="text-lg font-semibold">이 계정의 성과를 읽지 못했어요</h2>
+            <h2 className="text-lg font-semibold">이 계정의 성과를 수집하지 못했어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
-              게시물 {num(data.total)}개의 목록은 받았지만 인스타에서 성과를 읽을 권한이 없어요. Meta 비즈니스 설정에서 이 계정을 mcb 시스템 사용자에 추가하면 다음 수집부터 읽을 수 있어요.
+              게시물 {num(data.total)}개의 목록은 받았지만 인스타에서 성과를 조회할 권한이 없어요. Meta 비즈니스 설정에서 이 계정을 mcb 시스템 사용자에 추가하면 다음 수집부터 집계할 수 있어요.
             </p>
           </CardContent>
         </Card>
@@ -248,8 +248,8 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
           <History className="size-8 text-muted-foreground" aria-hidden />
-          <h2 className="text-lg font-semibold">지난 게시물을 아직 읽지 않았어요</h2>
-          <p className="max-w-md text-sm text-muted-foreground">매일 05:10에 지난 게시물을 차례로 읽어요. 첫 수집이 끝나면 여기에 나와요.</p>
+          <h2 className="text-lg font-semibold">지난 게시물을 아직 수집하지 않았어요</h2>
+          <p className="max-w-md text-sm text-muted-foreground">매일 05:10에 지난 게시물을 차례로 수집해요. 첫 수집이 끝나면 여기에 나와요.</p>
         </CardContent>
       </Card>
     );
@@ -261,8 +261,8 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
         <p className="flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-2 text-xs text-ink-2">
           <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
           {data.listed
-            ? `지난 게시물 ${num(data.total)}개 중 ${num(data.read)}개를 읽었어요. 나머지는 다음 수집에 이어서 읽어요. 지금 숫자는 일부 기준이에요.`
-            : `지난 게시물 목록을 아직 읽지 않았어요. 지금은 최근 ${num(data.read)}개 기준이라 평소 조회수와 배수가 달라질 수 있어요.`}
+            ? `지난 게시물 ${num(data.total)}개 중 ${num(data.read)}개를 수집했어요. 나머지는 다음 수집에 이어서 처리해요. 지금 숫자는 일부 기준이에요.`
+            : `지난 게시물 목록을 아직 수집하지 않았어요. 지금은 최근 ${num(data.read)}개 기준이라 평소 조회수와 배수가 달라질 수 있어요.`}
         </p>
       )}
 
@@ -295,7 +295,7 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
               ...formats.map((f) => ({ value: f, label: `${FORMAT_LABEL[f]} ${allRows.filter((r) => r.format === f).length}` })),
             ]}
           />
-          <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
+          <label className="flex items-center gap-1.5 text-sm text-ink-2">
             <input type="checkbox" checked={hideEvents} onChange={(e) => setHideEvents(e.target.checked)} className="size-4 accent-primary" />
             경품 · 이벤트 말 든 글 빼기
           </label>
@@ -304,7 +304,7 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
 
       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: "게시물", value: `${num(rows.length)}개`, sub: period === "all" ? "조회수를 읽은 전체" : "고른 기간" },
+          { label: "게시물", value: `${num(rows.length)}개`, sub: period === "all" ? "조회수를 수집한 전체" : "고른 기간" },
           { label: "3배 넘은 게시물", value: `${counts.x3}개`, sub: "같은 유형 평소 기준" },
           { label: "10배 넘은 게시물", value: `${counts.x10}개`, sub: "같은 유형 평소 기준" },
         ].map((t) => (
@@ -328,9 +328,9 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
       </dl>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-        <section aria-label="언제 터졌나" className="rounded-lg border bg-card p-4">
-          <h2 className="text-[15px] font-semibold">언제 터졌나</h2>
-          <p className="text-[13px] text-muted-foreground">점 하나가 게시물 하나예요. 파란 점은 같은 유형 평소의 3배를 넘은 게시물이에요. 유형을 고르면 평소 조회수가 점선으로 나와요. 세로축은 한 칸에 10배씩 커져요.</p>
+        <section aria-label="성과가 높았던 시기" className="rounded-lg border bg-card p-4">
+          <h2 className="text-[15px] font-semibold">성과가 높았던 시기</h2>
+          <p className="text-sm text-muted-foreground">점 하나가 게시물 하나예요. 파란 점은 같은 유형 평소의 3배를 넘은 게시물이에요. 유형을 고르면 평소 조회수가 점선으로 나와요. 세로축은 한 칸에 10배씩 커져요.</p>
           <div className="mt-3">
             <PostTimeline rows={rows} base={formatPick === "all" ? null : bases.get(formatPick) ?? null} from={from} now={now} />
           </div>
@@ -341,7 +341,7 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
 
       <div className="flex flex-wrap items-center gap-2">
         <Segmented<Tier>
-          ariaLabel="터진 정도"
+          ariaLabel="성과 구간"
           value={tier}
           onChange={(v) => {
             setTier(v);
@@ -360,7 +360,7 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
           aria-label="정렬"
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
-          className="h-9 rounded-md border border-input bg-card px-3 text-base focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:text-[13px]"
+          className="h-9 rounded-md border border-input bg-card px-3 text-base focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none sm:text-sm"
         >
           {SORTS.map((s) => (
             <option key={s.value} value={s.value}>
@@ -382,7 +382,7 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
       </div>
 
       {shown.length === 0 ? (
-        <p className="rounded-md bg-surface-2 px-3 py-6 text-center text-[13px] text-muted-foreground">이 기간에 해당하는 게시물이 없어요. 기간이나 터진 정도를 바꿔 보세요.</p>
+        <p className="rounded-md bg-surface-2 px-3 py-6 text-center text-sm text-muted-foreground">이 기간에 해당하는 게시물이 없어요. 기간이나 성과 구간을 바꿔 보세요.</p>
       ) : view === "card" ? (
         <ul className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {shown.slice(0, limit).map((r, i) => (
@@ -401,15 +401,15 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
       )}
 
       <details className="rounded-lg border bg-card px-4 py-3 text-xs text-muted-foreground">
-        <summary className="cursor-pointer text-[13px] font-medium text-ink-2">이 숫자를 읽는 법</summary>
+        <summary className="cursor-pointer text-sm font-medium text-ink-2">이 숫자를 보는 법</summary>
         <ul className="mt-2 list-disc space-y-1 pl-4">
-          <li>조회수는 계정 인사이트 값이에요. 공개 조회수가 10% 넘게 크면 &quot;광고 포함 추정&quot;으로 표시해요. 공개 조회수는 최근 릴스만 읽어서 옛 릴스와 사진 · 캐러셀은 판단하지 않아요.</li>
-          <li>배수는 조회수 ÷ 고른 기간의 같은 유형 평소 조회수예요. 사진 · 캐러셀과 릴스는 조회수 크기가 달라 따로 잡아요. 기간을 바꾸면 배수도 바뀌어요.</li>
-          <li>공유 · 저장 비율은 도달 1,000명당 몇 명인지예요. 도달이 조회수의 10%도 안 되는 옛 게시물은 도달 값이 깨진 것으로 보고 비율을 빼요.</li>
-          <li>&quot;경품 · 이벤트 말&quot; · &quot;댓글 요청 글&quot;은 캡션 단어로 나눠 할인 글도 섞일 수 있어요. 댓글 요청 글은 댓글이 많이 늘어서 댓글 수를 인기로 읽으면 안 돼요.</li>
+          <li>조회수는 계정 인사이트 값이에요. 공개 조회수가 10% 넘게 크면 &quot;광고 포함 추정&quot;으로 표시해요. 공개 조회수는 최근 릴스만 수집해서 옛 릴스와 사진 · 캐러셀은 판단하지 않아요.</li>
+          <li>배수는 조회수 ÷ 고른 기간의 같은 유형 평소 조회수예요. 사진 · 캐러셀과 릴스는 조회수 크기가 달라 따로 계산해요. 기간을 바꾸면 배수도 바뀌어요.</li>
+          <li>공유 · 저장 비율은 도달 1,000명당 몇 명인지예요. 도달이 조회수의 10%도 안 되는 옛 게시물은 도달 값이 깨진 것으로 보고 비율 계산에서 제외해요.</li>
+          <li>&quot;경품 · 이벤트 말&quot; · &quot;댓글 요청 글&quot;은 캡션 단어로 나눠 할인 글도 섞일 수 있어요. 댓글 요청 글은 댓글이 많이 늘어서 댓글 수를 인기 지표로 보면 안 돼요.</li>
           <li>제목은 캡션 앞부분이에요. 영상 첫 마디 · 3초 유지율 · 게시물별 팔로우는 인스타가 주지 않아요.</li>
           <li>표지는 잘된 게시물과 최근 게시물 위주로 보관해요. 나머지는 표지 없이 나올 수 있어요.</li>
-          <li>2024년 이전 사진 · 캐러셀은 인스타가 조회수를 주지 않아 뺐어요{data.skipped > 0 && ` (${num(data.skipped)}개)`}. 조회수가 없는 게시물도 함께 빠져요. 스토리는 인스타 게시물 목록에 나오지 않아요.</li>
+          <li>2024년 이전 사진 · 캐러셀은 인스타가 조회수를 제공하지 않아 제외했어요{data.skipped > 0 && ` (${num(data.skipped)}개)`}. 조회수가 없는 게시물도 함께 제외해요. 스토리는 인스타 게시물 목록에 나오지 않아요.</li>
         </ul>
       </details>
     </div>

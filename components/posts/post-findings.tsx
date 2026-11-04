@@ -20,7 +20,7 @@ export function PostFindings({ analysis }: { analysis: PostAnalysis | null }) {
       </div>
 
       {!analysis ? (
-        <p className="text-[13px] text-muted-foreground">지난 게시물을 다 읽으면 해석을 써 드려요. 일주일에 한 번 새로 써요.</p>
+        <p className="text-sm text-muted-foreground">지난 게시물 수집이 끝나면 해석을 작성해요. 일주일에 한 번 새로 작성해요.</p>
       ) : (
         <>
           {analysis.headline && <p className="rounded-md bg-brand-soft px-3 py-2.5 text-[15px] font-semibold text-foreground">{analysis.headline}</p>}
@@ -31,7 +31,7 @@ export function PostFindings({ analysis }: { analysis: PostAnalysis | null }) {
                 {f.stat && <p className="text-[15px] leading-snug font-bold break-keep tabular-nums">{f.stat}</p>}
                 <div>
                   <p className="text-sm font-semibold">{f.title}</p>
-                  <p className="mt-0.5 text-[13px] text-ink-2">{f.detail}</p>
+                  <p className="mt-0.5 text-sm text-ink-2">{f.detail}</p>
                 </div>
               </li>
             ))}
@@ -40,7 +40,7 @@ export function PostFindings({ analysis }: { analysis: PostAnalysis | null }) {
           {analysis.actions.length > 0 && (
             <ul className="space-y-1.5 rounded-md bg-surface-2 px-3 py-2.5">
               {analysis.actions.map((a, i) => (
-                <li key={i} className="flex items-start gap-2 text-[13px]">
+                <li key={i} className="flex items-start gap-2 text-sm">
                   <Badge variant={a.label === "더 만들 것" ? "default" : "outline"} className="w-[76px]">
                     {a.label}
                   </Badge>
@@ -56,7 +56,7 @@ export function PostFindings({ analysis }: { analysis: PostAnalysis | null }) {
               {caveats.map((c, i) => (
                 <li key={i}>{c}</li>
               ))}
-              <li>숫자는 코드가 계산했고 해석만 AI가 썼어요. 통계에 없는 숫자가 든 문장은 자동으로 뺐어요.</li>
+              <li>숫자는 코드가 계산했고 해석만 AI가 썼어요. 통계에 없는 숫자가 든 문장은 자동으로 제외했어요.</li>
               <li>시기가 겹친다고 원인인 건 아니에요. 위에서 기간을 바꿔도 이 글은 그대로예요.</li>
             </ul>
           </details>

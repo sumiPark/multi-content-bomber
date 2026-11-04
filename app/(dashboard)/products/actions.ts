@@ -53,7 +53,7 @@ export async function approveAnalysisAction(input: z.infer<typeof idSchema>): Pr
   // 근거 있는 특징이 하나도 없으면 대본에 쓸 말이 없다 — 확인해도 후보가 되면 안 된다(2026-11-04)
   const { data: current } = await service.from("product_analyses").select("claims").eq("product_id", parsed.data.productId).maybeSingle();
   if (current && (!Array.isArray(current.claims) || current.claims.length === 0)) {
-    return { ok: false, error: "상세페이지에서 근거를 찾은 특징이 없어 확인할 수 없어요. 이미지부터 다시 읽거나 이 상품을 빼 주세요." };
+    return { ok: false, error: "상세페이지에서 근거를 찾은 특징이 없어 확인할 수 없어요. 이미지부터 다시 분석하거나 이 상품을 빼 주세요." };
   }
   const { data, error } = await service
     .from("product_analyses")

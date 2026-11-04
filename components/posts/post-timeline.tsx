@@ -17,7 +17,7 @@ export interface TimelineRow {
 }
 
 const H = 260;
-const PAD = { l: 44, r: 10, t: 10, b: 24 };
+const PAD = { l: 52, r: 10, t: 10, b: 28 };
 const HIT_PX = 22;
 const DAY_MS = 86_400_000;
 const KST_MS = 9 * 3600_000;
@@ -102,7 +102,7 @@ export function PostTimeline({ rows, base, from, now }: { rows: TimelineRow[]; b
   return (
     <div ref={box} className="relative">
       {!chart ? (
-        <p className="py-8 text-center text-[13px] text-muted-foreground">이 기간에는 게시물이 적어 그래프를 그리지 않았어요.</p>
+        <p className="py-8 text-center text-sm text-muted-foreground">이 기간에는 게시물이 적어 그래프를 그리지 않았어요.</p>
       ) : (
         <>
           <svg
@@ -120,13 +120,13 @@ export function PostTimeline({ rows, base, from, now }: { rows: TimelineRow[]; b
             {chart.yTicks.map((v) => (
               <g key={v}>
                 <line x1={PAD.l} x2={W - PAD.r} y1={chart.ty(v)} y2={chart.ty(v)} className="stroke-border" strokeWidth={1} />
-                <text x={PAD.l - 6} y={chart.ty(v) + 4} textAnchor="end" className="fill-muted-foreground text-[11px] tabular-nums">
+                <text x={PAD.l - 6} y={chart.ty(v) + 5} textAnchor="end" className="fill-muted-foreground text-xs tabular-nums">
                   {short(v)}
                 </text>
               </g>
             ))}
             {chart.xTicks.map((t) => (
-              <text key={t.t} x={t.x} y={H - 7} textAnchor="middle" className="fill-muted-foreground text-[11px] tabular-nums">
+              <text key={t.t} x={t.x} y={H - 8} textAnchor="middle" className="fill-muted-foreground text-xs tabular-nums">
                 {t.label}
               </text>
             ))}

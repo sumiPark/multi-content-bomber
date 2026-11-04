@@ -53,14 +53,14 @@ export function FeedReviewSection({
               const v = VERDICT[c.verdict];
               return (
                 <li key={c.id} className="min-w-0">
-                  <p className="flex items-center gap-1.5 text-[13px] font-medium">
+                  <p className="flex items-center gap-1.5 text-sm font-medium">
                     {CHECK_LABEL[c.id]}
                     <span className={cn("inline-flex items-center gap-1 text-xs font-semibold", v.text)}>
                       <v.Icon className="size-3.5" aria-hidden />
                       {v.label}
                     </span>
                   </p>
-                  <p className="mt-0.5 text-[13px] text-ink-2">{c.finding}</p>
+                  <p className="mt-0.5 text-sm text-ink-2">{c.finding}</p>
                 </li>
               );
             })}
@@ -68,7 +68,7 @@ export function FeedReviewSection({
           {review.suggestions.length > 0 && (
             <div className="rounded-md bg-surface-2 px-3 py-2.5">
               <p className="text-xs font-semibold text-muted-foreground">앞으로 이렇게 해 보세요</p>
-              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[13px] text-ink-2">
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-sm text-ink-2">
                 {review.suggestions.map((s, i) => (
                   <li key={i}>{s}</li>
                 ))}

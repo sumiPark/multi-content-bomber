@@ -139,7 +139,7 @@ export function ScreenshotUpload({ accountId, current }: { accountId: string; cu
         />
         <Button variant="outline" size="sm" disabled={isPending} onClick={() => fileRef.current?.click()}>
           <ImageUp className="size-4" aria-hidden />
-          {phase === "reading" ? "캡처 읽는 중…" : "프로필 캡처 올리기"}
+          {phase === "reading" ? "캡처 분석 중…" : "프로필 캡처 올리기"}
         </Button>
         {phase !== "confirm" && (
           <Button
@@ -163,8 +163,8 @@ export function ScreenshotUpload({ accountId, current }: { accountId: string; cu
       {phase === "confirm" && (
         <div className="space-y-4 rounded-lg border bg-card p-4">
           <div>
-            <p className="text-sm font-semibold">읽은 값을 확인하세요</p>
-            <p className="text-xs text-muted-foreground">틀린 건 고친 뒤 저장하세요. 모르는 칸은 비워 두면 점수에서 빼요.</p>
+            <p className="text-sm font-semibold">인식한 값을 확인하세요</p>
+            <p className="text-xs text-muted-foreground">틀린 건 고친 뒤 저장하세요. 모르는 칸은 비워 두면 점수에서 제외해요.</p>
           </div>
           {notes.length > 0 && (
             <ul className="space-y-1 rounded-md bg-warn-soft px-3 py-2">
@@ -181,7 +181,7 @@ export function ScreenshotUpload({ accountId, current }: { accountId: string; cu
             <div className="space-y-1.5">
               <Label htmlFor={`hl-${accountId}`}>하이라이트 이름 (한 줄에 하나)</Label>
               <Textarea id={`hl-${accountId}`} rows={4} value={highlights} disabled={noHighlights} onChange={(e) => setHighlights(e.target.value)} />
-              <label className="flex items-center gap-2 text-[13px] text-ink-2">
+              <label className="flex items-center gap-2 text-sm text-ink-2">
                 <input type="checkbox" checked={noHighlights} onChange={(e) => setNoHighlights(e.target.checked)} className="size-4 accent-primary" />
                 하이라이트가 없어요
               </label>

@@ -47,7 +47,7 @@ export function Toaster() {
           key={t.id}
           role="status"
           className={cn(
-            "pointer-events-auto flex items-start gap-2 rounded-lg border bg-card px-3.5 py-2.5 text-[13px] shadow-[0_8px_24px_rgb(16_24_40/.12),0_2px_6px_rgb(16_24_40/.08)]",
+            "pointer-events-auto flex items-start gap-2 rounded-lg border bg-card px-3.5 py-2.5 text-sm shadow-[0_8px_24px_rgb(16_24_40/.12),0_2px_6px_rgb(16_24_40/.08)]",
             t.tone === "risk" && "border-risk/40",
           )}
         >

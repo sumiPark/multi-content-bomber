@@ -67,7 +67,7 @@ function toMessage(err: unknown): string {
   if (err instanceof EpisodeAlertError) return err.message;
   if (err instanceof InstagramApiError) {
     if (err.kind === "TOKEN") return "계정 토큰이 만료됐어요. 계정 연동에서 다시 연결해주세요.";
-    if (err.kind === "RATE_LIMIT") return "인스타 호출 한도에 걸렸어요. 잠시 뒤 다시 시도해주세요.";
+    if (err.kind === "RATE_LIMIT") return "인스타 호출 한도를 넘었어요. 잠시 뒤 다시 시도해주세요.";
     if (err.kind === "NOT_FOUND") return "인스타 게시물을 찾을 수 없어요. 지워졌는지 확인해주세요.";
     return `인스타 오류: ${err.message}`;
   }

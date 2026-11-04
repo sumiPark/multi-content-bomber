@@ -105,6 +105,6 @@ export async function interpretEditStyle(text: string): Promise<EditStyleResult>
     response_format: zodResponseFormat(editStyleResultSchema, "edit_style"),
   });
   const r = completion.choices[0]?.message?.parsed;
-  if (!r) throw new Error("편집 스타일을 읽지 못했어요.");
+  if (!r) throw new Error("편집 스타일을 반영하지 못했어요.");
   return r;
 }

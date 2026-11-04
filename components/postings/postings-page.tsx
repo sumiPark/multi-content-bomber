@@ -512,7 +512,7 @@ export function PostingsPage({
       {actionMessage && !actionMessage.ok && (
         <div
           role="alert"
-          className="flex items-start gap-2.5 rounded-lg bg-risk-soft px-3.5 py-3 text-[13px] text-ink-2"
+          className="flex items-start gap-2.5 rounded-lg bg-risk-soft px-3.5 py-3 text-sm text-ink-2"
         >
           <OctagonAlert className="mt-0.5 size-4 shrink-0 text-risk" />
           <p className="min-w-0 flex-1">{actionMessage.text}</p>
@@ -528,7 +528,7 @@ export function PostingsPage({
       )}
 
       {summary.failed > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-risk-soft px-3.5 py-3 text-[13px] text-ink-2">
+        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-risk-soft px-3.5 py-3 text-sm text-ink-2">
           <OctagonAlert className="size-4 shrink-0 text-risk" />
           <p className="min-w-0 flex-1">
             <b className="text-foreground">
@@ -674,7 +674,7 @@ export function PostingsPage({
         className="pointer-events-none fixed right-4 bottom-4 z-[70] flex flex-col gap-2"
       >
         {actionMessage?.ok && (
-          <div className="flex max-w-[400px] items-center gap-2.5 rounded-[10px] bg-foreground px-3.5 py-2.5 text-[13px] text-background shadow-[0_8px_24px_rgb(16_24_40/0.12),0_2px_6px_rgb(16_24_40/0.08)]">
+          <div className="flex max-w-[400px] items-center gap-2.5 rounded-[10px] bg-foreground px-3.5 py-2.5 text-sm text-background shadow-[0_8px_24px_rgb(16_24_40/0.12),0_2px_6px_rgb(16_24_40/0.08)]">
             <CircleCheck className="size-4 shrink-0" />
             {actionMessage.text}
           </div>
@@ -770,7 +770,7 @@ function SummaryCards({
               )}
             >
               {count}
-              <small className="ml-0.5 text-[13px] font-semibold text-muted-foreground">
+              <small className="ml-0.5 text-sm font-semibold text-muted-foreground">
                 건
               </small>
             </p>
@@ -945,7 +945,7 @@ function FiltersBar({
         aria-label="정렬"
         value={sortKey}
         onChange={(e) => onChangeSort(e.target.value as SortKey)}
-        className="h-9 rounded-md border border-input bg-card px-2.5 text-base sm:text-[13px]"
+        className="h-9 rounded-md border border-input bg-card px-2.5 text-base sm:text-sm"
       >
         {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
           <option key={k} value={k}>
@@ -981,7 +981,7 @@ function BulkActionBar({
   onClear: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b bg-brand-soft px-4 py-2 text-[13px]">
+    <div className="flex flex-wrap items-center gap-2 border-b bg-brand-soft px-4 py-2 text-sm">
       <b className="mr-2 text-primary tabular-nums">{selectedCount}건 선택</b>
       <Button
         variant="outline"
@@ -1045,7 +1045,7 @@ function PostingsTable({
 }) {
   if (items.length === 0) {
     return (
-      <div className="px-4 py-16 text-center text-[13px] text-muted-foreground">
+      <div className="px-4 py-16 text-center text-sm text-muted-foreground">
         조건에 맞는 발행이 없어요.
         <br />
         탭 · 플랫폼 · 기간을 바꾸거나 새 콘텐츠를 만들어 보세요.
@@ -1058,7 +1058,7 @@ function PostingsTable({
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[880px] border-collapse text-[13px]">
+      <table className="w-full min-w-[880px] border-collapse text-sm">
         <thead className="bg-surface-2">
           <tr>
             {canManage && (
@@ -1360,7 +1360,7 @@ function DetailDrawer({
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto p-4">
-          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="flex min-w-0 items-center gap-1.5">
               <PlatformIcon platform={item.account.platform} size={20} />
               <span className="truncate">
@@ -1374,7 +1374,7 @@ function DetailDrawer({
           </div>
 
           {item.lastError && (
-            <div className="space-y-2 rounded-lg bg-risk-soft px-3.5 py-3 text-[13px] text-ink-2">
+            <div className="space-y-2 rounded-lg bg-risk-soft px-3.5 py-3 text-sm text-ink-2">
               <p className="flex items-center gap-2 font-semibold text-foreground">
                 <OctagonAlert className="size-4 shrink-0 text-risk" />
                 마지막 오류
@@ -1403,7 +1403,7 @@ function DetailDrawer({
                 />
               )}
             </div>
-            <div className="min-w-0 text-[13px]">
+            <div className="min-w-0 text-sm">
               <b>{mediaSummary(item)}</b>
               <p className="mt-1 line-clamp-4 text-xs whitespace-pre-wrap text-ink-2">
                 {captionPreview(item.captions, 200)}
@@ -1415,7 +1415,7 @@ function DetailDrawer({
             <h3 className="mb-2 text-xs font-semibold text-muted-foreground">
               발행 정보
             </h3>
-            <dl className="grid grid-cols-[96px_minmax(0,1fr)] overflow-hidden rounded-lg border text-[13px]">
+            <dl className="grid grid-cols-[96px_minmax(0,1fr)] overflow-hidden rounded-lg border text-sm">
               {info.map((r, i) => (
                 <div key={r.label} className="contents">
                   <dt
@@ -1481,7 +1481,7 @@ function DetailDrawer({
                   파일과 캡션을 지운 콘텐츠예요. 발행 기록만 남아 있어요.
                 </p>
               )}
-              <div className="divide-y rounded-lg border text-[13px]">
+              <div className="divide-y rounded-lg border text-sm">
                 <div className="flex items-center justify-between gap-3 px-3.5 py-3">
                   <span className="min-w-0">
                     목록에서 숨기기
@@ -1589,7 +1589,7 @@ function CaptionBlock({
   return (
     <div className="rounded-lg border bg-surface-2 px-3.5 py-3 text-xs">
       <p className="mb-1 font-semibold text-muted-foreground">{title}</p>
-      {primary && <p className="mb-1 text-[13px] font-semibold">{primary}</p>}
+      {primary && <p className="mb-1 text-sm font-semibold">{primary}</p>}
       <p className="whitespace-pre-wrap text-ink-2">{body}</p>
       {tags.length > 0 && (
         <p className="mt-2 text-primary">{tags.join(" ")}</p>

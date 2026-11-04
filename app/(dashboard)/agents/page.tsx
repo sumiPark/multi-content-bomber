@@ -93,7 +93,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
                       {a.name}
                       <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-muted-foreground">{a.kind}</span>
                     </p>
-                    <p className="mt-1.5 text-[13px] text-ink-2">{a.does}</p>
+                    <p className="mt-1.5 text-sm text-ink-2">{a.does}</p>
                   </div>
                   {a.learning === "learn" && (
                     <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{v ? `플레이북 v${v.version}` : "기본 규칙만"}</span>
@@ -141,7 +141,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
         </CardHeader>
         <CardContent className="space-y-3">
           {pending.length === 0 ? (
-            <p className="rounded-md border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">
+            <p className="rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
               승인을 기다리는 제안이 없어요. 운영을 시작하고 첫 리포트가 나오면 여기에 올라와요.
             </p>
           ) : (
@@ -159,7 +159,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
             })
           )}
           {decided.length > 0 && (
-            <details className="text-[13px]">
+            <details className="text-sm">
               <summary className="cursor-pointer text-muted-foreground">처리한 제안 {decided.length}개</summary>
               <ul className="mt-2 divide-y rounded-md border">
                 {decided.map((f) => (
@@ -195,7 +195,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
                 href={`/agents?agent=${k}#playbook`}
                 aria-current={k === selected ? "page" : undefined}
                 className={cn(
-                  "h-8 rounded-[6px] px-3 text-[13px] leading-8",
+                  "h-8 rounded-[6px] px-3 text-sm leading-8",
                   k === selected ? "bg-card font-semibold shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -206,7 +206,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
         </CardHeader>
         <CardContent className="space-y-3">
           {!selectedInfo.usesPlaybook && selectedInfo.note && (
-            <p className="rounded-md bg-warn-soft px-3.5 py-2.5 text-[13px] text-warn">{selectedInfo.note}</p>
+            <p className="rounded-md bg-warn-soft px-3.5 py-2.5 text-sm text-warn">{selectedInfo.note}</p>
           )}
           <PlaybookEditor
             key={`${selected}-${selectedVersions[0]?.version ?? 0}`}

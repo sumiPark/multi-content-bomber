@@ -75,12 +75,12 @@ function AccountRow({ row, own, now, canEdit }: { row: BenchmarkRow; own: Benchm
       {row.status === "PENDING" ? (
         <p className="flex items-center gap-1.5 text-xs text-primary">
           <Loader2 className="size-3.5 animate-spin" aria-hidden />
-          아직 읽지 못했어요. 보통 1~2분이면 채워지고, 호출 한도에 걸리면 다음 자동 수집(매일 04:50)에 채워져요.
+          아직 수집하지 못했어요. 보통 1~2분이면 채워지고, 호출 한도를 넘으면 다음 자동 수집(매일 04:50)에 채워져요.
         </p>
       ) : failed ? (
         <p className="flex items-start gap-1.5 text-xs text-risk">
           <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
-          {row.error ?? "읽지 못했어요."}
+          {row.error ?? "수집하지 못했어요."}
         </p>
       ) : (
         <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
@@ -93,7 +93,7 @@ function AccountRow({ row, own, now, canEdit }: { row: BenchmarkRow; own: Benchm
         </dl>
       )}
       {row.reason && (
-        <p className="max-w-4xl text-[13px] text-ink-2">
+        <p className="max-w-4xl text-sm text-ink-2">
           <span className="text-muted-foreground">고른 이유 </span>
           {row.reason}
         </p>
@@ -118,7 +118,7 @@ function HitCard({ hit, now }: { hit: BenchmarkHit; now: number }) {
           <p className="text-base font-bold tabular-nums">평소의 {hit.multiple.toFixed(1)}배</p>
           <p className="truncate text-xs text-muted-foreground">@{hit.username}</p>
         </div>
-        <p className="line-clamp-2 text-[13px] text-ink-2">{hit.hook || "(캡션 없음)"}</p>
+        <p className="line-clamp-2 text-sm text-ink-2">{hit.hook || "(캡션 없음)"}</p>
         <p className="text-xs text-muted-foreground tabular-nums">
           조회 {short(hit.views)} · 좋아요 {short(hit.likes)} · 댓글 {count(hit.comments)}
           {days != null && ` · ${days}일 전`}
@@ -132,7 +132,7 @@ function HitCard({ hit, now }: { hit: BenchmarkHit; now: number }) {
         {hit.bannedPhrases.length > 0 && (
           <p className="flex items-start gap-1 text-xs text-risk">
             <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
-            그대로 쓰면 안 돼요. 광고 문구 규칙에 걸리는 표현: {hit.bannedPhrases.join(", ")}
+            그대로 쓰면 안 돼요. 광고 문구 규칙에 어긋나는 표현: {hit.bannedPhrases.join(", ")}
           </p>
         )}
         {hit.style && (
@@ -193,7 +193,7 @@ export function BenchmarkView({
               href={`/analytics?tab=compare&account=${a.id}`}
               aria-current={on ? "page" : undefined}
               className={cn(
-                "inline-flex h-[30px] items-center gap-1.5 rounded-[6px] px-3 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                "inline-flex h-[30px] items-center gap-1.5 rounded-[6px] px-3 text-xs font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                 on && "bg-card font-semibold text-foreground shadow-[0_1px_2px_rgb(16_24_40/0.12)]",
               )}
             >
@@ -244,8 +244,8 @@ export function BenchmarkView({
           <div className="space-y-2">
             <div>
               <h2 className="text-base font-semibold">평소보다 잘된 릴스</h2>
-              <p className="text-[13px] text-muted-foreground">
-                그 계정 평소 조회의 3배를 넘은 최근 6개월 릴스를 계정당 3개까지 골랐어요. 조회수에 비해 좋아요가 너무 적은 릴스는 광고로 키운 것으로 보고 뺐어요. 영상을 베끼지 말고 첫 줄과 구성만 참고하세요.
+              <p className="text-sm text-muted-foreground">
+                그 계정 평소 조회의 3배를 넘은 최근 6개월 릴스를 계정당 3개까지 골랐어요. 조회수에 비해 좋아요가 너무 적은 릴스는 광고로 키운 것으로 보고 제외했어요. 영상을 베끼지 말고 첫 줄과 구성만 참고하세요.
               </p>
             </div>
             {data.hits.length ? (
@@ -255,7 +255,7 @@ export function BenchmarkView({
                 ))}
               </ul>
             ) : (
-              <p className="rounded-md bg-surface-2 px-3 py-2.5 text-[13px] text-muted-foreground">아직 3배를 넘은 릴스가 없어요.</p>
+              <p className="rounded-md bg-surface-2 px-3 py-2.5 text-sm text-muted-foreground">아직 3배를 넘은 릴스가 없어요.</p>
             )}
           </div>
 
@@ -270,7 +270,7 @@ export function BenchmarkView({
             </Card>
             {data.rows.some((r) => r.lastCollectedAt) && (
               <p className="text-xs text-muted-foreground">
-                숫자는 매일 04:50에 새로 읽어요. 마지막 수집{" "}
+                숫자는 매일 04:50에 새로 수집해요. 마지막 수집{" "}
                 <RelativeTime iso={data.rows.map((r) => r.lastCollectedAt).filter((x): x is string => !!x).sort().at(-1) as string} />.
                 공개 조회수 기준이라 광고 조회가 포함될 수 있고, 저장 · 공유 수는 다른 계정이라 볼 수 없어요.
               </p>

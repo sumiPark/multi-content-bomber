@@ -229,11 +229,11 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
         </header>
         <div className="min-w-0">
           {card.ideaTitle && <p className="text-sm font-semibold">{card.ideaTitle}</p>}
-          <p className="truncate text-[13px] text-muted-foreground">{card.productName}</p>
+          <p className="truncate text-sm text-muted-foreground">{card.productName}</p>
         </div>
 
         {posted && (
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             {card.postedAt && (
               <span className="text-muted-foreground">
                 <RelativeTime iso={card.postedAt} /> 올림
@@ -330,12 +330,12 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
             {showFiles && files && (
               <div className="space-y-2 rounded-md border p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[13px] font-semibold">다시 편집용 파일</p>
+                  <p className="text-sm font-semibold">다시 편집용 파일</p>
                   <Button size="sm" variant="outline" className="hidden md:inline-flex" disabled={zipping !== null} onClick={() => downloadZip(files)}>
                     <FolderDown className="size-4" /> {zipping ? `묶는 중: ${zipping}` : "전체 ZIP 받기"}
                   </Button>
                 </div>
-                <ul className="divide-y text-[13px]">
+                <ul className="divide-y text-sm">
                   {[...(files.final ? [{ ...files.final, label: "완성본" }] : []), ...(files.thumbnail ? [{ ...files.thumbnail, label: "표지" }] : []), ...files.clips.map((c) => ({ ...c, label: `${c.cut}번 컷 원본` }))].map((f: ShootFile & { label: string }) => (
                     <li key={f.name} className="flex items-center justify-between gap-3 py-1.5">
                       <span className="min-w-0 truncate">

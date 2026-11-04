@@ -98,7 +98,7 @@ export function checkInstagramCaption(caption: string, hashtags: string[], rules
   const absolute = hits(published, COMPLIANCE_WARN);
   if (absolute.length > 0) review(`근거가 필요한 단정 표현이 있어요: ${absolute.join(", ")}`);
   for (const hit of checkText(published, "OTHER", rules.filter((r) => r.ruleType === "BANNED"))) {
-    review(`광고 문구 규칙에 걸려요: ${hit.matched}${hit.rule.suggestion ? ` (대신: ${hit.rule.suggestion})` : ""}`);
+    review(`광고 문구 규칙에 어긋나요: ${hit.matched}${hit.rule.suggestion ? ` (대신: ${hit.rule.suggestion})` : ""}`);
   }
   if (LINK.test(body)) review("캡션에 링크가 있어요. 캡션 링크는 눌리지 않아요");
 

@@ -205,7 +205,7 @@ export function SidebarShell({
       return (
         <span
           aria-label={`실패 ${failedJobCount}건`}
-          className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-risk px-1.5 text-[11px] leading-5 font-bold text-white tabular-nums"
+          className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-risk px-1.5 text-xs leading-5 font-bold text-white tabular-nums"
         >
           {display}
         </span>
@@ -214,7 +214,7 @@ export function SidebarShell({
     if (item.badgeKind === "confirm") {
       if (confirmDueCount <= 0) return null;
       return (
-        <span aria-label={`상품 확인할 칸 ${confirmDueCount}개`} className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-warn px-1.5 text-[11px] leading-5 font-semibold text-white tabular-nums">
+        <span aria-label={`상품 확인할 칸 ${confirmDueCount}개`} className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-warn px-1.5 text-xs leading-5 font-semibold text-white tabular-nums">
           {confirmDueCount > 99 ? "99+" : confirmDueCount}
         </span>
       );
@@ -232,7 +232,7 @@ export function SidebarShell({
       return (
         <span
           aria-label="출시 예정"
-          className="ml-auto inline-flex items-center rounded-full bg-surface-2 px-2 text-[11px] leading-5 font-semibold text-muted-foreground"
+          className="ml-auto inline-flex items-center rounded-full bg-surface-2 px-2 text-xs leading-5 font-semibold text-muted-foreground"
         >
           준비 중
         </span>
@@ -292,11 +292,11 @@ export function SidebarShell({
 
   const orgCard = (
     <div className="flex w-full items-center gap-2.5 rounded-lg border bg-card p-2 text-left">
-      <span className="grid size-7 shrink-0 place-items-center rounded-[7px] bg-surface-3 text-[13px] font-bold">
+      <span className="grid size-7 shrink-0 place-items-center rounded-[7px] bg-surface-3 text-sm font-bold">
         {(orgName ?? "M").slice(0, 1)}
       </span>
       <span className="flex min-w-0 flex-col leading-tight">
-        <b className="truncate text-[13px]">{orgName ?? "조직 없음"}</b>
+        <b className="truncate text-sm">{orgName ?? "조직 없음"}</b>
         <small className="text-xs text-muted-foreground">{role ? (ROLE_LABEL[role] ?? role) : ""}</small>
       </span>
     </div>
@@ -304,10 +304,10 @@ export function SidebarShell({
 
   const userPanel = userEmail ? (
     <div className="mt-auto flex items-center gap-2.5 border-t px-2 pt-3">
-      <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-brand-soft text-[13px] font-bold text-primary">
+      <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-brand-soft text-sm font-bold text-primary">
         {userEmail.slice(0, 1).toUpperCase()}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={userEmail}>
+      <span className="min-w-0 flex-1 truncate text-sm font-medium" title={userEmail}>
         {userEmail}
       </span>
       <form action={signOut}>

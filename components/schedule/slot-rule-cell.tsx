@@ -51,7 +51,7 @@ export function useScheduleRun() {
   return { isPending, error, run, setError };
 }
 
-const selectClass = "h-8 rounded-md border border-input bg-card px-2 text-[13px] focus-visible:outline-2 focus-visible:outline-primary";
+const selectClass = "h-8 rounded-md border border-input bg-card px-2 text-sm focus-visible:outline-2 focus-visible:outline-primary";
 
 export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canManage: boolean }) {
   const { isPending, error, run, setError } = useScheduleRun();
@@ -125,7 +125,7 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
               <span className="text-xs text-muted-foreground">{rule.active ? "켜짐" : "꺼짐"}</span>
             )}
           </div>
-          <p className={cn("min-w-0 text-[13px]", rule.topic ? "text-foreground" : "text-faint")}>{rule.topic ?? "주제 없음"}</p>
+          <p className={cn("min-w-0 text-sm", rule.topic ? "text-foreground" : "text-faint")}>{rule.topic ?? "주제 없음"}</p>
           {canManage && (
             <div className="flex items-center justify-between gap-1">
               <Button

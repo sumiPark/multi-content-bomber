@@ -112,7 +112,7 @@ export async function analyzeProduct(
     }
     const merged = mergeParts(parts);
     if (prepared.animated) {
-      merged.uncertainties.push("움직이는 이미지(GIF)라 첫 장면만 읽음");
+      merged.uncertainties.push("움직이는 이미지(GIF)라 첫 장면만 분석함");
       merged.fullIngredientsVisible = false;
     }
     const stored: StoredExtract = {
@@ -167,7 +167,7 @@ export async function analyzeProduct(
   let reason: string | null = null;
   if (texts.every((t) => !t.trim())) {
     state = "insufficient";
-    reason = "상세 이미지에서 글자를 읽지 못함";
+    reason = "상세 이미지에서 글자를 인식하지 못함";
   } else if (points.length === 0) {
     state = "insufficient";
     reason = "원문 근거가 있는 특징이 없음";

@@ -46,7 +46,7 @@ export function Segmented<T extends string>({
             disabled={disabled || o.disabled}
             onClick={() => onChange(o.value)}
             className={cn(
-              "inline-flex h-[30px] items-center gap-1.5 rounded-[6px] px-3 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:text-muted-foreground [&_svg]:size-3.5 [&_svg]:shrink-0",
+              "inline-flex h-[30px] items-center gap-1.5 rounded-[6px] px-3 text-xs font-medium whitespace-nowrap text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:text-muted-foreground [&_svg]:size-3.5 [&_svg]:shrink-0",
               on && "bg-card font-semibold text-foreground shadow-[0_1px_2px_rgb(16_24_40/0.12)]",
             )}
           >

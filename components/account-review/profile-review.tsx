@@ -170,14 +170,14 @@ export function ProfileScoreOverview({
                       {s.unknown.length > 0 && <span className="text-xs text-muted-foreground">모르는 항목 {s.unknown.length}개</span>}
                     </div>
                     {s.rewrites[0] && (
-                      <p className="line-clamp-2 border-t pt-2.5 text-[13px] text-ink-2">
+                      <p className="line-clamp-2 border-t pt-2.5 text-sm text-ink-2">
                         <span className="text-muted-foreground">먼저 고칠 것 </span>
                         {s.rewrites[0].title}
                       </p>
                     )}
                   </>
                 ) : (
-                  <p className="text-[13px] text-muted-foreground">
+                  <p className="text-sm text-muted-foreground">
                     {s.busy ? "채점 중이에요." : "아직 채점 전이에요. 매일 04:30에 자동으로 채점해요."}
                   </p>
                 )}
@@ -214,7 +214,7 @@ function ItemBars({ items }: { items: ReviewItem[] }) {
         const lv = level(it.score, it.max);
         return (
           <li key={it.id} className="grid grid-cols-[88px_minmax(0,1fr)_64px] items-center gap-x-3 gap-y-1">
-            <p className="truncate text-[13px] font-medium">{it.label}</p>
+            <p className="truncate text-sm font-medium">{it.label}</p>
             <div
               role="img"
               aria-label={`${it.label} ${it.score == null ? "모름" : `${it.max}점 만점에 ${it.score}점, ${lv.label}`}`}
@@ -223,7 +223,7 @@ function ItemBars({ items }: { items: ReviewItem[] }) {
             >
               {it.score != null && it.score > 0 && <span className={cn("block h-full rounded-full", lv.bar)} style={{ width: `${pct(it.score, it.max)}%` }} />}
             </div>
-            <p className="text-right text-[13px] tabular-nums">
+            <p className="text-right text-sm tabular-nums">
               {it.score == null ? <span className="text-muted-foreground">모름</span> : <b className="font-semibold">{it.score}</b>}
               <span className="text-muted-foreground">/{it.max}</span>
             </p>
@@ -254,11 +254,11 @@ function Rewrites({ rewrites, start = 0 }: { rewrites: ReviewRewrite[]; start?: 
             <span className="grid size-6 shrink-0 place-items-center rounded-full bg-brand-soft text-xs text-primary tabular-nums">{start + i + 1}</span>
             {r.title}
           </p>
-          {r.why && <p className="mt-1 text-[13px] text-muted-foreground">{r.why}</p>}
+          {r.why && <p className="mt-1 text-sm text-muted-foreground">{r.why}</p>}
           <ul className="mt-2.5 space-y-2">
             {r.options.map((o, j) => (
               <li key={j} className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2">
-                <p className="min-w-0 flex-1 text-[13px] whitespace-pre-line">{o}</p>
+                <p className="min-w-0 flex-1 text-sm whitespace-pre-line">{o}</p>
                 <CopyButton text={o} />
               </li>
             ))}
@@ -364,7 +364,7 @@ export function ProfileScoreCard({
             {s.latest?.summary && <p className="max-w-3xl text-sm text-ink-2">{s.latest.summary}</p>}
             {s.unknown.length > 0 && (
               <p className="max-w-3xl rounded-md bg-brand-soft px-3 py-2 text-xs text-ink-2">
-                <b>모르는 항목</b> {s.unknown.map((i) => i.label).join(" · ")}은 점수에서 뺐어요. 하이라이트 · 고정 게시물 · 연락 버튼은 인스타가 알려
+                <b>모르는 항목</b> {s.unknown.map((i) => i.label).join(" · ")}은 점수에서 제외했어요. 하이라이트 · 고정 게시물 · 연락 버튼은 인스타가 알려
                 주지 않아서 프로필 캡처를 한 장 올리면 채워져요.
               </p>
             )}
@@ -398,7 +398,7 @@ export function ProfileScoreCard({
                 <Rewrites rewrites={top} />
                 {rest.length > 0 && (
                   <details className="rounded-lg border">
-                    <summary className="cursor-pointer px-3.5 py-2.5 text-[13px] font-medium">나머지 {rest.length}개 더 보기</summary>
+                    <summary className="cursor-pointer px-3.5 py-2.5 text-sm font-medium">나머지 {rest.length}개 더 보기</summary>
                     <div className="border-t p-3">
                       <Rewrites rewrites={rest} start={TOP_REWRITES} />
                     </div>

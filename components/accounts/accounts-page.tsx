@@ -260,7 +260,7 @@ export function AccountsPage({
       {canManage ? (
         <ConnectorCard />
       ) : (
-        <p className="rounded-lg border bg-card px-4 py-3 text-[13px] text-muted-foreground">계정 연결 · 다시 연결은 관리자 · 매니저만 할 수 있어요.</p>
+        <p className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">계정 연결 · 다시 연결은 관리자 · 매니저만 할 수 있어요.</p>
       )}
 
       {isCreating && canManage && (

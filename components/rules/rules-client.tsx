@@ -337,7 +337,7 @@ export function PreviewCheck() {
       {error && <p className="text-xs text-destructive">{error}</p>}
       {hits &&
         (hits.length === 0 ? (
-          <p className="text-xs text-ok">걸린 규칙이 없어요.</p>
+          <p className="text-xs text-ok">해당하는 규칙이 없어요.</p>
         ) : (
           <ul className="space-y-1 text-xs">
             {hits.map((h) => (

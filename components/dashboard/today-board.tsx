@@ -28,7 +28,7 @@ export function BlockedAlert({ items }: { items: BlockedItem[] }) {
       </p>
       <ul className="mt-2 space-y-1.5">
         {items.slice(0, 4).map((b) => (
-          <li key={b.key} className="flex items-center justify-between gap-3 text-[13px]">
+          <li key={b.key} className="flex items-center justify-between gap-3 text-sm">
             <span className="min-w-0">
               <b>{b.label}</b>
               {b.reason && <span className="ml-1.5 text-ink-2">{b.reason.slice(0, 80)}</span>}
@@ -42,7 +42,7 @@ export function BlockedAlert({ items }: { items: BlockedItem[] }) {
         ))}
       </ul>
       {items.length > 4 && (
-        <details className="mt-1.5 text-[13px]">
+        <details className="mt-1.5 text-sm">
           <summary className="cursor-pointer text-xs font-semibold text-risk">외 {items.length - 4}개 더 보기</summary>
           <ul className="mt-1.5 space-y-1">
             {items.slice(4).map((b) => (
@@ -73,7 +73,7 @@ export function AtRiskAlert({ items }: { items: BlockedItem[] }) {
       </p>
       <ul className="mt-2 space-y-1.5">
         {items.slice(0, 5).map((b) => (
-          <li key={b.key} className="flex items-center justify-between gap-3 text-[13px]">
+          <li key={b.key} className="flex items-center justify-between gap-3 text-sm">
             <span className="min-w-0">
               <b>{b.label}</b>
               {b.reason && <span className="ml-1.5 text-ink-2">{b.reason}</span>}
@@ -87,7 +87,7 @@ export function AtRiskAlert({ items }: { items: BlockedItem[] }) {
         ))}
       </ul>
       {items.length > 5 && (
-        <details className="mt-1.5 text-[13px]">
+        <details className="mt-1.5 text-sm">
           <summary className="cursor-pointer text-xs font-semibold text-warn">외 {items.length - 5}개 더 보기</summary>
           <ul className="mt-1.5 space-y-1">
             {items.slice(5).map((b) => (
@@ -125,7 +125,7 @@ export function TodayPostsCard({ data }: { data: TodayPosts }) {
         <CardTitle>
           오늘 올린 게시물 <span className="font-normal text-muted-foreground tabular-nums">· {total}개</span>
         </CardTitle>
-        <CardDescription className="mt-1">인스타에서 바로 읽은 계정별 개수예요. MCB로 올린 것과 앱에서 올린 것을 모두 세요. 스토리는 빠져요.</CardDescription>
+        <CardDescription className="mt-1">인스타에서 바로 집계한 계정별 게시물 수예요. MCB와 인스타 앱에서 올린 게시물을 모두 집계하고, 스토리는 제외해요.</CardDescription>
       </CardHeader>
       <CardContent>
         {data.rows.length === 0 ? (
@@ -134,10 +134,10 @@ export function TodayPostsCard({ data }: { data: TodayPosts }) {
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {data.rows.map((r) => (
               <li key={r.account} className="rounded-md border px-3.5 py-3">
-                <p className="truncate text-[13px] font-semibold">@{r.account}</p>
+                <p className="truncate text-sm font-semibold">@{r.account}</p>
                 {r.count == null ? (
                   <p className="mt-1 flex items-center gap-1 text-xs text-warn">
-                    <CircleAlert className="size-3.5 shrink-0" /> 못 읽음
+                    <CircleAlert className="size-3.5 shrink-0" /> 집계 실패
                   </p>
                 ) : (
                   <>
@@ -181,7 +181,7 @@ export function UploadScheduleCard({ data, today, tomorrow }: { data: UploadSche
           <p className="py-6 text-center text-sm text-muted-foreground">예정된 업로드가 없어요.</p>
         ) : (
           <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full min-w-[640px] border-collapse text-[13px]">
+            <table className="w-full min-w-[640px] border-collapse text-sm">
               <thead className="bg-surface-2 text-xs text-muted-foreground">
                 <tr className="h-11">
                   <th scope="col" className="w-28 px-3.5 text-left font-medium">
@@ -242,7 +242,7 @@ export function YesterdayStrip({ lines }: { lines: YesterdayLine[] }) {
       <CardContent>
         <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {lines.map((l) => (
-            <li key={l.account} className="rounded-md border px-3.5 py-3 text-[13px]">
+            <li key={l.account} className="rounded-md border px-3.5 py-3 text-sm">
               <p className="font-semibold">@{l.account}</p>
               <p className="mt-1 tabular-nums">
                 팔로워 {l.followers?.toLocaleString("ko-KR") ?? "—"}

@@ -122,7 +122,7 @@ export function CollectionStatus({
               <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
             <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-              남은 것 {progress.queued + progress.analyzing}개{progress.analyzing > 0 && ` (지금 ${progress.analyzing}개 읽는 중)`}
+              남은 것 {progress.queued + progress.analyzing}개{progress.analyzing > 0 && ` (지금 ${progress.analyzing}개 분석 중)`}
               {progress.failed > 0 && <span className="text-destructive"> · 실패 {progress.failed}개</span>}
             </p>
           </div>
@@ -135,7 +135,7 @@ export function CollectionStatus({
           )}
           {as.stoppedByDeadline && (
             <p className="text-xs text-warn">
-              실행 시간 한도(45분)에 걸려 멈췄어요. 남은 것은 다음 실행이 이어서 읽습니다.
+              실행 시간 한도(45분)를 넘어 멈췄어요. 남은 상품은 다음 실행에서 이어서 분석합니다.
             </p>
           )}
         </div>
@@ -144,7 +144,7 @@ export function CollectionStatus({
       {(failed.length > 0 || collectErrors.length > 0 || analyzeRun?.error || collectRun?.error) && (
         <div className="space-y-1 rounded-md border border-warn/40 bg-warn-soft p-3 text-xs">
           <p className="flex items-center gap-1 font-semibold text-warn">
-            <AlertTriangle className="size-3.5" /> 일부 상품을 받거나 읽지 못했어요. 다음 수집 때 다시 시도해요.
+            <AlertTriangle className="size-3.5" /> 일부 상품을 수집하거나 분석하지 못했어요. 다음 수집 때 다시 시도해요.
           </p>
           {[collectRun?.error, analyzeRun?.error].filter(Boolean).map((e) => (
             <p key={e}>{e}</p>

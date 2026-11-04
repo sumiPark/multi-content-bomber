@@ -97,7 +97,7 @@ export function ShootIdeaList({ ideas, account, canManage }: { ideas: ShootIdeaD
                 <span className="block text-sm font-semibold">
                   {idea.title} <span className="text-xs font-normal text-muted-foreground">· {idea.format}</span>
                 </span>
-                {idea.draft && <span className="block truncate text-[13px] text-ink-2">“{idea.draft.hook}”</span>}
+                {idea.draft && <span className="block truncate text-sm text-ink-2">“{idea.draft.hook}”</span>}
                 <span className="block truncate text-xs text-muted-foreground">
                   {idea.product?.name ?? "상품 정보 없음"}
                   {idea.product && ` · ${won(idea.product.price)}`}
@@ -149,11 +149,11 @@ function IdeaDrawer({ idea, account, canManage, onClose }: { idea: ShootIdeaData
 
           {idea.draft ? (
             <section className="space-y-2.5">
-              <h3 className="text-[13px] font-semibold text-muted-foreground">대본 초안</h3>
+              <h3 className="text-sm font-semibold text-muted-foreground">대본 초안</h3>
               <p className="rounded-md bg-brand-soft px-3 py-2.5 text-sm font-semibold">“{idea.draft.hook}”</p>
               <ol className="space-y-2.5">
                 {idea.draft.beats.map((b, i) => (
-                  <li key={i} className="flex gap-2.5 text-[13px]">
+                  <li key={i} className="flex gap-2.5 text-sm">
                     <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs font-semibold tabular-nums text-ink-2">{i + 1}</span>
                     <span className="min-w-0">
                       <span className="block leading-relaxed font-medium">{b.line}</span>
@@ -169,12 +169,12 @@ function IdeaDrawer({ idea, account, canManage, onClose }: { idea: ShootIdeaData
           )}
 
           <section className="space-y-1">
-            <h3 className="text-[13px] font-semibold text-muted-foreground">어떻게 찍나요</h3>
-            <p className="text-[13px] leading-relaxed">{idea.concept}</p>
+            <h3 className="text-sm font-semibold text-muted-foreground">어떻게 찍나요</h3>
+            <p className="text-sm leading-relaxed">{idea.concept}</p>
           </section>
           <section className="space-y-1">
-            <h3 className="text-[13px] font-semibold text-muted-foreground">AI가 고른 이유</h3>
-            <p className="text-[13px] leading-relaxed">{idea.why}</p>
+            <h3 className="text-sm font-semibold text-muted-foreground">AI가 고른 이유</h3>
+            <p className="text-sm leading-relaxed">{idea.why}</p>
           </section>
         </div>
 
@@ -247,7 +247,7 @@ export function ShootProgressRow({ plan, canManage }: { plan: ShootProgressData;
     <li className="space-y-2 rounded-md border bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={s.variant}>{s.label}</Badge>
-        <span className="min-w-0 text-[13px] font-semibold">{plan.title ?? plan.product?.name ?? "기획"}</span>
+        <span className="min-w-0 text-sm font-semibold">{plan.title ?? plan.product?.name ?? "기획"}</span>
         {!plan.title && <Badge variant="outline">직접 추가</Badge>}
         <span className="ml-auto flex items-center gap-1">
           {href && (

@@ -35,7 +35,7 @@ export default async function AutoSettingsDetailPage({ params }: { params: Promi
 
   return (
     <main className="space-y-4 p-4 sm:p-6">
-      <Link href="/auto/settings" className="inline-flex items-center gap-1 text-[13px] font-medium text-muted-foreground hover:text-foreground">
+      <Link href="/auto/settings" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> 자동 콘텐츠 설정 목록
       </Link>
       <h1 className="text-xl font-bold tracking-[-0.01em]">@{name}</h1>

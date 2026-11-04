@@ -21,7 +21,7 @@ export interface LimitsData {
   minGapHours: number;
 }
 
-const selectClass = "h-9 rounded-md border border-input bg-card px-2.5 text-[13px] focus-visible:outline-2 focus-visible:outline-primary";
+const selectClass = "h-9 rounded-md border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-primary";
 
 export function ScopeChecks({ options, value, onChange }: { options: ScopeOptionData[]; value: string[]; onChange: (v: string[]) => void }) {
   return (
@@ -32,7 +32,7 @@ export function ScopeChecks({ options, value, onChange }: { options: ScopeOption
           <label
             key={o.key}
             className={cn(
-              "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary",
+              "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm transition-colors focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary",
               on ? "border-primary bg-brand-soft font-semibold text-primary" : "border-input bg-card hover:bg-surface-2",
             )}
           >
@@ -100,7 +100,7 @@ export function AccountScheduleCard({
               </div>
             </div>
           ) : (
-            <p className="flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
+            <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
               쓸 상품
               {scopes.length ? (
                 scopes.map((k) => (
@@ -177,7 +177,7 @@ export function AccountScheduleCard({
             <button
               type="button"
               onClick={() => setAdding(true)}
-              className="flex min-h-24 items-center justify-center gap-1.5 rounded-lg border border-dashed text-[13px] text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+              className="flex min-h-24 items-center justify-center gap-1.5 rounded-lg border border-dashed text-sm text-muted-foreground hover:bg-surface-2 hover:text-foreground"
             >
               <Plus className="size-4" /> 칸 추가
             </button>
@@ -261,7 +261,7 @@ export function AddAccountPanel({
         </Button>
       </div>
       <label className="block space-y-1.5">
-        <span className="text-[13px] font-semibold">인스타그램 계정</span>
+        <span className="text-sm font-semibold">인스타그램 계정</span>
         <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className={cn(selectClass, "block w-full max-w-xs")} required>
           <option value="">고르기</option>
           {candidates.map((c) => (
@@ -272,11 +272,11 @@ export function AddAccountPanel({
         </select>
       </label>
       <div className="space-y-1.5">
-        <p className="text-[13px] font-semibold">쓸 상품</p>
+        <p className="text-sm font-semibold">쓸 상품</p>
         <ScopeChecks options={options} value={scopes} onChange={setScopes} />
       </div>
       <div className="space-y-1.5">
-        <p className="text-[13px] font-semibold">하루 칸</p>
+        <p className="text-sm font-semibold">하루 칸</p>
         <ul className="space-y-1.5">
           {slots.map((s, i) => (
             <li key={i} className="flex flex-wrap items-center gap-1.5">

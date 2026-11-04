@@ -34,7 +34,7 @@ export function extractFirstFrame(file: File): Promise<ExtractedFrame> {
       reject(err);
     };
 
-    video.onerror = () => fail(new Error("영상 메타데이터를 읽지 못했습니다."));
+    video.onerror = () => fail(new Error("영상 메타데이터를 불러오지 못했습니다."));
 
     video.onloadedmetadata = () => {
       const duration = video.duration;

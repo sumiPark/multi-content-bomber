@@ -180,7 +180,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                   </ul>
 
                   <div className="overflow-x-auto rounded-lg border">
-                    <table className="w-full min-w-[960px] table-fixed border-collapse text-[13px]">
+                    <table className="w-full min-w-[1160px] table-fixed border-collapse text-sm">
                       <thead className="bg-surface-2 text-xs text-muted-foreground">
                         <tr className="h-11">
                           <th scope="col" className="w-32 px-3.5 text-left font-medium">

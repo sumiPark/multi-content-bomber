@@ -173,7 +173,7 @@ export default async function UploadPage({
         </p>
       </header>
       {draftId && !initialDraft && (
-        <p className="rounded-lg bg-warn-soft px-3.5 py-3 text-[13px] text-ink-2">
+        <p className="rounded-lg bg-warn-soft px-3.5 py-3 text-sm text-ink-2">
           이어서 할 임시 저장을 찾을 수 없어요. 이미 발행을 등록했거나 지워졌을 수 있어요. 새로
           만들어 주세요.
         </p>

@@ -138,7 +138,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             오늘과일 · 쿠마마켓 · 리유 상품을 매일 03시에 받아 오고, 판매 중인 상품의 상세페이지(이미지)를
-            AI가 읽어 요약합니다. 건기식은 기능성 문구를 사람이 꼭 확인해요.
+            AI가 분석해 요약합니다. 건기식은 기능성 문구를 사람이 꼭 확인해요.
           </p>
         </div>
         <div className="flex items-start gap-2">

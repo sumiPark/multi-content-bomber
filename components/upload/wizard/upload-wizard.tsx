@@ -741,7 +741,7 @@ export function UploadWizard({
   return (
     <div className="grid items-start gap-4 lg:grid-cols-[188px_minmax(0,1fr)] xl:grid-cols-[188px_minmax(0,1fr)_300px]">
       {draft && (
-        <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-[13px] text-ink-2 lg:col-span-2 xl:col-span-3">
+        <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-sm text-ink-2 lg:col-span-2 xl:col-span-3">
           <Info className="mt-0.5 size-4 shrink-0 text-primary" />
           <p>
             임시 저장한 콘텐츠를 이어서 하고 있어요. 고른 계정 · 캡션 · 시각이 그대로예요.
@@ -793,7 +793,7 @@ export function UploadWizard({
         {error && (
           <div
             role="alert"
-            className="mx-4 mt-4 flex gap-2.5 rounded-lg bg-risk-soft px-3.5 py-3 text-[13px] text-ink-2"
+            className="mx-4 mt-4 flex gap-2.5 rounded-lg bg-risk-soft px-3.5 py-3 text-sm text-ink-2"
           >
             <CircleAlert className="mt-0.5 size-4 shrink-0 text-risk" />
             <p>{error}</p>
@@ -958,7 +958,7 @@ function FieldLabel({
   optional?: boolean;
 }) {
   return (
-    <Label htmlFor={htmlFor} className="text-[13px] font-semibold text-ink-2">
+    <Label htmlFor={htmlFor} className="text-sm font-semibold text-ink-2">
       {children}
       {optional && (
         <span className="text-xs font-normal text-faint">선택</span>
@@ -968,7 +968,7 @@ function FieldLabel({
 }
 
 const SELECT_CLASS =
-  "h-9 w-full rounded-md border border-input bg-card px-2.5 text-base sm:text-[13px]";
+  "h-9 w-full rounded-md border border-input bg-card px-2.5 text-base sm:text-sm";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 오른쪽 요약 — 어느 단계에서든 고른 것을 확인한다
@@ -1086,7 +1086,7 @@ function WizardSummary({
         </span>
       </div>
       <div className="p-4">
-        <dl className="grid grid-cols-[84px_minmax(0,1fr)] overflow-hidden rounded-lg border text-[13px]">
+        <dl className="grid grid-cols-[84px_minmax(0,1fr)] overflow-hidden rounded-lg border text-sm">
           {rows.map((r, i) => (
             <div key={r.label} className="contents">
               <dt
@@ -1253,7 +1253,7 @@ function Step1Accounts({
             onChange={(e) => onChangeInternalTitle(e.target.value)}
             maxLength={200}
             placeholder="예) 한강 카페 1편"
-            className="h-9 w-full rounded-md border border-input bg-card px-3 text-base sm:text-[13px]"
+            className="h-9 w-full rounded-md border border-input bg-card px-3 text-base sm:text-sm"
           />
           <p className="text-xs text-muted-foreground">
             보관함 · 배포 관리에서 찾을 때 쓰는 이름이에요. 게시물에는 보이지 않아요.
@@ -1304,7 +1304,7 @@ function Step1Accounts({
                     className="pointer-events-none size-4 accent-primary"
                   />
                   <span className={cn("size-2.5 shrink-0 rounded-[3px]", dot)} />
-                  <span className="flex-1 text-[13px] font-semibold">
+                  <span className="flex-1 text-sm font-semibold">
                     {section.title}
                     <span className="ml-1.5 text-xs font-medium text-muted-foreground tabular-nums">
                       {selectedInGroup.length}/{eligible.length}
@@ -1343,7 +1343,7 @@ function Step1Accounts({
                           />
                           <PlatformIcon platform={acc.platform} size={20} />
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13px] font-semibold leading-tight">
+                            <p className="truncate text-sm font-semibold leading-tight">
                               {acc.display_name ?? "(이름 없음)"}
                             </p>
                             <p
@@ -1430,7 +1430,7 @@ function Step2Media({
     <>
       <StepBody>
         {usingResumedMedia && (
-          <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-[13px] text-ink-2">
+          <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-sm text-ink-2">
             <Info className="mt-0.5 size-4 shrink-0 text-primary" />
             <p>
               임시 저장한 {mediaType === "IMAGE" ? "사진" : "영상"}이 이미 올라가 있어요. 그대로
@@ -1523,7 +1523,7 @@ function ValidationPanel({
 }) {
   return (
     <div className="space-y-1.5">
-      <p className="text-[13px] font-semibold text-ink-2">
+      <p className="text-sm font-semibold text-ink-2">
         계정마다 올릴 수 있는지
       </p>
       <ul className="overflow-hidden rounded-lg border">
@@ -1547,7 +1547,7 @@ function PlatformVerdictRow({ verdict }: { verdict: PlatformVerdict }) {
     >
       <div className="flex shrink-0 items-center gap-2 sm:w-40 sm:pt-0.5">
         <PlatformIcon platform={verdict.platform} size={20} />
-        <span className="text-[13px] font-semibold">
+        <span className="text-sm font-semibold">
           {PLATFORM_LABEL[verdict.platform]}
         </span>
       </div>
@@ -1719,7 +1719,7 @@ function Step3Caption({
             </div>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-brand-soft px-3.5 py-3">
-              <p className="flex gap-2.5 text-[13px] text-ink-2">
+              <p className="flex gap-2.5 text-sm text-ink-2">
                 <Info className="mt-0.5 size-4 shrink-0 text-primary" />
                 빈 캡션으로 시작해 플랫폼마다 직접 써요. 중간에 멈추려면 아래
                 &lsquo;임시 저장&rsquo;을 누르세요 — 보관함에서 이어서 할 수 있어요.
@@ -1752,7 +1752,7 @@ function Step3Caption({
                 </div>
               )}
               {captionMode === "ai" && captionReviewNotes.length > 0 && (
-                <div className="flex gap-2.5 rounded-lg border border-warn/40 bg-warn-soft px-3.5 py-3 text-[13px] text-ink-2">
+                <div className="flex gap-2.5 rounded-lg border border-warn/40 bg-warn-soft px-3.5 py-3 text-sm text-ink-2">
                   <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warn" />
                   <div>
                     <p className="font-semibold">인스타 캡션을 올리기 전에 확인해 주세요</p>
@@ -1904,7 +1904,7 @@ function Step4Review({
         </p>
 
         {!canAdvance && (
-          <div className="flex gap-2.5 rounded-lg bg-warn-soft px-3.5 py-3 text-[13px] text-ink-2">
+          <div className="flex gap-2.5 rounded-lg bg-warn-soft px-3.5 py-3 text-sm text-ink-2">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warn" />
             <p>
               올릴 수 없는 항목이 있어요. 위 버튼으로 해당 단계로 돌아가 고쳐
@@ -2085,7 +2085,7 @@ function Step5Schedule({
         {scheduleMode === "scheduled" ? (
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <p className="text-[13px] font-semibold text-ink-2">
+              <p className="text-sm font-semibold text-ink-2">
                 자주 쓰는 시각
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -2127,7 +2127,7 @@ function Step5Schedule({
                   onChangeScheduledAt(e.target.value);
                 }}
                 disabled={completing}
-                className="h-9 w-full rounded-md border border-input bg-card px-3 text-base sm:text-[13px]"
+                className="h-9 w-full rounded-md border border-input bg-card px-3 text-base sm:text-sm"
               />
               {missingTime && (
                 <p className="text-xs text-risk">
@@ -2140,14 +2140,14 @@ function Step5Schedule({
             </div>
           </div>
         ) : (
-          <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-[13px] text-ink-2">
+          <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-sm text-ink-2">
             <Send className="mt-0.5 size-4 shrink-0 text-primary" />
             <p>완료를 누르면 곧 올리기 시작해요. 진행은 배포 관리에서 볼 수 있어요.</p>
           </div>
         )}
 
         {hasTikTok && (
-          <div className="flex gap-2.5 rounded-lg border border-warn/40 bg-warn-soft px-3.5 py-3 text-[13px] text-ink-2">
+          <div className="flex gap-2.5 rounded-lg border border-warn/40 bg-warn-soft px-3.5 py-3 text-sm text-ink-2">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warn" />
             <p>
               틱톡은 지금 <b>&lsquo;나만 보기&rsquo;</b>로 올라가요. 틱톡 앱 심사를 마치기 전이라 공개로 올릴 수 없어요. 올라간 뒤 틱톡 앱에서 공개로 바꿔 주세요.
@@ -2158,7 +2158,7 @@ function Step5Schedule({
         {seriesRows.length > 0 && (
           <div className="space-y-3 rounded-lg border p-4">
             <div>
-              <p className="text-[13px] font-semibold text-ink-2">
+              <p className="text-sm font-semibold text-ink-2">
                 시리즈 다음 화로 올리기{" "}
                 <span className="text-xs font-normal text-faint">선택</span>
               </p>
@@ -2174,7 +2174,7 @@ function Step5Schedule({
                 return (
                   <li key={account.id} className="space-y-2">
                     <div className="grid items-center gap-2 sm:grid-cols-[180px_minmax(0,1fr)]">
-                      <span className="flex min-w-0 items-center gap-2 text-[13px] font-semibold">
+                      <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
                         <PlatformIcon platform="INSTAGRAM" size={16} />
                         <span className="truncate">
                           @{account.display_name ?? "(이름 없음)"}
@@ -2208,7 +2208,7 @@ function Step5Schedule({
                           }
                           className="mt-0.5 size-4 accent-primary"
                         />
-                        <span className="min-w-0 text-[13px]">
+                        <span className="min-w-0 text-sm">
                           올라가면 바로 {chosen.nextEpisodeNo - 1}화 댓글에 답글 달기
                           <span className="block text-xs text-muted-foreground">
                             꺼 두면 나중에 시리즈 댓글 자동화에서 켤 수 있어요.

@@ -58,7 +58,7 @@ export async function readProfileScreenshot(dataUrl: string): Promise<Screenshot
     response_format: zodResponseFormat(schema, "profile_screenshot"),
   });
   const r = completion.choices[0]?.message?.parsed;
-  if (!r) throw new Error("캡처를 읽지 못했어요.");
+  if (!r) throw new Error("캡처를 인식하지 못했어요.");
 
   const notes = [...r.notes];
   const t = (s: string) => s.trim() || null;

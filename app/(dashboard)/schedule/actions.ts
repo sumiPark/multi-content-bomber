@@ -392,7 +392,7 @@ export async function saveAutoConceptAction(input: z.input<typeof autoConceptSch
     updated_by: auth.userId,
   });
   if (error) return { ok: false, error: error.message };
-  return done("저장했어요. 다음에 쓰는 대본부터 AI가 읽어요.");
+  return done("저장했어요. 다음에 쓰는 대본부터 AI가 참고해요.");
 }
 
 /**
@@ -418,7 +418,7 @@ export async function saveShootConceptAction(input: z.input<typeof shootConceptS
     } catch (e) {
       console.error("[schedule] 편집 스타일 읽기 실패:", e);
       params = null;
-      message = "저장했어요. 다만 편집 스타일을 읽지 못해 편집은 기본으로 나가요. 잠시 뒤 다시 저장해 주세요.";
+      message = "저장했어요. 다만 편집 스타일을 반영하지 못해 편집은 기본으로 나가요. 잠시 뒤 다시 저장해 주세요.";
     }
   }
 
@@ -436,5 +436,5 @@ export async function saveShootConceptAction(input: z.input<typeof shootConceptS
     updated_by: auth.userId,
   });
   if (error) return { ok: false, error: error.message };
-  return done(message ?? "저장했어요. 다음 기획과 대본부터 AI가 읽어요.");
+  return done(message ?? "저장했어요. 다음 기획과 대본부터 AI가 참고해요.");
 }

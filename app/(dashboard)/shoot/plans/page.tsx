@@ -157,7 +157,7 @@ export default async function ShootPlansPage({ searchParams }: { searchParams: P
                     {g.ideas.length > 0 ? (
                       <ShootIdeaList ideas={g.ideas} account={g.name} canManage={canManage} />
                     ) : (
-                      <p className="rounded-md border border-dashed bg-card px-4 py-6 text-center text-[13px] text-muted-foreground">
+                      <p className="rounded-md border border-dashed bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                         {g.off ? "고를 기획이 없어요." : "기획을 만드는 중이거나 고를 후보가 모자라요. 몇 분 뒤에도 없으면 촬영 설정의 쓸 상품을 확인해 주세요."}
                       </p>
                     )}

@@ -743,7 +743,7 @@ export async function getShootFilesAction(input: z.infer<typeof filesSchema>): P
   if (plan.status !== "PUBLISHED") {
     const blocking = await currentBlocking(service, plan);
     const acked = new Set((plan.warnings_ack ?? []) as string[]);
-    if (blocking.some((b) => !acked.has(b))) return { ok: false, error: "걸린 내용을 먼저 확인해 주세요." };
+    if (blocking.some((b) => !acked.has(b))) return { ok: false, error: "경고 내용을 먼저 확인해 주세요." };
   }
 
   const account = plan.social_accounts?.display_name ?? "";

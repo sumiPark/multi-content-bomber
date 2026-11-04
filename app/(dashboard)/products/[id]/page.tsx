@@ -112,7 +112,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                       )}
                     </>
                   ) : (
-                    <p className="text-xs text-muted-foreground">아직 읽지 않은 이미지예요.</p>
+                    <p className="text-xs text-muted-foreground">아직 분석하지 않은 이미지예요.</p>
                   )}
                 </div>
               </div>
@@ -149,8 +149,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               <p className="text-muted-foreground">
                 아직 요약이 없어요.{" "}
                 {product.stock_status === "available"
-                  ? "다음 분석 때 읽어요. 보통 매일 새벽에 돌아요."
-                  : "판매 중인 상품만 분석해서, 다시 판매되면 그때 읽어요."}
+                  ? "다음 분석 때 처리해요. 보통 매일 새벽에 실행돼요."
+                  : "판매 중인 상품만 분석해서, 다시 판매되면 그때 분석해요."}
               </p>
               <ProductActions productId={product.id} canManage={canManage} excluded={product.excluded} hasAnalysis={false} />
             </div>

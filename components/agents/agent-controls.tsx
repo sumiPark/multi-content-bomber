@@ -122,7 +122,7 @@ export function PlaybookEditor({
             maxLength={4000}
             aria-label="플레이북 추가 지침"
             placeholder={"예)\n- 첫 문장은 질문형을 먼저 쓴다\n- 과일은 당도 · 산지보다 먹는 장면을 먼저 보여 준다"}
-            className="font-[inherit] text-[13px] leading-relaxed"
+            className="font-[inherit] text-sm leading-relaxed"
           />
           <div className="flex flex-wrap items-center gap-2">
             <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} placeholder="바꾼 이유 (선택)" aria-label="바꾼 이유" className="max-w-md" />
@@ -147,9 +147,9 @@ export function PlaybookEditor({
       ) : (
         <div className="space-y-2">
           {current?.body.trim() ? (
-            <pre className="whitespace-pre-wrap rounded-md border bg-surface-2 px-3.5 py-3 font-[inherit] text-[13px] leading-relaxed">{current.body}</pre>
+            <pre className="whitespace-pre-wrap rounded-md border bg-surface-2 px-3.5 py-3 font-[inherit] text-sm leading-relaxed">{current.body}</pre>
           ) : (
-            <p className="rounded-md border border-dashed px-3.5 py-3 text-[13px] text-muted-foreground">
+            <p className="rounded-md border border-dashed px-3.5 py-3 text-sm text-muted-foreground">
               추가 지침이 없어요. 지금은 코드에 있는 기본 규칙(근거 문구만 쓰기 · 금지 표현 피하기 · 계정 역할)만으로 일해요.
             </p>
           )}
@@ -171,7 +171,7 @@ export function PlaybookEditor({
         ) : (
           <ul className="divide-y rounded-md border">
             {history.map((h, i) => (
-              <li key={h.version} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3.5 py-2.5 text-[13px]">
+              <li key={h.version} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3.5 py-2.5 text-sm">
                 <span className="font-semibold tabular-nums">v{h.version}</span>
                 {i === 0 && <span className="rounded-full bg-brand-soft px-2 py-0.5 text-xs font-semibold text-primary">지금 쓰는 것</span>}
                 <span className="text-muted-foreground">
@@ -231,21 +231,21 @@ export function FeedbackCard({ fb, canManage }: { fb: FeedbackData; canManage: b
       <div className="grid gap-3 lg:grid-cols-2">
         <div>
           <p className="mb-1 text-xs font-semibold text-muted-foreground">지금</p>
-          <pre className="min-h-16 whitespace-pre-wrap rounded-md border bg-surface-2 px-3 py-2.5 font-[inherit] text-[13px] leading-relaxed">
+          <pre className="min-h-16 whitespace-pre-wrap rounded-md border bg-surface-2 px-3 py-2.5 font-[inherit] text-sm leading-relaxed">
             {fb.currentBody.trim() || "(추가 지침 없음)"}
           </pre>
         </div>
         <div>
           <p className="mb-1 text-xs font-semibold text-muted-foreground">바뀐 뒤</p>
           {mode === "edit" ? (
-            <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} maxLength={4000} aria-label="반영할 지침" className="text-[13px]" />
+            <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} maxLength={4000} aria-label="반영할 지침" className="text-sm" />
           ) : (
-            <pre className="min-h-16 whitespace-pre-wrap rounded-md border border-primary/30 bg-brand-soft px-3 py-2.5 font-[inherit] text-[13px] leading-relaxed">{fb.proposedBody}</pre>
+            <pre className="min-h-16 whitespace-pre-wrap rounded-md border border-primary/30 bg-brand-soft px-3 py-2.5 font-[inherit] text-sm leading-relaxed">{fb.proposedBody}</pre>
           )}
         </div>
       </div>
       {(fb.evidence.summary || fb.evidence.sample != null) && (
-        <p className="text-[13px] text-ink-2">
+        <p className="text-sm text-ink-2">
           근거: {fb.evidence.summary}
           {fb.evidence.sample != null && ` · 표본 ${fb.evidence.sample}개`}
           {fb.evidence.baseline && ` · ${fb.evidence.baseline}`}

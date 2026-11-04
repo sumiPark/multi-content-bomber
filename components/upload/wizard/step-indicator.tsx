@@ -32,7 +32,7 @@ export function StepIndicator({
                 disabled={!clickable && status !== "active"}
                 aria-current={status === "active" ? "step" : undefined}
                 className={cn(
-                  "flex h-10 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] font-medium whitespace-nowrap transition-colors",
+                  "flex h-10 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm font-medium whitespace-nowrap transition-colors",
                   status === "active" && "bg-brand-soft font-semibold text-primary",
                   status === "done" && "text-ink-2",
                   status === "pending" && "text-muted-foreground",

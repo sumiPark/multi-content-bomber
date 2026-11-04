@@ -50,7 +50,7 @@ export function ShootAddAccount({ candidates, options }: { candidates: { id: str
         </Button>
       </div>
       <label className="block space-y-1.5">
-        <span className="text-[13px] font-semibold">인스타그램 계정</span>
+        <span className="text-sm font-semibold">인스타그램 계정</span>
         <select
           value={accountId}
           onChange={(e) => {
@@ -58,7 +58,7 @@ export function ShootAddAccount({ candidates, options }: { candidates: { id: str
             // AI 자동에서 쓰던 계정은 쓸 상품을 미리 채운다
             setScopes(candidates.find((c) => c.id === e.target.value)?.scopes ?? []);
           }}
-          className="block h-9 w-full max-w-xs rounded-md border border-input bg-card px-2.5 text-[13px] focus-visible:outline-2 focus-visible:outline-primary"
+          className="block h-9 w-full max-w-xs rounded-md border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-primary"
           required
         >
           <option value="">고르기</option>
@@ -70,7 +70,7 @@ export function ShootAddAccount({ candidates, options }: { candidates: { id: str
         </select>
       </label>
       <div className="space-y-1.5">
-        <p className="text-[13px] font-semibold">쓸 상품</p>
+        <p className="text-sm font-semibold">쓸 상품</p>
         <ScopeChecks options={options} value={scopes} onChange={setScopes} />
         <p className="text-xs text-muted-foreground">AI 자동 업로드와 함께 쓰는 설정이에요.</p>
       </div>
@@ -130,7 +130,7 @@ export function ShootAccountHeader({
             </div>
           </div>
         ) : (
-          <p className="flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
+          <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
             쓸 상품
             {scopes.map((k) => (
               <span key={k} className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-2">

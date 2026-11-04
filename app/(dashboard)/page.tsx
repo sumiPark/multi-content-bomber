@@ -136,7 +136,7 @@ function TodayPostsSkeleton() {
   return (
     <div className="rounded-lg border bg-card p-6" aria-busy="true">
       <p className="text-[15px] font-semibold">오늘 올린 게시물</p>
-      <p className="mt-2 text-sm text-muted-foreground">인스타에서 읽는 중…</p>
+      <p className="mt-2 text-sm text-muted-foreground">인스타에서 집계하는 중…</p>
     </div>
   );
 }

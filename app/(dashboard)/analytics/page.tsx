@@ -204,7 +204,7 @@ export default async function AnalyticsPage({
             {tab === "profile"
               ? "프로필을 12개 기준으로 매일 04:30에 자동 채점하고, 점수를 가장 많이 깎는 곳부터 고칠 문구를 드려요. 인스타에는 아무것도 바꾸지 않아요. 마음에 드는 문구를 직접 붙여 넣으세요."
               : tab === "compare"
-                ? "우리 계정마다 참고할 계정을 두고, 그 계정 릴스가 평소보다 몇 배 잘됐는지 매일 읽어요. 고른 이유와 숫자 근거를 함께 보여 드려요."
+                ? "우리 계정마다 참고할 계정을 두고, 그 계정 릴스가 평소보다 몇 배 잘됐는지 매일 집계해요. 고른 이유와 숫자 근거를 함께 보여 드려요."
                 : "릴스 · 사진 · 캐러셀을 유형별 평소 조회수와 견줘 봐요. 어떤 게시물이 평소보다 몇 배 잘됐는지, 무엇을 더 만들지 숫자로 보여 드려요. 매일 새벽에 자동으로 수집해요."}
           </p>
         </div>
@@ -258,7 +258,7 @@ export default async function AnalyticsPage({
                       href={`/analytics?tab=posts&account=${a.id}&period=${postsPeriod}`}
                       aria-current={on ? "page" : undefined}
                       className={cn(
-                        "inline-flex h-[30px] items-center rounded-[6px] px-3 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                        "inline-flex h-[30px] items-center rounded-[6px] px-3 text-xs font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                         on && "bg-card font-semibold text-foreground shadow-[0_1px_2px_rgb(16_24_40/0.12)]",
                       )}
                     >
@@ -271,7 +271,7 @@ export default async function AnalyticsPage({
               {postsData && postsSelected && <PostPerformance key={postsSelected.id} data={postsData} now={postsNow} period={postsPeriod} accountId={postsSelected.id} />}
 
               <details className="group">
-                <summary className="cursor-pointer rounded-lg border bg-card px-4 py-3 text-[13px] font-medium text-ink-2">최근 게시물 30개 · 팔로워 변화</summary>
+                <summary className="cursor-pointer rounded-lg border bg-card px-4 py-3 text-sm font-medium text-ink-2">최근 게시물 30개 · 팔로워 변화</summary>
                 <div className="mt-3">
               {!collected ? (
                 <EmptyState

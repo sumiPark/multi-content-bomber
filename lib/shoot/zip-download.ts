@@ -24,7 +24,7 @@ async function* entries(files: ZipEntry[], onFile: (name: string) => void) {
       continue;
     }
     const res = await fetch(f.url as string);
-    if (!res.ok) throw new Error(`${f.name}을 읽지 못했어요 (${res.status}).`);
+    if (!res.ok) throw new Error(`${f.name}을 불러오지 못했어요 (${res.status}).`);
     yield { name: f.name, input: res };
   }
 }

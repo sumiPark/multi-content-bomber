@@ -48,7 +48,7 @@ export function ConfirmDialog({
           {danger && <TriangleAlert className="size-5 shrink-0 text-risk" />}
           {title}
         </h2>
-        <div className="space-y-2 text-[13px] leading-relaxed text-ink-2">{children}</div>
+        <div className="space-y-2 text-sm leading-relaxed text-ink-2">{children}</div>
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="ghost" onClick={onClose} disabled={pending}>
             그만두기
