@@ -72,7 +72,7 @@ function Field({
 
 const PHRASE_HELP = "한 줄에 문구 하나, 10개까지. {상품}처럼 중괄호 안은 AI가 채우고 나머지 글자는 그대로 나가요. 말과 화면 문구에 똑같이 들어가요.";
 
-export function AccountConceptCard({ data, canManage, mode, top }: { data: ConceptCardData; canManage: boolean; mode: "auto" | "shoot"; top?: React.ReactNode }) {
+export function AccountConceptCard({ data, canManage, mode, top, hideName }: { data: ConceptCardData; canManage: boolean; mode: "auto" | "shoot"; top?: React.ReactNode; hideName?: boolean }) {
   const { isPending, error, run } = useScheduleRun();
   const [form, setForm] = useState<Record<FormKey, string>>(() => Object.fromEntries(FORM_KEYS.map((k) => [k, data[k]])) as Record<FormKey, string>);
   const bind = (key: FormKey) => ({ value: form[key], onChange: (v: string) => setForm((f) => ({ ...f, [key]: v })), disabled: !canManage || isPending });
@@ -82,7 +82,7 @@ export function AccountConceptCard({ data, canManage, mode, top }: { data: Conce
   return (
     <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={`@${data.name} 컨셉`}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h3 className="text-[15px] font-semibold">@{data.name}</h3>
+        {!hideName && <h3 className="text-[15px] font-semibold">@{data.name}</h3>}
         <span className="text-xs text-muted-foreground">
           계정 역할 {data.role ?? "미정"} ·{" "}
           <Link href="/accounts" className="underline underline-offset-2">

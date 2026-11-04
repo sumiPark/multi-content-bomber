@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { UserMinus, UserPlus, X } from "lucide-react";
 import { disableShootAccountAction, enableShootAccountAction, updateScopesAction } from "@/app/(dashboard)/schedule/actions";
@@ -8,7 +9,7 @@ import { useScheduleRun } from "@/components/schedule/slot-rule-cell";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
-// 촬영 설정의 부품 — 기획을 만들 계정 추가 · 빼기, 쓸 상품 바꾸기. 쓸 상품은 AI 자동 업로드와 함께 쓴다.
+// 촬영 설정의 부품 — 목록의 계정 추가, 상세의 쓸 상품 바꾸기 · 계정 빼기. 쓸 상품은 AI 자동 업로드와 함께 쓴다.
 
 export function ShootAddAccount({ candidates, options }: { candidates: { id: string; name: string; scopes: string[] }[]; options: ScopeOptionData[] }) {
   const { isPending, error, run, setError } = useScheduleRun();
@@ -100,6 +101,7 @@ export function ShootAccountHeader({
   canManage: boolean;
 }) {
   const { isPending, error, run } = useScheduleRun();
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(scopes);
   const [askOff, setAskOff] = useState(false);
@@ -156,7 +158,15 @@ export function ShootAccountHeader({
         confirmLabel="빼기"
         pending={isPending}
         onClose={() => setAskOff(false)}
-        onConfirm={() => run(() => disableShootAccountAction({ accountId }), () => setAskOff(false))}
+        onConfirm={() =>
+          run(
+            () => disableShootAccountAction({ accountId }),
+            () => {
+              setAskOff(false);
+              router.push("/shoot/settings");
+            },
+          )
+        }
       >
         <p>고르기 전 기획은 목록에서 빠지고 새 기획을 만들지 않아요. 이미 고른 기획과 저장한 컨셉은 그대로예요.</p>
       </ConfirmDialog>
