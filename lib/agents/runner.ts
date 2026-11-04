@@ -49,6 +49,8 @@ export async function runAgent<T>(opts: {
   agent: AgentName;
   system: string;
   user: string;
+  // 처음 메시지에 함께 보낼 그림(data URL) — 편집 에이전트의 프레임 묶음
+  userImages?: string[];
   skills: AgentSkill[];
   outputSchema: z.ZodType<T>;
   outputName: string;
@@ -110,7 +112,12 @@ export async function runAgent<T>(opts: {
   );
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: opts.system + playbookBlock(playbook) },
-    { role: "user", content: opts.user },
+    {
+      role: "user",
+      content: opts.userImages?.length
+        ? [{ type: "text", text: opts.user }, ...opts.userImages.map((url) => ({ type: "image_url" as const, image_url: { url, detail: "high" as const } }))]
+        : opts.user,
+    },
   ];
 
   try {
@@ -139,6 +146,8 @@ export async function runAgent<T>(opts: {
       }
 
       messages.push(msg as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+      // 스킬이 돌려준 그림 — tool 메시지에는 그림을 못 넣어 호출을 모두 답한 뒤 user 메시지로 붙인다
+      const pendingImages: string[] = [];
       for (const call of calls) {
         if (call.type !== "function") continue;
         const skill = opts.skills.find((s) => s.name === call.function.name);
@@ -147,7 +156,13 @@ export async function runAgent<T>(opts: {
         try {
           if (!skill) throw new Error(`없는 스킬: ${call.function.name}`);
           const args = skill.input.parse(JSON.parse(call.function.arguments || "{}"));
-          const result = await skill.run(args);
+          const raw = await skill.run(args);
+          let result = raw;
+          if (raw && typeof raw === "object" && Array.isArray((raw as { __images?: unknown }).__images)) {
+            const { __images, ...rest } = raw as { __images: string[] };
+            pendingImages.push(...__images);
+            result = rest;
+          }
           content = JSON.stringify(result).slice(0, MAX_RESULT_CHARS);
           skillCalls.push({ skill: call.function.name, args, ok: true, ms: Date.now() - started });
         } catch (err) {
@@ -156,6 +171,12 @@ export async function runAgent<T>(opts: {
           skillCalls.push({ skill: call.function.name, args: call.function.arguments, ok: false, ms: Date.now() - started, error });
         }
         messages.push({ role: "tool", tool_call_id: call.id, content });
+      }
+      if (pendingImages.length) {
+        messages.push({
+          role: "user",
+          content: [{ type: "text", text: "방금 요청한 프레임이다." }, ...pendingImages.map((url) => ({ type: "image_url" as const, image_url: { url, detail: "high" as const } }))],
+        });
       }
     }
     throw new Error(`스킬 호출이 ${maxSteps}번을 넘음 — 답을 정하지 못함`);

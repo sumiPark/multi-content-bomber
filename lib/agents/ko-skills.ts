@@ -177,3 +177,39 @@ export function profileRubric(): { note: string; roleNote: string; items: Rubric
   rubricCache = { note: raw.note, roleNote: raw.role_note, items: raw.items };
   return rubricCache;
 }
+
+export interface EditKit {
+  hook_rules: string[];
+  thumbnail_rules: string[];
+  cut_rules: string[];
+  caption_rules: string[];
+  tts_rules: string[];
+  graphics: Record<string, { use: string; params: Record<string, string> }>;
+  graphics_rules: string[];
+  sfx: Record<string, { use: string; gain_db: number; slice: [number, number] | null; lead?: number }>;
+  sfx_rules: string[];
+  music: { file: string; in: number; gain_db: number };
+  voice: { id: string; title: string; model: string; speed: number };
+  render: { hyperframes: string };
+}
+
+let editKitCache: EditKit | null = null;
+
+/** 편집 규칙 · 그래픽 틀 · 소리 목록 (ig-edit-ko/kit.json). */
+export function editKit(): EditKit {
+  if (editKitCache) return editKitCache;
+  editKitCache = JSON.parse(readFileSync(path.join(SKILLS_DIR, "ig-edit-ko", "kit.json"), "utf8")) as EditKit;
+  return editKitCache;
+}
+
+/** 편집 소재가 있는 폴더 (글꼴 · 효과음). */
+export function editKitAsset(...parts: string[]): string {
+  return path.join(SKILLS_DIR, "ig-edit-ko", "assets", ...parts);
+}
+
+/** TTS 읽기용 원고에 남은 숫자 · 기호를 말하는 대로 바꾼다 (ttsread_ko.py). 한 줄에 문장 하나. */
+export function ttsReading(lines: string[]): { source: string; text: string; flags: string[] }[] {
+  const clean = lines.map((l) => l.replace(/\s+/g, " ").trim());
+  const r = runPy("ig-edit-ko/ttsread_ko.py", `${clean.join("\n")}\n`) as { source: string; text: string; flags: string[] }[];
+  return Array.isArray(r) ? r : [r];
+}

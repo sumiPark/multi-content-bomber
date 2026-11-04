@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
 import { REQUEST_STATUS } from "@/lib/shoot/request-data";
 import { createClient } from "@/lib/supabase/client";
+import { HookFields } from "@/components/shoot/hook-fields";
 import { cn } from "@/lib/utils";
 
 // 촬영 요청 하나(상세 화면) — 컷 목록(찍을 것 · 찍는 법 · 화면 문구 · 대사), 컷마다 촬영본 올리기, 다 올렸어요.
@@ -31,6 +32,11 @@ export interface ShootRequestCardData {
   product: { name: string; url: string; image: string | null } | null;
   brief: string | null;
   hook: { spoken: string; onScreen: string; score: number | null } | null;
+  // 사람이 넣은 첫 화면 후킹 · 표지 글자 — 비면 편집 에이전트가 만든다
+  planId: string;
+  humanHook: string;
+  humanThumbnail: string;
+  thumbnailIdea: string | null;
   caption: string;
   // 저장한 후킹 문구를 썼는지 · 못 썼으면 왜 (계정 컨셉, 0039)
   fixedHook: boolean;
@@ -121,6 +127,7 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
           {request.fixedHook && <span className="ml-1 text-xs text-muted-foreground">저장한 후킹 문구</span>}
         </p>
       )}
+      {open && <HookFields planId={request.planId} hook={request.humanHook} thumbnail={request.humanThumbnail} aiHook={request.hook?.onScreen ?? null} aiThumbnail={request.thumbnailIdea} />}
       {request.fixedNotes.length > 0 && open && (
         <ul className="space-y-0.5 rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">
           {request.fixedNotes.map((n) => (

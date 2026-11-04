@@ -23,6 +23,7 @@ type Edit = {
   thumbnail?: string | null;
   editedAt?: string | null;
   segments?: { cut: number; onScreen: string; subtitles: { text: string }[] }[];
+  kit?: { hook?: { text?: string; source?: string }; thumbnail?: { title?: string } } | null;
   check?: { issues?: { kind: string; detail: string }[] };
 };
 type Proposal = { ideas?: { title: string }[]; chosen?: number | null };
@@ -78,7 +79,8 @@ export default async function ShootReviewPage() {
   const cards: ReviewCardData[] = plans.map((p) => {
     const r = p.shoot_requests;
     const edit = (r?.edit ?? {}) as Edit;
-    const caption = ((p.script ?? {}) as { caption?: { text: string } }).caption?.text ?? "";
+    const script = (p.script ?? {}) as { caption?: { text: string }; human?: { hook?: string | null; thumbnail?: string | null } };
+    const caption = script.caption?.text ?? "";
     const segments = edit.segments ?? [];
     const cuts = (r?.cuts ?? []) as Cut[];
     const editFailed = p.status === "SHOT" && r?.status === "FAILED";
@@ -116,6 +118,11 @@ export default async function ShootReviewPage() {
       hasFinal: !!r?.rendered_path,
       seconds: edit.seconds ?? null,
       caption,
+      hookText: edit.kit?.hook?.text ?? null,
+      hookByHuman: edit.kit?.hook?.source === "human",
+      thumbnailText: edit.kit?.thumbnail?.title ?? null,
+      humanHook: script.human?.hook ?? "",
+      humanThumbnail: script.human?.thumbnail ?? "",
       skippedCuts: cuts.filter((c) => c.skipped).map((c) => c.no),
       cuts: cuts.filter((c) => !c.skipped).map((c) => {
         const seg = segments.find((s) => s.cut === c.no);

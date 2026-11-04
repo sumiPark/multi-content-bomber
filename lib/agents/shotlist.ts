@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { conceptBlock } from "@/lib/agents/concept";
+import { editKit } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { runAgent, type AgentResult } from "@/lib/agents/runner";
 import { writerSkills } from "@/lib/agents/script";
@@ -23,6 +24,11 @@ export const shotlistSchema = z.object({
     )
     .describe("서로 다른 공식으로 정확히 3개"),
   chosen_hook: z.number().int().describe("고른 훅 번호 (0~2)"),
+  thumbnail: z.object({
+    title: z.string().describe("표지 큰 글자, 8자 안팎. 후킹과 같은 약속을 더 짧게"),
+    sub: z.string().describe("표지 작은 글자, 없으면 빈 문자열"),
+    shot: z.string().describe("표지로 쓸 장면 — 찍는 사람이 알 수 있게 한 줄"),
+  }),
   cuts: z
     .array(
       z.object({
@@ -30,7 +36,8 @@ export const shotlistSchema = z.object({
         shot: z.string().describe("무엇을 찍는지 — 화면에 보이는 것 한 줄"),
         how: z.string().describe("어떻게 찍는지 — 각도 · 거리 · 손 · 배경 · 빛, 찍는 사람이 바로 따라 할 수 있게"),
         on_screen: z.string().describe("이 컷 화면 문구, 12자 안팎. 없으면 빈 문자열"),
-        voice: z.string().describe("이 컷에서 말할 대사. 말하지 않는 계정 · 컷이면 빈 문자열"),
+        voice: z.string().describe("찍는 사람이 직접 말할 대사. 말하지 않는 계정 · 컷이면 빈 문자열"),
+        narration: z.string().describe("말하지 않는 계정의 AI 음성 내레이션 초안. 이 컷에서 보이는 것에 맞는 구어체 한 문장. 사람이 말하는 컷이면 빈 문자열"),
       }),
     )
     .describe("컷 5~8개, 첫 컷 = 고른 훅"),
@@ -70,7 +77,8 @@ function systemPrompt(ctx: ShotlistContext): string {
   const what = ctx.idea
     ? `고른 기획: "${ctx.idea.title}" (${ctx.idea.format}) — ${ctx.idea.concept}`
     : `사람이 상품을 직접 골랐다.${ctx.brief ? ` 메모: "${ctx.brief}" — 이 메모를 가장 먼저 반영한다.` : " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
-  return `너는 인스타그램 @${ctx.accountName}의 릴스 촬영 감독 겸 대본 작가다. 사람이 휴대폰으로 컷 리스트대로 찍어 올리면 AI가 컷을 잇고 화면 문구를 입힌다.
+  const kit = editKit();
+  return `너는 인스타그램 @${ctx.accountName}의 릴스 촬영 감독 겸 대본 작가다. 사람이 휴대폰으로 컷 리스트대로 찍어 올리면 AI 편집자가 원본을 보고 컷 · 음성 · 자막 · 그래픽 · 효과음을 넣어 완성한다.
 계정 역할: ${focus}${ctx.roleNote ? ` — ${ctx.roleNote}` : ""}
 상품: ${f.shop} ${f.kindLabel} "${f.name}"
 ${what}
@@ -78,10 +86,14 @@ ${what}
 순서 (스킬을 실제로 써라):
 1. get_product_facts, list_hook_formulas를 읽는다.
 2. 서로 다른 공식으로 훅 3개를 쓰고 score_hooks로 채점한다. 1등이 50점 미만이면 다시 쓴다. 첫 컷은 그 훅이다.
-3. 컷 리스트: 컷 5~8개, 컷마다 1.5~5초, 합계 15~25초. 첫 컷 0~2초에 가장 눈에 띄는 장면(결과 · 단면 · 움직임).
+   후킹 규칙:
+${kit.hook_rules.map((r) => `   - ${r}`).join("\n")}
+   표지 규칙(thumbnail):
+${kit.thumbnail_rules.map((r) => `   - ${r}`).join("\n")}
+3. 컷 리스트: 컷 5~8개, 컷마다 1.5~5초, 합계 15~25초. 첫 컷은 후킹 글자와 함께 궁금증을 만드는 장면이다(결과 · 단면 · 움직임 · 의외의 행동). 편집에서 잘라 쓰게 컷마다 동작을 2~3초 더 길게 찍으라고 how에 적는다.
    컷마다 장면이 바뀌어야 한다(같은 각도 연속 금지). 마지막 컷은 훅의 낱말을 되받아 다시 보게.
    how는 찍는 사람이 그대로 따라 할 수 있게 구체적으로: 위에서 · 옆에서 · 손 클로즈업 · 흰 배경 · 창가 빛 등.
-4. ${person ? "voice: 사람이 카메라 보고 말할 짧은 대사. 컷 길이 안에 말할 수 있게(1초에 6음절 안팎). time_script로 재고 경고를 없앤다." : "voice는 모두 빈 문자열(말하지 않는다). 화면 문구로 이야기를 이끈다. 화면 문구를 time_script로 재 본다."}
+4. ${person ? "voice: 사람이 카메라 보고 말할 짧은 대사. 컷 길이 안에 말할 수 있게(1초에 6음절 안팎). time_script로 재고 경고를 없앤다." : "voice는 모두 빈 문자열이다. 찍는 사람은 말하지 않고, narration을 AI 음성이 읽는다. 말투는 친근한 수다체, 컷 길이 안에 읽을 수 있게(1초에 6음절 안팎). 말은 그 컷에서 보이는 것에 맞춘다. time_script로 재고 경고를 없앤다."}
 5. 캡션을 쓰고 check_caption으로 점검한다. 첫 줄 40자 이내, 요청은 하나, 해시태그 정확히 3개.
 6. 화면 문구 · 대사 · 캡션 전체를 check_ai_tone, check_rules로 점검하고 걸린 것을 고친다.
 
@@ -118,7 +130,7 @@ export function shotlistAsScript(s: ShotlistOutput) {
   return {
     hooks: s.hooks,
     chosen_hook: s.chosen_hook,
-    beats: s.cuts.map((c) => ({ spoken: c.voice || c.on_screen, on_screen: c.on_screen, visual: `${c.shot} — ${c.how}` })),
+    beats: s.cuts.map((c) => ({ spoken: c.voice || c.narration || c.on_screen, on_screen: c.on_screen, visual: `${c.shot} — ${c.how}` })),
     loop_word: s.loop_word,
     caption: s.caption,
   };

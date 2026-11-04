@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { conceptBlock } from "@/lib/agents/concept";
+import { editKit } from "@/lib/agents/ko-skills";
 import { runAgent, type AgentResult } from "@/lib/agents/runner";
 import { selectSkills, type SelectContext } from "@/lib/agents/select";
 import { KIND_LABEL, SHOPS } from "@/lib/products/shops";
@@ -57,6 +58,7 @@ function systemPrompt(ctx: PlanAContext): string {
 - 건강기능식품은 기능성 효과를 보여 주는 기획을 하지 않는다(구성 · 먹는 방법 · 맛 · 포장 위주).
 - why는 사람이 고를 때 읽는다. 짧고 구체적으로.
 - draft는 사람이 읽고 고르는 대본 초안이다. 기획을 고르기 전에 get_product로 사실을 확인하고, 거기 있는 숫자 · 성분 · 효과만 쓴다. 1인칭은 그 장면에서 실제로 보여 주는 것까지만.
+- draft.hook은 첫 화면에 크게 나가는 후킹이다. 다음 규칙을 지킨다: ${editKit().hook_rules.join(" ")}
 - draft 말투는 짧은 구어체. 최고 · 유일 · 100% 같은 단정, 효과 보장, 번역투를 쓰지 않는다.
 - 후보가 모자라면 있는 만큼만.${conceptBlock("이 계정의 직접 촬영 컨셉", ctx.concept, "기획 형식 · 찍는 방식 · 분위기를 이 방향에 맞추고, why에 어떻게 맞췄는지 적는다.")}`;
 }

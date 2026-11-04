@@ -45,6 +45,13 @@ export interface ReviewCardData {
   hasFinal: boolean;
   seconds: number | null;
   caption: string;
+  // 이번 편집에 들어간 후킹 · 표지 글자 (기본 편집이면 null)
+  hookText: string | null;
+  hookByHuman: boolean;
+  thumbnailText: string | null;
+  // 사람이 넣어 둔 글자. 비면 AI가 정한다
+  humanHook: string;
+  humanThumbnail: string;
   cuts: { no: number; onScreen: string; subtitle: string | null }[];
   // 찍지 못해 뺀 컷 번호
   skippedCuts: number[];
@@ -92,6 +99,8 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
   const [caption, setCaption] = useState(card.caption);
   const [editingTexts, setEditingTexts] = useState(false);
   const [texts, setTexts] = useState(card.cuts);
+  const [hook, setHook] = useState(card.humanHook);
+  const [thumbnail, setThumbnail] = useState(card.humanThumbnail);
   const [ask, setAsk] = useState<"skip" | "reopen" | "unlink" | null>(null);
   const [files, setFiles] = useState<Extract<ShootFilesResult, { ok: true }> | null>(null);
   const [showFiles, setShowFiles] = useState(false);
@@ -115,6 +124,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
     if (t.onScreen === card.cuts[i].onScreen && !subtitleChanged) return [];
     return [{ no: t.no, onScreen: t.onScreen, ...(subtitleChanged ? { subtitle: t.subtitle ?? "" } : {}) }];
   });
+  const hookChanged = hook.trim() !== card.humanHook.trim() || thumbnail.trim() !== card.humanThumbnail.trim();
   // 페이지를 오래 열어 두면 미리보기 링크가 만료된다 — 한 번만 새 링크를 받아 온다
   const router = useRouter();
   const refreshedOnce = useRef(false);
@@ -373,6 +383,16 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
 
         {reviewable && editingTexts && card.requestId && (
           <div className="space-y-2 rounded-md border border-dashed p-2.5">
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              <label className="space-y-1 text-xs font-semibold">
+                첫 화면 후킹
+                <Input value={hook} maxLength={40} placeholder={card.hookText ? `비우면 AI가 정해요 · 지금: ${card.hookText}` : "비우면 AI가 정해요"} onChange={(e) => setHook(e.target.value)} />
+              </label>
+              <label className="space-y-1 text-xs font-semibold">
+                표지 글자
+                <Input value={thumbnail} maxLength={24} placeholder={card.thumbnailText ? `비우면 AI가 정해요 · 지금: ${card.thumbnailText.replace(/\n+/g, " ")}` : "비우면 AI가 정해요"} onChange={(e) => setThumbnail(e.target.value)} />
+              </label>
+            </div>
             <p className="text-xs text-muted-foreground">컷마다 화면 문구 · 자막을 고치고 다시 편집하면 몇 분 뒤 새 완성본이 나와요. 자막을 비우면 그 컷 자막은 빠져요. 화면 문구는 22자까지 큰 글자로 들어가고, 더 길면 글자가 작아져요.</p>
             {texts.map((t, i) => (
               <div key={t.no} className="grid gap-1 sm:grid-cols-[2rem_1fr_1.4fr] sm:items-center">
@@ -383,8 +403,8 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
             ))}
             <Button
               size="sm"
-              disabled={isPending || changedCuts.length === 0}
-              onClick={() => run(() => reEditAction({ requestId: card.requestId!, cuts: changedCuts }), "다시 편집을 시작했어요. 몇 분 뒤 새 완성본이 나와요.", () => setEditingTexts(false))}
+              disabled={isPending || (changedCuts.length === 0 && !hookChanged)}
+              onClick={() => run(() => reEditAction({ requestId: card.requestId!, cuts: changedCuts, ...(hookChanged ? { hook: hook.trim(), thumbnail: thumbnail.trim() } : {}) }), "다시 편집을 시작했어요. 몇 분 뒤 새 완성본이 나와요.", () => setEditingTexts(false))}
             >
               <RotateCcw className="size-4" /> 고친 문구로 다시 편집
             </Button>
@@ -395,7 +415,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
           <div className="flex flex-wrap gap-2">
             {reviewable && card.requestId && (
               <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setEditingTexts((v) => !v)}>
-                <Pencil className="size-4" /> 화면 문구 · 자막 고치기
+                <Pencil className="size-4" /> 후킹 · 문구 · 자막 고치기
               </Button>
             )}
             {failed && card.requestId && (

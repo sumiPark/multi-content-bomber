@@ -15,6 +15,9 @@ import { getOpenAI } from "@/lib/openai";
 import type { ContentRule } from "@/lib/rules/check";
 import { PACE, type EditStyle } from "@/lib/shoot/edit-style";
 import { concatSegments, extractAudio, probe, renderSegment, snapshot, type SegmentSpec } from "@/lib/shoot/ffmpeg";
+import { readClip, renderKitEdit, type KitClip, type KitResult } from "@/lib/shoot/video-kit/pipeline";
+import { transcribeWords } from "@/lib/shoot/video-kit/tools";
+import type { EditPlan } from "@/lib/agents/edit-plan";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -22,7 +25,9 @@ import type { Json } from "@/types/database";
 // 직접 촬영 편집 워커 — 편집 에이전트(3)의 촬영본 편집. 사람이 "다 올렸어요"를 누른(UPLOADED) 촬영 요청마다:
 //   1. 컷마다 쓸 구간을 고른다 — 말하는 컷은 받아쓰기(whisper) 시각으로 말 앞뒤만, 아니면 앞 흔들림을 빼고 컷 길이만큼
 //   2. 1080x1920으로 맞추고 화면 문구(위) · 말 자막(아래)을 입힌다 — 사람이 고친 문구가 있으면 그걸로
-//   3. 이어 붙이고 소리 크기를 맞춘다. 음악은 아직 없음(AI 음악 도구를 정하면 여기서 깐다)
+//   3. 이어 붙이고 소리 크기를 맞춘다.
+//   편집 키트(lib/shoot/video-kit, 규칙은 .claude/skills/ig-edit-ko)가 먼저 돈다: 원본 분석 → 후킹 · 표지 → 컷 → 음성 · 자막 →
+//   모션그래픽 · 효과음 · 음악. 키트가 실패하면 위 1~3의 기본 편집으로 만들고 이유를 화면에 남긴다(SHOOT_BASIC_EDIT=1이면 기본 편집만).
 //   4. 실제로 들어간 문구 · 자막 · 캡션으로 점검(4)을 다시 돌린다 → 완성본 받기 화면에 보인다
 //   끝나면 shoot_requests EDITED + content_plans RENDERED.
 //
@@ -39,6 +44,7 @@ type Cut = {
   how: string;
   on_screen: string;
   voice: string;
+  narration?: string;
   // 완성본 받기에서 사람이 고친 문구 (있으면 이걸 쓴다)
   on_screen_override?: string | null;
   subtitle_override?: string | null;
@@ -179,7 +185,7 @@ async function loadRules(service: Service): Promise<ContentRule[]> {
 }
 
 // 이 시간 넘게 EDITING이면 멈춘 것으로 보고 다시 집는다 — shoot-edit.yml timeout-minutes(30)보다 길게
-const STALE_EDIT_MS = 40 * 60_000;
+const STALE_EDIT_MS = 55 * 60_000;
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -191,7 +197,7 @@ async function main() {
   let q = service
     .from("shoot_requests")
     .select(
-      "id, organization_id, plan_id, status, updated_at, cuts, clips, content_plans!inner(id, social_account_id, product_id, script, social_accounts(display_name, role_focus))",
+      "id, organization_id, plan_id, status, updated_at, cuts, clips, edit, content_plans!inner(id, social_account_id, product_id, script, social_accounts(display_name, role_focus))",
     )
     .order("uploaded_at");
   // 편집 중(EDITING)인 채 STALE_EDIT_MS 넘게 멈춘 건 — 러너가 시간 제한 · 장애로 죽은 것 — 도 다시 집는다(2026-11-04).
@@ -229,17 +235,84 @@ async function main() {
       if (!cuts.length) throw new Error("편집할 컷이 없어요");
       const clips = (req.clips ?? []) as Clip[];
       const speaks = acc?.role_focus === "PERSON" || cuts.some((c) => c.voice?.trim());
-      const style = (await loadAccountConcept(service, plan.social_account_id)).editStyle;
+      const concept = await loadAccountConcept(service, plan.social_account_id);
+      const style = concept.editStyle;
 
-      const plans: Plan[] = [];
+      const fileOf = new Map<number, string>();
       for (const cut of cuts) {
         const clip = clips.find((c) => c.cut === cut.no);
         if (!clip) throw new Error(`${cut.no}번 컷 촬영본이 없어요`);
         const ext = clip.path.split(".").pop() ?? "mp4";
         const file = join(workDir, `in${cut.no}.${ext}`);
         await download(service, clip.path, file);
-        plans.push(await planCut(cut, file, workDir, speaks, style));
+        fileOf.set(cut.no, file);
       }
+
+      const script = (plan.script ?? {}) as {
+        hooks?: { formula_id: number; spoken: string; on_screen: string }[];
+        chosen_hook?: number;
+        caption?: { text: string; keywords: string[] };
+        loop_word?: string;
+        thumbnail?: { title: string; sub?: string };
+        fixed?: { hook?: { text?: string } | null; ending?: { text?: string } | null };
+        human?: { hook?: string | null; thumbnail?: string | null };
+      };
+      const facts = await loadProductFacts(service, plan.product_id!);
+
+      // 편집 키트 — 실패하면 아래 기본 편집으로 넘어간다
+      const clipsSig = cuts.map((c) => clips.find((k) => k.cut === c.no)?.path ?? "").join("|");
+      const prevKit = (req.edit as { kit?: { plan?: EditPlan; clipsSig?: string } } | null)?.kit;
+      let kit: KitResult | null = null;
+      let kitError: string | null = null;
+      if (process.env.SHOOT_BASIC_EDIT !== "1") {
+        try {
+          const kitClips: KitClip[] = [];
+          for (const cut of cuts) {
+            const file = fileOf.get(cut.no)!;
+            const k = readClip(cut.no, file, {
+              shot: cut.shot,
+              how: cut.how,
+              onScreen: cut.on_screen_override ?? cut.on_screen,
+              voice: cut.voice,
+              narration: cut.narration,
+            });
+            // 사람이 나오는 계정만 원본의 말을 받아 적는다
+            if (acc?.role_focus === "PERSON" && k.hasAudio) k.transcript = (await transcribeWords(file, workDir, cut.voice)).segments;
+            kitClips.push(k);
+          }
+          const hook = script.hooks?.[script.chosen_hook ?? 0];
+          kit = await renderKitEdit({
+            workDir: join(workDir, "kit"),
+            service: dryRun ? null : service,
+            readService: service,
+            planId: plan.id,
+            accountName: acc?.display_name ?? "",
+            roleFocus: acc?.role_focus ?? null,
+            facts,
+            rules,
+            clips: kitClips,
+            humanHook: script.human?.hook,
+            humanThumbnail: script.human?.thumbnail,
+            shotlistHook: hook ? { spoken: hook.spoken, on_screen: hook.on_screen } : null,
+            shotlistThumbnail: script.thumbnail ?? null,
+            fixedHook: script.fixed?.hook?.text,
+            fixedEnding: script.fixed?.ending?.text,
+            tone: concept.shootTone,
+            editStyleText: concept.shootEditStyle,
+            style,
+            reusePlan: prevKit?.clipsSig === clipsSig ? prevKit.plan : null,
+            overrides: cuts
+              .filter((c) => c.on_screen_override != null || c.subtitle_override != null)
+              .map((c) => ({ no: c.no, onScreen: c.on_screen_override, subtitle: c.subtitle_override })),
+          });
+        } catch (e) {
+          kitError = e instanceof Error ? e.message : String(e);
+          console.error(`[shoot-edit] ${label} 편집 키트 실패, 기본 편집으로 만듭니다: ${kitError}`);
+        }
+      }
+
+      const plans: Plan[] = [];
+      if (!kit) for (const cut of cuts) plans.push(await planCut(cut, fileOf.get(cut.no)!, workDir, speaks, style));
 
       const segments: string[] = [];
       for (const p of plans) {
@@ -257,32 +330,35 @@ async function main() {
         renderSegment(spec, out, workDir, `c${p.cutNo}`);
         segments.push(out);
       }
-      const final = join(workDir, "final.mp4");
-      concatSegments(segments, final, workDir);
-      const thumb = join(workDir, "thumb.jpg");
-      snapshot(final, Math.min(1, plans[0].duration / 2), thumb);
+      const final = kit?.final ?? join(workDir, "final.mp4");
+      if (!kit) concatSegments(segments, final, workDir);
+      const thumb = kit?.cover ?? join(workDir, "thumb.jpg");
+      if (!kit) snapshot(final, Math.min(1, plans[0].duration / 2), thumb);
       const seconds = probe(final).duration;
-      console.log(`[shoot-edit] ${label} — 컷 ${plans.length}개 · ${seconds.toFixed(1)}초 · ${Math.round((Date.now() - startedAt) / 1000)}초 걸림`);
+      console.log(`[shoot-edit] ${label} — ${kit ? `편집 키트, 컷 ${kit.timeline.cuts.length}개, 후킹 "${kit.hook.text}"` : `기본 편집, 컷 ${plans.length}개`} · ${seconds.toFixed(1)}초 · ${Math.round((Date.now() - startedAt) / 1000)}초 걸림`);
       for (const p of plans) {
         console.log(`  ${p.cutNo}. ${p.start.toFixed(1)}~${(p.start + p.duration).toFixed(1)}초 [${p.onScreen}]${p.subtitles.length ? ` 자막: ${p.subtitles.map((s) => s.text).join(" / ")}` : ""}`);
       }
 
       // 실제로 들어간 글로 다시 점검 — 사람이 말한 내용(자막)에 근거 없는 효과가 섞일 수 있다
-      const script = (plan.script ?? {}) as { hooks?: { formula_id: number; spoken: string; on_screen: string }[]; chosen_hook?: number; caption?: { text: string; keywords: string[] }; loop_word?: string };
-      const facts = await loadProductFacts(service, plan.product_id!);
       const check = await checkScript(
         {
-          hooks: script.hooks ?? [],
-          chosen_hook: script.chosen_hook ?? 0,
-          beats: plans.map((p) => ({ spoken: p.subtitles.map((s) => s.text).join(" ") || p.onScreen, on_screen: p.onScreen, visual: "" })),
+          hooks: kit ? [{ formula_id: 0, spoken: kit.plan.hook.spoken, on_screen: kit.plan.hook.on_screen }] : (script.hooks ?? []),
+          chosen_hook: kit ? 0 : (script.chosen_hook ?? 0),
+          beats: kit
+            ? kit.plan.beats.map((b, i) => ({ spoken: b.tts || b.captions.join(" "), on_screen: i === 0 ? kit!.plan.hook.on_screen : b.graphics.map((g) => g.text).filter(Boolean).join(" "), visual: b.cuts.map((c) => c.what).join(" / ") }))
+            : plans.map((p) => ({ spoken: p.subtitles.map((s) => s.text).join(" ") || p.onScreen, on_screen: p.onScreen, visual: "" })),
           loop_word: script.loop_word ?? "",
           caption: script.caption ?? { text: "", keywords: [] },
         },
         facts,
         rules,
         acc?.display_name ?? "",
-        { track: "A", seconds },
+        { track: "A", seconds, fixedHook: kit ? kit.hook.source !== "ai" : false },
       );
+      // 사람이 확인할 것 — 완성본 받기 화면에 함께 보인다
+      for (const w of kit?.warnings ?? []) check.issues.push({ kind: "edit", detail: w });
+      if (kitError) check.issues.push({ kind: "edit", detail: `후킹 · 음성 · 그래픽 편집이 실패해 컷과 자막만 넣은 기본 편집으로 만들었어요. 다시 편집해 보세요. (${kitError.slice(0, 160)})` });
       for (const i of check.issues) console.log(`  ✗ ${i.detail}`);
 
       if (dryRun) {
@@ -302,10 +378,12 @@ async function main() {
       const edit = {
         seconds,
         thumbnail: `${base}.jpg`,
-        segments: plans.map((p) => ({ cut: p.cutNo, start: p.start, duration: p.duration, onScreen: p.onScreen, subtitles: p.subtitles })),
+        segments: kit ? kit.segments : plans.map((p) => ({ cut: p.cutNo, start: p.start, duration: p.duration, onScreen: p.onScreen, subtitles: p.subtitles })),
         check: { ...check, checkedAt: new Date().toISOString() },
-        music: null,
+        music: kit?.sounds.music ?? null,
         style,
+        // 다시 편집 때 같은 촬영본이면 이 계획을 다시 쓴다
+        kit: kit ? { plan: kit.plan, clipsSig, hook: kit.hook, thumbnail: kit.plan.thumbnail, sounds: kit.sounds, loudness: kit.loudness, usedVoice: kit.usedVoice } : null,
         editedAt: new Date().toISOString(),
       };
       const { data: prev } = await service.from("shoot_requests").select("rendered_path, edit").eq("id", req.id).maybeSingle();
@@ -337,9 +415,9 @@ async function main() {
         agent: "edit",
         plan_id: plan.id,
         status: "success",
-        model: speaks ? "whisper-1 + ffmpeg" : "ffmpeg",
+        model: kit ? "video-kit" : speaks ? "whisper-1 + ffmpeg" : "ffmpeg",
         input: { requestId: req.id, cuts: cuts.length } as Json,
-        output: { seconds, segments: edit.segments.length, checkModel: agentModel(), issues: check.issues.length } as Json,
+        output: { seconds, segments: edit.segments.length, checkModel: agentModel(), issues: check.issues.length, kit: !!kit, kitError, hook: kit?.hook ?? null } as Json,
         tokens_input: check.tokens.input,
         tokens_output: check.tokens.output,
         finished_at: new Date().toISOString(),

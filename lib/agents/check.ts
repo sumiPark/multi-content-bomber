@@ -18,7 +18,7 @@ const MIN_HUMAN_SCORE = 55;
 const LENGTH_RANGE: [number, number] = [12, 40];
 
 export interface CheckIssue {
-  kind: "hook" | "length" | "rules" | "tone" | "caption" | "stock" | "grounding" | "fabrication";
+  kind: "hook" | "length" | "rules" | "tone" | "caption" | "stock" | "grounding" | "fabrication" | "edit";
   detail: string;
 }
 

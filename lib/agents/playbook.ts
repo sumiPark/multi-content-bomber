@@ -39,7 +39,7 @@ export const AGENTS: AgentInfo[] = [
     no: 3,
     name: "편집",
     kind: "코드",
-    does: "촬영본을 잇고 자막 · 화면 문구를 넣어요",
+    does: "촬영본을 보고 후킹 · 표지 · 컷 · 음성 · 자막 · 그래픽 · 효과음을 정해요",
     learning: "learn",
     usesPlaybook: false,
     note: "지금은 정해진 코드 규칙으로만 편집해서 플레이북이 아직 쓰이지 않아요 (AI 영상 · 음악이 정해지면 씀)",

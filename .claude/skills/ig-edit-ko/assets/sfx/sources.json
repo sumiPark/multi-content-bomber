@@ -1,0 +1,98 @@
+{
+ "click": {
+  "title": "Button click",
+  "creator": "rolandseer",
+  "dur_ms": 581,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/rolandseer/sounds/489008",
+  "url": "https://cdn.freesound.org/previews/489/489008_1943411-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "641e51ef-a907-43cd-ad15-c38ebc58e38b"
+ },
+ "rustle": {
+  "title": "Blanket Rustling Movement 2_1",
+  "creator": "Joao_Janz",
+  "dur_ms": 3082,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/Joao_Janz/sounds/493260",
+  "url": "https://cdn.freesound.org/previews/493/493260_9961300-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "e5715c9d-cde2-42fe-a779-c6572f52ab81"
+ },
+ "whoosh": {
+  "title": "Swing 1_5",
+  "creator": "Joao_Janz",
+  "dur_ms": 906,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/Joao_Janz/sounds/485250",
+  "url": "https://cdn.freesound.org/previews/485/485250_9961300-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "2242127b-80b9-449a-b9a3-8685ad7bf85a"
+ },
+ "pop": {
+  "title": "cartoon pop or drip",
+  "creator": "AlaskaRobotics",
+  "dur_ms": 144,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/AlaskaRobotics/sounds/221091",
+  "url": "https://cdn.freesound.org/previews/221/221091_1282865-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "784e2334-bc3b-4a35-9c27-36906e632560"
+ },
+ "ding": {
+  "title": "Soft-Notifications - Bell - Ding-Dong.mp3",
+  "creator": "LegitCheese",
+  "dur_ms": 800,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/LegitCheese/sounds/571513",
+  "url": "https://cdn.freesound.org/previews/571/571513_2226836-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "c66607e4-8323-4d81-afd6-c0dbf06686e3"
+ },
+ "plug": {
+  "title": "Pulling the Plug",
+  "creator": "OwlStorm",
+  "dur_ms": 3844,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/OwlStorm/sounds/209016",
+  "url": "https://cdn.freesound.org/previews/209/209016_140737-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "c432196e-bd2b-44dc-bee2-2a6bbb8302c2"
+ },
+ "tick": {
+  "title": "Clock Tick (Tik Tak)",
+  "creator": "KaosMakinesi",
+  "dur_ms": 2000,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/KaosMakinesi/sounds/403001",
+  "url": "https://cdn.freesound.org/previews/403/403001_4381068-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "815ccec4-47ad-432a-bde7-791709e2e5de"
+ },
+ "bgm": {
+  "title": "Ukulele short chorded melody",
+  "creator": "el_boss",
+  "dur_ms": 49069,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/el_boss/sounds/643566",
+  "url": "https://cdn.freesound.org/previews/643/643566_9129912-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "cef99e6a-41ad-4791-aa87-682a05545c19"
+ }
+}

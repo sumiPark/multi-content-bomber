@@ -21,6 +21,8 @@ type SavedShotlist = {
   chosen_hook?: number;
   caption?: { text: string };
   fixed?: { hook?: unknown; notes?: string[] };
+  human?: { hook?: string | null; thumbnail?: string | null };
+  thumbnail?: { title?: string };
 };
 type Proposal = { ideas?: { title?: string }[]; chosen?: number | null };
 
@@ -31,6 +33,7 @@ export interface RequestRow {
   clips: Json;
   error: string | null;
   content_plans: {
+    id: string;
     proposal: Json;
     human_brief: string | null;
     script: Json | null;
@@ -57,6 +60,10 @@ export function toRequestCard(r: RequestRow): ShootRequestCardData {
     product: plan.products ? { name: plan.products.name, url: plan.products.url, image: plan.products.represent_image_url } : null,
     brief: plan.human_brief,
     hook: hook ? { spoken: hook.spoken, onScreen: hook.on_screen, score: hook.score ?? null } : null,
+    planId: plan.id,
+    humanHook: script.human?.hook ?? "",
+    humanThumbnail: script.human?.thumbnail ?? "",
+    thumbnailIdea: script.thumbnail?.title ?? null,
     caption: script.caption?.text ?? "",
     fixedHook: !!script.fixed?.hook,
     fixedNotes: script.fixed?.notes ?? [],

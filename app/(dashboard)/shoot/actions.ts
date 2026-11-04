@@ -523,7 +523,46 @@ const reEditSchema = z.object({
     // subtitle을 안 보내면 그 컷 자막은 그대로(말한 시각에 맞춘 자막 유지), 보내면 그 글로 바꾼다
     .array(z.object({ no: z.number().int().min(1).max(20), onScreen: z.string().max(40), subtitle: z.string().max(120).optional() }))
     .max(20),
+  // 사람이 직접 넣는 후킹 · 표지 문구. 안 보내면 그대로, 빈 문자열이면 AI가 정한다
+  hook: z.string().trim().max(40).optional(),
+  thumbnail: z.string().trim().max(24).optional(),
 });
+
+const humanTextSchema = z.object({
+  planId: z.string().uuid(),
+  hook: z.string().trim().max(40),
+  thumbnail: z.string().trim().max(24),
+});
+
+/** 대본(content_plans.script)에 사람이 정한 후킹 · 표지 문구를 저장한다. 편집 에이전트가 글자 그대로 쓴다. */
+async function saveHumanText(service: Service, planId: string, patch: { hook?: string; thumbnail?: string }): Promise<string | null> {
+  const { data: row, error } = await service.from("content_plans").select("script").eq("id", planId).maybeSingle();
+  if (error) return error.message;
+  const script = (row?.script ?? {}) as Record<string, unknown>;
+  const human = { ...((script.human ?? {}) as { hook?: string; thumbnail?: string }), ...patch };
+  const { error: upErr } = await service
+    .from("content_plans")
+    .update({ script: { ...script, human } as unknown as Json })
+    .eq("id", planId);
+  return upErr?.message ?? null;
+}
+
+/** 촬영 · 올리기 화면의 후킹 · 표지 문구 저장. 비워 두면 AI가 만든다. */
+export async function saveHumanTextAction(input: z.infer<typeof humanTextSchema>): Promise<ShootResult> {
+  const parsed = humanTextSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "후킹은 40자, 표지는 24자까지 넣을 수 있어요." };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data: plan } = await service.from("content_plans").select("id, status").eq("id", parsed.data.planId).eq("organization_id", auth.orgId).eq("track", "A").maybeSingle();
+  if (!plan) return { ok: false, error: "기획을 찾을 수 없습니다." };
+  if (plan.status === "PUBLISHED") return { ok: false, error: "이미 올린 기획이에요." };
+  const failed = await saveHumanText(service, plan.id, { hook: parsed.data.hook, thumbnail: parsed.data.thumbnail });
+  if (failed) return { ok: false, error: failed };
+  revalidatePath("/shoot/uploads");
+  revalidatePath("/shoot/review");
+  return { ok: true };
+}
 
 /** 고친 화면 문구 · 자막으로 다시 편집 (실패한 편집 다시 시도도 이걸로 — cuts 빈 배열). */
 export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise<ShootResult> {
@@ -538,6 +577,13 @@ export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise
   if (req.status !== "EDITED" && req.status !== "FAILED") return { ok: false, error: "편집이 끝난 뒤에 다시 편집할 수 있어요." };
   const { data: planRow } = await service.from("content_plans").select("status").eq("id", req.plan_id).maybeSingle();
   if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 올렸거나 끝난 기획이라 다시 편집할 수 없어요." };
+  if (parsed.data.hook !== undefined || parsed.data.thumbnail !== undefined) {
+    const failed = await saveHumanText(service, req.plan_id, {
+      ...(parsed.data.hook !== undefined ? { hook: parsed.data.hook } : {}),
+      ...(parsed.data.thumbnail !== undefined ? { thumbnail: parsed.data.thumbnail } : {}),
+    });
+    if (failed) return { ok: false, error: failed };
+  }
   const fix = new Map(parsed.data.cuts.map((c) => [c.no, c]));
   const cuts = ((req.cuts ?? []) as Cut[]).map((c) => {
     const f = fix.get(c.no);
