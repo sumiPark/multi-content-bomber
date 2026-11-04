@@ -74,9 +74,11 @@ async function main() {
   for (const plan of plans) {
     if (!plan.product_id) continue;
     const acc = plan.social_accounts?.display_name ?? "";
+    const concept = await loadAccountConcept(service, plan.social_account_id);
+    // 시험(--dry-run)에서만 말투를 바꿔 설정 반영을 본다. 저장하지 않는다
+    if (dryRun && process.env.TEST_AUTO_TONE?.trim()) concept.autoTone = process.env.TEST_AUTO_TONE.trim();
     // 시험(--dry-run --plan): 대본 없는 칸은 임시 대본을 써서 돌린다. 저장하지 않는다
     if (!plan.script && dryRun && onlyPlan) {
-      const concept = await loadAccountConcept(service, plan.social_account_id);
       const res = await writeScript(
         { service, planId: plan.id, accountName: acc, roleFocus: concept.autoRole, roleNote: null, slotTime: plan.slot_time as string, facts: await loadProductFacts(service, plan.product_id), rules, concept: concept.autoConcept, tone: concept.autoTone, videoStyle: concept.autoVideoStyle },
         { log: false },
@@ -111,7 +113,7 @@ async function main() {
         planId: plan.id,
         account: acc,
         productId: plan.product_id,
-        concept: await loadAccountConcept(service, plan.social_account_id),
+        concept,
         script: plan.script as unknown as SavedScript,
         rules,
         dryRun,

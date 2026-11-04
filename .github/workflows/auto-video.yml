@@ -17,9 +17,12 @@ on:
         description: "이 칸만 만들기 (비우면 만들 칸 전부)"
         required: false
       dry_run:
-        description: "만들기만 하고 저장 · 발행하지 않기"
+        description: "만들기만 하고 저장 · 발행하지 않기 (결과는 실행 기록의 파일로)"
         type: boolean
         default: false
+      test_tone:
+        description: "시험에서만 쓸 말투 · 분위기 (dry_run 전용, 저장 안 됨)"
+        required: false
 
 concurrency:
   group: auto-video-worker
@@ -57,7 +60,7 @@ jobs:
       - name: Prepare HyperFrames browser
         run: npx --yes hyperframes@0.8.210 browser ensure
       - name: Make videos
-        run: npm run worker:auto-video -- ${{ inputs.plan && format('--plan {0}', inputs.plan) || '' }} ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: npm run worker:auto-video -- ${{ inputs.plan && format('--plan {0}', inputs.plan) || '' }} ${{ inputs.dry_run && '--dry-run --out dry-out' || '' }}
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -68,3 +71,12 @@ jobs:
           AGENT_MODEL: ${{ vars.AGENT_MODEL }}
           AUTO_VIDEO_PUBLISH: ${{ vars.AUTO_VIDEO_PUBLISH }}
           VIDEO_PYTHON: python
+          TEST_AUTO_TONE: ${{ inputs.test_tone }}
+      - name: Keep dry-run result
+        if: ${{ inputs.dry_run && !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-video-dry-run
+          path: dry-out
+          retention-days: 3
+          if-no-files-found: ignore
