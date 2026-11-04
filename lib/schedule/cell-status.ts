@@ -62,7 +62,7 @@ export function cellStatus(
   switch (plan.status) {
     case "PROPOSED":
       // 올릴 시각까지 확인이 없으면 건너뛴다 — 정리 워커가 돌기 전에도 그렇게 보여 준다
-      return past ? { label: "건너뜀", tone: "idle", href: null } : { label: "상품 확인", tone: "todo", href: confirm, task: "confirm" };
+      return past ? { label: "건너뜀", tone: "idle", href: null } : { label: "상품 확인 필요", tone: "todo", href: confirm, task: "confirm" };
     case "CONFIRMED":
       return { label: "대본 쓰는 중", tone: "wait", href: confirm };
     case "SCRIPTED":

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { type ReactNode, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ExternalLink, History, Loader2 } from "lucide-react";
 import { PostFindings } from "@/components/posts/post-findings";
@@ -154,6 +154,15 @@ function ReelTable({ rows }: { rows: Computed[] }) {
   );
 }
 
+function FilterRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="w-7 shrink-0 pt-[9px] text-xs font-medium text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
 export function PostPerformance({ data, now, period, accountId }: { data: PostPerformanceData; now: number; period: PostPeriod; accountId: string }) {
   const router = useRouter();
   const [changing, startChange] = useTransition();
@@ -257,36 +266,40 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Segmented<PostPeriod>
-          ariaLabel="기간"
-          value={period}
-          disabled={changing}
-          onChange={pickPeriod}
-          options={[
-            { value: "90", label: "90일" },
-            { value: "30", label: "30일" },
-            { value: "365", label: "1년" },
-            { value: "all", label: "전체 기간" },
-          ]}
-        />
-        {changing && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="불러오는 중" />}
-        <Segmented<PostFormat | "all">
-          ariaLabel="게시물 유형"
-          value={formatPick}
-          onChange={(v) => {
-            setFormatPick(v);
-            setLimit(PAGE_SIZE);
-          }}
-          options={[
-            { value: "all", label: `전체 ${allRows.length}` },
-            ...formats.map((f) => ({ value: f, label: `${FORMAT_LABEL[f]} ${allRows.filter((r) => r.format === f).length}` })),
-          ]}
-        />
-        <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
-          <input type="checkbox" checked={hideEvents} onChange={(e) => setHideEvents(e.target.checked)} className="size-4 accent-primary" />
-          경품 · 이벤트 말 든 글 빼기
-        </label>
+      <div className="space-y-2">
+        <FilterRow label="기간">
+          <Segmented<PostPeriod>
+            ariaLabel="기간"
+            value={period}
+            disabled={changing}
+            onChange={pickPeriod}
+            options={[
+              { value: "30", label: "30일" },
+              { value: "90", label: "90일" },
+              { value: "365", label: "1년" },
+              { value: "all", label: "전체 기간" },
+            ]}
+          />
+          {changing && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="불러오는 중" />}
+        </FilterRow>
+        <FilterRow label="유형">
+          <Segmented<PostFormat | "all">
+            ariaLabel="게시물 유형"
+            value={formatPick}
+            onChange={(v) => {
+              setFormatPick(v);
+              setLimit(PAGE_SIZE);
+            }}
+            options={[
+              { value: "all", label: `모든 유형 ${allRows.length}` },
+              ...formats.map((f) => ({ value: f, label: `${FORMAT_LABEL[f]} ${allRows.filter((r) => r.format === f).length}` })),
+            ]}
+          />
+          <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
+            <input type="checkbox" checked={hideEvents} onChange={(e) => setHideEvents(e.target.checked)} className="size-4 accent-primary" />
+            경품 · 이벤트 말 든 글 빼기
+          </label>
+        </FilterRow>
       </div>
 
       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -338,7 +351,7 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
             { value: "10", label: `10배↑ ${counts.x10}` },
             { value: "3", label: `3배↑ ${counts.x3}` },
             { value: "2", label: `2배↑ ${counts.x2}` },
-            { value: "all", label: `전체 ${rows.length}` },
+            { value: "all", label: `모두 ${rows.length}` },
             { value: "share", label: `공유 많음 ${counts.share}` },
             { value: "ad", label: `광고 포함 추정 ${counts.ad}` },
           ]}
