@@ -16,8 +16,14 @@ import { InstagramApiError, instagramRequest } from "./instagram-comments";
 //   계정:   reach, views, accounts_engaged, total_interactions (period=day, total_value)
 // 계정 전환 전에 올린 게시물 등은 일부 지표가 "지원 안 함(100)"으로 거절된다 — 그때는
 // 지표를 하나씩 다시 물어 되는 것만 받는다.
+//
+// 비즈니스 시스템 사용자 토큰(IG_DISCOVERY_TOKEN, 비즈니스 설정의 mcb): 계정마다 다시 연결하지 않아도
+// 할당된 인스타 계정의 성과를 읽는다(graph.facebook.com). 2026-11-04 실측 — 같은 게시물 ID · 같은 지표
+// 이름으로 읽히고, fruit_cuma 83개 연속 호출에도 사용량 1%. 인스타 ID가 Instagram 로그인의 ID와
+// 달라서(17841…) 계정은 아이디(username)로 맞춘다. 게시 · 댓글 권한이 없는 읽기 전용 키다.
 
 const GRAPH_API_BASE = "https://graph.instagram.com/v23.0";
+const SYSTEM_API_BASE = "https://graph.facebook.com/v26.0";
 
 const MEDIA_METRICS = [
   "views",
@@ -63,8 +69,8 @@ export interface InstagramMedia {
 // 지표 이름 → 값. 받지 못한 지표는 키가 없다.
 export type MetricValues = Record<string, number>;
 
-function graphUrl(path: string, token: string, params: Record<string, string>) {
-  const url = new URL(`${GRAPH_API_BASE}${path}`);
+function graphUrl(path: string, token: string, params: Record<string, string>, base = GRAPH_API_BASE) {
+  const url = new URL(`${base}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   url.searchParams.set("access_token", token);
   return url.toString();
@@ -180,10 +186,11 @@ async function fetchInsights(
   token: string,
   metrics: readonly string[],
   extra: Record<string, string> = {},
+  base = GRAPH_API_BASE,
 ): Promise<MetricValues> {
   try {
     const res = await instagramRequest<{ data: InsightRow[] }>(
-      graphUrl(path, token, { metric: metrics.join(","), ...extra }),
+      graphUrl(path, token, { metric: metrics.join(","), ...extra }, base),
     );
     return readInsights(res.data);
   } catch (err) {
@@ -193,7 +200,7 @@ async function fetchInsights(
     for (const m of metrics) {
       try {
         const res = await instagramRequest<{ data: InsightRow[] }>(
-          graphUrl(path, token, { metric: m, ...extra }),
+          graphUrl(path, token, { metric: m, ...extra }, base),
         );
         Object.assign(out, readInsights(res.data));
       } catch (e) {
@@ -204,15 +211,59 @@ async function fetchInsights(
   }
 }
 
+function mediaMetrics(media: Pick<InstagramMedia, "mediaProductType">): string[] {
+  return media.mediaProductType === "REELS"
+    ? [...MEDIA_METRICS, ...REELS_EXTRA_METRICS]
+    : [...MEDIA_METRICS];
+}
+
 export async function getMediaInsights(
   token: string,
   media: Pick<InstagramMedia, "id" | "mediaProductType">,
 ): Promise<MetricValues> {
-  const metrics =
-    media.mediaProductType === "REELS"
-      ? [...MEDIA_METRICS, ...REELS_EXTRA_METRICS]
-      : [...MEDIA_METRICS];
-  return fetchInsights(`/${media.id}/insights`, token, metrics);
+  return fetchInsights(`/${media.id}/insights`, token, mediaMetrics(media));
+}
+
+/** 시스템 사용자 토큰으로 읽을 수 있는 인스타 계정 — 소문자 아이디 → 인스타 ID. */
+export async function listSystemAccounts(token: string): Promise<Map<string, string>> {
+  type Page = { data: { id: string; username?: string }[]; paging?: { next?: string } };
+  const out = new Map<string, string>();
+  let next: string | null = graphUrl(
+    "/me/assigned_instagram_accounts",
+    token,
+    { fields: "id,username", limit: "100" },
+    SYSTEM_API_BASE,
+  );
+  while (next) {
+    const page: Page = await instagramRequest<Page>(next);
+    for (const a of page.data) if (a.username) out.set(a.username.toLowerCase(), a.id);
+    next = page.paging?.next ?? null;
+  }
+  return out;
+}
+
+/** 시스템 사용자 토큰으로 게시물 성과 — 지표는 getMediaInsights와 같다. */
+export async function getMediaInsightsBySystem(
+  token: string,
+  media: Pick<InstagramMedia, "id" | "mediaProductType">,
+): Promise<MetricValues> {
+  return fetchInsights(`/${media.id}/insights`, token, mediaMetrics(media), {}, SYSTEM_API_BASE);
+}
+
+/** 시스템 사용자 토큰으로 계정 하루 성과 — [since, until) 구간 합계 (unix 초). */
+export async function getAccountDayInsightsBySystem(
+  token: string,
+  igUserId: string,
+  since: number,
+  until: number,
+): Promise<MetricValues> {
+  return fetchInsights(
+    `/${igUserId}/insights`,
+    token,
+    ACCOUNT_METRICS,
+    { period: "day", metric_type: "total_value", since: String(since), until: String(until) },
+    SYSTEM_API_BASE,
+  );
 }
 
 /** 계정 하루 성과 — [since, until) 구간 합계 (unix 초). */

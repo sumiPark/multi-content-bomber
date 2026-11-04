@@ -5,10 +5,13 @@ import { decryptToken } from "@/lib/crypto";
 import { InstagramApiError } from "@/lib/platforms/instagram-comments";
 import {
   getAccountDayInsights,
+  getAccountDayInsightsBySystem,
   getMediaInsights,
+  getMediaInsightsBySystem,
   getProfile,
   isPermissionError,
   listRecentMedia,
+  listSystemAccounts,
   type InstagramMedia,
   type MetricValues,
 } from "@/lib/platforms/instagram-insights";
@@ -28,8 +31,12 @@ import { startRunLog } from "./run-log";
 //   2. 최근 게시물 → social_posts (MCB로 올린 건 publish_jobs와 연결)
 //   3. 게시물 성과 → post_metrics (오늘 날짜 행) — 같은 날 다시 돌면 덮어쓴다
 //
-// 성과 권한(instagram_business_manage_insights)이 없는 계정은 1의 프로필 숫자와 게시물
-// 좋아요 · 댓글 수만 쌓는다(기본 권한으로 읽힘). 다시 연결하면 다음 수집부터 전부 채워진다.
+// 성과(조회 · 도달 · 저장 · 공유 · 시청 시간)는 비즈니스 시스템 사용자 키(IG_DISCOVERY_TOKEN, mcb)에
+// 그 계정이 할당돼 있으면 그 키로 읽는다 — 계정을 다시 연결하지 않아도 된다. 없으면 계정 토큰으로 읽고,
+// 계정 토큰에 성과 권한(instagram_business_manage_insights)도 없으면 1의 프로필 숫자와 게시물
+// 좋아요 · 댓글 수만 쌓는다(기본 권한으로 읽힘).
+//
+// 시스템 키 오류는 계정 연결 문제가 아니다 — 계정을 비활성으로 표시하지 않고 계정 토큰으로 돌아간다.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -53,9 +60,27 @@ type AccountResult = {
   account: string;
   status: "ok" | "token_expired" | "rate_limited" | "error";
   insights: boolean;
+  // 성과를 어느 키로 읽었나 (system = mcb 키, account = 계정 토큰)
+  source?: "system" | "account";
   posts: number;
   message?: string;
 };
+
+// 시스템 키로 읽을 수 있는 계정 (소문자 아이디 → 인스타 ID). 키가 없거나 못 읽으면 null.
+type SystemAccess = { token: string; accounts: Map<string, string> } | null;
+
+async function loadSystemAccess(): Promise<SystemAccess> {
+  const token = process.env.IG_DISCOVERY_TOKEN?.trim();
+  if (!token) return null;
+  try {
+    const accounts = await listSystemAccounts(token);
+    console.log(`[collect-metrics] 시스템 키로 읽는 계정 ${accounts.size}개`);
+    return { token, accounts };
+  } catch (err) {
+    console.warn("[collect-metrics] 시스템 키를 못 씀 — 계정 토큰으로 수집:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
 
 /** KST 기준 오늘 날짜(YYYY-MM-DD)와 전날 하루 구간 [since, until) (unix 초). */
 function kstWindow(now = Date.now()) {
@@ -86,6 +111,7 @@ async function collectAccount(
   service: Service,
   account: AccountRow,
   win: ReturnType<typeof kstWindow>,
+  systemAccess: SystemAccess,
 ): Promise<AccountResult> {
   const label = account.display_name ?? account.id;
   if (!account.access_token_encrypted) {
@@ -96,13 +122,33 @@ async function collectAccount(
   try {
     // 1. 프로필 + 전날 하루 성과
     const profile = await getProfile(token);
+
+    // 시스템 키 — 이 계정이 할당돼 있을 때만. 실패하면 이 계정은 계정 토큰으로 돌아간다.
+    const systemIgId = systemAccess?.accounts.get(profile.username.toLowerCase()) ?? null;
+    let system = systemAccess && systemIgId ? { token: systemAccess.token, igId: systemIgId } : null;
+    const trySystem = async (read: (s: { token: string; igId: string }) => Promise<MetricValues>): Promise<MetricValues | null> => {
+      if (!system) return null;
+      try {
+        return await read(system);
+      } catch (err) {
+        console.warn(`[collect-metrics] ${label}: 시스템 키 실패 — 계정 토큰으로:`, err instanceof Error ? err.message : err);
+        system = null;
+        return null;
+      }
+    };
+
     let insights = true;
     let day: MetricValues = {};
-    try {
-      day = await getAccountDayInsights(token, win.since, win.until);
-    } catch (err) {
-      if (!isPermissionError(err)) throw err;
-      insights = false;
+    const systemDay = await trySystem((s) => getAccountDayInsightsBySystem(s.token, s.igId, win.since, win.until));
+    if (systemDay) {
+      day = systemDay;
+    } else {
+      try {
+        day = await getAccountDayInsights(token, win.since, win.until);
+      } catch (err) {
+        if (!isPermissionError(err)) throw err;
+        insights = false;
+      }
     }
 
     const { error: dailyErr } = await service.from("account_daily").upsert(
@@ -127,7 +173,7 @@ async function collectAccount(
     // 2. 최근 게시물
     const media = pickTracked(await listRecentMedia(token, MAX_POSTS));
     if (media.length === 0) {
-      return { account: label, status: "ok", insights, posts: 0 };
+      return { account: label, status: "ok", insights: insights || !!system, source: system ? "system" : "account", posts: 0 };
     }
 
     // MCB로 올린 게시물이면 발행 작업과 연결 (publish_jobs.platform_post_id = 인스타 media id).
@@ -172,7 +218,10 @@ async function collectAccount(
       const postId = postIdByMedia.get(m.id);
       if (!postId) continue;
       let v: MetricValues = {};
-      if (insights) {
+      const systemValues = await trySystem((s) => getMediaInsightsBySystem(s.token, m));
+      if (systemValues) {
+        v = systemValues;
+      } else if (insights) {
         try {
           v = await getMediaInsights(token, m);
         } catch (err) {
@@ -201,7 +250,7 @@ async function collectAccount(
       .upsert(rows, { onConflict: "post_id,collected_on" });
     if (metricErr) throw new Error(`post_metrics 저장 실패: ${metricErr.message}`);
 
-    return { account: label, status: "ok", insights, posts: rows.length };
+    return { account: label, status: "ok", insights: insights || !!system, source: system ? "system" : "account", posts: rows.length };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (err instanceof InstagramApiError && err.kind === "TOKEN") {
@@ -246,11 +295,12 @@ async function main() {
   }
 
   // 계정이 4개라 순서대로 — 계정마다 호출 한도가 따로라 병렬의 이득이 작고, 로그가 읽기 쉽다.
+  const systemAccess = await loadSystemAccess();
   const results: AccountResult[] = [];
   for (const account of accounts) {
-    const r = await collectAccount(service, account, win);
+    const r = await collectAccount(service, account, win, systemAccess);
     console.log(
-      `[collect-metrics] ${r.account}: ${r.status} | 게시물 ${r.posts}개 | 성과 권한 ${r.insights ? "있음" : "없음"}` +
+      `[collect-metrics] ${r.account}: ${r.status} | 게시물 ${r.posts}개 | 성과 ${r.insights ? `있음(${r.source === "system" ? "시스템 키" : "계정 토큰"})` : "없음"}` +
         (r.message ? ` | ${r.message}` : ""),
     );
     results.push(r);

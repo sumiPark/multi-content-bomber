@@ -39,3 +39,5 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           # 토큰 AES-256-GCM 복호화 키 (Vercel과 반드시 같은 값이어야 함).
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          # 비즈니스 시스템 사용자 mcb 키 — 할당된 계정의 성과를 읽는다. 없으면 계정 토큰으로 수집.
+          IG_DISCOVERY_TOKEN: ${{ secrets.IG_DISCOVERY_TOKEN }}
