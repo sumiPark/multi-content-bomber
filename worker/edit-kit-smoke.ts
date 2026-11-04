@@ -10,7 +10,7 @@ import { readClip, renderKitEdit } from "@/lib/shoot/video-kit/pipeline";
 import { ffmpeg } from "@/lib/shoot/video-kit/tools";
 
 // 편집 키트 점검 — 러너에서 브라우저 · HyperFrames · 믹스가 도는지와 렌더 시간을 잰다. 시험 영상으로 돌고 DB에 쓰지 않는다.
-// 에이전트와 음성을 부르지 않는다. 음성 키를 지우고 돌려 말 길이는 어림값을 쓴다.
+// 에이전트를 부르지 않는다. 음성은 SMOKE_VOICE=1일 때만 kit.json의 모델로 만들고, 아니면 말 길이를 어림한다.
 
 const blank: EditGraphic = {
   type: "chip", at_word: "", at: 0, text: "", small: "", sub: "", note: "", chip: "", tone: "", side: "", number: "", unit: "", left: "", right: "", left_value: 0, right_value: 0, items: [], x: 0, y: 0, r: 0, from: "",
@@ -33,7 +33,7 @@ const plan: EditPlan = {
 const facts = { id: "smoke", name: "시험 상품", shop: "시험", kind: "OTHER", kindLabel: "시험", price: null, stockStatus: "available", url: "", detailImages: 0, oneLine: null, usage: null, cautions: null, details: {}, claims: [], uncertainties: [], healthFunctional: false, approvedClaims: [], certifiedFunctions: [], sourceText: "" } as ProductFacts;
 
 async function main() {
-  delete process.env.FISH_API_KEY;
+  if (process.env.SMOKE_VOICE !== "1") delete process.env.FISH_API_KEY;
   // 프레임 검수도 부르지 않는다
   delete process.env.OPENAI_API_KEY;
   const workDir = join(tmpdir(), `edit-kit-smoke-${Date.now()}`);
@@ -47,7 +47,7 @@ async function main() {
     });
     const clips = files.map((f, i) => readClip(i + 1, f, { shot: `시험 ${i + 1}` }));
     const r = await renderKitEdit({ workDir: join(workDir, "kit"), service: null, accountName: "smoke", liveVoice: false, facts, rules: [], clips, reusePlan: plan });
-    console.log(`[edit-kit-smoke] 통과 — ${Math.round((Date.now() - started) / 1000)}초, 영상 ${r.seconds.toFixed(1)}초, ${(statSync(r.final).size / 1024 / 1024).toFixed(1)}MB, 표지 ${(statSync(r.cover).size / 1024).toFixed(0)}KB, ${r.loudness} LUFS`);
+    console.log(`[edit-kit-smoke] 통과 — ${Math.round((Date.now() - started) / 1000)}초, 영상 ${r.seconds.toFixed(1)}초, ${(statSync(r.final).size / 1024 / 1024).toFixed(1)}MB, 표지 ${(statSync(r.cover).size / 1024).toFixed(0)}KB, ${r.loudness} LUFS, 음성 ${r.usedVoice ? "있음" : "없음"}`);
     console.log("경고:", r.warnings);
   } finally {
     rmSync(workDir, { recursive: true, force: true });

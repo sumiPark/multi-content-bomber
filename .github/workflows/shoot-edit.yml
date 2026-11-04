@@ -19,7 +19,7 @@ on:
         type: boolean
         default: false
       smoke:
-        description: "시험 영상으로 렌더만 점검 (DB · 유료 API 안 씀)"
+        description: "시험 영상으로 음성 · 렌더 점검 (DB · OpenAI 안 씀)"
         type: boolean
         default: false
 
@@ -51,6 +51,11 @@ jobs:
       - name: Check edit kit
         if: ${{ inputs.smoke }}
         run: npm run worker:edit-kit-smoke
+        env:
+          SMOKE_VOICE: "1"
+          FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
+          FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
+          FISH_MODEL: ${{ vars.FISH_MODEL }}
       - name: Edit uploaded shoots
         if: ${{ !inputs.smoke }}
         run: npm run worker:shoot-edit -- ${{ inputs.request && format('--request {0}', inputs.request) || '' }} ${{ inputs.dry_run && '--dry-run' || '' }}
