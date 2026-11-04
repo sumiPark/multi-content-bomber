@@ -76,7 +76,7 @@ export function hyperframes(version: string, cwd: string, args: string[], timeou
   return r.stdout;
 }
 
-/** Fish Audio TTS. 키가 없으면 null — 호출한 쪽이 음성 없이 이어 간다(다른 유료 서비스로 넘어가지 않는다). */
+/** Fish Audio TTS. 키가 없으면 null — 호출한 쪽이 음성 없이 이어 간다(다른 모델 · 유료 서비스로 넘어가지 않는다). */
 export async function fishTts(text: string, voice: { id: string; model: string; speed: number }): Promise<Buffer | null> {
   const key = process.env.FISH_API_KEY;
   if (!key) return null;
@@ -84,7 +84,7 @@ export async function fishTts(text: string, voice: { id: string; model: string; 
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await fetch("https://api.fish.audio/v1/tts", {
       method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", model: voice.model },
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", model: process.env.FISH_MODEL || voice.model },
       body: JSON.stringify({ text, reference_id: process.env.FISH_VOICE_ID || voice.id, format: "wav", normalize: true, latency: "normal", prosody: { speed: voice.speed, volume: 0 } }),
       signal: AbortSignal.timeout(120_000),
     });

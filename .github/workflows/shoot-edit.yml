@@ -60,5 +60,6 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
           FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
+          FISH_MODEL: ${{ vars.FISH_MODEL }}
           SHOOT_BASIC_EDIT: ${{ vars.SHOOT_BASIC_EDIT }}
           AGENT_MODEL: ${{ vars.AGENT_MODEL }}

@@ -179,6 +179,7 @@ async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string): Pr
   const voices: VoiceClip[] = [];
   let usedVoice = false;
   let noVoice = false;
+  let voiceError: string | null = null;
   for (const [i, beat] of plan.beats.entries()) {
     if (beat.mode === "live") {
       const c = beat.cuts[0];
@@ -187,7 +188,15 @@ async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string): Pr
       continue;
     }
     plan.beats[i] = { ...beat, tts: texts[i] };
-    const buf = noVoice ? null : await fishTts(texts[i], kit.voice);
+    let buf: Buffer | null = null;
+    if (!noVoice) {
+      try {
+        buf = await fishTts(texts[i], kit.voice);
+      } catch (e) {
+        // 무료 모델이 끝났거나 장애면 음성만 빼고 이어 간다 — 영상 전체를 기본 편집으로 떨어뜨리지 않는다
+        voiceError = e instanceof Error ? e.message : String(e);
+      }
+    }
     if (!buf) {
       noVoice = true;
       // 음성이 없으면 말 길이를 어림해 자막만 맞춘다
@@ -200,7 +209,7 @@ async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string): Pr
     voices.push({ file, fileIn: span.from, fileOut: span.to });
     usedVoice = true;
   }
-  if (noVoice) warnings.push("음성 키(FISH_API_KEY)가 없어 내레이션 없이 자막과 음악으로 만들었어요.");
+  if (noVoice) warnings.push(voiceError ? `음성을 만들지 못해 내레이션 없이 자막과 음악으로 만들었어요. (${voiceError.slice(0, 160)})` : "음성 키(FISH_API_KEY)가 없어 내레이션 없이 자막과 음악으로 만들었어요.");
   return { voices, usedVoice, warnings };
 }
 
