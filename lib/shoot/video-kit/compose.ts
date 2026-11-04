@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editKitAsset } from "@/lib/agents/ko-skills";
 import type { EditPlan } from "@/lib/agents/edit-plan";
+import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, ZONE_BOX, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import type { TimedGraphic, Timeline } from "@/lib/shoot/video-kit/timeline";
 
 // 시각표 → HyperFrames 프로젝트(index.html + compositions). 글자 · 그래픽 틀은 ig-edit-ko/kit.json과 같은 이름을 쓴다.
@@ -17,16 +18,6 @@ export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-/** 강조할 낱말을 감싼다. 글자는 먼저 이스케이프한다. */
-function marked(text: string, words: string[], tag = "b"): string {
-  let out = esc(text);
-  for (const w of [...words].filter(Boolean).sort((a, b) => b.length - a.length)) {
-    const safe = esc(w.trim());
-    if (safe) out = out.split(safe).join(`<${tag}>${safe}</${tag}>`);
-  }
-  return out;
-}
-
 /** 큰 글자를 두 줄 이내로 나눈다. 사람이 줄을 나눴으면 그대로. */
 export function hookLines(text: string): string[] {
   const parts = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
@@ -39,20 +30,8 @@ export function hookLines(text: string): string[] {
   return [t.slice(0, best).trim(), t.slice(best + 1).trim()];
 }
 
-function bigFont(lines: string[], max: number, width: number): number {
-  const units = Math.max(1, ...lines.map((l) => [...l].reduce((s, c) => s + (c === " " ? 0.32 : /[가-힣]/.test(c) ? 0.96 : 0.62), 0)));
-  return Math.min(max, Math.floor(width / units));
-}
-
-function hookBlock(lines: string[], highlight: string, size: number): string {
-  return lines
-    .map((l) => `<div class="hl" style="font-size:${size}px"><span>${marked(l, highlight ? [highlight] : [])}</span></div>`)
-    .join("");
-}
-
-const HOOK_CSS = `.hl { line-height: 1.26; font-weight: 800; letter-spacing: -0.03em; }
-    .hl span { display: inline-block; padding: 2px 26px 8px; margin-bottom: 8px; border-radius: 14px; background: #111; color: #fff; -webkit-box-decoration-break: clone; }
-    .hl b { color: #FFD23F; font-weight: 800; }`;
+// 위쪽 자리를 쓰는 그래픽 — 이 동안 자막은 위로 가지 않는다
+const TOP_GRAPHICS = new Set(["badge", "title", "chip", "notice", "stat", "split", "steps", "end_card"]);
 
 function graphicHtml(g: TimedGraphic): string {
   const clip = `id="${g.id}" class="g clip" data-start="${g.start}" data-duration="${(g.end - g.start).toFixed(3)}"`;
@@ -134,7 +113,28 @@ function clamp01(v: number): number {
 }
 
 /** 프로젝트 파일을 쓴다. base.mp4 · mix.wav는 호출한 쪽이 assets에 둔다. */
-export function writeProject(dir: string, tl: Timeline): void {
+export interface BehindWord {
+  word: string;
+  start: number;
+  end: number;
+  // assets 안의 제품만 남은 투명 영상
+  file: string;
+}
+
+export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null } = {}): void {
+  const look = opts.look ?? DEFAULT_LOOK;
+  const zones = opts.zones ?? null;
+  const hookAt: Zone = hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
+  const blocks = tl.captions.map((c) => {
+    const busy: Zone[] = [];
+    if (c.start < tl.hook.end) busy.push(hookAt);
+    if (tl.graphics.some((g) => TOP_GRAPHICS.has(g.type) && g.start < c.end && g.end > c.start)) busy.push("top");
+    return captionBlock(c, look, captionZone(zones, c.start, c.end, busy));
+  });
+  const behind = opts.behind ?? null;
+  // 제품 뒤 글자 구간에서 화면을 당기면 제품 레이어와 어긋난다
+  const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.start - 0.4 && t < behind.end)) : [];
+  const behindSize = behind ? Math.min(470, Math.floor(980 / Math.max(1, [...behind.word].length))) : 0;
   mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
   mkdirSync(join(dir, "compositions"), { recursive: true });
   for (const f of ["Regular", "SemiBold", "ExtraBold"]) copyFileSync(editKitAsset("fonts", `Pretendard-${f}.woff2`), join(dir, "assets", "fonts", `Pretendard-${f}.woff2`));
@@ -142,35 +142,21 @@ export function writeProject(dir: string, tl: Timeline): void {
   writeFileSync(join(dir, "hyperframes.json"), JSON.stringify({ paths: { blocks: "compositions", components: "compositions/components", assets: "assets" }, media: { autoProxy: false } }));
 
   const D = tl.duration;
-  const caps = tl.captions
-    .map((c) => `<div id="${c.id}" class="cap clip" data-start="${c.start}" data-duration="${(c.end - c.start).toFixed(3)}"><span>${marked(c.text, c.emphasis)}</span></div>`)
-    .join("\n    ");
+  const caps = blocks.map((b) => b.html).join("\n    ");
   writeFileSync(
     join(dir, "compositions", "captions.html"),
     `<template>
   <style>
     ${FONT}
     #root { position: absolute; inset: 0; font-family: "Pretendard", sans-serif; pointer-events: none; }
-    .cap { position: absolute; left: 0; right: 0; top: 1205px; text-align: center; overflow: visible; opacity: 0; }
-    .cap span { display: inline-block; padding: 4px 20px 8px; border-radius: 16px; background: rgba(0,0,0,.34); color: #fff; font-weight: 800; font-size: 60px; line-height: 1.2; letter-spacing: -1px; text-shadow: 0 0 2px #000, 0 0 6px #000, 0 2px 4px #000, 0 4px 20px rgba(0,0,0,.8); }
-    .cap b { color: #FFD23F; font-weight: 800; }
+    ${lookCss(look)}
   </style>
   <div id="root" data-composition-id="captions" data-width="1080" data-height="1920">
     ${caps}
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
-    const groups = ${JSON.stringify(tl.captions.map((c) => [`#${c.id}`, c.start, c.end]))};
-    for (const [sel] of groups) {
-      const span = document.querySelector(sel + " span");
-      const fit = window.__hyperframes?.fitTextFontSize?.(span.textContent, { fontFamily: "Pretendard", fontWeight: 800, maxWidth: 864, baseFontSize: 60, minFontSize: 44 });
-      if (fit?.fontSize) span.style.fontSize = fit.fontSize + "px";
-    }
-    for (const [sel, start, end] of groups) {
-      tl.fromTo(sel, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration: 0.09, ease: "power2.out" }, start);
-      tl.to(sel, { opacity: 0, duration: 0.06, ease: "power2.in" }, end - 0.06);
-      tl.set(sel, { opacity: 0, visibility: "hidden" }, end);
-    }
+    ${blocks.map((b) => b.motion).join("\n    ")}
     window.__timelines["captions"] = tl;
   </script>
 </template>
@@ -185,20 +171,19 @@ export function writeProject(dir: string, tl: Timeline): void {
     ${FONT}
     #root { position: absolute; inset: 0; font-family: "Pretendard", sans-serif; pointer-events: none; color: #fff; }
     .g { position: absolute; opacity: 0; }
-    #hook { position: absolute; left: 0; right: 0; top: ${tl.hook.position === "lower" ? 860 : 190}px; text-align: center; }
-    ${HOOK_CSS}
+    ${lookCss(look)}
     .card { background: rgba(20,20,20,.86); border-radius: 30px; }
     .big { display: inline-block; font-weight: 800; font-size: 112px; letter-spacing: -3px; padding: 14px 46px 20px; border-radius: 30px; color: #fff; }
     .chip { display: inline-block; padding: 12px 28px; border-radius: 999px; font-weight: 800; font-size: 44px; letter-spacing: -1px; }
-    .orange { background: #E04E08; color: #fff; } .white { background: #fff; color: #1b1b1b; }
+    .orange { background: var(--accent); color: var(--on-accent); } .white { background: #fff; color: #1b1b1b; }
     svg { overflow: visible; }
     .ts { display: block; font-size: 46px; font-weight: 600; color: #FFB48A; margin-bottom: 4px; }
     .tb { display: block; font-size: 96px; font-weight: 800; letter-spacing: -3px; line-height: 1.1; }
     .tl { height: 8px; background: #FF6A1A; margin-top: 14px; border-radius: 4px; transform-origin: 0 50%; }
     .ntc { padding: 28px 36px; display: flex; align-items: center; gap: 28px; }
-    .ntc .ic { flex: none; width: 96px; height: 96px; border-radius: 50%; background: #E04E08; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 66px; }
+    .ntc .ic { flex: none; width: 96px; height: 96px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 66px; }
     .ntc small { display: block; font-size: 40px; font-weight: 600; color: #ddd; }
-    .ntc strong { display: block; font-size: 62px; font-weight: 800; letter-spacing: -2px; color: #FFD23F; }
+    .ntc strong { display: block; font-size: 62px; font-weight: 800; letter-spacing: -2px; color: var(--accent); }
     .disc { position: absolute; left: 40px; top: 0; width: 320px; height: 320px; border-radius: 50%; background: rgba(20,20,20,.86); }
     .ringsvg { position: absolute; left: 40px; top: 0; transform: rotate(-90deg); }
     .tnum { position: absolute; left: 40px; top: 0; width: 320px; height: 320px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 800; }
@@ -209,7 +194,7 @@ export function writeProject(dir: string, tl: Timeline): void {
     .half span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 54px; text-shadow: 0 2px 8px rgba(0,0,0,.65); }
     .snote { position: absolute; right: 0; bottom: -62px; padding: 4px 18px 6px; border-radius: 12px; background: rgba(20,20,20,.86); font-size: 32px; font-weight: 600; }
     .step { display: flex; align-items: center; gap: 22px; margin-bottom: 16px; font-size: 54px; font-weight: 800; letter-spacing: -1px; }
-    .step i { flex: none; width: 66px; height: 66px; border-radius: 50%; background: #E04E08; display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 40px; }
+    .step i { flex: none; width: 66px; height: 66px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-style: normal; font-size: 40px; }
     .stepn { margin-top: 18px; font-size: 36px; font-weight: 600; color: #e6e6e6; letter-spacing: -1px; }
     .ecard { padding: 36px 44px 34px; }
     .ecard strong { display: block; margin: 16px 0 6px; font-size: 80px; font-weight: 800; letter-spacing: -3px; line-height: 1.12; }
@@ -217,7 +202,7 @@ export function writeProject(dir: string, tl: Timeline): void {
     .ecard em { display: block; margin-top: 18px; font-style: normal; font-size: 33px; font-weight: 400; color: #ccc; letter-spacing: -.5px; }
   </style>
   <div id="root" data-composition-id="graphics" data-width="1080" data-height="1920">
-    <div id="hook" class="clip" data-start="0" data-duration="${tl.hook.end}">${hookBlock(lines, tl.hook.highlight, bigFont(lines, 112, 860))}</div>
+    <div id="hook" class="lk clip" data-start="0" data-duration="${tl.hook.end}" style="top:${ZONE_BOX[hookAt].top}px;height:${ZONE_BOX[hookAt].height}px">${bigText(lines, tl.hook.highlight, look, Math.max(112, Math.min(150, look.size * 1.7)), 950)}</div>
     ${tl.graphics.map(graphicHtml).join("\n    ")}
   </div>
   <script>
@@ -247,11 +232,18 @@ export function writeProject(dir: string, tl: Timeline): void {
       #root { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; }
       #stage { position: absolute; inset: 0; }
       #base { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      ${FONT}
     </style>
   </head>
   <body>
     <div id="root" data-composition-id="main" data-start="0" data-duration="${D}" data-width="1080" data-height="1920">
       <div id="stage"><video id="base" class="clip" src="assets/base.mp4" muted data-start="0" data-duration="${D}" data-track-index="0"></video></div>
+      ${
+        behind
+          ? `<div id="bwrap" class="clip" data-start="${behind.start}" data-duration="${(behind.end - behind.start).toFixed(3)}" data-track-index="5" style="position:absolute;inset:0"><div id="bword" style="position:absolute;left:0;right:0;top:430px;text-align:center;font-family:Pretendard,sans-serif;font-weight:800;font-size:${behindSize}px;line-height:1;letter-spacing:-.05em;color:${look.accent_color}">${esc(behind.word)}</div></div>
+      <video id="bcut" class="clip" src="assets/${behind.file}" muted data-start="${behind.start}" data-duration="${(behind.end - behind.start).toFixed(3)}" data-track-index="6" data-layout-allow-occlusion style="position:absolute;inset:0;width:1080px;height:1920px"></video>`
+          : ""
+      }
       <div id="graphics" data-composition-id="graphics" data-composition-src="compositions/graphics.html" data-start="0" data-duration="${D}" data-track-index="1" data-track-kind="graphics" data-width="1080" data-height="1920"></div>
       <div id="captions" data-composition-id="captions" data-composition-src="compositions/captions.html" data-start="0" data-duration="${D}" data-track-index="2" data-track-kind="captions" data-width="1080" data-height="1920"></div>
       <audio id="mix" class="clip" src="assets/mix.wav" data-start="0" data-duration="${D}" data-track-index="3" data-volume="1"></audio>
@@ -260,6 +252,8 @@ export function writeProject(dir: string, tl: Timeline): void {
       const tl = gsap.timeline({ paused: true });
       // 첫 컷은 살짝 밀려 들어와 눈길을 끈다
       tl.fromTo("#stage", { scale: 1.1 }, { scale: 1, duration: ${Math.min(firstCutEnd, 1.2).toFixed(3)}, ease: "power2.out" }, 0);
+      ${behind ? `tl.fromTo("#bword", { scale: 0.86, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, ${behind.start});` : ""}
+      ${punches.map((t) => `tl.to("#stage", { scale: 1.035, duration: 0.09, ease: "power2.out" }, ${t.toFixed(3)}); tl.to("#stage", { scale: 1, duration: 0.26, ease: "power2.inOut" }, ${(t + 0.09).toFixed(3)});`).join("\n      ")}
       window.__timelines["main"] = tl;
     </script>
   </body>
@@ -269,7 +263,7 @@ export function writeProject(dir: string, tl: Timeline): void {
 }
 
 /** 표지 프로젝트 — 프레임 위에 후킹보다 큰 글자. 피드에서 잘리지 않게 가운데 4:5 안에 둔다. */
-export function writeCoverProject(dir: string, frame: string, plan: EditPlan["thumbnail"]): void {
+export function writeCoverProject(dir: string, frame: string, plan: EditPlan["thumbnail"], look: Look = DEFAULT_LOOK): void {
   mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
   copyFileSync(editKitAsset("fonts", "Pretendard-ExtraBold.woff2"), join(dir, "assets", "fonts", "Pretendard-ExtraBold.woff2"));
   copyFileSync(editKitAsset("fonts", "Pretendard-SemiBold.woff2"), join(dir, "assets", "fonts", "Pretendard-SemiBold.woff2"));
@@ -290,14 +284,14 @@ export function writeCoverProject(dir: string, frame: string, plan: EditPlan["th
   #root { position: relative; width: 100%; height: 100%; font-family: "Pretendard", sans-serif; overflow: hidden; }
   #bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   #shade { position: absolute; left: 0; right: 0; ${plan.position === "lower" ? "bottom: 0; height: 1100px; background: linear-gradient(0deg, rgba(0,0,0,.55), rgba(0,0,0,0));" : "top: 0; height: 1000px; background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0));"} }
-  #text { position: absolute; left: 0; right: 0; top: ${plan.position === "lower" ? 1020 : 300}px; text-align: center; }
-  ${HOOK_CSS}
-  #sub { display: inline-block; margin-top: 10px; padding: 8px 26px 12px; border-radius: 12px; background: #FFD23F; color: #111; font-weight: 800; font-size: 52px; letter-spacing: -1px; }
+  ${lookCss(look)}
+  #text { top: ${plan.position === "lower" ? 980 : 280}px; }
+  #sub { display: inline-block; margin-top: 10px; padding: 8px 26px 12px; border-radius: 12px; background: var(--accent); color: var(--on-accent); font-weight: 800; font-size: 52px; letter-spacing: -1px; }
 </style></head><body>
 <div id="root" data-composition-id="main" data-start="0" data-duration="1" data-width="1080" data-height="1920">
   <img id="bg" class="clip" src="assets/frame.jpg" alt="" data-start="0" data-duration="1" data-track-index="0" />
   <div id="shade" class="clip" data-start="0" data-duration="1" data-track-index="1"></div>
-  <div id="text" class="clip" data-start="0" data-duration="1" data-track-index="2">${hookBlock(lines, plan.highlight, bigFont(lines, 148, 900))}${plan.sub.trim() ? `<div><span id="sub">${esc(plan.sub.trim())}</span></div>` : ""}</div>
+  <div id="text" class="lk clip" data-start="0" data-duration="1" data-track-index="2">${bigText(lines, plan.highlight, look, 148, 950)}${plan.sub.trim() ? `<div><span id="sub">${esc(plan.sub.trim())}</span></div>` : ""}</div>
 </div>
 <script>window.__timelines["main"] = gsap.timeline({ paused: true });</script>
 </body></html>

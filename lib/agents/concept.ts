@@ -2,6 +2,7 @@ import { zodResponseFormat } from "openai/helpers/zod";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
+import { voiceIdOf } from "@/lib/shoot/voices";
 import { DEFAULT_EDIT_STYLE, editStyleResultSchema, parseEditStyle, type EditStyle, type EditStyleResult } from "@/lib/shoot/edit-style";
 import type { createServiceClient } from "@/lib/supabase/service";
 
@@ -22,6 +23,9 @@ export interface AccountConcept {
   autoEndings: string[];
   autoTone: string;
   autoVideoStyle: string;
+  // 목소리(0047) — 방식별로 따로. 비면 기본 목소리
+  autoVoiceId: string | null;
+  shootVoiceId: string | null;
   // 직접 촬영 + AI 편집 (혼합)
   shootConcept: string;
   shootHooks: string[];
@@ -40,6 +44,8 @@ const EMPTY: AccountConcept = {
   autoEndings: [],
   autoTone: "",
   autoVideoStyle: "",
+  autoVoiceId: null,
+  shootVoiceId: null,
   shootConcept: "",
   shootHooks: [],
   shootEndings: [],
@@ -57,6 +63,8 @@ export async function loadAccountConcept(service: Service, accountId: string): P
     .maybeSingle();
   if (error) console.warn(`[concept] 읽기 실패(${accountId}): ${error.message}`);
   if (!data) return EMPTY;
+  // 목소리(0047)는 따로 읽는다. 못 읽으면 기본 목소리로 이어 간다
+  const { data: voices } = await service.from("account_concepts").select("auto_voice_id, shoot_voice_id").eq("social_account_id", accountId).maybeSingle();
   return {
     autoRole: data.auto_role_focus,
     shootRole: data.shoot_role_focus,
@@ -66,6 +74,8 @@ export async function loadAccountConcept(service: Service, accountId: string): P
     autoEndings: data.auto_endings,
     autoTone: data.auto_tone,
     autoVideoStyle: data.auto_video_style,
+    autoVoiceId: voiceIdOf(voices?.auto_voice_id),
+    shootVoiceId: voiceIdOf(voices?.shoot_voice_id),
     shootConcept: data.shoot_concept,
     shootHooks: data.shoot_hooks,
     shootEndings: data.shoot_endings,

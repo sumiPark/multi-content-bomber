@@ -328,9 +328,11 @@ export const instagram: PlatformAdapter = {
                   video_url: signedUrl,
                   // 커버 프레임: 사용자가 고른 시점(ms)을 thumb_offset으로 전달. Reels는 영상
                   // 내 한 프레임을 커버로 지정 가능(별도 이미지 업로드 없이). 미지정이면 IG 기본.
-                  ...(ctx.coverTimestampMs != null
-                    ? { thumb_offset: String(ctx.coverTimestampMs) }
-                    : {}),
+                  ...(ctx.instagramCoverUrl
+                    ? { cover_url: ctx.instagramCoverUrl }
+                    : ctx.coverTimestampMs != null
+                      ? { thumb_offset: String(ctx.coverTimestampMs) }
+                      : {}),
                 }
               : { image_url: signedUrl }),
             ...(caption ? { caption } : {}),
@@ -607,6 +609,8 @@ function buildFingerprint(ctx: PublishContext, caption: string): string {
         ctx.mediaSignedUrls.length,
         caption,
         ctx.coverTimestampMs,
+        // 서명 주소는 재시도마다 바뀌므로 표지 유무만 본다
+        !!ctx.instagramCoverUrl,
       ]),
     )
     .digest("hex")

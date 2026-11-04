@@ -7,8 +7,7 @@ import {
   confirmAllAction,
   confirmPlanAction,
   skipPlanAction,
-  type ConfirmResult,
-} from "@/app/(dashboard)/auto/confirm/actions";
+  type ConfirmResult, approveVideoAction, remakeVideoAction } from "@/app/(dashboard)/auto/confirm/actions";
 import { won } from "@/components/products/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,13 +43,15 @@ export interface PlanCardData {
   // 대본 · 점검 결과 (확인 뒤 AI가 씀)
   script: { hookScore: number | null; beats: { spoken: string; onScreen: string }[]; caption: string; fixedHook: boolean; fixedNotes: string[] } | null;
   issues: string[];
+  // 완성본 (서명 주소)
+  video: { url: string; seconds: number | null; reading: string | null; music: { title?: string; creator?: string; license?: string; landing?: string } | null } | null;
 }
 
 const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" | "ok" }> = {
   PROPOSED: { label: "확인 대기", variant: "default" },
   CONFIRMED: { label: "확인됨 · 대본 대기", variant: "secondary" },
-  SCRIPTED: { label: "대본 완료 · 영상 준비 중", variant: "secondary" },
-  RENDERED: { label: "영상 완료", variant: "secondary" },
+  SCRIPTED: { label: "대본 완료 · 영상 만드는 중", variant: "secondary" },
+  RENDERED: { label: "완성 · 확인 대기", variant: "default" },
   BLOCKED: { label: "점검에 걸림", variant: "destructive" },
   SCHEDULED: { label: "예약됨", variant: "ok" },
   PUBLISHED: { label: "발행됨", variant: "ok" },
@@ -113,6 +114,37 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
             <li key={i}>✗ {i}</li>
           ))}
         </ul>
+      )}
+
+      {plan.video && (
+        <div className="space-y-2">
+          <video src={plan.video.url} controls playsInline preload="metadata" className="aspect-[9/16] max-h-[480px] rounded-md bg-black" />
+          {plan.video.reading && <p className="text-xs text-muted-foreground">글자 디자인: {plan.video.reading}</p>}
+          {plan.video.music?.title && (
+            <p className="text-xs text-muted-foreground">
+              음악: {plan.video.music.landing ? <a href={plan.video.music.landing} target="_blank" rel="noreferrer" className="underline">{plan.video.music.title}</a> : plan.video.music.title}
+              {plan.video.music.creator && ` · ${plan.video.music.creator}`}
+              {plan.video.music.license && ` · ${plan.video.music.license.toUpperCase()}`}
+            </p>
+          )}
+          {canManage && (plan.status === "RENDERED" || plan.status === "BLOCKED") && (
+            <div className="flex flex-wrap gap-2">
+              {plan.status === "RENDERED" && (
+                <Button size="sm" disabled={isPending} onClick={() => run(() => approveVideoAction({ planId: plan.id }), plan.pastSlot ? "바로 올려요." : "올릴 시각에 올라가요.")}>
+                  <Check className="size-4" /> 이대로 올리기
+                </Button>
+              )}
+              <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => remakeVideoAction({ planId: plan.id }), "영상을 다시 만들어요.")}>
+                <RotateCcw className="size-4" /> 영상 다시 만들기
+              </Button>
+              {plan.status === "RENDERED" && (
+                <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setAskSkip(true)}>
+                  <SkipForward className="size-4" /> 이 칸 건너뛰기
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {plan.script && plan.script.fixedNotes.length > 0 && (

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { voiceIdOf } from "@/lib/shoot/voices";
 import { interpretEditStyle } from "@/lib/agents/concept";
 import { templateProblem } from "@/lib/agents/fixed-phrases";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
@@ -16,7 +17,7 @@ import {
   validateSlots,
 } from "@/lib/schedule/slot-admin";
 import { createServiceClient } from "@/lib/supabase/service";
-import type { Json } from "@/types/database";
+import type { Json, TablesInsert } from "@/types/database";
 
 // 자동 콘텐츠 설정 · 촬영 설정의 서버 액션 (slot_rules 0031, track_settings 0028) — ADMIN · MANAGER. 칸은 AI 자동 칸만(직접 촬영은 0042부터 칸이 아니다).
 //   영상 참고 내용은 방식별로 따로 저장한다(saveAutoConceptAction · saveShootConceptAction). 쓸 상품만 함께 쓴다.
@@ -345,6 +346,12 @@ const roleSchema = z
   .enum(["", "PRODUCT", "PERSON"])
   .transform((v) => (v === "" ? null : v));
 
+// 목록에 있는 목소리만 저장한다. 빈 값은 기본 목소리
+const voiceChoice = z
+  .string()
+  .refine((v) => v === "" || voiceIdOf(v) !== null, "고를 수 없는 목소리예요.")
+  .transform((v) => voiceIdOf(v));
+
 const autoConceptSchema = z.object({
   accountId: z.string().uuid(),
   autoRole: roleSchema,
@@ -353,6 +360,7 @@ const autoConceptSchema = z.object({
   autoEndings: phraseLines,
   autoTone: conceptText,
   autoVideoStyle: conceptText,
+  autoVoiceId: voiceChoice,
 });
 
 const shootConceptSchema = z.object({
@@ -364,11 +372,22 @@ const shootConceptSchema = z.object({
   shootEndings: phraseLines,
   shootTone: conceptText,
   shootEditStyle: conceptText,
+  shootVoiceId: voiceChoice,
 });
 
 async function ownedAccount(service: Service, accountId: string, orgId: string): Promise<boolean> {
   const { data } = await service.from("social_accounts").select("id").eq("id", accountId).eq("organization_id", orgId).maybeSingle();
   return !!data;
+}
+
+/** 저장. 목소리 컬럼(0047)이 아직 없으면 목소리만 빼고 저장해 나머지 설정은 잃지 않는다. */
+async function saveConcept(service: Service, row: TablesInsert<"account_concepts">) {
+  const first = await service.from("account_concepts").upsert(row);
+  if (!first.error?.message.includes("voice_id")) return first;
+  const rest = { ...row };
+  delete rest.auto_voice_id;
+  delete rest.shoot_voice_id;
+  return service.from("account_concepts").upsert(rest);
 }
 
 /** 자동 콘텐츠 설정 저장 — AI 자동 값만 쓴다. 직접 촬영 값은 건드리지 않는다. 다음 상품 제안 · 대본부터 AI가 읽는다. */
@@ -380,7 +399,7 @@ export async function saveAutoConceptAction(input: z.input<typeof autoConceptSch
   const service = createServiceClient();
   const d = parsed.data;
   if (!(await ownedAccount(service, d.accountId, auth.orgId))) return { ok: false, error: "계정을 찾을 수 없어요." };
-  const { error } = await service.from("account_concepts").upsert({
+  const { error } = await saveConcept(service, {
     social_account_id: d.accountId,
     organization_id: auth.orgId,
     auto_role_focus: d.autoRole,
@@ -389,6 +408,7 @@ export async function saveAutoConceptAction(input: z.input<typeof autoConceptSch
     auto_endings: d.autoEndings,
     auto_tone: d.autoTone,
     auto_video_style: d.autoVideoStyle,
+    auto_voice_id: d.autoVoiceId,
     updated_by: auth.userId,
   });
   if (error) return { ok: false, error: error.message };
@@ -422,7 +442,7 @@ export async function saveShootConceptAction(input: z.input<typeof shootConceptS
     }
   }
 
-  const { error } = await service.from("account_concepts").upsert({
+  const { error } = await saveConcept(service, {
     social_account_id: d.accountId,
     organization_id: auth.orgId,
     shoot_role_focus: d.shootRole,
@@ -433,6 +453,7 @@ export async function saveShootConceptAction(input: z.input<typeof shootConceptS
     shoot_tone: d.shootTone,
     shoot_edit_style: d.shootEditStyle,
     shoot_edit_params: params,
+    shoot_voice_id: d.shootVoiceId,
     updated_by: auth.userId,
   });
   if (error) return { ok: false, error: error.message };

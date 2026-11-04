@@ -1,0 +1,74 @@
+{
+ "piano_soft": {
+  "title": "Soft piano.wav",
+  "creator": "Johnnie_Holiday",
+  "source": "freesound",
+  "landing": "https://freesound.org/people/Johnnie_Holiday/sounds/554602",
+  "url": "https://cdn.freesound.org/previews/554/554602_4819210-hq.mp3",
+  "license": "cc0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "b401850e-83c4-4352-96b5-f29daf90120f"
+ },
+ "piano_loop": {
+  "title": "Piano Song Loop #4 Childhood by KLEBER KGF",
+  "creator": "Kleber_KGF",
+  "source": "freesound",
+  "landing": "https://freesound.org/people/Kleber_KGF/sounds/355071",
+  "url": "https://cdn.freesound.org/previews/355/355071_6567189-hq.mp3",
+  "license": "cc0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "7ef8c141-a8a2-4f48-a131-4b1149152a5d"
+ },
+ "bright_sky": {
+  "title": "Blue Sky.mp3",
+  "creator": "Sergmusic",
+  "source": "freesound",
+  "landing": "https://freesound.org/people/Sergmusic/sounds/639933",
+  "url": "https://cdn.freesound.org/previews/639/639933_14100637-hq.mp3",
+  "license": "cc0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "efa007f6-a5fe-420c-a1a6-8d5dafa95005"
+ },
+ "lofi_vanilla": {
+  "title": "Vanilla Lofi Beat",
+  "creator": "Seth_Makes_Sounds",
+  "source": "freesound",
+  "landing": "https://freesound.org/people/Seth_Makes_Sounds/sounds/691510",
+  "url": "https://cdn.freesound.org/previews/691/691510_13228046-hq.mp3",
+  "license": "cc0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "e55f8c2f-a12a-4fac-836f-fd56c0abcb21"
+ },
+ "retro_pop": {
+  "title": "Retro Pop Beat",
+  "creator": "bunnyghost",
+  "source": "freesound",
+  "landing": "https://freesound.org/people/bunnyghost/sounds/434862",
+  "url": "https://cdn.freesound.org/previews/434/434862_8871439-hq.mp3",
+  "license": "cc0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "96d7bfca-b611-45f2-bbfe-42c74c6f3d95"
+ },
+ "sims_beat": {
+  "title": "Sims-Type Beat",
+  "creator": "Bertsz",
+  "source": "freesound",
+  "landing": "https://freesound.org/people/Bertsz/sounds/545460",
+  "url": "https://cdn.freesound.org/previews/545/545460_6714882-hq.mp3",
+  "license": "cc0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "d46ef6f2-fb8e-4906-a776-81319f5ada75"
+ },
+ "bgm": {
+  "title": "Ukulele short chorded melody",
+  "creator": "el_boss",
+  "dur_ms": 49069,
+  "source": "freesound",
+  "landing": "https://freesound.org/people/el_boss/sounds/643566",
+  "url": "https://cdn.freesound.org/previews/643/643566_9129912-hq.mp3",
+  "license": "cc0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "id": "cef99e6a-41ad-4791-aa87-682a05545c19"
+ }
+}

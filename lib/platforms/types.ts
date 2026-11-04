@@ -48,6 +48,8 @@ export interface PublishContext {
   // 둘 다 null이면 커버 미지정(어댑터 기본 동작).
   coverTimestampMs: number | null;
   coverSignedUrl: string | null;
+  // 인스타 릴스 표지 이미지. AI 자동 콘텐츠만 넣는다(metadata.ig_cover_path). 없으면 지금처럼 thumb_offset
+  instagramCoverUrl?: string | null;
   // ── 재시도 이어받기 ──
   // 플랫폼이 서버에서 오래 처리하는 작업(Instagram 컨테이너 인코딩 등)은 한 시도의
   // 폴링 상한 안에 안 끝날 수 있다. 그때 진행분을 버리지 않도록, 어댑터가 다음 시도가

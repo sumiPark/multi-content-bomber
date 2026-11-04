@@ -22,6 +22,8 @@ export type Database = {
           auto_role_focus: string | null
           auto_tone: string
           auto_video_style: string
+          auto_voice_id: string | null
+          shoot_voice_id: string | null
           organization_id: string
           shoot_concept: string
           shoot_edit_params: Json | null
@@ -42,6 +44,8 @@ export type Database = {
           auto_role_focus?: string | null
           auto_tone?: string
           auto_video_style?: string
+          auto_voice_id?: string | null
+          shoot_voice_id?: string | null
           organization_id: string
           shoot_concept?: string
           shoot_edit_params?: Json | null
@@ -62,6 +66,8 @@ export type Database = {
           auto_role_focus?: string | null
           auto_tone?: string
           auto_video_style?: string
+          auto_voice_id?: string | null
+          shoot_voice_id?: string | null
           organization_id?: string
           shoot_concept?: string
           shoot_edit_params?: Json | null
@@ -746,6 +752,7 @@ export type Database = {
           status: string
           track: string
           updated_at: string
+          video: Json | null
           warnings_ack: Json
           warnings_ack_at: string | null
           warnings_ack_by: string | null
@@ -776,6 +783,7 @@ export type Database = {
           status?: string
           track: string
           updated_at?: string
+          video?: Json | null
           warnings_ack?: Json
           warnings_ack_at?: string | null
           warnings_ack_by?: string | null
@@ -806,6 +814,7 @@ export type Database = {
           status?: string
           track?: string
           updated_at?: string
+          video?: Json | null
           warnings_ack?: Json
           warnings_ack_at?: string | null
           warnings_ack_by?: string | null
@@ -2120,6 +2129,87 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      stock_music: {
+        Row: {
+          checked_at: string
+          creator: string | null
+          landing: string | null
+          last_used_at: string | null
+          license: string | null
+          reason: string | null
+          rejected: boolean
+          title: string | null
+          track_id: string
+        }
+        Insert: {
+          checked_at?: string
+          creator?: string | null
+          landing?: string | null
+          last_used_at?: string | null
+          license?: string | null
+          reason?: string | null
+          rejected?: boolean
+          title?: string | null
+          track_id: string
+        }
+        Update: {
+          checked_at?: string
+          creator?: string | null
+          landing?: string | null
+          last_used_at?: string | null
+          license?: string | null
+          reason?: string | null
+          rejected?: boolean
+          title?: string | null
+          track_id?: string
+        }
+        Relationships: []
+      }
+      stock_searches: {
+        Row: {
+          fetched_at: string
+          hits: Json
+          query: string
+        }
+        Insert: {
+          fetched_at?: string
+          hits?: Json
+          query: string
+        }
+        Update: {
+          fetched_at?: string
+          hits?: Json
+          query?: string
+        }
+        Relationships: []
+      }
+      stock_videos: {
+        Row: {
+          checked_at: string
+          page_url: string | null
+          provider: string
+          reason: string | null
+          rejected: boolean
+          video_id: number
+        }
+        Insert: {
+          checked_at?: string
+          page_url?: string | null
+          provider: string
+          reason?: string | null
+          rejected?: boolean
+          video_id: number
+        }
+        Update: {
+          checked_at?: string
+          page_url?: string | null
+          provider?: string
+          reason?: string | null
+          rejected?: boolean
+          video_id?: number
+        }
+        Relationships: []
       }
       social_accounts: {
         Row: {

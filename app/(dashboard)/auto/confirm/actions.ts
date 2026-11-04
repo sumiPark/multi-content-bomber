@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { isPastSlot } from "@/lib/automation/deadline";
-import { triggerAutoScriptRun } from "@/lib/github-dispatch";
+import { scheduleAutoVideo } from "@/lib/auto-video/publish";
+import { triggerAutoScriptRun, triggerAutoVideoRun } from "@/lib/github-dispatch";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // AI 자동 업로드 상품 확인 (0028 content_plans). 사람은 상품만 확인하고, 이후 대본 · 점검은 자동(영상 · 게시는 준비 중).
@@ -98,6 +99,8 @@ export async function confirmPlanAction(input: z.infer<typeof confirmSchema>): P
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!updated?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
+  // 예전 완성본 기록을 지운다. 컬럼(0046)이 없으면 실패해도 그만이다
+  if (fixing) await service.from("content_plans").update({ video: null }).eq("id", plan.id);
   // 멈춘 칸은 시간이 없을 수 있어 바로 다시 쓴다(실패해도 다음 정기 실행이 집어 간다)
   if (fixing) await triggerAutoScriptRun(`rewrite ${plan.id}`).catch((e) => console.error("[auto] 대본 트리거 실패:", e));
   revalidatePath("/auto/confirm");
@@ -105,6 +108,50 @@ export async function confirmPlanAction(input: z.infer<typeof confirmSchema>): P
 }
 
 const idSchema = z.object({ planId: z.string().uuid() });
+
+/** 완성본을 보고 올린다. 올릴 시각이 지났으면 바로 올라간다. */
+export async function approveVideoAction(input: z.infer<typeof idSchema>): Promise<ConfirmResult> {
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
+  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
+  const r = await scheduleAutoVideo(service, plan.id, { byUser: auth.userId });
+  if (!r.ok) return r;
+  revalidatePath("/auto/confirm");
+  revalidatePath("/postings");
+  return { ok: true };
+}
+
+/** 완성본이 마음에 들지 않을 때 대본은 두고 영상만 다시 만든다. */
+export async function remakeVideoAction(input: z.infer<typeof idSchema>): Promise<ConfirmResult> {
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
+  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
+  if (plan.status !== "RENDERED" && plan.status !== "BLOCKED") return { ok: false, error: "완성본이 있거나 멈춘 칸만 다시 만들 수 있어요." };
+  const { data: row } = await service.from("content_plans").select("script, video").eq("id", plan.id).maybeSingle();
+  if (!row?.script) return { ok: false, error: "대본이 없어요. 먼저 대본을 다시 써 주세요." };
+  const old = (row.video ?? {}) as { path?: string; thumbnail?: string };
+  const { data: moved, error } = await service
+    .from("content_plans")
+    .update({ status: "SCRIPTED", video: null, check_result: null, note: null, error: null })
+    .eq("id", plan.id)
+    .eq("status", plan.status)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
+  const files = [old.path, old.thumbnail].filter((p): p is string => !!p);
+  if (files.length) await service.storage.from("media").remove(files);
+  await triggerAutoVideoRun(`remake ${plan.id}`).catch((e) => console.error("[auto] 영상 트리거 실패:", e));
+  revalidatePath("/auto/confirm");
+  return { ok: true };
+}
 
 export async function skipPlanAction(input: z.infer<typeof idSchema>): Promise<ConfirmResult> {
   const parsed = idSchema.safeParse(input);
@@ -115,7 +162,7 @@ export async function skipPlanAction(input: z.infer<typeof idSchema>): Promise<C
   const service = createServiceClient();
   const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
   if (!plan) return { ok: false, error: "기획안을 찾을 수 없습니다." };
-  if (plan.status !== "PROPOSED" && plan.status !== "CONFIRMED" && plan.status !== "BLOCKED") {
+  if (plan.status !== "PROPOSED" && plan.status !== "CONFIRMED" && plan.status !== "BLOCKED" && plan.status !== "RENDERED") {
     return { ok: false, error: "이미 다음 단계로 넘어간 칸입니다." };
   }
   const { error } = await service

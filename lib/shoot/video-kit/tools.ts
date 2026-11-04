@@ -88,7 +88,7 @@ export async function fishTts(text: string, voice: { id: string; model: string; 
     const res = await fetch("https://api.fish.audio/v1/tts", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", model: voice.model },
-      body: JSON.stringify({ text, reference_id: process.env.FISH_VOICE_ID || voice.id, format: "wav", normalize: true, latency: "normal", prosody: { speed: voice.speed, volume: 0 } }),
+      body: JSON.stringify({ text, reference_id: voice.id, format: "wav", normalize: true, latency: "normal", prosody: { speed: voice.speed, volume: 0 } }),
       signal: AbortSignal.timeout(120_000),
     });
     if (res.ok) return Buffer.from(await res.arrayBuffer());

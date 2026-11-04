@@ -189,6 +189,8 @@ export interface EditKit {
   sfx: Record<string, { use: string; gain_db: number; slice: [number, number] | null; lead?: number }>;
   sfx_rules: string[];
   music: { file: string; in: number; gain_db: number };
+  music_library: { file: string; mood: string; in: number; gain_db: number }[];
+  look_rules: string[];
   voice: { id: string; title: string; model: string; speed: number };
   render: { hyperframes: string };
 }

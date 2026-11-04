@@ -2,6 +2,7 @@
 import "./load-env";
 
 import { POSTED_KEEP_DAYS, shootFilesDeleteAt, UNPOSTED_KEEP_DAYS } from "@/lib/shoot/retention";
+import { AUTO_VIDEO_KEEP_DAYS } from "@/lib/auto-video/retention";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -161,6 +162,36 @@ async function cleanupShootFiles(service: Service, apply: boolean): Promise<void
   console.log(`  3) 보관 기간이 지난 직접 촬영(올린 뒤 ${POSTED_KEEP_DAYS}일 · 안 올리면 ${UNPOSTED_KEEP_DAYS}일): 요청 ${requests}개 · 파일 ${files}개 · 촬영 원본 약 ${mb(bytes)}${apply ? " 지움" : " (시험, 안 지움)"}`);
 }
 
+/** AI 자동 칸에서 올리지 않은 완성본만 지운다. 올린 영상은 발행 기록(contents)이 쓰므로 두고, 경로가 지워져도 기록은 남긴다. */
+async function cleanupAutoVideos(service: Service, apply: boolean): Promise<void> {
+  const { data, error } = await service
+    .from("content_plans")
+    .select("id, status, video")
+    .eq("track", "B")
+    .in("status", ["RENDERED", "BLOCKED", "SKIPPED", "FAILED"])
+    .not("video", "is", null);
+  if (error) {
+    // 0046 적용 전이면 지울 것도 없다. 다른 정리를 막지 않는다
+    console.warn(`  4) 자동 영상을 읽지 못해 건너뜀: ${error.message}`);
+    return;
+  }
+  const cutoff = Date.now() - AUTO_VIDEO_KEEP_DAYS * 24 * 60 * 60 * 1000;
+  let count = 0;
+  for (const p of data ?? []) {
+    const v = (p.video ?? {}) as { path?: string; thumbnail?: string; madeAt?: string };
+    if (!v.path || !v.madeAt || Date.parse(v.madeAt) > cutoff) continue;
+    count++;
+    if (!apply) continue;
+    const { error: removeErr } = await service.storage.from(BUCKET).remove([v.path, v.thumbnail].filter((x): x is string => !!x));
+    if (removeErr) {
+      console.warn(`[cleanup-drafts] 자동 영상 삭제 실패(${p.id}): ${removeErr.message}`);
+      continue;
+    }
+    await service.from("content_plans").update({ video: { ...v, path: null, thumbnail: null } }).eq("id", p.id);
+  }
+  console.log(`  4) 올리지 않은 AI 자동 영상(${AUTO_VIDEO_KEEP_DAYS}일 지남): ${count}개`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const service = createServiceClient();
@@ -198,6 +229,7 @@ async function main() {
   console.log(`  2) 어떤 콘텐츠에도 안 쓰인 업로드 파일: ${orphanFiles.length}개`);
   console.log(`  지울 파일 용량 합계: 약 ${mb(bytes)}`);
   await cleanupShootFiles(service, args.apply);
+  await cleanupAutoVideos(service, args.apply);
 
   if (!args.apply) {
     console.log("  (세기만 했어요. 지우려면 --apply)");

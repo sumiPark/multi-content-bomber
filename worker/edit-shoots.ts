@@ -302,6 +302,7 @@ async function main() {
             fixedEnding: script.fixed?.ending?.text,
             tone: concept.shootTone,
             editStyleText: concept.shootEditStyle,
+            voiceId: concept.shootVoiceId,
             style,
             reusePlan: prevKit?.clipsSig === clipsSig ? prevKit.plan : null,
             overrides: cuts

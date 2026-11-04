@@ -1,5 +1,6 @@
 "use client";
 
+import { VOICE_CHOICES } from "@/lib/shoot/voices";
 import { useState } from "react";
 import { Save } from "lucide-react";
 import { saveAutoConceptAction, saveShootConceptAction } from "@/app/(dashboard)/schedule/actions";
@@ -21,6 +22,9 @@ export interface ConceptCardData {
   autoEndings: string;
   autoTone: string;
   autoVideoStyle: string;
+  // 목소리 — 방식별로 따로. 빈 값은 기본 목소리
+  autoVoiceId: string;
+  shootVoiceId: string;
   shootRole: string;
   // AI = AI 음성(기본), LIVE = 찍을 때 말한 소리
   shootVoice: string;
@@ -36,10 +40,10 @@ export interface ConceptCardData {
 }
 
 type Role = "" | "PRODUCT" | "PERSON";
-type AutoKey = "autoRole" | "autoConcept" | "autoHooks" | "autoEndings" | "autoTone" | "autoVideoStyle";
-type ShootKey = "shootRole" | "shootVoice" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
-const AUTO_KEYS: AutoKey[] = ["autoRole", "autoConcept", "autoHooks", "autoEndings", "autoTone", "autoVideoStyle"];
-const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootVoice", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
+type AutoKey = "autoRole" | "autoConcept" | "autoHooks" | "autoEndings" | "autoTone" | "autoVideoStyle" | "autoVoiceId";
+type ShootKey = "shootRole" | "shootVoice" | "shootVoiceId" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
+const AUTO_KEYS: AutoKey[] = ["autoRole", "autoConcept", "autoHooks", "autoEndings", "autoTone", "autoVideoStyle", "autoVoiceId"];
+const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootVoice", "shootVoiceId", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
 
 function Field({
   label,
@@ -93,6 +97,28 @@ function VoiceField({ value, onChange, disabled }: { value: string; onChange: (v
   );
 }
 
+function VoicePickField({ value, help, onChange, disabled }: { value: string; help: string; onChange: (v: string) => void; disabled: boolean }) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-sm font-semibold text-ink-2">AI 목소리</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+      >
+        <option value="">기본 목소리</option>
+        {VOICE_CHOICES.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.title}
+          </option>
+        ))}
+      </select>
+      <span className="block text-xs text-muted-foreground">{help}</span>
+    </label>
+  );
+}
+
 function RoleField({ value, help, onChange, disabled }: { value: string; help: string; onChange: (v: string) => void; disabled: boolean }) {
   return (
     <label className="block space-y-1">
@@ -133,6 +159,7 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
             autoEndings: form.autoEndings,
             autoTone: form.autoTone,
             autoVideoStyle: form.autoVideoStyle,
+            autoVoiceId: form.autoVoiceId,
           })
         : saveShootConceptAction({
             accountId: data.accountId,
@@ -143,6 +170,7 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
             shootEndings: form.shootEndings,
             shootTone: form.shootTone,
             shootEditStyle: form.shootEditStyle,
+            shootVoiceId: form.shootVoiceId,
           }),
     );
 
@@ -153,17 +181,18 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
 
       {mode === "auto" ? (
         <>
-          <div className="max-w-xs">
+          <div className="grid gap-4 lg:grid-cols-2">
             <RoleField {...bind("autoRole")} help="AI가 만드는 영상의 장면과 말투 방향이에요. 직접 촬영과는 따로 정해요." />
+            <VoicePickField {...bind("autoVoiceId")} help="AI 자동 콘텐츠의 내레이션 목소리예요. 직접 촬영과는 따로 정해요." />
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <Field {...bind("autoHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 고를 때 이것만 보세요\n이거 모르고 사면 손해예요"} />
             <Field {...bind("autoEndings")} label="마지막 문구" rows={3} max={2000} help="영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"저장해 두고 살 때 꺼내 보세요"} />
-            <Field {...bind("autoTone")} label="말투 · 분위기" help="내레이션과 캡션에 반영돼요." placeholder={"친구에게 알려 주듯 편한 존댓말, 짧게 끊어서."} />
+            <Field {...bind("autoTone")} label="말투 · 분위기" help="내레이션 · 캡션과 자막 디자인 · 음악 분위기에 반영돼요." placeholder={"친구에게 알려 주듯 편한 존댓말, 짧게 끊어서."} />
             <Field
               {...bind("autoVideoStyle")}
               label="영상 생성 스타일"
-              help="지금은 대본의 장면 설명에 반영돼요. 영상 자동 생성을 붙이면 모든 영상을 이 지시대로 만들어요."
+              help="대본의 장면 설명, 소재 선택, 자막 디자인, 음악에 반영돼요."
               placeholder={"밝은 자연광, 나무 식탁 위 클로즈업, 카메라는 천천히. 사람 얼굴은 나오지 않게."}
             />
             <Field {...bind("autoConcept")} label="컨셉 · 자유 메모" help="상품을 고르고 대본을 쓸 때 AI가 참고해요." placeholder={"20대 후반 직장인이 보는 계정. 가격보다 맛 표현 위주로."} />
@@ -174,6 +203,11 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
           <div className="grid gap-4 lg:grid-cols-2">
             <RoleField {...bind("shootRole")} help="어떤 장면으로 찍을지예요. 사람 중심은 사람이 나오는 컷, 상품 중심은 손 · 제품 위주로 기획해요." />
             <VoiceField {...bind("shootVoice")} />
+            {form.shootVoice === "LIVE" ? (
+              <p className="self-center rounded-md border px-3 py-2 text-xs text-muted-foreground">찍을 때 말한 소리를 쓰는 동안에는 AI 목소리를 쓰지 않아요.</p>
+            ) : (
+              <VoicePickField {...bind("shootVoiceId")} help="직접 촬영 영상의 내레이션 목소리예요. AI 자동 콘텐츠와는 따로 정해요." />
+            )}
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <Field {...bind("shootHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 잘라 보면 이래요\n사장이 직접 고른 {상품}"} />
@@ -183,13 +217,13 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
               <Field
                 {...bind("shootEditStyle")}
                 label="편집 스타일"
-                help="컷 리스트에 반영하고, 저장할 때 AI가 편집 값으로 옮겨요. 컷 길이 · 화면 문구 위치 · 크기 · 색 · 띠 · 말 자막 · 영상 색을 바꿀 수 있어요."
+                help="컷 리스트에 반영하고, AI가 컷 속도 · 자막 디자인 · 음악을 정할 때 읽어요. 영상 색은 아래 값으로 들어가요."
                 placeholder={"컷은 빠르게, 화면 문구는 가운데에 크고 노랗게, 색은 따뜻하게."}
               />
               {!editDirty && data.shootEditStyle.trim() && (
                 <div className="space-y-1 rounded-md border px-3 py-2 text-xs">
                   <p>
-                    <span className="font-semibold">지금 편집에 들어가는 값: </span>
+                    <span className="font-semibold">영상 색과 기본 편집에 들어가는 값: </span>
                     {data.editApplied.length ? data.editApplied.join(" · ") : "기본 편집과 같아요"}
                   </p>
                   {data.editUnsupported.length > 0 && (

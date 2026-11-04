@@ -10,8 +10,11 @@ import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
+import { normalizeLook, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse, type PickedMusic } from "@/lib/shoot/video-kit/music";
+import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
-import { writeCoverProject, writeProject } from "@/lib/shoot/video-kit/compose";
+import { writeCoverProject, writeProject, type BehindWord } from "@/lib/shoot/video-kit/compose";
 import { layoutBeats, timeText, type TimedCut, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -37,6 +40,11 @@ export interface KitInput {
   facts: ProductFacts;
   rules: ContentRule[];
   clips: KitClip[];
+  // 소재 종류(편집 지시가 달라진다). 없으면 직접 촬영
+  source?: "shoot" | "auto";
+  scriptLines?: string[];
+  // 계정 설정의 목소리. 없으면 기본 목소리. 모델은 kit.json의 무료 모델 고정
+  voiceId?: string | null;
   humanHook?: string | null;
   humanThumbnail?: string | null;
   shotlistHook?: { spoken: string; on_screen: string } | null;
@@ -68,7 +76,7 @@ export interface KitResult {
   segments: KitSegment[];
   hook: { text: string; source: "human" | "saved" | "ai" };
   warnings: string[];
-  sounds: { sfx: string[]; music: string | null };
+  sounds: { sfx: string[]; music: string | null; musicSource: MusicSource | null };
   loudness: number | null;
   tokens: { input: number; output: number };
   usedVoice: boolean;
@@ -176,8 +184,9 @@ export function planProblems(plan: EditPlan): string[] {
   return [...new Set(problems)];
 }
 
-async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string): Promise<{ voices: VoiceClip[]; usedVoice: boolean; warnings: string[] }> {
+async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string, voiceId: string | null | undefined): Promise<{ voices: VoiceClip[]; usedVoice: boolean; warnings: string[] }> {
   const kit = editKit();
+  const voiceSetting = { ...kit.voice, id: voiceId || process.env.FISH_VOICE_ID || kit.voice.id };
   const warnings: string[] = [];
   const clipOf = new Map(clips.map((c) => [c.no, c]));
   const ttsLines = plan.beats.map((b) => (b.mode === "tts" ? b.tts : ""));
@@ -201,7 +210,7 @@ async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string): Pr
     let buf: Buffer | null = null;
     if (!noVoice) {
       try {
-        buf = await fishTts(texts[i], kit.voice);
+        buf = await fishTts(texts[i], voiceSetting);
       } catch (e) {
         // 무료 모델이 끝났거나 장애면 음성만 빼고 이어 간다 — 영상 전체를 기본 편집으로 떨어뜨리지 않는다
         voiceError = e instanceof Error ? e.message : String(e);
@@ -265,7 +274,7 @@ function buildVoiceTrack(tl: Timeline, workDir: string): string {
 }
 
 /** 내레이션 + 효과음 + 음악. 말할 때 음악과 효과음이 자동으로 줄어든다. */
-function buildMix(tl: Timeline, voice: string, dest: string): { sfx: string[]; music: string | null } {
+function buildMix(tl: Timeline, voice: string, dest: string, music: MusicToUse): { sfx: string[]; music: string | null; musicSource: MusicSource | null } {
   const kit = editKit();
   const D = tl.duration.toFixed(3);
   const used = tl.sfx.filter((s) => kit.sfx[s.name]);
@@ -281,14 +290,14 @@ function buildMix(tl: Timeline, voice: string, dest: string): { sfx: string[]; m
   const m = used.length;
   parts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${D}[z]`);
   parts.push(`[z]${used.map((_, i) => `[s${i}]`).join("")}amix=inputs=${m + 1}:normalize=0:duration=longest,apad=whole_dur=${D},atrim=0:${D}[sfx]`);
-  inputs.push("-stream_loop", "-1", "-i", editKitAsset("sfx", `${kit.music.file}.mp3`), "-i", voice);
-  parts.push(`[${m}:a]atrim=${kit.music.in}:${kit.music.in + tl.duration},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=${kit.music.gain_db}dB,afade=t=in:d=0.3,afade=t=out:st=${Math.max(0, tl.duration - 1).toFixed(3)}:d=1[bg]`);
+  inputs.push("-stream_loop", "-1", "-i", music.file, "-i", voice);
+  parts.push(`[${m}:a]atrim=${music.in}:${music.in + tl.duration},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=${music.gain_db}dB,afade=t=in:d=0.3,afade=t=out:st=${Math.max(0, tl.duration - 1).toFixed(3)}:d=1[bg]`);
   parts.push(`[${m + 1}:a]aformat=channel_layouts=stereo,asplit=3[k1][k2][vm]`);
   parts.push("[bg][k1]sidechaincompress=threshold=0.05:ratio=3.5:attack=20:release=260:makeup=1[bgd]");
   parts.push("[sfx][k2]sidechaincompress=threshold=0.06:ratio=2:attack=5:release=120:makeup=1[sfxd]");
   parts.push(`[vm][sfxd][bgd]amix=inputs=3:normalize=0:duration=first,volume=1dB,alimiter=limit=0.84:level=false,atrim=0:${D}[mix]`);
   ffmpeg(["-y", "-v", "error", ...inputs, "-filter_complex", parts.join(";"), "-map", "[mix]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", dest]);
-  return { sfx: [...new Set(used.map((s) => s.name))], music: kit.music.file };
+  return { sfx: [...new Set(used.map((s) => s.name))], music: music.name, musicSource: music.source };
 }
 
 function lufs(file: string): number | null {
@@ -361,13 +370,31 @@ async function qaFrames(version: string, dir: string, tl: Timeline, workDir: str
   }
 }
 
-function makeCover(version: string, workDir: string, clip: KitClip, plan: EditPlan["thumbnail"]): string {
+/** AI가 고른 낱말이 [제품컷]의 자막에 있으면 그 컷의 제품을 떼어 글자 앞에 놓는다. 안 되면 null. */
+function makeBehindWord(look: Look, tl: Timeline, clips: KitClip[], baseVideo: string, project: string, workDir: string): BehindWord | null {
+  const word = look.behind_word;
+  if (!word) return null;
+  const cap = tl.captions.find((c) => c.text.includes(word) && c.start > 1.3);
+  const cut = cap && tl.cuts.find((c) => c.start <= cap.start && cap.start < c.end);
+  const owner = cut && clips.find((c) => c.no === cut.clip);
+  if (!cap || !cut || !owner?.shot?.startsWith("[제품컷]") || cut.end - cut.start > 3.5) return null;
+  const file = "cutout.webm";
+  const made = runVisionTool<{ ratio: number }>("cutout.py", [baseVideo, cut.start.toFixed(3), (cut.end - cut.start).toFixed(3), join(project, "assets", file), join(workDir, "cutout")]);
+  // 제품이 거의 없거나 화면을 다 덮으면 글자가 안 보인다
+  if (!made || made.ratio < 0.06 || made.ratio > 0.6) return null;
+  return { word, start: Number(Math.max(cut.start, cap.start).toFixed(3)), end: Number(cut.end.toFixed(3)), file };
+}
+
+function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditPlan["thumbnail"], look: Look): string {
   const frame = join(workDir, "cover-frame.jpg");
-  const at = Math.min(Math.max(0, plan.at), Math.max(0, clip.duration - 0.1));
+  const at = Math.min(Math.max(0, thumb.at), Math.max(0, clip.duration - 0.1));
   ffmpeg(["-y", "-v", "error", "-ss", at.toFixed(3), "-i", clip.file, "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920", "-q:v", "2", frame]);
   const dir = join(workDir, "cover");
   mkdirSync(dir, { recursive: true });
-  writeCoverProject(dir, frame, plan);
+  // 표지 글자도 상품을 피한다. 자리를 못 읽으면 AI가 정한 자리
+  const cover0 = frameZones([frame], workDir)?.[0];
+  const plan = cover0 ? { ...thumb, position: cover0.top <= cover0.lower ? ("top" as const) : ("lower" as const) } : thumb;
+  writeCoverProject(dir, frame, plan, look);
   const outDir = join(workDir, "cover-out");
   hyperframes(version, dir, ["snapshot", "--at", "0.5", "--no-end", "-o", outDir], 5 * 60_000);
   const png = readdirSync(outDir).find((f) => f.endsWith(".png"));
@@ -411,6 +438,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       fixedEnding: input.fixedEnding,
       tone: input.tone,
       editStyle: input.editStyleText,
+      source: input.source,
+      scriptLines: input.scriptLines,
       lookCloser: async (no, from, to) => {
         const c = clips.find((x) => x.no === no);
         if (!c) throw new Error(`${no}번 촬영본이 없어요`);
@@ -435,9 +464,10 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   // 첫 비트는 후킹 글자만 — 다른 그래픽이 겹치면 후킹이 묻힌다
   plan.beats[0] = { ...plan.beats[0], graphics: plan.beats[0].graphics.filter((g) => g.type === "ring" || g.type === "arrow") };
   warnings.push(...plan.warnings);
+  const look = normalizeLook(plan.look);
 
   // 2. 음성 → 시각표
-  const made = await makeVoices(plan, clips, workDir);
+  const made = await makeVoices(plan, clips, workDir, input.voiceId);
   warnings.push(...made.warnings);
   const seconds = new Map(clips.map((c) => [c.no, c.duration]));
   const base = layoutBeats(plan, made.voices, seconds);
@@ -479,8 +509,21 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   mkdirSync(join(project, "assets"), { recursive: true });
   copyFileSync(baseVideo, join(project, "assets", "base.mp4"));
   const mix = join(project, "assets", "mix.wav");
-  const sounds = buildMix(tl, voice, mix);
-  writeProject(project, tl);
+  // 음악: 다시 편집이면 처음 고른 곡, 아니면 영상마다 검색한다. 안 되면 대체 곡
+  const priorMusic = (input.reusePlan as (EditPlan & { pickedMusic?: PickedMusic }) | null | undefined)?.pickedMusic;
+  const music =
+    (priorMusic ? await reloadMusic(priorMusic, workDir) : null) ??
+    (await findMusic({ service: input.service, readService: input.readService, query: look.music_query, intent: look.music_intent, workDir })) ??
+    libraryMusic(look.music);
+  console.log(`[video-kit] 음악: ${music.name}${music.source ? ` (${music.source.creator}, ${music.source.license}, 검색어 "${music.query}")` : " (대체 곡)"}`);
+  const sounds = buildMix(tl, voice, mix, music);
+  // 장면마다 상품 · 사람이 있는 자리를 읽어 글자가 피하게 한다. 못 읽으면 기본 자리
+  const zones = subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
+    const owner = clips.find((c) => c.no === tl.cuts[i]?.clip);
+    return owner?.shot?.startsWith("[코드 모션]") ? { ...z, cover: { ...z.cover, mid: 1 } } : z;
+  }) ?? null;
+  const behind = makeBehindWord(look, tl, clips, baseVideo, project, workDir);
+  writeProject(project, tl, { look, zones, behind });
 
   // 5. 프레임 검수 — 표적을 벗어난 표시는 빼고, 나머지는 사람에게 넘긴다
   const qa = await qaFrames(version, project, tl, workDir);
@@ -489,22 +532,30 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   warnings.push(...qa.issues);
   if (qa.drop.size) {
     tl = { ...tl, graphics: tl.graphics.filter((g) => !qa.drop.has(g.id) || (g.type !== "ring" && g.type !== "arrow")) };
-    writeProject(project, tl);
+    writeProject(project, tl, { look, zones, behind });
   }
 
   // 6. 렌더 · 표지
   const final = join(workDir, "final.mp4");
-  hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
+  try {
+    hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
+  } catch (e) {
+    // 제품 뒤 글자가 렌더를 막으면 그 효과만 빼고 다시 만든다
+    if (!behind) throw e;
+    console.warn("[video-kit] 제품 뒤 글자를 빼고 다시 렌더:", e instanceof Error ? e.message : e);
+    writeProject(project, tl, { look, zones, behind: null });
+    hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
+  }
   if (!existsSync(final) || mediaSeconds(final) < 1) throw new Error("렌더 결과가 없어요");
   const coverClip = clips.find((c) => c.no === plan.thumbnail.clip) ?? clips[0];
-  const cover = makeCover(version, workDir, coverClip, plan.thumbnail);
+  const cover = makeCover(version, workDir, coverClip, plan.thumbnail, look);
 
   const hookText = plan.hook.on_screen.replace(/\n+/g, " ");
   return {
     final,
     cover,
     seconds: mediaSeconds(final),
-    plan,
+    plan: { ...plan, pickedMusic: { name: music.name, in: music.in, gain_db: music.gain_db, source: music.source, query: music.query } } as EditPlan,
     timeline: tl,
     segments: buildSegments(plan, tl),
     hook: { text: hookText, source: input.humanHook?.trim() ? "human" : input.fixedHook?.trim() ? "saved" : "ai" },

@@ -95,6 +95,11 @@ export async function triggerAutoPlanRun(reason: string): Promise<void> {
   await dispatch(AUTO_PLAN_DISPATCH_EVENT, reason);
 }
 
+/** AI 자동 콘텐츠 영상 워커를 깨운다(다시 만들기). */
+export async function triggerAutoVideoRun(reason: string): Promise<void> {
+  await dispatch("auto-video", reason);
+}
+
 export async function triggerShootEditRun(reason: string): Promise<void> {
   await dispatch(SHOOT_EDIT_DISPATCH_EVENT, reason);
 }

@@ -370,6 +370,9 @@ async function runPublish(
     ? await signCover(supabase, cover.path)
     : null;
 
+  const igCoverPath = (content.metadata as { ig_cover_path?: unknown } | null)?.ig_cover_path;
+  const instagramCoverUrl = account.platform === "INSTAGRAM" && typeof igCoverPath === "string" && igCoverPath ? await signCover(supabase, igCoverPath) : null;
+
   // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID/커버/이어받기 상태 주입
   const publishCtx: PublishContext = {
     ...buildPublishContext(content, account.platform),
@@ -377,6 +380,7 @@ async function runPublish(
     mediaSignedUrls,
     coverTimestampMs: cover.ms,
     coverSignedUrl,
+    instagramCoverUrl,
     resumeState: row.resume_state ?? null,
     saveResumeState,
     deadlineAt,

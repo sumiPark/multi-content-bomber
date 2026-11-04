@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { loadTrackTimes } from "@/lib/schedule/track-times";
 import { CONFIRM_NOTICE_HOURS, isPastSlot } from "@/lib/automation/deadline";
+import { createServiceClient } from "@/lib/supabase/service";
 import { kstDate } from "@/lib/automation/time";
 import { cn } from "@/lib/utils";
 
@@ -89,6 +90,17 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     };
   };
 
+  // 완성본 — 비공개 버킷이라 서명 주소로 보여 준다
+  // 컬럼(0046)이 아직 없으면 완성본 없이 그대로 보여 준다
+  const { data: videoRows } = await supabase.from("content_plans").select("id, video").eq("slot_date", slotDate).eq("track", "B");
+  const videoOf = new Map((videoRows ?? []).map((r) => [r.id, r.video]));
+  const videoPaths = (plans ?? []).map((p) => (videoOf.get(p.id) as { path?: string } | null | undefined)?.path).filter((x): x is string => !!x);
+  const signed = new Map<string, string>();
+  if (videoPaths.length) {
+    const { data: urls } = await createServiceClient().storage.from("media").createSignedUrls(videoPaths, 3600);
+    for (const u of urls ?? []) if (u.path && u.signedUrl) signed.set(u.path, u.signedUrl);
+  }
+
   // 계정별로 묶는다
   const byAccount = new Map<string, { name: string; plans: PlanCardData[] }>();
   for (const p of plans ?? []) {
@@ -112,6 +124,11 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       error: p.error,
       script: summarizeScript(p.script),
       issues: ((p.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),
+      video: (() => {
+        const v = videoOf.get(p.id) as { path?: string; seconds?: number; plan?: { look?: { reading?: string } }; sounds?: { music?: string | null; musicSource?: { title?: string; creator?: string; license?: string; landing?: string } | null } } | null | undefined;
+        const url = v?.path ? signed.get(v.path) : undefined;
+        return url ? { url, seconds: v?.seconds ?? null, reading: v?.plan?.look?.reading ?? null, music: v?.sounds?.musicSource ?? (v?.sounds?.music ? { title: v.sounds.music } : null) } : null;
+      })(),
     });
     byAccount.set(p.social_account_id, group);
   }

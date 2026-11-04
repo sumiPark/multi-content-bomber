@@ -66,12 +66,10 @@ export function cellStatus(
     case "CONFIRMED":
       return { label: "대본 쓰는 중", tone: "wait", href: confirm };
     case "SCRIPTED":
-      // 영상 만들기가 아직 없어 대본까지가 끝 — 시각이 지나도 올라가지 않는다
-      return past
-        ? { label: "안 올라감 · 영상 준비 중", tone: "idle", href: confirm }
-        : { label: "대본 완료 · 영상 준비 중", tone: "wait", href: confirm };
+      // 시각이 지나도 만들어 끝나는 대로 올린다
+      return { label: "영상 만드는 중", tone: "wait", href: confirm };
     case "RENDERED":
-      return { label: "점검 중", tone: "wait", href: confirm };
+      return { label: "완성 · 확인 대기", tone: "todo", href: confirm };
     case "BLOCKED":
       return { label: "멈춤", tone: "risk", href: confirm };
   }

@@ -5,6 +5,7 @@ import type { ProductFacts } from "@/lib/agents/product-facts";
 import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner";
 import { writerSkills } from "@/lib/agents/script";
 import type { ContentRule } from "@/lib/rules/check";
+import { lookSchema } from "@/lib/shoot/video-kit/caption-style";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 편집 에이전트(3) — 올라온 촬영본의 프레임을 보고 편집 계획을 정한다(.claude/skills/ig-edit-ko).
@@ -41,6 +42,7 @@ const graphicSchema = z.object({
 });
 
 export const editPlanSchema = z.object({
+  look: lookSchema.describe("이 영상의 자막 · 큰 글자 디자인과 음악. 계정 설정을 읽고 영상마다 만든다"),
   analysis: z
     .array(z.object({ clip: z.number().int(), good: z.string().describe("쓸 만한 구간과 내용"), avoid: z.string().describe("뺄 구간 · 이유") }))
     .describe("촬영본마다 한 줄"),
@@ -114,6 +116,10 @@ export interface EditPlanContext {
   tone?: string | null;
   editStyle?: string | null;
   lookCloser: (clip: number, from: number, to: number) => Promise<string>;
+  // 소재가 사람이 찍은 촬영본인지, AI 자동 콘텐츠용으로 만든 것인지
+  source?: "shoot" | "auto";
+  // AI 자동 콘텐츠: 점검을 통과한 대본. 뜻을 바꾸지 않고 쓴다
+  scriptLines?: string[];
   // 먼저 낸 계획과 코드 점검에서 걸린 것 — 고쳐서 다시 낸다
   retry?: { plan: EditPlan; problems: string[] } | null;
 }
@@ -132,9 +138,10 @@ function systemPrompt(ctx: EditPlanContext): string {
   const thumbAsk = ctx.humanThumbnail?.trim()
     ? `사람이 정한 표지 글자가 있다: "${ctx.humanThumbnail.trim()}". 글자를 바꾸지 말고 thumbnail.title에 쓰고, 어울리는 프레임만 고른다.`
     : `표지도 네가 만든다.${ctx.shotlistThumbnail?.title ? ` 컷 리스트의 표지 문구 "${ctx.shotlistThumbnail.title}"를 참고한다.` : ""}`;
-  return `너는 인스타그램 @${ctx.accountName}의 릴스 편집자다. 사람이 찍은 원본을 보고, 직접 만든 것처럼 보이는 편집 계획을 세운다. 계획은 코드가 그대로 만든다.
+  const auto = ctx.source === "auto";
+  return `너는 인스타그램 @${ctx.accountName}의 릴스 편집자다. ${auto ? "제품 사진을 움직인 컷, 설명 모션, 스톡 분위기 영상으로 된 소재를 보고" : "사람이 찍은 원본을 보고"}, 직접 만든 것처럼 보이는 편집 계획을 세운다. 계획은 코드가 그대로 만든다.
 상품: ${f.shop} ${f.kindLabel} "${f.name}"
-${ctx.liveVoice ? "이 계정은 사람이 나와 말한다. 촬영본에 말이 있는 구간은 mode live로 그대로 쓰고, 말이 없는 구간에만 tts를 쓴다." : "이 계정의 촬영본에는 쓸 말이 없다. 모든 비트를 mode tts로 쓴다. 말투는 친근한 여성 수다체다."}
+${ctx.liveVoice ? "이 계정은 사람이 나와 말한다. 촬영본에 말이 있는 구간은 mode live로 그대로 쓰고, 말이 없는 구간에만 tts를 쓴다." : `이 계정의 소재에는 쓸 말이 없다. 모든 비트를 mode tts로 쓴다.${ctx.tone?.trim() ? " 말투는 아래 계정 설정을 따른다." : " 계정 말투 설정이 없으니 친근한 수다체로 쓴다."}`}
 
 순서 (스킬을 실제로 써라):
 1. get_product_facts를 읽고, 프레임 묶음에서 촬영본마다 쓸 구간과 뺄 구간을 판단한다(analysis). 시각이 애매하면 look_closer로 확인한다.
@@ -142,6 +149,21 @@ ${ctx.liveVoice ? "이 계정은 사람이 나와 말한다. 촬영본에 말이
 3. ${thumbAsk}
 4. 대본과 컷: 첫 비트는 후킹이고 첫 컷은 가장 궁금한 장면이다. 그 뒤로 비트마다 한 가지만 말하고 장면과 말이 맞게 한다. 합계 15~30초.
 5. 자막 · 그래픽 · 효과음을 정한다. 쓰는 말 전체를 check_ai_tone, check_rules로 점검하고 read_tts로 읽기용 원고를 확인한다.
+6. look을 정한다. 아래 계정 설정과 상품 · 장면을 읽고 이 영상에 맞는 글자 디자인과 음악을 직접 만든다.${auto && ctx.scriptLines?.length ? `
+
+점검을 통과한 대본이다. 문장을 고쳐 쓰지 말고 비트로 그대로 쓴다. 숫자와 기호만 읽는 대로 바꾼다:
+${bullets(ctx.scriptLines)}` : ""}${auto ? `
+
+소재 규칙:
+- [제품컷]은 실제 제품 사진을 움직인 것이다. 사진 속 장면을 실제 사용 과정처럼 설명하지 않는다.
+- [코드 모션]은 설명 도식이다. 도식의 숫자가 나오는 시각에 맞춰 그 말을 하게 구간을 고른다.
+- [스톡]은 상품과 무관한 분위기 영상이다. 공감이나 상황을 말하는 문장에만 쓰고, 스톡 장면에서 상품 기능을 말하지 않는다. 어울리는 문장이 있으면 한 번은 쓴다.` : ""}
+
+글자 디자인 규칙:
+${bullets(kit.look_rules)}
+음악은 영상마다 찾는다. 상품 · 말투 · 장면에 맞는 music_query와 music_intent를 쓴다. 비슷한 상품이어도 그 영상의 분위기로 쓴다.
+검색이 안 될 때 쓸 곡(music):
+${JSON.stringify(kit.music_library.map((m) => ({ file: m.file, mood: m.mood })))}
 
 후킹 규칙:
 ${bullets(kit.hook_rules)}

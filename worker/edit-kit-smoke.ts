@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
 import type { ProductFacts } from "@/lib/agents/product-facts";
+import { DEFAULT_LOOK } from "@/lib/shoot/video-kit/caption-style";
 import { readClip, renderKitEdit } from "@/lib/shoot/video-kit/pipeline";
 import { ffmpeg } from "@/lib/shoot/video-kit/tools";
 
@@ -17,6 +18,7 @@ const blank: EditGraphic = {
 };
 
 const plan: EditPlan = {
+  look: { ...DEFAULT_LOOK },
   analysis: [],
   hook: { on_screen: "이 버튼\n왜 두 개?", highlight: "두 개", position: "top", spoken: "이 버튼 왜 두 개일까요?" },
   thumbnail: { title: "버튼\n왜 두 개?", highlight: "두 개", position: "top", sub: "시험 영상", clip: 1, at: 1 },
