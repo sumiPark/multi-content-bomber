@@ -62,7 +62,7 @@ interface ContentRow {
 
 function contentPaths(c: ContentRow): string[] {
   const meta = (c.metadata && typeof c.metadata === "object" ? c.metadata : {}) as Record<string, unknown>;
-  const extra = [meta.thumbnail_path, meta.cover_path].filter((p): p is string => typeof p === "string");
+  const extra = [meta.thumbnail_path, meta.cover_path, meta.ig_cover_path].filter((p): p is string => typeof p === "string");
   return [...(c.media_urls ?? []), ...extra];
 }
 
@@ -169,12 +169,10 @@ async function cleanupAutoVideos(service: Service, apply: boolean): Promise<void
     .select("id, status, video")
     .eq("track", "B")
     .in("status", ["RENDERED", "BLOCKED", "SKIPPED", "FAILED"])
-    .not("video", "is", null);
-  if (error) {
-    // 0046 적용 전이면 지울 것도 없다. 다른 정리를 막지 않는다
-    console.warn(`  4) 자동 영상을 읽지 못해 건너뜀: ${error.message}`);
-    return;
-  }
+    .not("video", "is", null)
+    // 발행 작업이 연결된 파일은 발행 기록이 쓴다
+    .is("publish_job_id", null);
+  if (error) throw new Error(`자동 영상 조회 실패: ${error.message}`);
   const cutoff = Date.now() - AUTO_VIDEO_KEEP_DAYS * 24 * 60 * 60 * 1000;
   let count = 0;
   for (const p of data ?? []) {

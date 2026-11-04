@@ -33,7 +33,7 @@ export const sourcePlanSchema = z.object({
     .array(
       z.object({
         id: z.string().describe("후보 번호 p1, p2 ..."),
-        usable: z.boolean().describe("이 상품의 실물이 보이고, 사람 얼굴 · 다른 브랜드가 없고, 글자를 잘라 낼 수 있으면 true"),
+        usable: z.boolean().describe("이 상품의 실물이나 제형 · 질감이 보이고, 사람 얼굴 · 다른 브랜드가 없고, 글자를 잘라 낼 수 있으면 true"),
         what: z.string().describe("사진에 보이는 것 한 줄"),
         trim_top: z.number().describe("위에서 잘라 낼 비율 0~0.6. 글자 띠 · 제목이 위에 있으면 그만큼"),
         trim_bottom: z.number().describe("아래에서 잘라 낼 비율 0~0.6"),
@@ -77,13 +77,14 @@ export async function writeSourcePlan(ctx: SourceContext): Promise<AgentResult<S
 상품: ${f.shop} ${f.kindLabel} "${f.name}"
 
 소재 세 가지:
-- photo: 상세페이지 제품 사진 후보(번호 붙은 그림). 카메라가 천천히 움직이는 컷이 된다. 이 상품을 보여 주는 비트의 기본이다.
+- photo: 대표 이미지와 상세페이지의 사진 후보(번호 붙은 그림). 카메라가 천천히 움직이는 컷이 된다. 이 상품을 보여 주는 비트의 기본이고, 쓸 사진이 있으면 비트의 절반 이상에 쓴다.
 - motion: 코드로 그리는 설명 도식. 숫자 · 비교 · 차례를 말할 때 쓴다. 값은 get_product_facts에 있는 것만 쓴다.
 - stock: 무료 분위기 영상. 상황 · 공감 문장에만, 한 영상에 2개 이내. 상품 기능을 말하는 비트에는 쓰지 않는다.
 
 사진 후보 판단:
 - 사람 얼굴이 보이면 usable false(모델 사진은 초상권 문제가 있어 움직이지 않는다). 손 · 팔만 보이면 괜찮다.
-- 이 상품이 아닌 물건, 인증서 · 표 · 그래프 · 비교 그림은 false. 그림 위에 글자가 박혀 잘라 낼 수 없으면 false.
+- 이 상품의 제형 · 질감을 보여 주는 사진은 쓸 수 있다. 다만 그 사진을 효과의 증거처럼 말하지 않는다.
+- 이 상품이 아닌 물건, 인증서 · 표 · 그래프 · 비교 그림, 성분 목록은 false. 그림 위에 글자가 박혀 잘라 낼 수 없으면 false.
 - 위나 아래에 글자 띠가 있으면 trim_top, trim_bottom으로 잘라 내고 쓴다. 제품 표면에 인쇄된 글자는 괜찮다.
 - 제품 주의사항과 부딪히는 사진은 쓰지 않거나 warnings에 적는다.
 
@@ -102,7 +103,7 @@ ${ctx.beats.map((b, i) => `${i}. "${b.spoken}"${b.on_screen ? ` [화면 문구: 
     system,
     user,
     userImages: ctx.sheets,
-    skills: writerSkills({ facts: ctx.facts, rules: ctx.rules, accountName: ctx.accountName }).filter((s) => s.name === "get_product_facts"),
+    skills: writerSkills({ facts: ctx.facts, rules: ctx.rules, accountName: ctx.accountName }).filter((s) => s.name === "get_product_facts" || s.name === "check_rules"),
     outputSchema: sourcePlanSchema,
     outputName: "source_plan",
     maxSteps: 6,
@@ -130,7 +131,15 @@ export function sourcePlanProblems(plan: SourcePlan, beatCount: number): string[
       stock++;
       if (!b.stock_query.trim()) out.push(`${b.beat}번 비트에 스톡 검색어가 없다`);
     }
-    if (b.use === "motion" && !b.motion) out.push(`${b.beat}번 비트에 도식 값이 없다`);
+    if (b.use === "motion") {
+      const m = b.motion;
+      const empty =
+        !m ||
+        (m.kind === "steps" && !m.items.some((t) => t.trim())) ||
+        (m.kind === "big_fact" && !m.big.trim()) ||
+        (m.kind === "compare" && !m.left_value.trim() && !m.right_values.some((t) => t.trim()));
+      if (empty) out.push(`${b.beat}번 비트에 도식 값이 없다`);
+    }
   }
   for (let i = 0; i < beatCount; i++) if (!seen.has(i)) out.push(`${i}번 비트의 소재가 없다`);
   if (stock > 2) out.push("스톡은 2개 이내로 줄인다");

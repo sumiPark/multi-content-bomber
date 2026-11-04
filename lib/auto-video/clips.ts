@@ -132,7 +132,7 @@ tl.to("#right", { opacity: .95, duration: ${Math.max(1, step * Math.max(1, value
 function countHtml(m: MotionSpec, accent: string): { css: string; body: string; script: string; shot: string } {
   const r = 300;
   const circ = (2 * Math.PI * r).toFixed(1);
-  const to = Math.max(1, Math.round(m.number_to));
+  const to = m.number_to;
   const css = `${BASE_CSS}
 #ring { position: absolute; left: 190px; top: 560px; width: 700px; height: 700px; }
 #ring svg { transform: rotate(-90deg); }
@@ -182,7 +182,9 @@ tl.to("#big", { scale: 1.06, duration: 7, ease: "none" }, .6);`;
 }
 
 /** 코드 모션 → 컷. 값은 소재 에이전트가 상품 정보에서 낸 것만 들어온다. */
-export function motionClip(m: MotionSpec, workDir: string, name: string): { file: string; shot: string } {
+export function motionClip(input: MotionSpec, workDir: string, name: string): { file: string; shot: string } {
+  // 차오르는 숫자는 자연수만 쓴다. 1.5g 같은 값을 반올림하면 사실이 바뀌니 그대로 크게 보여 준다
+  const m: MotionSpec = input.kind === "count" && !(Number.isInteger(input.number_to) && input.number_to > 0) ? { ...input, kind: "big_fact", big: String(input.number_to) } : input;
   const accent = hex(m.accent, "#E04E08");
   const built = m.kind === "compare" ? compareHtml(m, accent) : m.kind === "count" ? countHtml(m, accent) : m.kind === "steps" ? stepsHtml(m, accent) : bigHtml(m, accent);
   const dir = join(workDir, name);

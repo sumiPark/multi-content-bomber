@@ -350,7 +350,7 @@ async function main() {
           hooks: kit ? [{ formula_id: 0, spoken: kit.plan.hook.spoken, on_screen: kit.plan.hook.on_screen }] : (script.hooks ?? []),
           chosen_hook: kit ? 0 : (script.chosen_hook ?? 0),
           beats: kit
-            ? kit.plan.beats.map((b, i) => ({ spoken: b.tts || b.captions.join(" "), on_screen: i === 0 ? kit!.plan.hook.on_screen : b.graphics.map((g) => g.text).filter(Boolean).join(" "), visual: b.cuts.map((c) => c.what).join(" / ") }))
+            ? kit.plan.beats.map((b, i) => ({ spoken: b.captions.join(" ") || b.tts, on_screen: i === 0 ? kit!.plan.hook.on_screen : b.graphics.map((g) => g.text).filter(Boolean).join(" "), visual: b.cuts.map((c) => c.what).join(" / ") }))
             : plans.map((p) => ({ spoken: p.subtitles.map((s) => s.text).join(" ") || p.onScreen, on_screen: p.onScreen, visual: "" })),
           loop_word: script.loop_word ?? "",
           caption: script.caption ?? { text: "", keywords: [] },

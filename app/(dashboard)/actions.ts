@@ -758,7 +758,7 @@ export async function deleteContentsAction(
 
   const pathsOf = (t: { media_urls: string[]; metadata: unknown }) => {
     const meta = (t.metadata && typeof t.metadata === "object" ? t.metadata : {}) as Record<string, unknown>;
-    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path].filter((x): x is string => typeof x === "string" && !!x);
+    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path, meta.ig_cover_path].filter((x): x is string => typeof x === "string" && !!x);
   };
   const candidatePaths = Array.from(new Set(targets.filter((t) => deletedIds.has(t.id)).flatMap(pathsOf)));
 

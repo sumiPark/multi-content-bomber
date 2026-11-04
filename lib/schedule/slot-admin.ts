@@ -34,8 +34,6 @@ export function scopeLabel(s: { shop: string; kind: string }): string {
   return SCOPE_OPTIONS.find((o) => o.shop === s.shop && o.kind === s.kind)?.label ?? `${s.shop} ${s.kind}`;
 }
 
-export const TRACK_LABEL: Record<string, string> = { B: "AI 자동", A: "직접 촬영" };
-
 /**
  * 화면 안내용 "08 · 21시" — 켜진 칸들의 시각을 모아 보여 준다. 계정마다 시각이 달라 많으면 많이 쓰는 4개 + "등".
  * 칸이 없으면 "칸 없음".

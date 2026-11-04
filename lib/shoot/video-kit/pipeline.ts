@@ -382,7 +382,7 @@ function makeBehindWord(look: Look, tl: Timeline, clips: KitClip[], baseVideo: s
   const made = runVisionTool<{ ratio: number }>("cutout.py", [baseVideo, cut.start.toFixed(3), (cut.end - cut.start).toFixed(3), join(project, "assets", file), join(workDir, "cutout")]);
   // 제품이 거의 없거나 화면을 다 덮으면 글자가 안 보인다
   if (!made || made.ratio < 0.06 || made.ratio > 0.6) return null;
-  return { word, start: Number(Math.max(cut.start, cap.start).toFixed(3)), end: Number(cut.end.toFixed(3)), file };
+  return { word, start: Number(Math.max(cut.start, cap.start).toFixed(3)), cutStart: Number(cut.start.toFixed(3)), end: Number(cut.end.toFixed(3)), file };
 }
 
 function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditPlan["thumbnail"], look: Look): string {
@@ -512,7 +512,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   // 음악: 다시 편집이면 처음 고른 곡, 아니면 영상마다 검색한다. 안 되면 대체 곡
   const priorMusic = (input.reusePlan as (EditPlan & { pickedMusic?: PickedMusic }) | null | undefined)?.pickedMusic;
   const music =
-    (priorMusic ? await reloadMusic(priorMusic, workDir) : null) ??
+    (priorMusic ? (priorMusic.source ? await reloadMusic(priorMusic, workDir) : libraryMusic(priorMusic.name)) : null) ??
     (await findMusic({ service: input.service, readService: input.readService, query: look.music_query, intent: look.music_intent, workDir })) ??
     libraryMusic(look.music);
   console.log(`[video-kit] 음악: ${music.name}${music.source ? ` (${music.source.creator}, ${music.source.license}, 검색어 "${music.query}")` : " (대체 곡)"}`);

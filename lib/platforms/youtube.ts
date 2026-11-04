@@ -6,7 +6,6 @@ import {
   TokenExpiredError,
   type OAuthTokens,
   type PlatformAdapter,
-  type PublishContext,
   type PublishResult,
   type RefreshedTokens,
 } from "./types";

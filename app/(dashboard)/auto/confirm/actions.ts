@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { isPastSlot } from "@/lib/automation/deadline";
-import { scheduleAutoVideo } from "@/lib/auto-video/publish";
+import { releaseOldPublish, scheduleAutoVideo } from "@/lib/auto-video/publish";
 import { triggerAutoScriptRun, triggerAutoVideoRun } from "@/lib/github-dispatch";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -83,6 +83,17 @@ export async function confirmPlanAction(input: z.infer<typeof confirmSchema>): P
   const { data: product } = await service.from("products").select("stock_status").eq("id", nextProduct).maybeSingle();
   if (product?.stock_status !== "available") return { ok: false, error: "지금 판매 중이 아닌 상품이에요. 다른 후보로 바꾸거나 건너뛰어 주세요." };
 
+  // 멈춘 칸을 다시 쓰면 예전 발행 작업을 끊고, 작업이 없던 완성본 파일은 지운다
+  let staleFiles: string[] = [];
+  if (fixing) {
+    const released = await releaseOldPublish(service, plan.id);
+    if (!released.ok) return released;
+    if (!released.hadJob) {
+      const { data: row } = await service.from("content_plans").select("video").eq("id", plan.id).maybeSingle();
+      const old = (row?.video ?? {}) as { path?: string; thumbnail?: string };
+      staleFiles = [old.path, old.thumbnail].filter((p): p is string => !!p);
+    }
+  }
   const { data: updated, error } = await service
     .from("content_plans")
     .update({
@@ -92,15 +103,14 @@ export async function confirmPlanAction(input: z.infer<typeof confirmSchema>): P
       confirmed_by: auth.userId,
       confirmed_at: new Date().toISOString(),
       // 멈춘 칸을 다시 쓰면 예전 대본 · 점검 결과는 지운다
-      ...(fixing ? { script: null, check_result: null, note: null, error: null } : {}),
+      ...(fixing ? { script: null, check_result: null, note: null, error: null, video: null } : {}),
     })
     .eq("id", plan.id)
     .eq("status", plan.status)
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!updated?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
-  // 예전 완성본 기록을 지운다. 컬럼(0046)이 없으면 실패해도 그만이다
-  if (fixing) await service.from("content_plans").update({ video: null }).eq("id", plan.id);
+  if (staleFiles.length) await service.storage.from("media").remove(staleFiles);
   // 멈춘 칸은 시간이 없을 수 있어 바로 다시 쓴다(실패해도 다음 정기 실행이 집어 간다)
   if (fixing) await triggerAutoScriptRun(`rewrite ${plan.id}`).catch((e) => console.error("[auto] 대본 트리거 실패:", e));
   revalidatePath("/auto/confirm");
@@ -138,15 +148,19 @@ export async function remakeVideoAction(input: z.infer<typeof idSchema>): Promis
   const { data: row } = await service.from("content_plans").select("script, video").eq("id", plan.id).maybeSingle();
   if (!row?.script) return { ok: false, error: "대본이 없어요. 먼저 대본을 다시 써 주세요." };
   const old = (row.video ?? {}) as { path?: string; thumbnail?: string };
+  const released = await releaseOldPublish(service, plan.id);
+  if (!released.ok) return released;
   const { data: moved, error } = await service
     .from("content_plans")
-    .update({ status: "SCRIPTED", video: null, check_result: null, note: null, error: null })
+    // remake: 오래된 칸이어도 사람이 다시 만들라고 했으니 워커가 만든다
+    .update({ status: "SCRIPTED", video: { remake: true }, check_result: null, note: null, error: null })
     .eq("id", plan.id)
     .eq("status", plan.status)
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
-  const files = [old.path, old.thumbnail].filter((p): p is string => !!p);
+  // 발행 작업이 쓰던 파일은 발행 기록에 남겨 둔다
+  const files = released.hadJob ? [] : [old.path, old.thumbnail].filter((p): p is string => !!p);
   if (files.length) await service.storage.from("media").remove(files);
   await triggerAutoVideoRun(`remake ${plan.id}`).catch((e) => console.error("[auto] 영상 트리거 실패:", e));
   revalidatePath("/auto/confirm");
@@ -165,12 +179,16 @@ export async function skipPlanAction(input: z.infer<typeof idSchema>): Promise<C
   if (plan.status !== "PROPOSED" && plan.status !== "CONFIRMED" && plan.status !== "BLOCKED" && plan.status !== "RENDERED") {
     return { ok: false, error: "이미 다음 단계로 넘어간 칸입니다." };
   }
-  const { error } = await service
+  const released = await releaseOldPublish(service, plan.id);
+  if (!released.ok) return released;
+  const { data: skipped, error } = await service
     .from("content_plans")
     .update({ status: "SKIPPED", note: "사람이 건너뜀", confirmed_by: auth.userId, confirmed_at: new Date().toISOString() })
     .eq("id", plan.id)
-    .eq("status", plan.status);
+    .eq("status", plan.status)
+    .select("id");
   if (error) return { ok: false, error: error.message };
+  if (!skipped?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
   revalidatePath("/auto/confirm");
   return { ok: true };
 }

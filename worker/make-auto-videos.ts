@@ -4,6 +4,7 @@ import "./load-env";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { checkScript } from "@/lib/agents/check";
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import { writeScript } from "@/lib/agents/script";
@@ -49,21 +50,13 @@ async function main() {
     suggestion: r.suggestion,
   }));
 
-  // 0046 적용 전에는 저장할 곳이 없으니 만들지 않는다(실패로 남기지 않는다)
-  const probe = await service.from("content_plans").select("video").limit(1);
-  if (probe.error) {
-    console.log(`[auto-video] DB 변경(0046) 적용 전이라 건너뜀: ${probe.error.message}`);
-    return;
-  }
-
   let q = service
     .from("content_plans")
     .select("id, organization_id, social_account_id, slot_date, slot_time, status, product_id, script, video, social_accounts(display_name)")
     .eq("track", "B")
     .order("slot_date")
     .order("slot_time");
-  // 확인한 칸은 시각이 지나도 만든다(끝나는 즉시 올라간다). 어제 칸까지 본다
-  q = onlyPlan ? q.eq("id", onlyPlan) : q.eq("status", "SCRIPTED").gte("slot_date", kstDate(-1));
+  q = onlyPlan ? q.eq("id", onlyPlan) : q.eq("status", "SCRIPTED");
   const { data: plans, error } = await q;
   if (error) throw new Error(error.message);
   if (!plans?.length) {
@@ -74,20 +67,40 @@ async function main() {
   for (const plan of plans) {
     if (!plan.product_id) continue;
     const acc = plan.social_accounts?.display_name ?? "";
+    const label = `@${acc} ${plan.slot_date} ${plan.slot_time}`;
     const concept = await loadAccountConcept(service, plan.social_account_id);
     // 시험(--dry-run)에서만 말투를 바꿔 설정 반영을 본다. 저장하지 않는다
     if (dryRun && process.env.TEST_AUTO_TONE?.trim()) concept.autoTone = process.env.TEST_AUTO_TONE.trim();
     // 시험(--dry-run --plan): 대본 없는 칸은 임시 대본을 써서 돌린다. 저장하지 않는다
     if (!plan.script && dryRun && onlyPlan) {
-      const res = await writeScript(
-        { service, planId: plan.id, accountName: acc, roleFocus: concept.autoRole, roleNote: null, slotTime: plan.slot_time as string, facts: await loadProductFacts(service, plan.product_id), rules, concept: concept.autoConcept, tone: concept.autoTone, videoStyle: concept.autoVideoStyle },
-        { log: false },
-      );
-      plan.script = res.output as unknown as Json;
+      try {
+        // 실제 대본 워커처럼 점검에 걸리면 한 번 다시 쓴다
+        const facts = await loadProductFacts(service, plan.product_id);
+        let fixRequests: string[] | undefined;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const res = await writeScript(
+            { service, planId: plan.id, accountName: acc, roleFocus: concept.autoRole, roleNote: null, slotTime: plan.slot_time as string, facts, rules, concept: concept.autoConcept, tone: concept.autoTone, videoStyle: concept.autoVideoStyle, fixRequests },
+            { log: false },
+          );
+          plan.script = res.output as unknown as Json;
+          const check = await checkScript(res.output, facts, rules, acc);
+          console.log(`  임시 대본 ${attempt + 1}번째: ${check.passed ? "통과" : `걸림 ${check.issues.map((i) => i.detail).join(" / ").slice(0, 200)}`}`);
+          if (check.passed) break;
+          fixRequests = check.issues.map((i) => i.detail);
+        }
+      } catch (e) {
+        process.exitCode = 1;
+        console.error(`[auto-video] ${label} 임시 대본 실패: ${e instanceof Error ? e.message : e}`);
+        continue;
+      }
     }
     if (!plan.script) continue;
-    const label = `@${acc} ${plan.slot_date} ${plan.slot_time}`;
     const prev = (plan.video ?? {}) as AutoVideo;
+    // 확인한 칸은 시각이 지나도 만든다(끝나는 즉시 올라간다). 그제 이전 칸은 사람이 다시 만들라고 했을 때만 만든다
+    if (!onlyPlan && !prev.remake && (plan.slot_date as string) < kstDate(-1)) {
+      if (!dryRun) await service.from("content_plans").update({ status: "BLOCKED", note: "올릴 시각이 오래 지나 만들지 않았어요. 필요하면 다시 만들어 주세요." }).eq("id", plan.id).eq("status", "SCRIPTED");
+      continue;
+    }
     // 다른 실행이 만드는 중이면 건너뛴다. 오래됐으면 끊긴 것으로 보고 다시 만든다
     if (!onlyPlan && prev.state === "making" && prev.startedAt && Date.now() - Date.parse(prev.startedAt) < STALE_MS) continue;
     const attempts = (prev.attempts ?? 0) + 1;

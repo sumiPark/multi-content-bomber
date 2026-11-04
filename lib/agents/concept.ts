@@ -58,13 +58,11 @@ const EMPTY: AccountConcept = {
 export async function loadAccountConcept(service: Service, accountId: string): Promise<AccountConcept> {
   const { data, error } = await service
     .from("account_concepts")
-    .select("auto_role_focus, shoot_role_focus, shoot_voice_mode, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params")
+    .select("auto_role_focus, shoot_role_focus, shoot_voice_mode, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, auto_voice_id, shoot_voice_id, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params")
     .eq("social_account_id", accountId)
     .maybeSingle();
   if (error) console.warn(`[concept] 읽기 실패(${accountId}): ${error.message}`);
   if (!data) return EMPTY;
-  // 목소리(0047)는 따로 읽는다. 못 읽으면 기본 목소리로 이어 간다
-  const { data: voices } = await service.from("account_concepts").select("auto_voice_id, shoot_voice_id").eq("social_account_id", accountId).maybeSingle();
   return {
     autoRole: data.auto_role_focus,
     shootRole: data.shoot_role_focus,
@@ -74,8 +72,8 @@ export async function loadAccountConcept(service: Service, accountId: string): P
     autoEndings: data.auto_endings,
     autoTone: data.auto_tone,
     autoVideoStyle: data.auto_video_style,
-    autoVoiceId: voiceIdOf(voices?.auto_voice_id),
-    shootVoiceId: voiceIdOf(voices?.shoot_voice_id),
+    autoVoiceId: voiceIdOf(data.auto_voice_id),
+    shootVoiceId: voiceIdOf(data.shoot_voice_id),
     shootConcept: data.shoot_concept,
     shootHooks: data.shoot_hooks,
     shootEndings: data.shoot_endings,

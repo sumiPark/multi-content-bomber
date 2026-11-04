@@ -67,8 +67,7 @@ multi-content-bomber/
 │   │   ├── sidebar-shell.tsx           # 4-그룹 사이드바 + 모바일 drawer + 뱃지(count/soon)
 │   │   └── coming-soon.tsx             # 자동화 그룹 추후 구현 안내 화면
 │   ├── dashboard/
-│   │   ├── dashboard-hub.tsx           # 액션 허브 (헤더/실패바/통계/예정/연동/빠른작업)
-│   │   └── organization-card.tsx
+│   │   └── dashboard-hub.tsx           # 액션 허브 (헤더/실패바/통계/예정/연동/빠른작업)
 │   ├── accounts/accounts-page.tsx      # 계정 그룹 카드 + inline 그룹 이동
 │   ├── postings/postings-page.tsx      # 배포 관리 필터·테이블·일괄 작업
 │   ├── presets/presets-manager.tsx
@@ -85,7 +84,6 @@ multi-content-bomber/
 │   │   ├── server.ts                   # createServerClient<Database> (async cookies)
 │   │   ├── service.ts                  # service_role 클라이언트 (토큰 컬럼/워커용)
 │   │   └── proxy.ts                    # 토큰 갱신 헬퍼 (proxy.ts에서 사용)
-│   ├── supabase.ts                     # 타입 안전 싱글톤 (anon)
 │   ├── auth.ts                         # 요청 단위 getSessionUser/getCurrentProfile (react.cache)
 │   ├── ai/caption-generator.ts         # gpt-6.1-terra + zod schema + 프롬프트 (인스타 점검은 instagram-caption-check.ts)
 │   ├── openai.ts                       # OpenAI 싱글톤
@@ -149,7 +147,6 @@ multi-content-bomber/
 - **서버 컴포넌트/액션:** `lib/supabase/server.ts` (async cookies로 세션 동기화)
 - **클라이언트 컴포넌트:** `lib/supabase/client.ts` (browser cookies)
 - **proxy.ts:** `lib/supabase/proxy.ts` (토큰 갱신 전용)
-- **익명 단순 쿼리:** `lib/supabase.ts` 싱글톤
 
 ### 에러 처리
 - Server Action: discriminated union 반환 (`{ ok: true, ... } | { ok: false, error: string }`)

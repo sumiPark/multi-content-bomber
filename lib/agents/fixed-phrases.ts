@@ -36,11 +36,6 @@ export interface PhraseState {
 
 const SLOT = /\{([^{}]+)\}/g;
 
-/** 문구의 빈칸 이름들. */
-export function slotNames(template: string): string[] {
-  return [...template.matchAll(SLOT)].map((m) => m[1].trim());
-}
-
 /** 빈칸을 채워 글자를 조립한다. 하나라도 비면 null — 나머지 글자는 건드리지 않는다. */
 export function renderTemplate(template: string, values: Map<string, string>): string | null {
   let missing = false;

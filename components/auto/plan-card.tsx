@@ -43,6 +43,8 @@ export interface PlanCardData {
   // 대본 · 점검 결과 (확인 뒤 AI가 씀)
   script: { hookScore: number | null; beats: { spoken: string; onScreen: string }[]; caption: string; fixedHook: boolean; fixedNotes: string[] } | null;
   issues: string[];
+  // 발행 작업 상태 (예약된 칸)
+  jobStatus: string | null;
   // 완성본 (서명 주소)
   video: { url: string; seconds: number | null; reading: string | null; music: { title?: string; creator?: string; license?: string; landing?: string } | null } | null;
 }
@@ -57,6 +59,15 @@ const STATUS: Record<string, { label: string; variant: "default" | "secondary" |
   PUBLISHED: { label: "발행됨", variant: "ok" },
   SKIPPED: { label: "건너뜀", variant: "outline" },
   FAILED: { label: "실패", variant: "destructive" },
+};
+
+// 칸 상태는 예약에서 멈춰 있어 실제 결과는 발행 작업에서 읽는다
+const JOB_STATUS: Record<string, { label: string; variant: "secondary" | "destructive" | "outline" | "ok" }> = {
+  SUCCESS: { label: "발행됨", variant: "ok" },
+  FAILED: { label: "발행 실패", variant: "destructive" },
+  CANCELLED: { label: "발행 취소", variant: "outline" },
+  PROCESSING: { label: "올리는 중", variant: "secondary" },
+  RETRYING: { label: "올리는 중", variant: "secondary" },
 };
 
 function useRun() {
@@ -82,7 +93,8 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
   const editable = canManage && !plan.pastSlot && (blocked || plan.status === "PROPOSED" || plan.status === "CONFIRMED");
   const soldOut = !!plan.product && plan.product.stock !== "available";
   const [askSkip, setAskSkip] = useState(false);
-  const s = STATUS[plan.status] ?? { label: plan.status, variant: "outline" as const };
+  const s = (plan.jobStatus && JOB_STATUS[plan.jobStatus]) || STATUS[plan.status] || { label: plan.status, variant: "outline" as const };
+  const canRemake = canManage && (plan.status === "RENDERED" || plan.status === "BLOCKED") && (!!plan.video || !!plan.script);
 
   return (
     <div className={cn("space-y-3 rounded-lg border bg-card p-4", plan.status === "SKIPPED" && "opacity-60")}>
@@ -100,7 +112,7 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
       {plan.reason && <p className="rounded-md bg-muted/40 px-3 py-2 text-xs leading-relaxed">AI 이유: {plan.reason}</p>}
       {plan.note && <p className="text-xs text-muted-foreground">{plan.note}</p>}
       {plan.error && (
-        <p className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">대본을 쓰다 오류가 났어요. 다음 실행(오전 7시 · 9시쯤)에 다시 시도해요. ({plan.error.slice(0, 120)})</p>
+        <p className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">만드는 중에 오류가 났어요. 다음 실행(1시간 안)에 다시 시도해요. ({plan.error.slice(0, 120)})</p>
       )}
       {editable && soldOut && (
         <p className="rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs text-warn">
@@ -127,22 +139,23 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
               {plan.video.music.license && ` · ${plan.video.music.license.toUpperCase()}`}
             </p>
           )}
-          {canManage && (plan.status === "RENDERED" || plan.status === "BLOCKED") && (
-            <div className="flex flex-wrap gap-2">
-              {plan.status === "RENDERED" && (
-                <Button size="sm" disabled={isPending} onClick={() => run(() => approveVideoAction({ planId: plan.id }), plan.pastSlot ? "바로 올려요." : "올릴 시각에 올라가요.")}>
-                  <Check className="size-4" /> 이대로 올리기
-                </Button>
-              )}
-              <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => remakeVideoAction({ planId: plan.id }), "영상을 다시 만들어요.")}>
-                <RotateCcw className="size-4" /> 영상 다시 만들기
-              </Button>
-              {plan.status === "RENDERED" && (
-                <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setAskSkip(true)}>
-                  <SkipForward className="size-4" /> 이 칸 건너뛰기
-                </Button>
-              )}
-            </div>
+        </div>
+      )}
+
+      {canRemake && (
+        <div className="flex flex-wrap gap-2">
+          {plan.status === "RENDERED" && plan.video && (
+            <Button size="sm" disabled={isPending} onClick={() => run(() => approveVideoAction({ planId: plan.id }), plan.pastSlot ? "바로 올려요." : "올릴 시각에 올라가요.")}>
+              <Check className="size-4" /> 이대로 올리기
+            </Button>
+          )}
+          <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => remakeVideoAction({ planId: plan.id }), "영상을 다시 만들어요.")}>
+            <RotateCcw className="size-4" /> 영상 다시 만들기
+          </Button>
+          {(plan.status === "RENDERED" || plan.pastSlot) && (
+            <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setAskSkip(true)}>
+              <SkipForward className="size-4" /> 이 칸 건너뛰기
+            </Button>
           )}
         </div>
       )}

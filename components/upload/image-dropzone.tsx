@@ -46,9 +46,9 @@ export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
   // Notify parent on every change (drop / remove / clear / reorder).
   // Intentional dep-list: parent passes a stable setter, re-running on
   // its identity would cause noisy re-emits.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     onChange?.(files.map((f) => f.file));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [files]);
 
   const onDrop = useCallback(

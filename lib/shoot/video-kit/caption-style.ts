@@ -204,7 +204,8 @@ const ENTER: Record<Look["entrance"], { from: string; to: string }> = {
   pop: { from: "{ scale: 0.4, opacity: 0, y: 24 }", to: '{ scale: 1, opacity: 1, y: 0, duration: 0.17, ease: "back.out(3)" }' },
   slam: { from: "{ scale: 1.7, opacity: 0 }", to: '{ scale: 1, opacity: 1, duration: 0.2, ease: "back.out(2.4)" }' },
   rise: { from: "{ y: 70, opacity: 0 }", to: '{ y: 0, opacity: 1, duration: 0.3, ease: "expo.out" }' },
-  wipe: { from: '{ clipPath: "inset(0 100% 0 0)" }', to: '{ clipPath: "inset(0 0% 0 0)", duration: 0.24, ease: "power2.out" }' },
+  // 끝 상태를 바깥으로 넓혀 외곽선 · 그림자가 잘리지 않게 한다
+  wipe: { from: '{ clipPath: "inset(-40% 100% -40% -10%)" }', to: '{ clipPath: "inset(-40% -10% -40% -10%)", duration: 0.24, ease: "power2.out" }' },
   fade: { from: "{ opacity: 0, y: 8 }", to: '{ opacity: 1, y: 0, duration: 0.09, ease: "power2.out" }' },
 };
 

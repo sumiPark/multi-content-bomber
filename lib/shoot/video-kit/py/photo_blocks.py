@@ -48,6 +48,9 @@ def blocks_of(path):
     im = Image.open(path).convert("RGB")
     if im.width != W:
         im = im.resize((W, round(im.height * W / im.width)), Image.LANCZOS)
+    # 대표 이미지처럼 짧은 이미지는 바탕이 단색이어도 제품 사진이다. 통째로 후보에 넣는다
+    if im.height <= im.width * 1.4:
+        return im, [(0, 0, im.width, im.height)]
     arr = np.asarray(im)
     # 속도를 위해 4줄마다 잰다
     rows = flat_ratio(arr[::4, ::2])

@@ -1,12 +1,11 @@
 import type { ConceptCardData } from "@/components/schedule/account-concept";
 import { describeEditStyle, parseEditStyle } from "@/lib/shoot/edit-style";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, Tables } from "@/types/database";
+import type { Tables } from "@/types/database";
 
 // 영상 참고 내용 카드에 넘길 값 — 자동 콘텐츠 설정과 촬영 설정이 같이 쓴다. 카드는 자기 방식의 값만 보여 주고 저장한다.
 
 export const CONCEPT_SELECT =
-  "social_account_id, auto_role_focus, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, shoot_role_focus, shoot_voice_mode, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at";
+  "social_account_id, auto_role_focus, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, auto_voice_id, shoot_voice_id, shoot_role_focus, shoot_voice_mode, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at";
 
 export type ConceptRow = Pick<
   Tables<"account_concepts">,
@@ -24,18 +23,10 @@ export type ConceptRow = Pick<
   | "shoot_tone"
   | "shoot_edit_style"
   | "shoot_edit_params"
+  | "auto_voice_id"
+  | "shoot_voice_id"
   | "updated_at"
-> &
-  Partial<Pick<Tables<"account_concepts">, "auto_voice_id" | "shoot_voice_id">>;
-
-/** 목소리 설정(0047). 컬럼이 아직 없거나 못 읽으면 빈 값 — 기본 목소리로 나가고 화면은 그대로 열린다. */
-export async function loadConceptVoices(
-  client: Pick<SupabaseClient<Database>, "from">,
-  accountId: string,
-): Promise<{ auto_voice_id?: string | null; shoot_voice_id?: string | null }> {
-  const { data, error } = await client.from("account_concepts").select("auto_voice_id, shoot_voice_id").eq("social_account_id", accountId).maybeSingle();
-  return error || !data ? {} : data;
-}
+>;
 
 export function roleLabel(role: string | null | undefined): string | null {
   return role === "PERSON" ? "사람 중심" : role === "PRODUCT" ? "상품 중심" : null;

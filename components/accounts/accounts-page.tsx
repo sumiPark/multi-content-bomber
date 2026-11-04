@@ -5,13 +5,11 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import {
   Check,
-  CircleAlert,
   FolderPlus,
   Pencil,
   Plug,
   Trash2,
   Unplug,
-  XIcon,
 } from "lucide-react";
 import {
   assignAccountsToGroupAction,
@@ -30,7 +28,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -154,10 +151,6 @@ export const GROUP_COLORS: Array<{
     ring: "ring-purple-400",
   },
 ];
-
-export function colorClass(color: string) {
-  return GROUP_COLORS.find((c) => c.id === color) ?? GROUP_COLORS[0];
-}
 
 function getStatus(
   isActive: boolean,

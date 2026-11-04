@@ -2,9 +2,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
+import type { EditGraphic } from "@/lib/agents/edit-plan";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
-import { sourcePlanProblems, writeSourcePlan, type SourcePlan } from "@/lib/agents/source-plan";
+import { sourcePlanProblems, writeSourcePlan, type MotionSpec, type SourcePlan } from "@/lib/agents/source-plan";
 import { motionClip, photoClip } from "@/lib/auto-video/clips";
 import { stockClip } from "@/lib/auto-video/stock";
 import type { ContentRule } from "@/lib/rules/check";
@@ -23,14 +24,16 @@ async function detailImages(urls: string[], dir: string): Promise<string[]> {
   mkdirSync(dir, { recursive: true });
   const files: string[] = [];
   for (const [i, url] of urls.slice(0, 12).entries()) {
-    const res = await fetch(url, { headers: { "User-Agent": "MCB-Video/1.0" } });
-    if (!res.ok) {
-      console.warn(`  상세 이미지 ${i + 1} 내려받기 실패(${res.status})`);
-      continue;
+    // 한 장이 안 받아져도 나머지로 만든다
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": "MCB-Video/1.0" } });
+      if (!res.ok) throw new Error(String(res.status));
+      const f = join(dir, `d${i}${url.toLowerCase().includes(".png") ? ".png" : ".jpg"}`);
+      writeFileSync(f, Buffer.from(await res.arrayBuffer()));
+      files.push(f);
+    } catch (e) {
+      console.warn(`  이미지 ${i + 1} 내려받기 실패(${e instanceof Error ? e.message : e})`);
     }
-    const f = join(dir, `d${i}${url.toLowerCase().includes(".png") ? ".png" : ".jpg"}`);
-    writeFileSync(f, Buffer.from(await res.arrayBuffer()));
-    files.push(f);
   }
   return files;
 }
@@ -71,7 +74,8 @@ export async function makeAutoVideo(input: {
   const { data: product } = await service.from("products").select("detail_image_urls, represent_image_url").eq("id", productId).maybeSingle();
 
   // 1. 상세페이지에서 사진 구간만 잘라 후보로
-  const urls = [...(product?.detail_image_urls ?? [])];
+  // 대표 이미지는 제품만 찍힌 사진인 경우가 많아 맨 앞에 넣는다
+  const urls = [...(product?.represent_image_url ? [product.represent_image_url] : []), ...(product?.detail_image_urls ?? [])];
   const images = await detailImages(urls, join(workDir, "detail"));
   const listFile = join(workDir, "images.json");
   writeFileSync(listFile, JSON.stringify(images));
@@ -183,22 +187,31 @@ export async function makeAutoVideo(input: {
   });
   tokens = { input: tokens.input + kit.tokens.input, output: tokens.output + kit.tokens.output };
 
-  // 5. 실제로 들어간 글로 다시 점검
+  // 5. 실제로 들어간 글로 다시 점검. 도식 · 그래픽 · 표지까지 영상에 박히는 글은 모두 본다
+  const graphicTexts = (g: EditGraphic) => [g.text, g.small, g.sub, g.note, g.chip, g.number, g.unit, g.left, g.right, ...g.items].filter(Boolean);
+  const motionTexts = sources.flatMap((s) => {
+    const m = (s as { spec?: MotionSpec }).spec;
+    return m ? [m.title, m.left_label, m.right_label, m.left_value, ...m.right_values, m.number_to ? `${m.number_to}${m.unit}` : "", m.end_text, ...m.items, m.big ? `${m.big}${m.unit}` : ""].filter(Boolean) : [];
+  });
+  const coverTexts = [kit.plan.thumbnail.title.replace(/\n+/g, " "), kit.plan.thumbnail.sub].filter(Boolean);
+  const lastBeat = kit.plan.beats.length - 1;
   const check = await checkScript(
     {
       hooks: [{ formula_id: 0, spoken: kit.plan.hook.spoken, on_screen: kit.plan.hook.on_screen }],
       chosen_hook: 0,
-      beats: kit.plan.beats.map((b, i) => ({ spoken: b.tts || b.captions.join(" "), on_screen: i === 0 ? kit.plan.hook.on_screen : b.graphics.map((g) => g.text).filter(Boolean).join(" "), visual: "" })),
+      // 근거 점검은 화면에 보이는 표기로 한다. 읽기용 원고(에이치에이)는 원문(AHA)과 맞지 않아 근거 없음으로 잘못 걸렸다
+      beats: kit.plan.beats.map((b, i) => ({ spoken: b.captions.join(" ") || b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(i === lastBeat ? [...motionTexts, ...coverTexts] : [])].join(" "), visual: "" })),
       loop_word: script.loop_word ?? "",
       caption: script.caption,
     },
     facts,
     rules,
     account,
-    { track: "B", seconds: kit.seconds, fixedHook: kit.hook.source !== "ai" },
+    // 훅 점수는 대본 단계에서 이미 통과했다. 여기 글은 읽기용(삼십칠 도)이라 다시 재면 낮게 나와 잘못 멈춘다
+    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: [script.fixed?.hook?.text, script.fixed?.ending?.text].filter((t): t is string => !!t) },
   );
   const blocking = finalBlocking(
-    { caption: script.caption?.text ?? "", onScreen: kit.plan.beats.flatMap((b) => b.graphics.map((g) => g.text)).concat(kit.plan.hook.on_screen), subtitles: kit.plan.beats.flatMap((b) => b.captions) },
+    { caption: script.caption?.text ?? "", onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...motionTexts, ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
     { kind: facts.kind, rules, approvedClaims: facts.approvedClaims, stockStatus: facts.stockStatus, healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions },
   );
   return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts };

@@ -53,9 +53,9 @@ export function VideoDropzone({
   // 고른 커버 프레임의 미리보기(data URL). 캡처 즉시 화면에 보여준다.
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     onChange?.(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
 
@@ -143,7 +143,6 @@ export function VideoDropzone({
     return (
       <div className="space-y-3">
         <div className="overflow-hidden rounded-lg border bg-black">
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <video
             ref={videoRef}
             src={previewUrl}

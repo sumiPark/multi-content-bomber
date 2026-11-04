@@ -53,7 +53,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
 
   const { data: plans } = await supabase
     .from("content_plans")
-    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, error, script, check_result, social_accounts(display_name)")
+    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, error, script, check_result, video, publish_jobs(status), social_accounts(display_name)")
     .eq("slot_date", slotDate)
     .eq("track", "B")
     .order("slot_time", { ascending: true });
@@ -91,10 +91,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   };
 
   // 완성본 — 비공개 버킷이라 서명 주소로 보여 준다
-  // 컬럼(0046)이 아직 없으면 완성본 없이 그대로 보여 준다
-  const { data: videoRows } = await supabase.from("content_plans").select("id, video").eq("slot_date", slotDate).eq("track", "B");
-  const videoOf = new Map((videoRows ?? []).map((r) => [r.id, r.video]));
-  const videoPaths = (plans ?? []).map((p) => (videoOf.get(p.id) as { path?: string } | null | undefined)?.path).filter((x): x is string => !!x);
+  const videoPaths = (plans ?? []).map((p) => (p.video as { path?: string } | null)?.path).filter((x): x is string => !!x);
   const signed = new Map<string, string>();
   if (videoPaths.length) {
     const { data: urls } = await createServiceClient().storage.from("media").createSignedUrls(videoPaths, 3600);
@@ -124,8 +121,9 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       error: p.error,
       script: summarizeScript(p.script),
       issues: ((p.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),
+      jobStatus: p.publish_jobs?.status ?? null,
       video: (() => {
-        const v = videoOf.get(p.id) as { path?: string; seconds?: number; plan?: { look?: { reading?: string } }; sounds?: { music?: string | null; musicSource?: { title?: string; creator?: string; license?: string; landing?: string } | null } } | null | undefined;
+        const v = p.video as { path?: string; seconds?: number; plan?: { look?: { reading?: string } }; sounds?: { music?: string | null; musicSource?: { title?: string; creator?: string; license?: string; landing?: string } | null } } | null;
         const url = v?.path ? signed.get(v.path) : undefined;
         return url ? { url, seconds: v?.seconds ?? null, reading: v?.plan?.look?.reading ?? null, music: v?.sounds?.musicSource ?? (v?.sounds?.music ? { title: v.sounds.music } : null) } : null;
       })(),
@@ -150,7 +148,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             AI 자동 업로드 칸({times.B})의 <b>상품을 확인</b>하면 AI가 대본 · 캡션을 쓰고 점검해요. 올리기 {CONFIRM_NOTICE_HOURS}시간 전에 알려 드리고, 올릴 시각까지 확인하지 않은 칸은 건너뛰어요. 확인한 칸은 영상 만들기가 늦어져도 끝나는 즉시 올라가요.{" "}
-            <b>지금은 대본까지만 자동이에요.</b> 영상 만들기 · 자동 게시는 준비 중이라 아직 올라가지 않아요.
+            <b>확인한 상품은 대본과 영상까지 자동으로 만들어요.</b> 완성본은 여기서 보고 올려요.
           </p>
         </div>
         {canManage && proposed > 0 && <ConfirmAllButton slotDate={slotDate} count={proposed} />}

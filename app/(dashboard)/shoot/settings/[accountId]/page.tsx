@@ -4,7 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { AccountConceptCard } from "@/components/schedule/account-concept";
 import { ShootAccountHeader } from "@/components/shoot/shoot-settings";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
-import { CONCEPT_SELECT, conceptCardData, type ConceptRow, loadConceptVoices } from "@/lib/schedule/concept-data";
+import { CONCEPT_SELECT, conceptCardData, type ConceptRow } from "@/lib/schedule/concept-data";
 import { SCOPE_OPTIONS } from "@/lib/schedule/slot-admin";
 
 // 촬영 설정 상세 — 계정 하나의 쓸 상품과 직접 촬영 컨셉(후킹 문구 · 마지막 문구 · 말투 · 편집 스타일 · 메모)을 고친다.
@@ -39,7 +39,7 @@ export default async function ShootSettingsDetailPage({ params }: { params: Prom
       </Link>
       <h1 className="text-xl font-bold tracking-[-0.01em]">@{name}</h1>
       <AccountConceptCard
-        data={conceptCardData({ accountId, name, row: (concept ? { ...concept, ...(await loadConceptVoices(supabase, accountId)) } : null) as unknown as ConceptRow | null })}
+        data={conceptCardData({ accountId, name, row: concept as unknown as ConceptRow | null })}
         canManage={canManage}
         mode="shoot"
         hideName

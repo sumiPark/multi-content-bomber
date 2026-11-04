@@ -1,4 +1,5 @@
 import { kstToIso } from "@/lib/automation/time";
+import { appendPublishHistory } from "@/lib/publish-history";
 import { splitHashtags } from "@/lib/shoot/final-check";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
@@ -10,6 +11,8 @@ type Service = ReturnType<typeof createServiceClient>;
 
 export interface AutoVideo {
   state?: "making" | "done";
+  // 사람이 다시 만들기를 눌렀다
+  remake?: boolean;
   startedAt?: string;
   attempts?: number;
   path?: string;
@@ -38,6 +41,11 @@ export async function scheduleAutoVideo(service: Service, planId: string, opts: 
   if (plan.social_accounts?.disconnected_at) return { ok: false, error: "연결이 끊긴 계정이에요." };
   if (!plan.slot_date || !plan.slot_time) return { ok: false, error: "올릴 시각이 없는 칸이에요." };
 
+  // 칸을 먼저 옮긴다. 두 곳에서 동시에 승인해도 한쪽만 작업을 만든다(이중 발행 방지)
+  const { data: claimed } = await service.from("content_plans").update({ status: "SCHEDULED", note: null }).eq("id", plan.id).eq("status", "RENDERED").select("id");
+  if (!claimed?.length) return { ok: false, error: "칸의 상태가 바뀌었어요. 새로 고쳐 주세요." };
+  const undo = () => service.from("content_plans").update({ status: "RENDERED" }).eq("id", plan.id).eq("status", "SCHEDULED");
+
   const script = (plan.script ?? {}) as { caption?: { text?: string } };
   const { caption, hashtags } = splitHashtags(script.caption?.text ?? "");
   const name = plan.products?.name ?? "AI 자동 콘텐츠";
@@ -55,7 +63,10 @@ export async function scheduleAutoVideo(service: Service, planId: string, opts: 
     })
     .select("id")
     .single();
-  if (contentError || !content) return { ok: false, error: contentError?.message ?? "콘텐츠를 만들지 못했어요." };
+  if (contentError || !content) {
+    await undo();
+    return { ok: false, error: contentError?.message ?? "콘텐츠를 만들지 못했어요." };
+  }
 
   const scheduledFor = kstToIso(plan.slot_date, plan.slot_time);
   const { data: job, error: jobError } = await service
@@ -65,19 +76,27 @@ export async function scheduleAutoVideo(service: Service, planId: string, opts: 
     .single();
   if (jobError || !job) {
     await service.from("contents").delete().eq("id", content.id);
+    await undo();
     return { ok: false, error: jobError?.message ?? "발행 작업을 만들지 못했어요." };
   }
-  const { data: moved } = await service
-    .from("content_plans")
-    .update({ status: "SCHEDULED", content_id: content.id, publish_job_id: job.id, note: null })
-    .eq("id", plan.id)
-    .eq("status", "RENDERED")
-    .select("id");
-  if (!moved?.length) {
-    // 그사이 사람이 건너뛰었으면 만든 작업을 되돌린다
-    await service.from("publish_jobs").delete().eq("id", job.id);
-    await service.from("contents").delete().eq("id", content.id);
-    return { ok: false, error: "칸의 상태가 바뀌었어요. 새로 고쳐 주세요." };
-  }
+  await service.from("content_plans").update({ content_id: content.id, publish_job_id: job.id }).eq("id", plan.id);
   return { ok: true, scheduledFor };
+}
+
+/**
+ * 칸을 건너뛰거나 다시 만들 때 예전 발행 작업을 끊는다. 끊지 않으면 배포 관리의 재시도로 옛 영상이 올라갈 수 있다.
+ * 발행 기록은 지우지 않고 취소로 남긴다. 작업이 쓰던 파일은 기록이 쓰므로 지우면 안 된다(hadJob).
+ */
+export async function releaseOldPublish(service: Service, planId: string): Promise<{ ok: true; hadJob: boolean } | { ok: false; error: string }> {
+  const { data: plan } = await service.from("content_plans").select("publish_job_id").eq("id", planId).maybeSingle();
+  if (!plan?.publish_job_id) return { ok: true, hadJob: false };
+  const { data: job } = await service.from("publish_jobs").select("id, status").eq("id", plan.publish_job_id).maybeSingle();
+  if (job?.status === "PROCESSING") return { ok: false, error: "지금 올리는 중이에요. 끝난 뒤 다시 해 주세요." };
+  if (job?.status === "SUCCESS") return { ok: false, error: "이미 올라간 칸이에요." };
+  if (job && job.status !== "CANCELLED") {
+    await service.from("publish_jobs").update({ status: "CANCELLED", cancelled_at: new Date().toISOString() }).eq("id", job.id).in("status", ["PENDING", "RETRYING", "FAILED"]);
+    await appendPublishHistory(service, [job.id], { status: "CANCELLED", message: "AI 자동 칸을 건너뛰거나 다시 만들어 취소" });
+  }
+  await service.from("content_plans").update({ publish_job_id: null, content_id: null, video: null }).eq("id", planId);
+  return { ok: true, hadJob: true };
 }

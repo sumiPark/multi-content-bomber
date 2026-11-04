@@ -115,7 +115,9 @@ function clamp01(v: number): number {
 /** 프로젝트 파일을 쓴다. base.mp4 · mix.wav는 호출한 쪽이 assets에 둔다. */
 export interface BehindWord {
   word: string;
+  // 글자가 나오는 시각. 제품 레이어는 컷 전체(cutStart~end)에 깔아 원본과 어긋나지 않게 한다
   start: number;
+  cutStart: number;
   end: number;
   // assets 안의 제품만 남은 투명 영상
   file: string;
@@ -133,7 +135,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   });
   const behind = opts.behind ?? null;
   // 제품 뒤 글자 구간에서 화면을 당기면 제품 레이어와 어긋난다
-  const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.start - 0.4 && t < behind.end)) : [];
+  const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.cutStart - 0.4 && t < behind.end)) : [];
   const behindSize = behind ? Math.min(470, Math.floor(980 / Math.max(1, [...behind.word].length))) : 0;
   mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
   mkdirSync(join(dir, "compositions"), { recursive: true });
@@ -241,7 +243,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
       ${
         behind
           ? `<div id="bwrap" class="clip" data-start="${behind.start}" data-duration="${(behind.end - behind.start).toFixed(3)}" data-track-index="5" style="position:absolute;inset:0"><div id="bword" style="position:absolute;left:0;right:0;top:430px;text-align:center;font-family:Pretendard,sans-serif;font-weight:800;font-size:${behindSize}px;line-height:1;letter-spacing:-.05em;color:${look.accent_color}">${esc(behind.word)}</div></div>
-      <video id="bcut" class="clip" src="assets/${behind.file}" muted data-start="${behind.start}" data-duration="${(behind.end - behind.start).toFixed(3)}" data-track-index="6" data-layout-allow-occlusion style="position:absolute;inset:0;width:1080px;height:1920px"></video>`
+      <video id="bcut" class="clip" src="assets/${behind.file}" muted data-start="${behind.cutStart}" data-duration="${(behind.end - behind.cutStart).toFixed(3)}" data-track-index="6" data-layout-allow-occlusion style="position:absolute;inset:0;width:1080px;height:1920px"></video>`
           : ""
       }
       <div id="graphics" data-composition-id="graphics" data-composition-src="compositions/graphics.html" data-start="0" data-duration="${D}" data-track-index="1" data-track-kind="graphics" data-width="1080" data-height="1920"></div>
