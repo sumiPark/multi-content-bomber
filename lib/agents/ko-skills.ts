@@ -117,6 +117,16 @@ export function hookFormulas(): { rules: string[]; hooks: HookFormula[] } {
   return formulasCache;
 }
 
+/** 잘된 릴스 첫 줄에 훅 공식 이름 · 점수를 붙인다 (swipe_ko.py). 다른 계정 비교용. */
+export function classifyHooks(rows: { id: string; hook: string; views: number }[]): { id: string; formula: string; score: number | null }[] {
+  const clean = (s: string) => s.replace(/[\t\r\n]+/g, " ").trim();
+  const tsv = ["id\thook\tviews", ...rows.map((r) => `${r.id}\t${clean(r.hook)}\t${r.views}`)].join("\n") + "\n";
+  const r = runPy("ig-viral-ko/swipe_ko.py", tsv, ["--no-write"]) as {
+    reels: { id: string; formula: string; hook_score: number | null }[];
+  };
+  return r.reels.map((x) => ({ id: x.id, formula: x.formula, score: x.hook_score }));
+}
+
 export interface ProfileCheckItem {
   id: string;
   label: string;

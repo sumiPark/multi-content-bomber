@@ -13,13 +13,15 @@ import {
   type ProfileScoreAccount,
   type ReviewRow,
 } from "@/components/account-review/profile-review";
+import { BenchmarkView } from "@/components/benchmark/benchmark-view";
 import { AnalyticsTabs, type AnalyticsTab } from "@/components/analytics/analytics-tabs";
 import { CollectNowButton } from "@/components/analytics/collect-now-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { loadBenchmark } from "@/lib/benchmark/load";
 
-// 분석 — 탭 둘: 프로필 점수(매일 04:30 자동 채점, 0034) · 게시물 성과(인스타 계정별 기준선).
+// 분석 — 탭 셋: 프로필 점수(매일 04:30 자동 채점, 0034) · 게시물 성과(인스타 계정별 기준선) · 다른 계정 비교(0037).
 // 게시물 성과 데이터는 성과 수집 워커(worker/collect-metrics.ts)가 매일 04시(KST)에 쌓는다(0024).
 // 트랙(A 혼합 / B 자동)별 비교는 운영 시작 뒤(7 첫 리포트)에 붙인다.
 
@@ -27,10 +29,13 @@ const BASELINE_POSTS = 30;
 const FOLLOWER_COMPARE_DAYS = 7;
 const PROFILE_HISTORY = 4;
 
+// "며칠 전" 계산 기준 시각 — 요청마다 새로 그리는 서버 컴포넌트
+const pageNow = () => Date.now();
+
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; account?: string }>;
 }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
@@ -38,7 +43,7 @@ export default async function AnalyticsPage({
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
 
-  const { tab: tabParam } = await searchParams;
+  const { tab: tabParam, account: accountParam } = await searchParams;
 
   const supabase = await getServerSupabase();
 
@@ -151,7 +156,19 @@ export default async function AnalyticsPage({
   const scoredCount = scoreAccounts.filter((a) => reviewsByAccount.get(a.id)?.some((r) => r.status === "DONE")).length;
   const collectedCount = baselines.filter((b) => b.lastCollectedOn).length;
   const tab: AnalyticsTab =
-    tabParam === "profile" || tabParam === "posts" ? tabParam : collected && scoredCount === 0 ? "posts" : "profile";
+    tabParam === "profile" || tabParam === "posts" || tabParam === "compare" ? tabParam : collected && scoredCount === 0 ? "posts" : "profile";
+
+  // 다른 계정 비교(0037) — 탭 숫자용 건수는 항상, 내용은 그 탭을 열 때만 읽는다
+  const { data: linkRows } = await supabase.from("benchmark_links").select("social_account_id, benchmark_account_id");
+  const compareCount = new Set((linkRows ?? []).map((l) => l.benchmark_account_id)).size;
+  const compareAccounts = scoreAccounts
+    .filter((a) => a.active)
+    .map((a) => ({ id: a.id, name: a.name, linkCount: (linkRows ?? []).filter((l) => l.social_account_id === a.id).length }));
+  // 고른 계정이 없으면 비교 목록이 있는 첫 계정
+  const compareSelected = compareAccounts.find((a) => a.id === accountParam) ?? compareAccounts.find((a) => a.linkCount > 0) ?? compareAccounts[0] ?? null;
+  const compareNow = pageNow();
+  const compareData = tab === "compare" && compareSelected ? await loadBenchmark(supabase, compareSelected.id, compareNow) : null;
+  const canEditCompare = profile.role === "ADMIN" || profile.role === "MANAGER";
 
   return (
     <main className="space-y-5 p-4 sm:p-6">
@@ -164,7 +181,9 @@ export default async function AnalyticsPage({
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
             {tab === "profile"
               ? "프로필을 12개 기준으로 매일 04:30에 자동 채점하고, 점수를 가장 많이 깎는 곳부터 고칠 문구를 드려요. 인스타에는 아무것도 바꾸지 않아요. 마음에 드는 문구를 직접 붙여 넣으세요."
-              : "인스타 계정마다 지금 수준을 숫자로 잡아 둡니다. 매일 04시에 팔로워와 최근 게시물 성과를 자동으로 수집해요."}
+              : tab === "compare"
+                ? "우리 계정마다 참고할 계정을 두고, 그 계정 릴스가 평소보다 몇 배 잘됐는지 매일 읽어요. 고른 이유와 숫자 근거를 함께 보여 드려요."
+                : "인스타 계정마다 지금 수준을 숫자로 잡아 둡니다. 매일 04시에 팔로워와 최근 게시물 성과를 자동으로 수집해요."}
           </p>
         </div>
         {tab === "posts" && accounts.length > 0 && (
@@ -189,9 +208,15 @@ export default async function AnalyticsPage({
         />
       ) : (
         <>
-          <AnalyticsTabs active={tab} scoredCount={scoredCount} collectedCount={collectedCount} />
+          <AnalyticsTabs active={tab} scoredCount={scoredCount} collectedCount={collectedCount} compareCount={compareCount} />
 
-          {tab === "profile" ? (
+          {tab === "compare" ? (
+            compareSelected && compareData ? (
+              <BenchmarkView accounts={compareAccounts} selectedId={compareSelected.id} data={compareData} canEdit={canEditCompare} now={compareNow} />
+            ) : (
+              <EmptyState title="연결된 인스타 계정이 없어요" body="계정 연동에서 다시 연결한 뒤 비교 계정을 넣을 수 있어요." />
+            )
+          ) : tab === "profile" ? (
             <section aria-label="프로필 점수" className="space-y-3">
               <ProfileScoreOverview accounts={scoreAccounts} histories={reviewsByAccount} />
               {scoreAccounts

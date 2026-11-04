@@ -99,6 +99,11 @@ export async function triggerProfileReviewRun(reason: string, accountId?: string
   await dispatch(PROFILE_REVIEW_DISPATCH_EVENT, reason, accountId ? { account: accountId } : {});
 }
 
+/** 다른 계정 비교 — 비교 계정을 추가한 직후. 평소엔 매일 04:50 schedule. */
+export async function triggerBenchmarkRun(reason: string): Promise<void> {
+  await dispatch("benchmark-collect", reason);
+}
+
 async function dispatch(eventType: string, reason: string, extra: Record<string, string> = {}): Promise<void> {
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   const repo = process.env.GITHUB_REPO;

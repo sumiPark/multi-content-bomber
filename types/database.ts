@@ -376,6 +376,181 @@ export type Database = {
           },
         ]
       }
+      benchmark_accounts: {
+        Row: {
+          biography: string | null
+          created_at: string
+          display_name: string | null
+          error: string | null
+          followers_count: number | null
+          id: string
+          last_collected_at: string | null
+          last_post_at: string | null
+          media_count: number | null
+          median_views: number | null
+          organization_id: string
+          own_account_id: string | null
+          reels_30d: number | null
+          reels_sampled: number | null
+          status: string
+          username: string
+        }
+        Insert: {
+          biography?: string | null
+          created_at?: string
+          display_name?: string | null
+          error?: string | null
+          followers_count?: number | null
+          id?: string
+          last_collected_at?: string | null
+          last_post_at?: string | null
+          media_count?: number | null
+          median_views?: number | null
+          organization_id: string
+          own_account_id?: string | null
+          reels_30d?: number | null
+          reels_sampled?: number | null
+          status?: string
+          username: string
+        }
+        Update: {
+          biography?: string | null
+          created_at?: string
+          display_name?: string | null
+          error?: string | null
+          followers_count?: number | null
+          id?: string
+          last_collected_at?: string | null
+          last_post_at?: string | null
+          media_count?: number | null
+          median_views?: number | null
+          organization_id?: string
+          own_account_id?: string | null
+          reels_30d?: number | null
+          reels_sampled?: number | null
+          status?: string
+          username?: string
+        }
+        Relationships: []
+      }
+      benchmark_links: {
+        Row: {
+          benchmark_account_id: string
+          created_at: string
+          created_by: string | null
+          group_type: string
+          id: string
+          organization_id: string
+          reason: string | null
+          social_account_id: string
+          source: string
+        }
+        Insert: {
+          benchmark_account_id: string
+          created_at?: string
+          created_by?: string | null
+          group_type?: string
+          id?: string
+          organization_id: string
+          reason?: string | null
+          social_account_id: string
+          source?: string
+        }
+        Update: {
+          benchmark_account_id?: string
+          created_at?: string
+          created_by?: string | null
+          group_type?: string
+          id?: string
+          organization_id?: string
+          reason?: string | null
+          social_account_id?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmark_links_benchmark_account_id_fkey"
+            columns: ["benchmark_account_id"]
+            isOneToOne: false
+            referencedRelation: "benchmark_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      benchmark_posts: {
+        Row: {
+          ad_suspected: boolean
+          benchmark_account_id: string
+          caption: string | null
+          comments_count: number | null
+          first_seen_at: string
+          formula: string | null
+          hook_score: number | null
+          id: string
+          like_count: number | null
+          media_product_type: string | null
+          multiple: number | null
+          organization_id: string
+          permalink: string | null
+          platform_media_id: string
+          posted_at: string | null
+          reposts_count: number | null
+          thumbnail_url: string | null
+          updated_at: string
+          view_count: number | null
+        }
+        Insert: {
+          ad_suspected?: boolean
+          benchmark_account_id: string
+          caption?: string | null
+          comments_count?: number | null
+          first_seen_at?: string
+          formula?: string | null
+          hook_score?: number | null
+          id?: string
+          like_count?: number | null
+          media_product_type?: string | null
+          multiple?: number | null
+          organization_id: string
+          permalink?: string | null
+          platform_media_id: string
+          posted_at?: string | null
+          reposts_count?: number | null
+          thumbnail_url?: string | null
+          updated_at?: string
+          view_count?: number | null
+        }
+        Update: {
+          ad_suspected?: boolean
+          benchmark_account_id?: string
+          caption?: string | null
+          comments_count?: number | null
+          first_seen_at?: string
+          formula?: string | null
+          hook_score?: number | null
+          id?: string
+          like_count?: number | null
+          media_product_type?: string | null
+          multiple?: number | null
+          organization_id?: string
+          permalink?: string | null
+          platform_media_id?: string
+          posted_at?: string | null
+          reposts_count?: number | null
+          thumbnail_url?: string | null
+          updated_at?: string
+          view_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmark_posts_benchmark_account_id_fkey"
+            columns: ["benchmark_account_id"]
+            isOneToOne: false
+            referencedRelation: "benchmark_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       caption_presets: {
         Row: {
           created_at: string

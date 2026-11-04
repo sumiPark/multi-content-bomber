@@ -21,7 +21,8 @@
     "worker:a-shotlist": "tsx worker/write-a-shotlists.ts",
     "worker:shoot-edit": "tsx worker/edit-shoots.ts",
     "worker:cleanup-drafts": "tsx worker/cleanup-drafts.ts",
-    "worker:profile-review": "tsx worker/review-profiles.ts"
+    "worker:profile-review": "tsx worker/review-profiles.ts",
+    "worker:benchmarks": "tsx worker/collect-benchmarks.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

@@ -1,0 +1,38 @@
+name: benchmarks
+
+# 다른 계정 비교 워커(worker/collect-benchmarks.ts) — 비교 계정 릴스를 Business Discovery로 읽는다.
+#   · schedule 매일 04:50 KST — 성과 수집(04:00) · 프로필 채점(04:30) 뒤
+#   · repository_dispatch(benchmark-collect) — 화면에서 비교 계정을 추가한 직후
+# 훅 공식 분류 스크립트(.claude/skills/ig-viral-ko/swipe_ko.py)가 파이썬이라 러너의 python3를 쓴다.
+on:
+  schedule:
+    - cron: "50 19 * * *"
+  repository_dispatch:
+    types: [benchmark-collect]
+  workflow_dispatch: {}
+
+concurrency:
+  group: benchmarks-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  collect-benchmarks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Collect benchmarks
+        run: npm run worker:benchmarks
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          IG_DISCOVERY_TOKEN: ${{ secrets.IG_DISCOVERY_TOKEN }}
