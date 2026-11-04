@@ -1,4 +1,5 @@
 import type { getServerSupabase } from "@/lib/auth";
+import { checkText, type ContentRule } from "@/lib/rules/check";
 import { firstLine, HIT_MULTIPLE } from "./discovery";
 
 // 분석 · 다른 계정 비교 화면 데이터 (0037).
@@ -8,6 +9,11 @@ type Supabase = Awaited<ReturnType<typeof getServerSupabase>>;
 // 이 기간 안의 릴스만 "잘된 릴스"로 본다 — 오래된 공식은 지금 안 먹힐 수 있다.
 const HIT_WINDOW_DAYS = 180;
 const HIT_LIST = 12;
+// 한 계정이 목록을 독차지하지 않게 (2026-11-04 실측: 12개 중 11개가 한 계정)
+const HIT_PER_ACCOUNT = 3;
+// 평소의 이 배수를 넘으면 공식보다 광고 · 유명인 캠페인일 가능성이 커서 뒤로 보낸다.
+// 좋아요가 많으면 광고 의심 필터에 안 걸린다 (실측: 평소의 717배, 1,474만 회에 좋아요 30만).
+const CAMPAIGN_MULTIPLE = 30;
 
 export type GroupType = "SAME" | "ADJACENT" | "LARGE";
 
@@ -43,6 +49,10 @@ export interface BenchmarkHit {
   comments: number | null;
   multiple: number;
   formula: string | null;
+  // 평소와 차이가 너무 커서 광고 · 유명인 영상일 수 있음
+  campaign: boolean;
+  // 그대로 따라 쓰면 광고 문구 규칙에 걸리는 표현
+  bannedPhrases: string[];
 }
 
 export interface BenchmarkOwn {
@@ -120,23 +130,56 @@ export async function loadBenchmark(supabase: Supabase, socialAccountId: string,
     }];
   });
 
+  // 광고 문구 규칙 — 다른 계정의 상품 종류는 모르므로 모든 규칙을 본다
+  const { data: ruleRows } = await supabase
+    .from("content_rules")
+    .select("id, rule_type, phrase, match_type, reason, suggestion")
+    .eq("active", true)
+    .eq("rule_type", "BANNED");
+  const rules: ContentRule[] = (ruleRows ?? []).map((r) => ({
+    id: r.id,
+    scope: "ALL",
+    ruleType: "BANNED",
+    phrase: r.phrase,
+    matchType: r.match_type as ContentRule["matchType"],
+    reason: r.reason,
+    suggestion: r.suggestion,
+  }));
+
   const usernameOf = new Map(rows.map((r) => [r.accountId, r.username]));
-  const hits: BenchmarkHit[] = (posts ?? [])
-    .filter((p) => !p.ad_suspected && usernameOf.has(p.benchmark_account_id))
+  const perAccount = new Map<string, number>();
+  const usable = (posts ?? []).filter((p) => !p.ad_suspected && usernameOf.has(p.benchmark_account_id));
+  // 배수 순(쿼리 순서) 그대로, 캠페인으로 보이는 것만 뒤로
+  const ordered = [
+    ...usable.filter((p) => Number(p.multiple) < CAMPAIGN_MULTIPLE),
+    ...usable.filter((p) => Number(p.multiple) >= CAMPAIGN_MULTIPLE),
+  ];
+  const hits: BenchmarkHit[] = ordered
+    .filter((p) => {
+      const n = perAccount.get(p.benchmark_account_id) ?? 0;
+      if (n >= HIT_PER_ACCOUNT) return false;
+      perAccount.set(p.benchmark_account_id, n + 1);
+      return true;
+    })
     .slice(0, HIT_LIST)
-    .map((p) => ({
-      id: p.id,
-      username: usernameOf.get(p.benchmark_account_id) as string,
-      permalink: p.permalink,
-      thumbnailUrl: p.thumbnail_url,
-      hook: firstLine(p.caption),
-      postedAt: p.posted_at,
-      views: p.view_count ?? 0,
-      likes: p.like_count,
-      comments: p.comments_count,
-      multiple: Number(p.multiple),
-      formula: p.formula,
-    }));
+    .map((p) => {
+      const hook = firstLine(p.caption);
+      return {
+        id: p.id,
+        username: usernameOf.get(p.benchmark_account_id) as string,
+        permalink: p.permalink,
+        thumbnailUrl: p.thumbnail_url,
+        hook,
+        postedAt: p.posted_at,
+        views: p.view_count ?? 0,
+        likes: p.like_count,
+        comments: p.comments_count,
+        multiple: Number(p.multiple),
+        formula: p.formula,
+        campaign: Number(p.multiple) >= CAMPAIGN_MULTIPLE,
+        bannedPhrases: [...new Set(checkText(hook, "OTHER", rules).flatMap((h) => (h.matched ? [h.matched] : [])))],
+      };
+    });
 
   return {
     own: ownRow

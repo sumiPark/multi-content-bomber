@@ -67,7 +67,19 @@ export function baselineViews(media: BenchmarkMedia[]): { median: number | null;
   return { median: median(reels.map((m) => m.view_count as number)), sampled: reels.length };
 }
 
-/** 캡션 첫 줄 — 영상 첫 마디는 API에 없어 대신 쓴다. */
+// 줄바꿈을 흉내 내는 보이지 않는 글자 — 2026-11-04 실측: cu_official 캡션 첫 줄이 "ㅤ⠀"
+const INVISIBLE = /[ ᅟᅠ​-‍⠀ㅤ﻿ﾠ]/g;
+const HOOK_MIN = 40;
+const HOOK_MAX = 120;
+
+/** 캡션 앞부분 — 영상 첫 마디는 API에 없어 대신 쓴다. 글자 없는 줄은 건너뛰고, 첫 줄이 짧으면 다음 줄까지 잇는다. */
 export function firstLine(caption: string | null | undefined): string {
-  return (caption ?? "").split("\n").map((l) => l.trim()).find(Boolean)?.slice(0, 120) ?? "";
+  let out = "";
+  for (const raw of (caption ?? "").split("\n")) {
+    const line = raw.replace(INVISIBLE, " ").replace(/\s+/g, " ").trim();
+    if (!/[\p{L}\p{N}]/u.test(line)) continue;
+    out = out ? `${out} ${line}` : line;
+    if (out.length >= HOOK_MIN) break;
+  }
+  return out.slice(0, HOOK_MAX);
 }

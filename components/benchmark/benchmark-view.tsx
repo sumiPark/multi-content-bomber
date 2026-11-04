@@ -121,6 +121,18 @@ function HitCard({ hit, now }: { hit: BenchmarkHit; now: number }) {
           조회 {short(hit.views)} · 좋아요 {short(hit.likes)} · 댓글 {count(hit.comments)}
           {days != null && ` · ${days}일 전`}
         </p>
+        {hit.campaign && (
+          <p className="flex items-start gap-1 text-xs text-warn">
+            <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
+            평소와 차이가 아주 커요. 광고나 유명인 영상일 수 있으니 형식만 참고하세요.
+          </p>
+        )}
+        {hit.bannedPhrases.length > 0 && (
+          <p className="flex items-start gap-1 text-xs text-risk">
+            <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden />
+            그대로 쓰면 안 돼요. 광고 문구 규칙에 걸리는 표현: {hit.bannedPhrases.join(", ")}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {hit.formula && hit.formula !== "미분류" && <Badge variant="secondary">{hit.formula}</Badge>}
           {hit.permalink && (
@@ -212,7 +224,7 @@ export function BenchmarkView({
             <div>
               <h2 className="text-base font-semibold">평소보다 잘된 릴스</h2>
               <p className="text-[13px] text-muted-foreground">
-                그 계정 평소 조회의 3배를 넘은 최근 6개월 릴스예요. 조회수에 비해 좋아요가 너무 적은 릴스는 광고로 키운 것으로 보고 뺐어요. 영상을 베끼지 말고 첫 줄과 구성만 참고하세요.
+                그 계정 평소 조회의 3배를 넘은 최근 6개월 릴스를 계정당 3개까지 골랐어요. 조회수에 비해 좋아요가 너무 적은 릴스는 광고로 키운 것으로 보고 뺐어요. 영상을 베끼지 말고 첫 줄과 구성만 참고하세요.
               </p>
             </div>
             {data.hits.length ? (
