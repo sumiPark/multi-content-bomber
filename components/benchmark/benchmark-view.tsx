@@ -73,7 +73,7 @@ function AccountRow({ row, own, now, canEdit }: { row: BenchmarkRow; own: Benchm
       {row.status === "PENDING" ? (
         <p className="flex items-center gap-1.5 text-xs text-primary">
           <Loader2 className="size-3.5 animate-spin" aria-hidden />
-          아직 읽는 중이에요. 1~2분 뒤 새로고침하세요.
+          아직 읽지 못했어요. 보통 1~2분이면 채워지고, 호출 한도에 걸리면 다음 자동 수집(매일 04:50)에 채워져요.
         </p>
       ) : failed ? (
         <p className="flex items-start gap-1.5 text-xs text-risk">
