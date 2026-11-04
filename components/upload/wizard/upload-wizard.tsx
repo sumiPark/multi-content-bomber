@@ -217,6 +217,8 @@ export function UploadWizard({
   const [captionMode, setCaptionMode] = useState<CaptionMode>(
     draft?.state.captionMode ?? "ai",
   );
+  // AI가 다시 써도 인스타 캡션에 남은, 사람이 확인할 표현
+  const [captionReviewNotes, setCaptionReviewNotes] = useState<string[]>([]);
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>(
     draft?.state.scheduleMode ?? "now",
   );
@@ -533,6 +535,7 @@ export function UploadWizard({
         metadata: mediaMetadata,
         description: description.trim() || undefined,
         presetId: presetId || undefined,
+        accountIds: selectedAccountIds,
         platforms: selectedPlatforms,
         internalTitle: internalTitle.trim() || undefined,
       });
@@ -541,6 +544,7 @@ export function UploadWizard({
         return;
       }
       setCaptions(result.captions);
+      setCaptionReviewNotes(result.reviewNotes);
       setContentId(result.contentId);
       setSavedAt(result.savedAt);
       setThumbnailUrls(result.thumbnailUrls);
@@ -560,6 +564,7 @@ export function UploadWizard({
         analyzePaths,
         description: description.trim() || undefined,
         presetId: presetId || undefined,
+        accountIds: selectedAccountIds,
         platforms: selectedPlatforms,
         previousCaptions: captions,
       });
@@ -568,6 +573,7 @@ export function UploadWizard({
         return;
       }
       setCaptions(result.captions);
+      setCaptionReviewNotes(result.reviewNotes);
       setSavedAt(result.savedAt);
       setThumbnailUrls(result.thumbnailUrls);
     } finally {
@@ -617,6 +623,7 @@ export function UploadWizard({
       );
       if (!ok) return;
       setCaptions(null);
+      setCaptionReviewNotes([]);
       setContentId(null);
       setSavedAt(null);
       setThumbnailUrls([]);
@@ -845,6 +852,7 @@ export function UploadWizard({
             selectedPreset={selectedPreset}
             generating={generating}
             captionMode={captionMode}
+            captionReviewNotes={captionReviewNotes}
             onSwitchMode={handleSwitchCaptionMode}
             onChangeDescription={setDescription}
             onChangePreset={setPresetId}
@@ -1575,6 +1583,7 @@ function Step3Caption({
   selectedPreset,
   generating,
   captionMode,
+  captionReviewNotes,
   onSwitchMode,
   onChangeDescription,
   onChangePreset,
@@ -1599,6 +1608,7 @@ function Step3Caption({
   selectedPreset: PresetSummary | undefined;
   generating: boolean;
   captionMode: CaptionMode;
+  captionReviewNotes: string[];
   onSwitchMode: (m: CaptionMode) => void;
   onChangeDescription: (v: string) => void;
   onChangePreset: (v: string) => void;
@@ -1739,6 +1749,19 @@ function Step3Caption({
                     <RefreshCw className={cn(generating && "animate-spin")} />
                     {generating ? "다시 쓰는 중…" : "다른 스타일로 다시 쓰기"}
                   </Button>
+                </div>
+              )}
+              {captionMode === "ai" && captionReviewNotes.length > 0 && (
+                <div className="flex gap-2.5 rounded-lg border border-warn/40 bg-warn-soft px-3.5 py-3 text-[13px] text-ink-2">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warn" />
+                  <div>
+                    <p className="font-semibold">인스타 캡션을 올리기 전에 확인해 주세요</p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                      {captionReviewNotes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               )}
               <CaptionResult

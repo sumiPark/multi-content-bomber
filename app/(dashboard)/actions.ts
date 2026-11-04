@@ -8,7 +8,9 @@ import {
   generateCaptions,
   type Captions,
 } from "@/lib/ai/caption-generator";
+import type { CaptionAccount } from "@/lib/ai/prompts";
 import { triggerPublishRun } from "@/lib/github-dispatch";
+import type { ContentRule } from "@/lib/rules/check";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -27,6 +29,7 @@ const generateInputSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({}),
   description: z.string().max(500).optional(),
   presetId: z.string().uuid().optional(),
+  accountIds: z.array(z.string().uuid()).max(50).optional(),
   platforms: z
     .array(z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK"]))
     .min(1, "플랫폼을 1개 이상 선택해주세요.")
@@ -45,6 +48,7 @@ const regenerateInputSchema = z.object({
   analyzePaths: z.array(z.string().min(1)).min(1).max(10),
   description: z.string().max(500).optional(),
   presetId: z.string().uuid().optional(),
+  accountIds: z.array(z.string().uuid()).max(50).optional(),
   platforms: z
     .array(z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK"]))
     .min(1)
@@ -93,6 +97,7 @@ export type GenerateCaptionsResult =
       ok: true;
       contentId: string;
       captions: Captions;
+      reviewNotes: string[];
       savedAt: string;
       thumbnailUrls: string[];
     }
@@ -121,6 +126,7 @@ export type RegenerateCaptionsResult =
       ok: true;
       contentId: string;
       captions: Captions;
+      reviewNotes: string[];
       savedAt: string;
       thumbnailUrls: string[];
     }
@@ -163,6 +169,66 @@ function pickPostType(
   if (platform === "YOUTUBE") return "PHOTO";
   if (platform === "INSTAGRAM") return count > 1 ? "CAROUSEL" : "FEED";
   return "PHOTO_MODE";
+}
+
+// 캡션에 계정 말투를 맞추고 광고 문구 규칙을 검사하려고 읽는다. 못 읽어도 캡션 생성은 멈추지 않는다.
+async function loadCaptionContext(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  accountIds: string[] | undefined,
+  platforms: Platform[],
+): Promise<{ instagramAccounts: CaptionAccount[]; contentRules: ContentRule[] }> {
+  if (!platforms.includes("INSTAGRAM")) {
+    return { instagramAccounts: [], contentRules: [] };
+  }
+
+  const [accounts, rules] = await Promise.all([
+    accountIds?.length
+      ? supabase
+          .from("social_accounts")
+          .select("id, display_name")
+          .eq("platform", "INSTAGRAM")
+          .is("disconnected_at", null)
+          .in("id", accountIds)
+      : Promise.resolve({ data: [], error: null }),
+    supabase
+      .from("content_rules")
+      .select("id, scope, rule_type, phrase, match_type, reason, suggestion")
+      .eq("active", true)
+      .eq("scope", "ALL")
+      .eq("rule_type", "BANNED"),
+  ]);
+  if (accounts.error) console.warn("[captions] 계정 읽기 실패:", accounts.error.message);
+  if (rules.error) console.warn("[captions] 광고 문구 규칙 읽기 실패:", rules.error.message);
+
+  const accountRows = accounts.data ?? [];
+  const concepts = accountRows.length
+    ? await supabase
+        .from("account_concepts")
+        .select("social_account_id, shoot_role_focus, shoot_concept, shoot_tone")
+        .in("social_account_id", accountRows.map((a) => a.id))
+    : { data: [], error: null };
+  if (concepts.error) console.warn("[captions] 계정 컨셉 읽기 실패:", concepts.error.message);
+
+  return {
+    instagramAccounts: accountRows.map((account) => {
+      const concept = concepts.data?.find((c) => c.social_account_id === account.id);
+      return {
+        name: (account.display_name ?? "account").replace(/^@/, ""),
+        roleFocus: concept?.shoot_role_focus ?? null,
+        concept: concept?.shoot_concept ?? "",
+        tone: concept?.shoot_tone ?? "",
+      };
+    }),
+    contentRules: (rules.data ?? []).map((r) => ({
+      id: r.id,
+      scope: r.scope as ContentRule["scope"],
+      ruleType: r.rule_type as ContentRule["ruleType"],
+      phrase: r.phrase,
+      matchType: r.match_type as ContentRule["matchType"],
+      reason: r.reason,
+      suggestion: r.suggestion,
+    })),
+  };
 }
 
 export async function generateCaptionsAction(
@@ -215,16 +281,24 @@ export async function generateCaptionsAction(
   }
 
   let captions: Captions;
+  let reviewNotes: string[];
   try {
+    const context = await loadCaptionContext(
+      supabase,
+      parsed.data.accountIds,
+      parsed.data.platforms,
+    );
     // `failed` check above guarantees every entry has a non-null signedUrl.
-    captions = await generateCaptions(
+    ({ captions, reviewNotes } = await generateCaptions(
       signed.map((s) => s.signedUrl as string),
       {
+        mediaType: parsed.data.mediaType,
         description: parsed.data.description,
         presetInstructions,
         platforms: parsed.data.platforms,
+        ...context,
       },
-    );
+    ));
   } catch (err) {
     console.error("[generateCaptionsAction] OpenAI failed:", err);
     return {
@@ -265,6 +339,7 @@ export async function generateCaptionsAction(
     ok: true,
     contentId: content.id,
     captions,
+    reviewNotes,
     savedAt: content.updated_at,
     thumbnailUrls: signed.map((s) => s.signedUrl as string),
   };
@@ -473,16 +548,24 @@ export async function regenerateCaptionsAction(
   }
 
   let captions: Captions;
+  let reviewNotes: string[];
   try {
-    captions = await generateCaptions(
+    const context = await loadCaptionContext(
+      supabase,
+      parsed.data.accountIds,
+      parsed.data.platforms,
+    );
+    ({ captions, reviewNotes } = await generateCaptions(
       signed.map((s) => s.signedUrl as string),
       {
+        mediaType: parsed.data.mediaType,
         description: parsed.data.description,
         presetInstructions,
         platforms: parsed.data.platforms,
         previousCaptions: parsed.data.previousCaptions,
+        ...context,
       },
-    );
+    ));
   } catch (err) {
     console.error("[regenerateCaptionsAction] OpenAI failed:", err);
     return {
@@ -517,6 +600,7 @@ export async function regenerateCaptionsAction(
     ok: true,
     contentId: updated.id,
     captions,
+    reviewNotes,
     savedAt: updated.updated_at,
     thumbnailUrls: signed.map((s) => s.signedUrl as string),
   };

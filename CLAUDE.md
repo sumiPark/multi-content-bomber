@@ -4,7 +4,7 @@
 
 ## 프로젝트 개요
 YouTube, Instagram, TikTok에 영상/이미지를 동시 업로드하는 AI 기반 콘텐츠 배포 플랫폼.
-OpenAI GPT-4o로 플랫폼별 캡션을 자동 생성하고, 최적 시간에 예약 업로드한다.
+OpenAI(`gpt-6.1-terra`)로 플랫폼별 캡션을 자동 생성하고, 최적 시간에 예약 업로드한다.
 
 ## 기술 스택
 - **프레임워크:** Next.js 16 (App Router, Turbopack 기본)
@@ -13,7 +13,7 @@ OpenAI GPT-4o로 플랫폼별 캡션을 자동 생성하고, 최적 시간에 �
 - **상태관리:** React useState/useReducer 기본 — 글로벌 상태가 필요해지면 Zustand 도입 검토
 - **UI:** Tailwind CSS v4 (config-less) + shadcn/ui (base-nova) + framer-motion
 - **디자인 규칙:** `DESIGN.md` (Marketing Hub와 같은 토큰 · 컴포넌트 규칙). 화면 작업 전에 읽고, 규칙을 바꾸면 DESIGN.md부터 고친다
-- **AI:** OpenAI GPT-4o API (Vision + JSON Schema strict mode)
+- **AI:** OpenAI API (Vision + JSON Schema strict mode). 캡션 · 에이전트는 `gpt-6.1-terra`, `lib/ai/reply-template-generator.ts`만 `gpt-4o`
 - **큐:** Postgres(publish_jobs 테이블) + `claim_due_publish_jobs` RPC(FOR UPDATE SKIP LOCKED) — BullMQ/Redis 제거
 - **배포:** Vercel (프론트, 서버리스) + GitHub Actions (워커 — cron 30분 sweep + repository_dispatch 즉시)
 
@@ -87,7 +87,7 @@ multi-content-bomber/
 │   │   └── proxy.ts                    # 토큰 갱신 헬퍼 (proxy.ts에서 사용)
 │   ├── supabase.ts                     # 타입 안전 싱글톤 (anon)
 │   ├── auth.ts                         # 요청 단위 getSessionUser/getCurrentProfile (react.cache)
-│   ├── ai/caption-generator.ts         # GPT-4o + zod schema + 프롬프트
+│   ├── ai/caption-generator.ts         # gpt-6.1-terra + zod schema + 프롬프트 (인스타 점검은 instagram-caption-check.ts)
 │   ├── openai.ts                       # OpenAI 싱글톤
 │   ├── storage/upload.ts               # 클라이언트 Storage 업로드 헬퍼
 │   ├── crypto.ts                       # 토큰 AES-256-GCM 암호화 (Phase 4a 구현)

@@ -2,7 +2,9 @@
 
 ## 개요
 
-MCB의 AI 캡션 생성에서 OpenAI GPT-4o API에 전달할 프롬프트 구조와 클릭/체류/저장을 유도하는 카피라이팅 원칙을 정의한다. 개발자는 `lib/ai/caption-generator.ts`와 `lib/ai/prompts.ts`를 이 문서를 단일 출처로 참조하여 구현한다.
+MCB의 AI 캡션 생성에서 OpenAI API(`gpt-6.1-terra`)에 전달할 프롬프트 구조와 클릭/체류/저장을 유도하는 카피라이팅 원칙을 정의한다. 개발자는 `lib/ai/caption-generator.ts`와 `lib/ai/prompts.ts`를 이 문서를 단일 출처로 참조하여 구현한다.
+
+> **Instagram은 2026-11-04부터 아래 8원칙을 쓰지 않는다.** 기준은 `.claude/skills/ig-caption-ko`와 `ig-human-ko`이고, 자세한 내용은 [Instagram](#instagram) 절에 있다. 8원칙은 YouTube · TikTok에만 적용한다.
 
 설계 목표:
 1. **메시지 일관성** — 한 콘텐츠에 대해 플랫폼별 톤은 다르되 핵심 메시지는 동일.
@@ -157,7 +159,7 @@ API 호출은 **1회로 선택된 플랫폼 전체 캡션을 동시 생성**한�
 2. 네이티브 사용자가 자연스럽게 느끼는 문체. 번역체·광고문구체 금지.
 3. 해시태그 전략은 플랫폼별로 다름:
    - YouTube: 검색 SEO 중심 (검색되는 키워드)
-   - Instagram: 발견 + 커뮤니티 (다양한 크기 믹스)
+   - Instagram: 주제 라벨 3개
    - TikTok: 바이럴 트렌드 중심 (적은 수, 짧고 강한 태그)
 4. 한국어 작성. 해시태그는 한/영 자연 혼합.
 5. **클릭베이트 금지** — 거짓 약속, 과장된 충격 표현, 본문과 관련 없는 hook은 알고리즘과 사용자 모두에게 처벌됨.
@@ -168,7 +170,6 @@ API 호출은 **1회로 선택된 플랫폼 전체 캡션을 동시 생성**한�
 
 **플랫폼별 캐릭터:**
 - YouTube: *친절한 전문가* — 정보를 신뢰감 있게, 결론까지 안내
-- Instagram: *감성 크리에이터* — 일상의 디테일, 공감, 스토리텔링
 - TikTok: *임팩트 트렌드세터* — 짧고 강하게, 패턴을 깬다
 
 **출력 규칙:**
@@ -209,24 +210,30 @@ SEO 키워드를 자연스럽게 2~3회 반복.
 
 ### Instagram
 
-**caption — 최대 2200자, 권장 300~800자**
+기준: `.claude/skills/ig-caption-ko`, `ig-human-ko`. 위 8원칙은 적용하지 않는다.
 
-구조:
-1. **첫 줄 (Hook)**: 강한 감정/질문/숫자 — **First-Line Hook 원칙** 필수. 마침표 X, 줄임표나 의도적 단절. "더보기" 유도가 알고리즘 핵심.
-2. **본문 스토리텔링**: 일상의 디테일, 공감 포인트. 가운데점 `·` 또는 줄바꿈으로 호흡. 이모지 1~3개/문단.
-3. **질문형 CTA**: "여러분은 어떻게 생각하세요?" 같은 답하기 쉬운 질문.
-4. **해시태그 블록**: 본문 끝에 줄바꿈 후 정렬. 또는 첫 댓글로 분리(권장).
+**caption의 일 — 미디어 유형으로 정한다**
+- 영상(릴스): 영상이 이미 후킹했다. 캡션은 요청, 맥락, 검색어를 담고 두 번째 훅을 만들지 않는다.
+- 사진: 캡션이 곧 콘텐츠다. 첫 문장이 훅이다.
 
-감성적·대화체. **Save-Worthy Framing** 자연스럽게 포함 ("이거 저장해두고 다시 보세요" 식).
+**caption — 최대 2200자, 권장 600자 안쪽**
+1. **첫 문장**: 공백 포함 40자 안. 인사 · 해시태그 · 이모지로 시작하지 않는다.
+2. **본문**: 짧은 문단 2~6개. 사람들이 인스타 검색창에 칠 말 2~3개를 평범한 문장 안에 넣는다.
+3. **요청**: 전체에서 하나. 저장, 댓글 키워드, DM 중에서 고른다.
+4. 링크 · 해시태그를 넣지 않는다. 사진 · 영상과 설명에 없는 숫자 · 효과 · 후기를 지어내지 않는다. 광고 심의 표현을 쓰지 않는다.
 
-**hashtags — 최대 20개**
-- 대형(100만+) 3~5 + 중형(1~100만) 5~8 + 소형/니치(<1만) 5~7
-- 한/영 혼합. 다양한 크기 믹스가 발견 알고리즘에 유리
+**hashtags — 정확히 3개**
+- 상품 · 고민 · 품목을 가리키는 주제 라벨만. 인스타 상한은 게시물당 5개(2025-12-18~)다.
+- `#일상` `#데일리` `#소통` `#맞팔` `#fyp`처럼 아무것도 설명하지 않는 태그는 쓰지 않는다.
 
-**cover_text — 최대 50자**
-- 릴스 커버에 들어갈 임팩트 한 줄
-- **Pattern Interruption** 또는 **Curiosity Gap** 활용
-- 이미지 게시면 빈 문자열
+**계정 맞춤**
+- 고른 인스타 계정의 직접 촬영 설정(`account_concepts.shoot_role_focus` · `shoot_concept` · `shoot_tone`)을 시스템 프롬프트에 넣는다. AI 자동 쪽 설정은 섞지 않는다.
+- 캡션은 플랫폼마다 하나라, 인스타 계정을 여러 개 고르면 어느 계정에 올라가도 어색하지 않게 쓴다.
+
+**점검 — `lib/ai/instagram-caption-check.ts`**
+- 생성 뒤 검사에 걸리면 지적 사항을 붙여 한 번 다시 쓴다(첫 응답이 25초 안에 끝났을 때만).
+- 그래도 남은 광고 심의 · 단정 표현 · 광고 문구 규칙 · 링크는 캡션 화면의 확인 상자로 알린다.
+- 파이썬 스크립트는 Vercel 서버 액션에서 돌릴 수 없어 필요한 검사만 TypeScript로 옮겼다. 상투어 사전은 `slop_ko.json`을 그대로 읽는다.
 
 ### TikTok
 
@@ -271,7 +278,7 @@ SEO 키워드를 자연스럽게 2~3회 반복.
 ```ts
 {
   youtube?:   { title, description, hashtags[], category }
-  instagram?: { caption, hashtags[], cover_text }
+  instagram?: { caption, hashtags[] }
   tiktok?:    { caption, hashtags[] }
 }
 ```
@@ -285,9 +292,8 @@ SEO 키워드를 자연스럽게 2~3회 반복.
 1. 선택된 플랫폼의 Platform Prompt만 조합
 2. JSON Schema의 `required` 필드 동적 설정
 3. Vision content (이미지/영상 첫 프레임) 함께 전달
-4. **GPT-4o 호출 파라미터:**
-   - `temperature`: 0.7 (기본), 0.85 (재생성 시)
-   - `max_tokens`: 4000
+4. **호출 파라미터 (`gpt-6.1-terra`, 2026-11-04 `gpt-4o`에서 교체):**
+   - `callOptions(model, 4000)`: 추론 모델이라 `temperature`를 받지 않는다. `reasoning_effort: low`, `max_completion_tokens: 12000`
    - `response_format: { type: "json_schema", strict: true }`
 5. JSON 파싱 → zod로 검증
 6. **후처리 검증** (다음 섹션)
@@ -305,9 +311,8 @@ AI가 글자수를 어겼을 때 안전망:
 - `#` 누락된 태그 → 자동 prepend
 
 **Instagram:**
-- `caption` 2200자 초과 → 트리밍
-- `hashtags` 20개 초과 → 뒤에서 제거
-- `cover_text` 50자 초과 → 트리밍 (말줄임 없이)
+- `caption` 2200자 초과 → 트리밍. em dash는 쉼표로 바꾼다.
+- `hashtags` 의미 없는 태그와 중복 제거 후 3개까지만
 
 **TikTok:**
 - `caption` 300자 초과 → 트리밍
@@ -334,7 +339,7 @@ AI가 글자수를 어겼을 때 안전망:
 
 사용자가 "다시 생성" 버튼을 누른 경우:
 
-1. 동일 입력으로 재호출하되 `temperature` 0.7 → 0.85 (다양성 ↑)
-2. 이전 응답을 `assistant` 메시지로 추가, 그 뒤 user 메시지로 *"위 결과와 다른 톤·각도로 다시 생성해주세요. 같은 정보를 다르게 풀어내거나 다른 hook 전략(Pattern Interruption / Curiosity Gap / Loss Aversion 등)을 시도해주세요."* 요청.
+1. 동일 입력으로 재호출한다. `temperature`를 쓰지 않으니 다양성은 아래 요청 문구로 만든다.
+2. 이전 응답을 `assistant` 메시지로 추가, 그 뒤 user 메시지로 다른 톤·각도를 요청한다. YouTube·TikTok은 다른 hook 전략(Pattern Interruption / Curiosity Gap / Loss Aversion 등)을 쓰고, Instagram은 규칙을 지키면서 첫 문장과 본문 구성을 바꾼다.
 3. 같은 contentId의 `ai_captions` 컬럼을 UPDATE (새 row 생성 안 함 — dangling row 방지)
 4. 플랫폼 개별 재생성도 향후 지원 가능 (현재는 전체 재생성만)

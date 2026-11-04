@@ -2,10 +2,18 @@ import "server-only";
 import { z } from "zod";
 import { getOpenAI } from "@/lib/openai";
 import type { Platform } from "@/lib/platforms";
+import { callOptions } from "@/lib/products/analysis/analyze";
+import type { ContentRule } from "@/lib/rules/check";
 import {
-  PLATFORM_PROMPTS,
+  checkInstagramCaption,
+  cleanInstagramHashtags,
+  type CaptionIssue,
+} from "./instagram-caption-check";
+import {
+  buildCaptionSystemPrompt,
+  captionFixInstruction,
   REGENERATE_INSTRUCTION,
-  SYSTEM_PROMPT,
+  type CaptionAccount,
 } from "./prompts";
 
 // Schema. 모든 플랫폼 필드 optional — 사용자가 선택한 플랫폼만 부분 객체로 저장.
@@ -37,7 +45,7 @@ export type Captions = z.infer<typeof captionsSchema>;
 // 글자수 / 해시태그 한도. docs/caption-engine.md와 동기화.
 const LIMITS = {
   youtube: { title: 100, description: 5000, hashtags: 15 },
-  instagram: { caption: 2200, hashtags: 20 },
+  instagram: { caption: 2200 },
   tiktok: { caption: 300, hashtags: 5 },
 } as const;
 
@@ -79,11 +87,6 @@ const PROPERTY_DEFS = {
   },
 };
 
-function buildSystemPrompt(platforms: Platform[]): string {
-  const guides = platforms.map((p) => PLATFORM_PROMPTS[p]).join("\n\n");
-  return `${SYSTEM_PROMPT}\n\n[플랫폼별 가이드 — 응답에 포함된 플랫폼만]\n\n${guides}`;
-}
-
 function buildResponseSchema(platforms: Platform[]) {
   const properties: Record<
     string,
@@ -105,18 +108,40 @@ function buildResponseSchema(platforms: Platform[]) {
 
 const ALL_PLATFORMS: Platform[] = ["YOUTUBE", "INSTAGRAM", "TIKTOK"];
 
+// 2026-11-04 비교(같은 상품 · 같은 프롬프트 각 4회): gpt-4o는 4회 모두 설명에 없는 효과 · 사용법을 지어냈고,
+// gpt-6.1-terra는 한 번도 지어내지 않았다. 추론 모델이라 temperature를 받지 않아 callOptions를 쓴다.
+const CAPTION_MODEL = "gpt-6.1-terra";
+
+// 재작성은 첫 응답이 이 시간 안에 끝났을 때만 한다 — Vercel 함수 제한(60초) 안에서 두 번째 호출까지 마치려고.
+const CAPTION_FIX_BUDGET_MS = 25_000;
+
 interface GenerateCaptionsOptions {
+  mediaType: "IMAGE" | "VIDEO";
   description?: string;
   presetInstructions?: string;
   platforms?: Platform[];
   /** 재생성 시 이전 응답을 assistant 메시지로 추가하고 다른 스타일을 요청한다. */
   previousCaptions?: Captions;
+  /** 캡션이 올라갈 인스타 계정. 비어 있으면 계정 맞춤 없이 쓴다. */
+  instagramAccounts?: CaptionAccount[];
+  /** 광고 문구 규칙(0026). 어떤 상품인지 모르니 모든 상품 공통(ALL) 규칙만 검사한다. */
+  contentRules?: ContentRule[];
+}
+
+export interface GenerateCaptionsOutput {
+  captions: Captions;
+  /** 재작성 뒤에도 인스타 캡션에 남아 사람이 확인할 표현. */
+  reviewNotes: string[];
+}
+
+function severity(issues: CaptionIssue[]): number {
+  return issues.reduce((sum, i) => sum + (i.level === "review" ? 100 : 1), 0);
 }
 
 export async function generateCaptions(
   imageDataUrls: string[],
-  options: GenerateCaptionsOptions = {},
-): Promise<Captions> {
+  options: GenerateCaptionsOptions,
+): Promise<GenerateCaptionsOutput> {
   if (imageDataUrls.length === 0) throw new Error("이미지가 없습니다.");
   if (imageDataUrls.length > 10)
     throw new Error("최대 10장까지 분석할 수 있습니다.");
@@ -151,7 +176,14 @@ export async function generateCaptions(
   const messages: Parameters<
     ReturnType<typeof getOpenAI>["chat"]["completions"]["create"]
   >[0]["messages"] = [
-    { role: "system", content: buildSystemPrompt(platforms) },
+    {
+      role: "system",
+      content: buildCaptionSystemPrompt(
+        platforms,
+        options.mediaType,
+        options.instagramAccounts ?? [],
+      ),
+    },
     {
       role: "user",
       content: [
@@ -172,26 +204,66 @@ export async function generateCaptions(
     messages.push({ role: "user", content: REGENERATE_INSTRUCTION });
   }
 
-  const completion = await getOpenAI().chat.completions.create({
-    model: "gpt-4o",
-    temperature: options.previousCaptions ? 0.85 : 0.7,
-    max_tokens: 4000,
-    messages,
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "captions",
-        strict: true,
-        schema: buildResponseSchema(platforms),
+  const responseSchema = buildResponseSchema(platforms);
+  const requestCaptions = async (
+    conversation: typeof messages,
+  ): Promise<{ captions: Captions; raw: string }> => {
+    const completion = await getOpenAI().chat.completions.create({
+      model: CAPTION_MODEL,
+      ...callOptions(CAPTION_MODEL, 4000),
+      messages: conversation,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "captions",
+          strict: true,
+          schema: responseSchema,
+        },
       },
-    },
-  });
+    });
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) throw new Error("OpenAI 응답이 비어있습니다.");
+    return { captions: postProcess(captionsSchema.parse(JSON.parse(raw))), raw };
+  };
+  const inspect = (c: Captions): CaptionIssue[] =>
+    c.instagram
+      ? checkInstagramCaption(
+          c.instagram.caption,
+          c.instagram.hashtags,
+          options.contentRules,
+        )
+      : [];
 
-  const content = completion.choices[0]?.message?.content;
-  if (!content) throw new Error("OpenAI 응답이 비어있습니다.");
+  const startedAt = Date.now();
+  const first = await requestCaptions(messages);
+  let captions = first.captions;
+  let issues = inspect(captions);
 
-  const parsed = captionsSchema.parse(JSON.parse(content));
-  return postProcess(parsed);
+  if (issues.length > 0 && Date.now() - startedAt < CAPTION_FIX_BUDGET_MS) {
+    try {
+      const fixed = await requestCaptions([
+        ...messages,
+        { role: "assistant", content: first.raw },
+        {
+          role: "user",
+          content: captionFixInstruction(issues.map((i) => i.message)),
+        },
+      ]);
+      const fixedIssues = inspect(fixed.captions);
+      if (severity(fixedIssues) <= severity(issues)) {
+        captions = fixed.captions;
+        issues = fixedIssues;
+      }
+    } catch (err) {
+      // 재작성이 실패해도 첫 결과는 쓸 수 있다. 남은 표현은 reviewNotes로 알린다.
+      console.warn("[generateCaptions] 인스타 캡션 재작성 실패:", err);
+    }
+  }
+
+  return {
+    captions,
+    reviewNotes: issues.filter((i) => i.level === "review").map((i) => i.message),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -254,10 +326,10 @@ function postProcessInstagram(
 ): NonNullable<Captions["instagram"]> {
   return {
     caption: trimByParagraph(
-      stripTrailingHashtags(c.caption),
+      stripTrailingHashtags(c.caption).replace(/\s*[—―]\s*/g, ", "),
       LIMITS.instagram.caption,
     ),
-    hashtags: ensureHash(c.hashtags).slice(0, LIMITS.instagram.hashtags),
+    hashtags: cleanInstagramHashtags(ensureHash(c.hashtags)),
   };
 }
 

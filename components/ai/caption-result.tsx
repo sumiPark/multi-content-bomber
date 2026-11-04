@@ -411,7 +411,7 @@ export const CaptionResult = forwardRef<
                     }
                   />
                   <Field
-                    label="해시태그 (최대 20개)"
+                    label="해시태그 (3개 권장, 최대 5개)"
                     value={draft.instagram.hashtagsText}
                     readOnly={!isEditing}
                     rows={3}
