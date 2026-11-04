@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Check, Pencil, RotateCcw, X } from "lucide-react";
@@ -96,6 +97,8 @@ export function ProductReviewPanel(props: {
   rejected: ReviewClaim[];
   healthFunctional: boolean | null;
   functionalClaims: string[];
+  // 표현 규칙에서 확정한 기능성 문구 수 — 건기식은 이게 있어야 AI 후보가 된다
+  approvedClaimCount: number;
   uncertainties: string[];
   edited: boolean;
   approvedAt: string | null;
@@ -150,6 +153,21 @@ export function ProductReviewPanel(props: {
                 ))}
               </ul>
             </>
+          )}
+          {props.healthFunctional && (
+            <div className="mt-2 border-t border-warn/30 pt-2">
+              <p className="font-semibold">AI 후보가 되려면 두 가지가 필요해요</p>
+              <ul className="mt-1 space-y-0.5">
+                <li>{props.approvedAt ? "✓" : "○"} 이 화면에서 분석 결과 확인</li>
+                <li>
+                  {props.approvedClaimCount > 0 ? "✓" : "○"}{" "}
+                  <Link href="/rules" className="underline underline-offset-2">
+                    표현 규칙
+                  </Link>
+                  에서 기능성 문구 확정{props.approvedClaimCount > 0 && ` (${props.approvedClaimCount}개)`}
+                </li>
+              </ul>
+            </div>
           )}
         </div>
       )}
@@ -326,7 +344,7 @@ export function ProductActions({
           size="sm"
           variant="outline"
           disabled={isPending}
-          onClick={() => run(() => reanalyzeAction({ productId, fromImages: false }), "다시 분석 대기로 넣었어요")}
+          onClick={() => run(() => reanalyzeAction({ productId, fromImages: false }), "다시 분석을 시작했어요. 판매 중인 상품이면 몇 분 뒤 결과가 나와요.")}
         >
           <RotateCcw className="size-4" /> {hasAnalysis ? "요약만 다시" : "분석 대기로"}
         </Button>
@@ -337,7 +355,7 @@ export function ProductActions({
             disabled={isPending}
             onClick={() => {
               if (window.confirm("상세 이미지를 처음부터 다시 읽을까요? AI 비용이 다시 듭니다.")) {
-                run(() => reanalyzeAction({ productId, fromImages: true }), "이미지부터 다시 읽도록 넣었어요");
+                run(() => reanalyzeAction({ productId, fromImages: true }), "이미지부터 다시 읽기 시작했어요. 판매 중인 상품이면 몇 분 뒤 결과가 나와요.");
               }
             }}
           >

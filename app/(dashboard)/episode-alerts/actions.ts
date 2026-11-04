@@ -261,6 +261,10 @@ export async function createSeriesAction(input: {
   try {
     const ig = await authForAccount(service, parsed.data.accountId, auth.organizationId);
 
+    // 게시물 정보를 먼저 다 받는다 — 도중에 실패해도 반쯤 만든 시리즈가 남지 않게(2026-11-04)
+    const medias = [];
+    for (const mediaId of parsed.data.mediaIds) medias.push(await getInstagramMedia(mediaId, ig.token));
+
     const { data: series, error } = await service
       .from("series")
       .insert({
@@ -280,16 +284,21 @@ export async function createSeriesAction(input: {
     }
 
     // 고른 순서대로 1화, 2화… 이미 올라간 회차라 알림 작업은 만들지 않는다.
-    for (const mediaId of parsed.data.mediaIds) {
-      const media = await getInstagramMedia(mediaId, ig.token);
-      await addEpisode(service, {
-        seriesId: series.id,
-        igMediaId: media.id,
-        permalink: media.permalink,
-        caption: media.caption,
-        mediaType: media.mediaType,
-        postedAt: media.timestamp,
-      });
+    // 회차 저장이 실패하면 방금 만든 시리즈를 지운다 — 남아 있으면 같은 이름으로 다시 만들 수 없었다.
+    try {
+      for (const media of medias) {
+        await addEpisode(service, {
+          seriesId: series.id,
+          igMediaId: media.id,
+          permalink: media.permalink,
+          caption: media.caption,
+          mediaType: media.mediaType,
+          postedAt: media.timestamp,
+        });
+      }
+    } catch (err) {
+      await service.from("series").delete().eq("id", series.id);
+      throw err;
     }
 
     revalidate();

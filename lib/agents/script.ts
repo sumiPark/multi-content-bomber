@@ -113,7 +113,7 @@ export function writerSkills(ctx: Pick<ScriptContext, "facts" | "rules" | "accou
       description: "광고 문구 규칙(금지 표현 · 꼭 넣을 문구) 검사. 걸린 게 있으면 고쳐서 다시 검사한다.",
       input: z.object({ text: z.string() }),
       async run(args) {
-        return checkText((args as { text: string }).text, ctx.facts.kind, ctx.rules, ctx.facts.approvedClaims, { healthFunctional: ctx.facts.healthFunctional }).map((h) => ({
+        return checkText((args as { text: string }).text, ctx.facts.kind, ctx.rules, ctx.facts.approvedClaims, { healthFunctional: ctx.facts.healthFunctional, certifiedFunctions: ctx.facts.certifiedFunctions }).map((h) => ({
           type: h.rule.ruleType === "BANNED" ? "금지 표현" : "빠진 필수 문구",
           phrase: h.matched ?? h.rule.phrase,
           reason: h.rule.reason,
@@ -143,7 +143,7 @@ function systemPrompt(ctx: ScriptContext): string {
 절대 규칙:
 - 사실(숫자 · 산지 · 성분 · 효과 · 구성)은 get_product_facts에 있는 것만. 없는 숫자를 만들지 않는다. uncertainties에 있는 건 말하지 않는다.
 - 사람이 실제로 써 본 적이 없으니 1인칭 체험담 금지: "써 봤는데", "제 피부가", "먹어 보니", "우리 엄마가" 같은 말을 쓰지 않는다. 상세페이지 정보를 전하는 말투(~래요, ~예요)나 시청자에게 말 거는 2인칭으로 쓴다. 사람 후기 · 고객 후기를 지어내지 않는다.
-- 건강기능식품 기능성 표현은 approvedClaims 문장 그대로만. 비어 있으면 기능성 · 건강 효과를 말하지 않는다.${f.kind === "COSMETIC" ? "\n- 화장품: 캡션에 '개인차'가 있음을 밝힌다. 치료 · 재생 · 염증 · 미백 · 주름 개선 같은 표현을 쓰지 않는다." : ""}
+- 건강기능식품 기능성 표현은 approvedClaims 문장 그대로만. 비어 있으면 기능성 · 건강 효과를 말하지 않는다.${f.kind === "COSMETIC" ? "\n- 화장품: 캡션에 '개인차'가 있음을 밝힌다. 치료 · 재생 · 염증 같은 표현을 쓰지 않는다. 미백 · 주름 개선 · 자외선 차단은 certifiedFunctions에 있는 것만 쓴다." : ""}
 - 재고 · 품절 · 할인 · 배송 같은 판매 상태는 말하지 않는다(올라갈 때 바뀔 수 있다). 가격은 상품 사실의 price만.
 - 인사 · 자기소개 · "오늘은 ~ 소개해 드릴게요"로 시작하지 않는다. 최고 · 유일 · 100% 같은 단정을 쓰지 않는다.
 - 화면 문구는 한 카드 12자 안팎. visual에는 실제 상품 이미지로 보여 줄 수 있는 장면만(병 · 제형 · 포장 · 단면 · 사용 장면).

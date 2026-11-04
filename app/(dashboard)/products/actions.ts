@@ -42,7 +42,7 @@ export async function collectProductsNowAction(): Promise<ProductActionResult> {
 
 const idSchema = z.object({ productId: z.string().uuid() });
 
-/** 사람이 분석 결과를 확인함 → ready. 건기식 기능성 문구 확정은 표현 규칙 화면(2-5)에서. */
+/** 사람이 분석 결과를 확인함 → ready(후보). 건기식 기능성 문구 확정은 표현 규칙 화면에서 따로 — 둘 다 돼야 후보가 된다. */
 export async function approveAnalysisAction(input: z.infer<typeof idSchema>): Promise<ProductActionResult> {
   const parsed = idSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -50,6 +50,11 @@ export async function approveAnalysisAction(input: z.infer<typeof idSchema>): Pr
   if (!auth.ok) return auth;
 
   const service = createServiceClient();
+  // 근거 있는 특징이 하나도 없으면 대본에 쓸 말이 없다 — 확인해도 후보가 되면 안 된다(2026-11-04)
+  const { data: current } = await service.from("product_analyses").select("claims").eq("product_id", parsed.data.productId).maybeSingle();
+  if (current && (!Array.isArray(current.claims) || current.claims.length === 0)) {
+    return { ok: false, error: "상세페이지에서 근거를 찾은 특징이 없어 확인할 수 없어요. 이미지부터 다시 읽거나 이 상품을 빼 주세요." };
+  }
   const { data, error } = await service
     .from("product_analyses")
     .update({ approved_by: auth.userId, approved_at: new Date().toISOString() })
@@ -70,7 +75,7 @@ const reanalyzeSchema = idSchema.extend({
   fromImages: z.boolean(),
 });
 
-/** 다시 분석 — 다음 분석 run에서 집힌다. 사람이 고친 요약(edited)은 이때 풀린다. */
+/** 다시 분석 — 바로 분석 워크플로를 깨운다(판매 중인 상품만 집힌다). 사람이 고친 요약(edited)은 이때 풀린다. */
 export async function reanalyzeAction(input: z.infer<typeof reanalyzeSchema>): Promise<ProductActionResult> {
   const parsed = reanalyzeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -94,6 +99,8 @@ export async function reanalyzeAction(input: z.infer<typeof reanalyzeSchema>): P
     })
     .eq("id", parsed.data.productId);
   if (error) return { ok: false, error: error.message };
+  // 깨우지 못해도 다음 03시 실행이 집어 간다 — 즉시성만 손해
+  await triggerProductsRun(`reanalyze:${parsed.data.productId}`).catch((e) => console.error("[products] 분석 트리거 실패:", e));
   refresh(parsed.data.productId);
   return { ok: true };
 }
@@ -177,7 +184,7 @@ const categorySchema = z.object({
   kind: z.enum(["FRUIT", "COSMETIC", "HEALTH_FOOD", "CLOTHING", "OTHER"]).nullable(),
 });
 
-/** 수집 카테고리 켜고 끄기 · 종류 바꾸기 — 다음 수집부터 반영된다. */
+/** 수집 카테고리 켜고 끄기 · 종류 바꾸기 — 다음 수집부터 반영된다. 종류가 바뀐 상품은 그때 다시 분석한다(판매 중인 것만). */
 export async function updateCategoryAction(input: z.infer<typeof categorySchema>): Promise<ProductActionResult> {
   const parsed = categorySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };

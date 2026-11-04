@@ -142,6 +142,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
       mediaCount: r.contents.media_urls?.length ?? 0,
       captions: r.contents.ai_captions,
       internalTitle: r.contents.internal_title,
+      contentErased: !!(r.contents.metadata as { erased_at?: string } | null)?.erased_at,
       account: {
         id: r.social_accounts.id,
         platform: r.social_accounts.platform,

@@ -33,6 +33,18 @@ function regexOf(rule: ContentRule): RegExp | null {
   }
 }
 
+// 금지 규칙의 "(미백|주름 개선|자외선 차단)"에 걸린 말 → 분석이 읽은 기능성 표기(analyze.ts certifiedFunctions)
+const COSMETIC_FUNCTIONS: { word: RegExp; certified: string }[] = [
+  { word: /미백/, certified: "미백" },
+  { word: /주름/, certified: "주름개선" },
+  { word: /자외선/, certified: "자외선차단" },
+];
+
+function isCertified(matched: string, certified: string[]): boolean {
+  const f = COSMETIC_FUNCTIONS.find((x) => x.word.test(matched));
+  return !!f && certified.includes(f.certified);
+}
+
 export function isValidRegex(pattern: string): boolean {
   try {
     new RegExp(pattern, "u");
@@ -46,14 +58,17 @@ export function isValidRegex(pattern: string): boolean {
  * @param approvedClaims 이 상품의 확정 심의 문구 — 그 안의 표현은 금지 검사에서 뺀다.
  * @param opts.healthFunctional 상품 분석의 건강기능식품 판정. false면(일반 식품) 건기식 전용 "꼭 넣을 문구"를 요구하지 않는다 —
  *   쿠마마켓 "식품"은 종류가 건기식으로 묶여 일반 식품에도 "건강기능식품" 표기를 요구했다(2026-11-04). 모르면(null) 요구한다.
+ * @param opts.certifiedFunctions 화장품 상세페이지에서 읽은 기능성 표기(심사 · 보고). 그 기능의 표현은 금지 검사에서 뺀다 —
+ *   예전엔 기능성 화장품도 "미백"을 늘 막았다(2026-11-04). 표기에 없는 기능은 그대로 막는다.
  */
 export function checkText(
   text: string,
   kind: ProductKind,
   rules: ContentRule[],
   approvedClaims: string[] = [],
-  opts: { healthFunctional?: boolean | null } = {},
+  opts: { healthFunctional?: boolean | null; certifiedFunctions?: string[] } = {},
 ): RuleHit[] {
+  const certified = kind === "COSMETIC" ? (opts.certifiedFunctions ?? []) : [];
   // 확정 문구 부분을 지운 본문으로 금지 표현을 찾는다.
   let scrubbed = text;
   for (const c of approvedClaims) {
@@ -67,8 +82,8 @@ export function checkText(
     if (rule.ruleType === "BANNED") {
       if (rule.matchType === "REGEX") {
         const re = regexOf(rule);
-        const m = re ? scrubbed.match(re) : null;
-        if (m) hits.push({ rule, matched: m[0] });
+        const m = re ? [...scrubbed.matchAll(re)].map((x) => x[0]).find((x) => !isCertified(x, certified)) : undefined;
+        if (m) hits.push({ rule, matched: m });
       } else if (squashed.includes(squash(rule.phrase))) {
         hits.push({ rule, matched: rule.phrase });
       }

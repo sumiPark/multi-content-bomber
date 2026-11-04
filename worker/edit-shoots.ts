@@ -40,6 +40,8 @@ type Cut = {
   // 완성본 확인에서 사람이 고친 문구 (있으면 이걸 쓴다)
   on_screen_override?: string | null;
   subtitle_override?: string | null;
+  // 못 찍어서 뺀 컷 — 편집에서 건너뛴다
+  skipped?: boolean;
 };
 type Clip = { cut: number; path: string; name: string; size: number; type: string; uploaded_by: string };
 type Subtitle = { text: string; from: number; to: number };
@@ -115,6 +117,7 @@ interface Plan {
   hasAudio: boolean;
   onScreen: string;
   subtitles: Subtitle[];
+  hdrTransfer: string | null;
 }
 
 async function planCut(cut: Cut, file: string, workDir: string, speaks: boolean): Promise<Plan> {
@@ -136,7 +139,7 @@ async function planCut(cut: Cut, file: string, workDir: string, speaks: boolean)
       const subtitles = cut.subtitle_override != null
         ? chunkSubtitle(cut.subtitle_override, 0, end - start)
         : segs.flatMap((s) => chunkSubtitle(s.text, Math.max(first, s.start) - start, Math.min(end, s.end) - start));
-      return { cutNo: cut.no, input: file, start, duration: end - start, hasAudio: true, onScreen, subtitles };
+      return { cutNo: cut.no, input: file, start, duration: end - start, hasAudio: true, onScreen, subtitles, hdrTransfer: info.hdrTransfer };
     }
   }
 
@@ -151,6 +154,7 @@ async function planCut(cut: Cut, file: string, workDir: string, speaks: boolean)
     hasAudio: info.hasAudio,
     onScreen,
     subtitles: cut.subtitle_override ? chunkSubtitle(cut.subtitle_override, 0, duration) : [],
+    hdrTransfer: info.hdrTransfer,
   };
 }
 
@@ -214,7 +218,8 @@ async function main() {
     mkdirSync(workDir, { recursive: true });
     const startedAt = Date.now();
     try {
-      const cuts = ((req.cuts ?? []) as Cut[]).slice().sort((a, b) => a.no - b.no);
+      const cuts = ((req.cuts ?? []) as Cut[]).filter((c) => !c.skipped).sort((a, b) => a.no - b.no);
+      if (!cuts.length) throw new Error("편집할 컷이 없어요");
       const clips = (req.clips ?? []) as Clip[];
       const speaks = acc?.role_focus === "PERSON" || cuts.some((c) => c.voice?.trim());
 
@@ -238,6 +243,7 @@ async function main() {
           hasAudio: p.hasAudio,
           onScreen: p.onScreen,
           subtitles: p.subtitles,
+          hdrTransfer: p.hdrTransfer,
         };
         renderSegment(spec, out, workDir, `c${p.cutNo}`);
         segments.push(out);

@@ -26,15 +26,41 @@ function run(bin: string, args: string[]): string {
 export interface ProbeResult {
   duration: number;
   hasAudio: boolean;
+  // HDR 촬영본이면 전달 함수(iPhone 기본 = arib-std-b67), 아니면 null
+  hdrTransfer: string | null;
 }
 
+const HDR_TRANSFERS = ["arib-std-b67", "smpte2084"];
+
 export function probe(file: string): ProbeResult {
-  const out = run(FFPROBE, ["-v", "error", "-show_entries", "format=duration:stream=codec_type", "-of", "json", file]);
-  const j = JSON.parse(out) as { format?: { duration?: string }; streams?: { codec_type?: string }[] };
+  const out = run(FFPROBE, ["-v", "error", "-show_entries", "format=duration:stream=codec_type,color_transfer", "-of", "json", file]);
+  const j = JSON.parse(out) as { format?: { duration?: string }; streams?: { codec_type?: string; color_transfer?: string }[] };
+  const transfer = (j.streams ?? []).find((s) => s.codec_type === "video")?.color_transfer;
   return {
     duration: Number(j.format?.duration ?? 0),
     hasAudio: (j.streams ?? []).some((s) => s.codec_type === "audio"),
+    hdrTransfer: transfer && HDR_TRANSFERS.includes(transfer) ? transfer : null,
   };
+}
+
+let zscaleAvailable: boolean | null = null;
+
+/** 색 변환 필터가 있는 FFmpeg인지 — 없는 빌드면 색이 바래더라도 편집은 끝낸다. */
+function hasZscale(): boolean {
+  if (zscaleAvailable == null) zscaleAvailable = /\bzscale\b/.test(run(FFMPEG, ["-hide_banner", "-filters"]));
+  return zscaleAvailable;
+}
+
+/** HDR → 일반 영상(BT.709). 그대로 8비트로 내리면 iPhone 기본 촬영본의 색이 바래 보인다. */
+function toneMapFilters(transfer: string): string[] {
+  return [
+    `zscale=tin=${transfer}:pin=2020:min=2020_ncl:t=linear:npl=100`,
+    "format=gbrpf32le",
+    "zscale=p=709",
+    "tonemap=tonemap=hable:desat=0",
+    "zscale=t=709:m=709:r=tv",
+    "format=yuv420p",
+  ];
 }
 
 /** drawtext 필터 값 이스케이프 (경로 · 옵션 안의 : ' \ ) */
@@ -42,10 +68,8 @@ function esc(v: string): string {
   return v.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
 }
 
-/** 12자 안팎 화면 문구를 한 줄 최대 maxChars로 — 공백에서 끊고, 없으면 글자 수로. 최대 2줄. */
-export function wrapLines(text: string, maxChars: number): string[] {
-  const t = text.replace(/\s+/g, " ").trim();
-  if (!t) return [];
+/** 한 줄 최대 maxChars로 — 공백에서 끊고, 없으면 글자 수로. */
+function wrapLines(t: string, maxChars: number): string[] {
   if (t.length <= maxChars) return [t];
   const words = t.split(" ");
   const lines: string[] = [];
@@ -59,8 +83,25 @@ export function wrapLines(text: string, maxChars: number): string[] {
     }
   }
   if (cur) lines.push(cur);
-  const out = lines.flatMap((l) => (l.length <= maxChars ? [l] : l.match(new RegExp(`.{1,${maxChars}}`, "g")) ?? []));
-  return out.length <= 2 ? out : [out[0], out.slice(1).join(" ")];
+  return lines.flatMap((l) => (l.length <= maxChars ? [l] : l.match(new RegExp(`.{1,${maxChars}}`, "g")) ?? []));
+}
+
+/**
+ * 문구를 두 줄 안에 넣는다. 안 들어가면 한 줄 글자 수를 늘리고 그만큼 글자를 줄인다.
+ * 예전엔 둘째 줄에 나머지를 다 붙여 22자를 넘는 문구가 화면 밖으로 잘렸다(2026-11-04).
+ */
+export function fitLines(text: string, maxChars: number, size: number): { lines: string[]; size: number } {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (!t) return { lines: [], size };
+  // 아주 긴 낱말 하나 때문에 글자가 너무 작아지지 않게, 절반 길이를 넘으면 낱말 중간에서 끊는다
+  const half = Math.ceil(t.length / 2);
+  const scaled = (chars: number) => Math.floor((size * maxChars) / chars);
+  for (let chars = maxChars; chars <= half; chars++) {
+    const lines = wrapLines(t, chars);
+    if (lines.length <= 2) return { lines, size: scaled(chars) };
+  }
+  if (t.length <= maxChars) return { lines: [t], size };
+  return { lines: t.match(new RegExp(`.{1,${half}}`, "g")) ?? [t], size: scaled(Math.max(half, maxChars)) };
 }
 
 interface TextLayer {
@@ -104,18 +145,20 @@ export interface SegmentSpec {
   // 화면 위쪽 문구(인스타 상단 UI 아래, 18%) · 아래쪽 말 자막(인스타 캡션 영역 위, 66%)
   onScreen: string;
   subtitles: { text: string; from: number; to: number }[];
+  hdrTransfer: string | null;
 }
 
 /** 컷 하나 → 1080x1920 · 30fps · H.264 · AAC 48kHz 스테레오 조각 (모두 같은 규격이라 이어 붙일 때 다시 인코딩하지 않는다). */
 export function renderSegment(spec: SegmentSpec, out: string, workDir: string, tag: string): void {
   const filters = [
+    ...(spec.hdrTransfer && hasZscale() ? toneMapFilters(spec.hdrTransfer) : []),
     `scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=increase`,
     `crop=${OUT_W}:${OUT_H}`,
     `fps=${FPS}`,
     "setsar=1",
-    ...drawtext({ lines: wrapLines(spec.onScreen, 11), top: 0.18, size: 84, box: false }, workDir, `${tag}-top`),
+    ...drawtext({ ...fitLines(spec.onScreen, 11, 84), top: 0.18, box: false }, workDir, `${tag}-top`),
     ...spec.subtitles.flatMap((sub, i) =>
-      drawtext({ lines: wrapLines(sub.text, 16), top: 0.66, size: 52, box: true, from: sub.from, to: sub.to }, workDir, `${tag}-sub${i}`),
+      drawtext({ ...fitLines(sub.text, 16, 52), top: 0.66, box: true, from: sub.from, to: sub.to }, workDir, `${tag}-sub${i}`),
     ),
     "format=yuv420p",
   ];

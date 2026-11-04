@@ -12,7 +12,7 @@ import { isPastSlot } from "@/lib/automation/deadline";
 // 촬영 · 올리기 — 기획을 고른 칸마다 AI가 쓴 컷 목록대로 찍고, 컷마다 휴대폰에서 바로 올린다.
 // 큰 파일은 끊겨도 이어서 올라간다(tus). 다 올리면 자동 편집으로 넘어간다.
 
-type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; done?: boolean };
+type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; done?: boolean; skipped?: boolean };
 type Clip = { cut: number; name: string; size: number };
 type SavedShotlist = {
   hooks?: { spoken: string; on_screen: string; score?: number | null }[];
@@ -65,6 +65,7 @@ export default async function ShootUploadsPage() {
           onScreen: c.on_screen,
           voice: c.voice,
           done: !!c.done,
+          skipped: !!c.skipped,
         })),
         clips: ((r.clips ?? []) as Clip[]).map((c) => ({ cut: c.cut, name: c.name, size: c.size })),
         // 찍는 사람이 고칠 수 있는 것만(화면 문구 · 대사) — 캡션 · 말투 점수는 찍을 때 고칠 수 없다

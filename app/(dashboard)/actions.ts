@@ -617,21 +617,57 @@ export async function deleteContentsAction(
     return { ok: false, error: "삭제할 콘텐츠를 찾을 수 없거나 권한이 없습니다." };
   }
 
-  // DB 먼저 삭제 (publish_jobs는 cascade). 콘텐츠 삭제는 만든 사람이나 관리자만 된다(RLS, 0001) —
-  // 실제로 지워진 행을 받아 그 행의 파일만 정리한다. 0건이면 "삭제됨"이라고 하지 않는다(2026-11-04).
-  const { data: deletedRows, error: deleteError } = await supabase
-    .from("contents")
-    .delete()
+  // 이미 올라간 콘텐츠는 행을 지우면 발행 기록까지 cascade로 사라진다(publish_jobs). 그래서 파일과 캡션만 지우고
+  // 기록(언제 · 어느 계정 · 게시물 링크)은 남긴다 — "이력 보존"과 개인정보 안내의 "언제든 삭제"를 같이 지킨다(2026-11-04).
+  const { data: postedJobs, error: postedError } = await supabase
+    .from("publish_jobs")
+    .select("content_id")
     .in(
-      "id",
+      "content_id",
       targets.map((t) => t.id),
     )
-    .select("id");
+    .eq("status", "SUCCESS");
+  if (postedError) {
+    return { ok: false, error: `조회 실패: ${postedError.message}` };
+  }
+  const postedIds = new Set((postedJobs ?? []).map((j) => j.content_id));
+
+  const erasedIds = new Set<string>();
+  for (const t of targets.filter((x) => postedIds.has(x.id))) {
+    const meta = (t.metadata && typeof t.metadata === "object" ? t.metadata : {}) as Record<string, unknown>;
+    const rest = { ...meta };
+    delete rest.thumbnail_path;
+    delete rest.cover_path;
+    const { data: erased, error: eraseError } = await supabase
+      .from("contents")
+      .update({ ai_captions: null, draft_saved_at: null, metadata: { ...rest, erased_at: new Date().toISOString() } as Json })
+      .eq("id", t.id)
+      .select("id");
+    if (eraseError) {
+      return { ok: false, error: `삭제 실패: ${eraseError.message}` };
+    }
+    if (erased?.length) erasedIds.add(t.id);
+  }
+  // 같은 콘텐츠의 남은 예약은 올릴 파일이 없어졌으니 취소한다
+  if (erasedIds.size > 0) {
+    await createServiceClient()
+      .from("publish_jobs")
+      .update({ status: "CANCELLED", cancelled_at: new Date().toISOString() })
+      .in("content_id", Array.from(erasedIds))
+      .in("status", ["PENDING", "RETRYING"]);
+  }
+
+  // DB 먼저 삭제 (publish_jobs는 cascade). 콘텐츠 삭제는 만든 사람이나 관리자만 된다(RLS, 0001) —
+  // 실제로 지워진 행을 받아 그 행의 파일만 정리한다. 0건이면 "삭제됨"이라고 하지 않는다(2026-11-04).
+  const removable = targets.filter((t) => !postedIds.has(t.id)).map((t) => t.id);
+  const { data: deletedRows, error: deleteError } = removable.length
+    ? await supabase.from("contents").delete().in("id", removable).select("id")
+    : { data: [] as { id: string }[], error: null };
 
   if (deleteError) {
     return { ok: false, error: `삭제 실패: ${deleteError.message}` };
   }
-  const deletedIds = new Set((deletedRows ?? []).map((r) => r.id));
+  const deletedIds = new Set([...(deletedRows ?? []).map((r) => r.id), ...erasedIds]);
   if (deletedIds.size === 0) {
     return { ok: false, error: "지울 권한이 없어요. 콘텐츠는 만든 사람이나 관리자만 지울 수 있어요." };
   }
@@ -652,7 +688,9 @@ export async function deleteContentsAction(
       .from("contents")
       .select("media_urls, metadata")
       .or(candidatePaths.map((x) => `metadata->>thumbnail_path.eq.${x},metadata->>cover_path.eq.${x}`).join(","));
-    const keep = new Set([...(still ?? []), ...(stillMeta ?? [])].flatMap(pathsOf));
+    // 파일을 이미 지운 콘텐츠(erased_at)는 경로만 남아 있을 뿐 쓰지 않는다
+    const inUse = (c: { metadata: unknown }) => !(c.metadata as { erased_at?: string } | null)?.erased_at;
+    const keep = new Set([...(still ?? []), ...(stillMeta ?? [])].filter(inUse).flatMap(pathsOf));
     // 남은 콘텐츠를 확인하지 못했으면 지우지 않는 쪽으로 — 파일이 남는 건 정리 워커가 나중에 처리한다
     const unsure = !still || !!metaErr;
     storagePaths = unsure ? [] : candidatePaths.filter((x) => !keep.has(x));
@@ -677,10 +715,14 @@ export async function deleteContentsAction(
   revalidatePath("/uploads");
 
   const skipped = targets.length - deletedIds.size;
+  const notices = [
+    ...(erasedIds.size > 0 ? [`이미 올라간 ${erasedIds.size}건은 파일과 캡션만 지우고 발행 기록은 남겼어요.`] : []),
+    ...(skipped > 0 ? [`${skipped}건은 지울 권한이 없어 남겼어요 (만든 사람이나 관리자만 지울 수 있어요).`] : []),
+  ];
   return {
     ok: true,
     deleted: deletedIds.size,
-    ...(skipped > 0 ? { notice: `${skipped}건은 지울 권한이 없어 남겼어요 (만든 사람이나 관리자만 지울 수 있어요).` } : {}),
+    ...(notices.length ? { notice: notices.join(" ") } : {}),
   };
 }
 

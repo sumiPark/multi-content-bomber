@@ -101,6 +101,8 @@ interface SeriesOption {
   name: string;
   socialAccountId: string;
   nextEpisodeNo: number;
+  // 이 시리즈에 아직 안 올라간 예약 수 — 다음 화 번호에 이미 더해져 있다
+  pendingCount: number;
 }
 
 interface UploadWizardProps {
@@ -2167,7 +2169,7 @@ function Step5Schedule({
                         <option value="">시리즈 아님</option>
                         {options.map((o) => (
                           <option key={o.id} value={o.id}>
-                            {o.name} · {o.nextEpisodeNo}화
+                            {o.name} · {o.nextEpisodeNo}화{o.pendingCount > 0 ? ` (예약 ${o.pendingCount}개 다음)` : ""}
                           </option>
                         ))}
                       </select>

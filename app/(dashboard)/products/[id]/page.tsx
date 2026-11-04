@@ -23,10 +23,11 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const canManage = profile.role === "ADMIN" || profile.role === "MANAGER";
 
   const supabase = await getServerSupabase();
-  const [{ data: product }, { data: extracts }, { data: analysis }] = await Promise.all([
+  const [{ data: product }, { data: extracts }, { data: analysis }, { count: approvedClaimCount }] = await Promise.all([
     supabase.from("products").select("*").eq("id", id).maybeSingle(),
     supabase.from("product_image_extracts").select("image_url, image_index, text, uncertainties, part_count").eq("product_id", id),
     supabase.from("product_analyses").select("*").eq("product_id", id).maybeSingle(),
+    supabase.from("product_claim_approvals").select("id", { count: "exact", head: true }).eq("product_id", id),
   ]);
   if (!product) notFound();
 
@@ -136,6 +137,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               rejected={rejected}
               healthFunctional={analysis.health_functional}
               functionalClaims={analysis.functional_claims}
+              approvedClaimCount={approvedClaimCount ?? 0}
               uncertainties={analysis.uncertainties}
               edited={analysis.edited}
               approvedAt={analysis.approved_at}

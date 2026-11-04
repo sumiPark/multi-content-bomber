@@ -11,14 +11,21 @@ export interface FinalTexts {
   subtitles: string[];
 }
 
+/** 상품 분석(관계가 객체 · 배열 어느 쪽으로 와도)에서 화장품 기능성 표기를 꺼낸다. */
+export function certifiedFunctionsOf(analysis: unknown): string[] {
+  const row = (Array.isArray(analysis) ? analysis[0] : analysis) as { summary?: { details?: { certifiedFunctions?: unknown } } } | null | undefined;
+  const v = row?.summary?.details?.certifiedFunctions;
+  return Array.isArray(v) ? (v as string[]) : [];
+}
+
 export function finalBlocking(
   texts: FinalTexts,
-  opts: { kind: ProductKind; rules: ContentRule[]; approvedClaims: string[]; stockStatus: string; healthFunctional?: boolean | null },
+  opts: { kind: ProductKind; rules: ContentRule[]; approvedClaims: string[]; stockStatus: string; healthFunctional?: boolean | null; certifiedFunctions?: string[] },
 ): string[] {
   const out: string[] = [];
   if (opts.stockStatus !== "available") out.push("지금 판매 중이 아닌 상품이에요");
   const all = [...texts.onScreen, ...texts.subtitles, texts.caption].filter(Boolean).join("\n");
-  for (const h of checkText(all, opts.kind, opts.rules, opts.approvedClaims, { healthFunctional: opts.healthFunctional })) {
+  for (const h of checkText(all, opts.kind, opts.rules, opts.approvedClaims, { healthFunctional: opts.healthFunctional, certifiedFunctions: opts.certifiedFunctions })) {
     out.push(
       h.rule.ruleType === "BANNED"
         ? `금지 표현 "${h.matched}"${h.rule.suggestion ? ` → ${h.rule.suggestion}` : ""}`

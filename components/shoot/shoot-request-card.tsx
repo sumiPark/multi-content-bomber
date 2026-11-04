@@ -9,6 +9,7 @@ import {
   addClipAction,
   finishUploadAction,
   removeClipAction,
+  skipCutAction,
   toggleCutAction,
   type ShootResult,
 } from "@/app/(dashboard)/shoot/actions";
@@ -33,7 +34,7 @@ export interface ShootRequestCardData {
   brief: string | null;
   hook: { spoken: string; onScreen: string; score: number | null } | null;
   caption: string;
-  cuts: { no: number; seconds: number; shot: string; how: string; onScreen: string; voice: string; done: boolean }[];
+  cuts: { no: number; seconds: number; shot: string; how: string; onScreen: string; voice: string; done: boolean; skipped: boolean }[];
   clips: { cut: number; name: string; size: number }[];
   issues: string[];
   error: string | null;
@@ -92,8 +93,9 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
   // 올릴 시각이 지난 칸은 더 찍어도 예약되지 않는다 — 다음 정리 때 건너뜀이 된다
   const open = request.status === "OPEN" && !request.pastSlot;
   const clipOf = new Map(request.clips.map((c) => [c.cut, c]));
-  const uploaded = request.cuts.filter((c) => clipOf.has(c.no)).length;
-  const totalSeconds = request.cuts.reduce((sum, c) => sum + c.seconds, 0);
+  const activeCuts = request.cuts.filter((c) => !c.skipped);
+  const uploaded = activeCuts.filter((c) => clipOf.has(c.no)).length;
+  const totalSeconds = activeCuts.reduce((sum, c) => sum + c.seconds, 0);
 
   return (
     <article className="space-y-3 rounded-lg border bg-card p-4">
@@ -150,11 +152,12 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
       )}
 
       <p className="text-xs text-muted-foreground">
-        컷 {request.cuts.length}개 · 약 {Math.round(totalSeconds)}초 · 올린 컷 {uploaded}/{request.cuts.length}
+        컷 {activeCuts.length}개 · 약 {Math.round(totalSeconds)}초 · 올린 컷 {uploaded}/{activeCuts.length}
+        {activeCuts.length < request.cuts.length && ` · 뺀 컷 ${request.cuts.length - activeCuts.length}개`}
       </p>
       <ol className="space-y-2">
         {request.cuts.map((c) => (
-          <CutRow key={c.no} requestId={request.id} cut={c} clip={clipOf.get(c.no) ?? null} open={open} orgId={orgId} userId={userId} />
+          <CutRow key={c.no} requestId={request.id} cut={c} clip={clipOf.get(c.no) ?? null} open={open} canSkip={activeCuts.length > 1} orgId={orgId} userId={userId} />
         ))}
       </ol>
 
@@ -173,10 +176,10 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
       )}
       {open && (
         <div className="flex flex-col items-start gap-1">
-          <Button disabled={isPending || uploaded < request.cuts.length} onClick={() => run(() => finishUploadAction({ requestId: request.id }), "다 올렸어요. 자동 편집을 시작해요.")}>
+          <Button disabled={isPending || uploaded < activeCuts.length} onClick={() => run(() => finishUploadAction({ requestId: request.id }), "다 올렸어요. 자동 편집을 시작해요.")}>
             <CheckCircle2 className="size-4" /> 다 올렸어요 · 편집 시작
           </Button>
-          {uploaded < request.cuts.length && <p className="text-xs text-muted-foreground">컷마다 촬영본을 하나씩 올리면 눌러져요.</p>}
+          {uploaded < activeCuts.length && <p className="text-xs text-muted-foreground">컷마다 촬영본을 하나씩 올리면 눌러져요. 못 찍는 컷은 빼도 돼요.</p>}
         </div>
       )}
       {error && <p className="text-xs text-risk">{error}</p>}
@@ -189,6 +192,7 @@ function CutRow({
   cut,
   clip,
   open,
+  canSkip,
   orgId,
   userId,
 }: {
@@ -196,6 +200,7 @@ function CutRow({
   cut: ShootRequestCardData["cuts"][number];
   clip: { name: string; size: number } | null;
   open: boolean;
+  canSkip: boolean;
   orgId: string;
   userId: string;
 }) {
@@ -276,6 +281,25 @@ function CutRow({
 
   const uploading = isUploading;
 
+  if (cut.skipped) {
+    return (
+      <li className="rounded-md border border-dashed p-2.5 text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 truncate text-sm">
+            <b>{cut.no}.</b> {cut.shot}
+          </p>
+          <Badge variant="outline">뺀 컷</Badge>
+          {open && (
+            <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => skipCutAction({ requestId, no: cut.no, skipped: false }), `${cut.no}번 컷을 되돌렸어요.`)}>
+              되돌리기
+            </Button>
+          )}
+        </div>
+        {error && <p className="mt-1 text-xs text-risk">{error}</p>}
+      </li>
+    );
+  }
+
   return (
     <li className={cn("rounded-md border p-2.5", clip && "border-ok/40 bg-ok-soft")}>
       <div className="flex items-start">
@@ -324,6 +348,11 @@ function CutRow({
             {clip && (
               <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => removeClipAction({ requestId, cut: cut.no }), `${cut.no}번 컷 촬영본을 지웠어요.`)} aria-label="올린 촬영본 지우기">
                 <Trash2 className="size-4" />
+              </Button>
+            )}
+            {!clip && canSkip && (
+              <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => skipCutAction({ requestId, no: cut.no, skipped: true }), `${cut.no}번 컷을 뺐어요. 이 컷 없이 편집해요.`)}>
+                이 컷 빼기
               </Button>
             )}
           </>

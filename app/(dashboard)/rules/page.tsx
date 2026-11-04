@@ -31,7 +31,7 @@ export default async function RulesPage() {
     // 건강기능식품으로 판정된 상품 (일반 식품은 기능성 표현 자체를 못 쓴다)
     supabase
       .from("product_analyses")
-      .select("product_id, functional_claims, products!inner(id, name, shop_code, stock_status, excluded)")
+      .select("product_id, functional_claims, approved_at, products!inner(id, name, shop_code, stock_status, excluded, analysis_state)")
       .eq("health_functional", true),
     supabase.from("product_claim_approvals").select("id, product_id, claim, source"),
   ]);
@@ -60,6 +60,8 @@ export default async function RulesPage() {
       name: a.products.name,
       shopName: SHOPS[a.products.shop_code as ShopCode]?.name ?? a.products.shop_code,
       candidates: a.functional_claims,
+      // 표현 규칙에서 문구를 확정해도 상품 화면에서 분석을 확인해야 후보가 된다
+      analysisConfirmed: a.products.analysis_state === "ready",
       approved: approvedBy.get(a.product_id) ?? [],
     }))
     // 확정 안 된 것 먼저

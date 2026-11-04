@@ -68,6 +68,8 @@ export interface PostingItem {
   updatedAt: string;
   completedAt: string | null;
   thumbnailUrl: string | null;
+  // 파일과 캡션을 지운 콘텐츠 — 발행 기록만 남아 있다
+  contentErased: boolean;
   mediaType: "IMAGE" | "VIDEO";
   mediaCount: number;
   captions: unknown;
@@ -262,17 +264,17 @@ export function PostingsPage({
   } | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // 콘텐츠 완전 삭제 — 목록에서 숨기는 deletePostingsAction과 다르다.
-  // 콘텐츠 행·미디어 파일·해당 콘텐츠의 모든 발행 이력이 함께 사라진다.
+  // 콘텐츠 삭제 — 목록에서 숨기는 deletePostingsAction과 다르다. 파일과 캡션이 지워지고,
+  // 이미 올라간 건은 발행 기록만 남는다(deleteContentsAction).
   function runDeleteContent(contentId: string, label: string) {
-    const message = `'${label}'을(를) 완전히 삭제할까요?\n\n업로드한 미디어 파일과 이 콘텐츠의 모든 발행 이력이 삭제되며 되돌릴 수 없습니다.\n(이미 SNS에 게시된 게시물은 각 플랫폼에서 별도로 삭제해야 합니다.)`;
+    const message = `'${label}'을(를) 삭제할까요? 되돌릴 수 없어요.\n\n올린 파일과 캡션이 지워져요. 이미 올라간 건은 발행 기록(언제 · 어느 계정 · 게시물 링크)만 남고, 아직 안 올라간 건은 기록까지 지워져요.\n(SNS에 올라간 게시물은 지워지지 않아요. 각 플랫폼에서 따로 지워 주세요.)`;
     if (!window.confirm(message)) return;
     startTransition(async () => {
       setActionMessage(null);
       const result = await deleteContentsAction({ contentIds: [contentId] });
       if (result.ok) {
         setDetailItem(null);
-        setActionMessage({ text: "콘텐츠를 삭제했어요", ok: true });
+        setActionMessage({ text: result.notice ?? "콘텐츠를 삭제했어요", ok: true });
         router.refresh();
       } else {
         setActionMessage({ text: result.error, ok: false });
@@ -303,28 +305,24 @@ export function PostingsPage({
     [initialPostings],
   );
 
-  // 자동 새로고침: PROCESSING/PENDING(scheduled 포함) 1건이라도 있으면 10초마다.
-  const hasActive = useMemo(
-    () =>
-      enriched.some(
-        (p) =>
-          p.displayStatus === "uploading" ||
-          p.displayStatus === "scheduled" ||
-          p.displayStatus === "pending",
-      ),
-    [enriched],
-  );
+  // 자동 새로고침: 올리는 중 · 대기 중이면 10초마다, 예약만 있으면 1분마다, 다른 탭을 보는 동안은 쉰다.
+  // 예약이 늘 있어 사실상 10초마다 전체를 다시 불러오던 것을 줄였다(2026-11-04).
+  const refreshMs = useMemo(() => {
+    if (enriched.some((p) => p.displayStatus === "uploading" || p.displayStatus === "pending")) return 10_000;
+    if (enriched.some((p) => p.displayStatus === "scheduled")) return 60_000;
+    return null;
+  }, [enriched]);
   const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     if (refreshTimer.current) clearInterval(refreshTimer.current);
-    if (!hasActive) return;
+    if (refreshMs == null) return;
     refreshTimer.current = setInterval(() => {
-      router.refresh();
-    }, 10000);
+      if (!document.hidden) router.refresh();
+    }, refreshMs);
     return () => {
       if (refreshTimer.current) clearInterval(refreshTimer.current);
     };
-  }, [hasActive, router]);
+  }, [refreshMs, router]);
 
   // 기간 + 플랫폼 + 상태 + 검색 적용
   const filtered = useMemo(() => {
@@ -1478,6 +1476,11 @@ function DetailDrawer({
               </h3>
               {/* 콘텐츠 완전 삭제 — 이 콘텐츠의 모든 발행에 영향을 주므로
                   발행 단위 작업(재시도/취소)과 떨어뜨려 설명과 함께 둔다. */}
+              {item.contentErased && (
+                <p className="mb-2 rounded-md bg-surface-2 px-3 py-2 text-xs text-muted-foreground">
+                  파일과 캡션을 지운 콘텐츠예요. 발행 기록만 남아 있어요.
+                </p>
+              )}
               <div className="divide-y rounded-lg border text-[13px]">
                 <div className="flex items-center justify-between gap-3 px-3.5 py-3">
                   <span className="min-w-0">
@@ -1498,11 +1501,12 @@ function DetailDrawer({
                     <EyeOff /> 숨기기
                   </Button>
                 </div>
+                {!item.contentErased && (
                 <div className="flex items-center justify-between gap-3 px-3.5 py-3">
                   <span className="min-w-0">
                     콘텐츠 삭제
                     <span className="block text-xs text-muted-foreground">
-                      올린 파일과 이 콘텐츠의 모든 발행 이력이 지워지고 되돌릴 수 없어요.
+                      파일과 캡션이 지워지고 되돌릴 수 없어요. 이미 올라간 건은 발행 기록이 남아요.
                     </span>
                   </span>
                   <Button
@@ -1520,6 +1524,7 @@ function DetailDrawer({
                     <Trash2 /> 삭제
                   </Button>
                 </div>
+                )}
               </div>
             </section>
           )}

@@ -14,6 +14,9 @@ export async function collectMetricsNowAction(): Promise<CollectNowResult> {
   if (!profile?.organization_id) {
     return { ok: false, error: "소속된 조직이 없습니다." };
   }
+  if (profile.role !== "ADMIN" && profile.role !== "MANAGER") {
+    return { ok: false, error: "지금 수집은 관리자 · 매니저만 할 수 있어요." };
+  }
 
   try {
     await triggerMetricsRun(`manual:${user.id}`);

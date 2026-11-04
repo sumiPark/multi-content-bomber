@@ -27,6 +27,8 @@ async function authorizeAccount(accountId: string) {
   if (!user) return { ok: false as const, error: "로그인이 필요합니다." };
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) return { ok: false as const, error: "소속된 조직이 없습니다." };
+  // 캡처 읽기 · 다시 채점은 AI 비용이 든다
+  if (profile.role !== "ADMIN" && profile.role !== "MANAGER") return { ok: false as const, error: "프로필 정보 채우기는 관리자 · 매니저만 할 수 있어요." };
   // 같은 조직 계정인지는 RLS가 걸러 준다.
   const supabase = await getServerSupabase();
   const { data: account } = await supabase

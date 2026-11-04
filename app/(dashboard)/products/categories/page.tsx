@@ -53,6 +53,7 @@ export default async function ProductCategoriesPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           켠 카테고리의 상품만 받아 옵니다. 하위 카테고리는 따로 끌 수 있고, 종류에 따라 상세페이지를 읽는
           항목(과일: 산지 · 당도 / 화장품: 성분 / 건기식: 기능성 문구 / 의류: 소재 · 사이즈)이 달라져요.
+          종류를 바꾸면 다음 수집 때 그 카테고리의 판매 중 상품을 다시 분석해요.
         </p>
       </header>
 

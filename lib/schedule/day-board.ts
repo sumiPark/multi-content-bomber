@@ -74,8 +74,8 @@ export async function loadDayBoard(supabase: Supabase, date: string, now = Date.
   const [{ data: rules }, { data: plans }, { data: settings }] = await Promise.all([
     supabase
       .from("slot_rules")
-      .select("social_account_id, slot_time, track, active, social_accounts(display_name, disconnected_at)")
-      .eq("active", true),
+      // 끈 칸도 읽는다 — 이미 만든 기획은 그대로 올라가니 표에서 빠지면 안 된다
+      .select("social_account_id, slot_time, track, active, social_accounts(display_name, disconnected_at, is_active)"),
     supabase
       .from("content_plans")
       .select("id, social_account_id, slot_date, slot_time, track, status, proposal, note, error, products(name), publish_jobs(status), shoot_requests(status, error), social_accounts(display_name)")
@@ -134,13 +134,19 @@ export async function loadDayBoard(supabase: Supabase, date: string, now = Date.
   const atRisk: BlockedItem[] = [];
   const planBySlot = new Map((plans ?? []).map((p) => [`${p.social_account_id}|${p.slot_date}|${p.slot_time}`, p]));
   const emptyCount: Record<string, number> = {};
+  const offAccounts = new Map<string, string>();
   for (const date of [today, tomorrow]) {
     for (const r of rules ?? []) {
-      if (!r.social_accounts || r.social_accounts.disconnected_at) continue;
+      if (!r.active || !r.social_accounts || r.social_accounts.disconnected_at) continue;
       if (isPastSlot(date, r.slot_time, 0, now)) continue;
       const p = planBySlot.get(`${r.social_account_id}|${date}|${r.slot_time}`);
       const name = `@${r.social_accounts.display_name ?? ""} ${dayName(date, today)} ${r.slot_time}`;
       if (!p) {
+        // 토큰이 만료된 계정은 기획하지 않는다 — 빈 칸으로 세지 않고 다시 연결하라고 따로 알린다
+        if (r.social_accounts.is_active === false) {
+          offAccounts.set(r.social_account_id, r.social_accounts.display_name ?? "");
+          continue;
+        }
         if (date === today || now >= Date.parse(kstToIso(today, NEXT_DAY_PLANNED_BY))) emptyCount[date] = (emptyCount[date] ?? 0) + 1;
         continue;
       }
@@ -175,12 +181,21 @@ export async function loadDayBoard(supabase: Supabase, date: string, now = Date.
       href: date === today ? "/schedule" : `/schedule?week=${date}`,
     });
 
+  for (const [id, name] of offAccounts)
+    atRisk.unshift({
+      key: `off-${id}`,
+      label: `@${name} 연결이 끊겨 기획을 못 해요`,
+      reason: "다시 연결하면 다음 기획부터 칸을 채워요",
+      href: "/accounts",
+    });
+
   // ── 고른 날의 칸 판
   const planOf = new Map((plans ?? []).filter((p) => p.slot_date === date).map((p) => [`${p.social_account_id}|${p.slot_time}`, p]));
   const rows: BoardRow[] = [];
   for (const r of rules ?? []) {
     if (!r.social_accounts || r.social_accounts.disconnected_at) continue;
     const p = planOf.get(`${r.social_account_id}|${r.slot_time}`);
+    if (!r.active && !p) continue;
     const ideas = ((p?.proposal ?? {}) as { ideas?: unknown[] }).ideas;
     rows.push({
       key: `${r.social_account_id}|${r.slot_time}`,
@@ -193,7 +208,7 @@ export async function loadDayBoard(supabase: Supabase, date: string, now = Date.
           : (p.products?.name ?? null)
         : null,
       status: !p
-        ? cellStatus(null, { date, time: r.slot_time, track: r.track, active: true }, now)
+        ? cellStatus(null, { date, time: r.slot_time, track: r.track, active: true, accountOff: r.social_accounts.is_active === false }, now)
         : boardStatus(statusOf(p), isPastDeadline(p.slot_date, deadlineOf.get(p.social_account_id) ?? "07:00", now)),
     });
   }
@@ -224,13 +239,14 @@ export interface YesterdayLine {
 }
 
 export async function loadYesterday(supabase: Supabase, now = Date.now()): Promise<YesterdayLine[]> {
+  const today = kstDate(0, now);
   const yesterday = kstDate(-1, now);
   const dayBefore = kstDate(-2, now);
   const [{ data: daily }, { data: posts }] = await Promise.all([
     supabase
       .from("account_daily")
       .select("social_account_id, day, followers_count, social_accounts(display_name)")
-      .in("day", [yesterday, dayBefore]),
+      .in("day", [today, yesterday, dayBefore]),
     supabase
       .from("social_posts")
       .select("social_account_id, caption, permalink, post_metrics(views, collected_on)")
@@ -250,10 +266,13 @@ export async function loadYesterday(supabase: Supabase, now = Date.now()): Promi
     byAccount.set(d.social_account_id, line);
   }
   for (const [id, line] of byAccount) {
-    const y = daily.find((d) => d.social_account_id === id && d.day === yesterday)?.followers_count ?? null;
-    const b = daily.find((d) => d.social_account_id === id && d.day === dayBefore)?.followers_count ?? null;
-    line.followers = y;
-    line.delta = y != null && b != null ? y - b : null;
+    // account_daily는 수집한 날(새벽 04시) 행이다 — 오늘 행 − 어제 행이 "어제 하루" 증감. 예전엔 하루 밀려 그저께 증감을 보여 줬다.
+    // 오늘 수집 전(04시 이전)이면 있는 것 중 최근 두 날로.
+    const followersOn = (day: string) => daily.find((d) => d.social_account_id === id && d.day === day)?.followers_count ?? null;
+    const latest = followersOn(today) ?? followersOn(yesterday);
+    const previous = followersOn(today) != null ? followersOn(yesterday) : followersOn(dayBefore);
+    line.followers = latest;
+    line.delta = latest != null && previous != null ? latest - previous : null;
     for (const p of (posts ?? []).filter((x) => x.social_account_id === id)) {
       const views = Math.max(0, ...(p.post_metrics ?? []).map((m) => m.views ?? 0));
       if (!line.bestPost || views > line.bestPost.views) {

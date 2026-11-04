@@ -61,6 +61,7 @@ interface JobOwnership {
   status: string;
   organization_id: string;
   account_disconnected: boolean;
+  content_erased: boolean;
 }
 
 async function fetchJobsByIds(ids: string[]): Promise<JobOwnership[]> {
@@ -68,13 +69,15 @@ async function fetchJobsByIds(ids: string[]): Promise<JobOwnership[]> {
   const { data } = await service
     .from("publish_jobs")
     .select(
-      "id, status, contents!inner ( organization_id ), social_accounts!inner ( disconnected_at )",
+      "id, status, contents!inner ( organization_id, metadata ), social_accounts!inner ( disconnected_at )",
     )
     .in("id", ids);
   return (data ?? []).map((r) => ({
     id: r.id,
     status: r.status,
     organization_id: (r.contents as { organization_id: string }).organization_id,
+    // 파일과 캡션을 지운 콘텐츠 — 다시 올릴 수 없다
+    content_erased: !!(r.contents as { metadata: { erased_at?: string } | null }).metadata?.erased_at,
     account_disconnected:
       (r.social_accounts as { disconnected_at: string | null })
         .disconnected_at !== null,
@@ -100,7 +103,11 @@ export async function retryPostingsAction(
   const jobs = await fetchJobsByIds(parsed.data.ids);
   const owned = filterByOrg(jobs, auth.organizationId);
   // 실패 상태만 대상.
-  const failed = owned.filter((j) => j.status === "FAILED");
+  const failedAll = owned.filter((j) => j.status === "FAILED");
+  const failed = failedAll.filter((j) => !j.content_erased);
+  if (failedAll.length > 0 && failed.length === 0) {
+    return { ok: false, error: "파일을 지운 콘텐츠라 다시 올릴 수 없어요." };
+  }
   // 연결 해제된 계정은 토큰이 없어 재시도해도 바로 실패한다. 재연결하면 같은 계정 행이
   // 되살아나(disconnected_at NULL) 그때부터 재시도 가능.
   const targets = failed.filter((j) => !j.account_disconnected);

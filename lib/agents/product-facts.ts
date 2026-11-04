@@ -24,6 +24,8 @@ export interface ProductFacts {
   uncertainties: string[];
   healthFunctional: boolean | null;
   approvedClaims: string[];
+  // 화장품 기능성 표기(심사 · 보고) — 상세페이지에 있을 때만 그 표현을 쓸 수 있다
+  certifiedFunctions: string[];
   // 근거 확인용 원문 (이미지 순서, 앞 6000자)
   sourceText: string;
 }
@@ -62,6 +64,7 @@ export async function loadProductFacts(service: Service, productId: string): Pro
     uncertainties: an?.uncertainties ?? [],
     healthFunctional: an?.health_functional ?? null,
     approvedClaims: (approvals ?? []).map((a) => a.claim),
+    certifiedFunctions: Array.isArray(summary.details?.certifiedFunctions) ? (summary.details.certifiedFunctions as string[]) : [],
     sourceText: (extracts ?? []).map((e) => e.text).join("\n").slice(0, 6000),
   };
 }

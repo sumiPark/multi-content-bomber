@@ -109,7 +109,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                 requestStatus: p.shoot_requests?.status ?? null,
               }
             : null,
-          { date, time: rule.slot_time, track: rule.track, active: rule.active },
+          { date, time: rule.slot_time, track: rule.track, active: rule.active, accountOff: rule.social_accounts?.is_active === false },
         );
         if (rule.active || p) counts[status.tone] += 1;
         return { date, status, product: p?.products?.name ?? null };

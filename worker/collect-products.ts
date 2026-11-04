@@ -199,13 +199,13 @@ async function collectShop(service: Service | null, shop: ShopCode, args: Args):
   summary.listed = ids.size;
   const targetIds = args.limit ? [...ids].slice(0, args.limit) : [...ids];
 
-  const existing = new Map<number, { source_hash: string; excluded: boolean }>();
+  const existing = new Map<number, { source_hash: string; excluded: boolean; kind: string | null }>();
   if (service) {
     // 몰당 수천 개 이하라 한 번에 읽는다(Supabase 기본 1000행 제한 → 페이지로).
     for (let from = 0; ; from += 1000) {
       const { data, error } = await service
         .from("products")
-        .select("shop_product_id, source_hash, excluded")
+        .select("shop_product_id, source_hash, excluded, kind")
         .eq("shop_code", shop)
         .range(from, from + 999);
       if (error) throw new Error(`products 조회 실패: ${error.message}`);
@@ -235,7 +235,8 @@ async function collectShop(service: Service | null, shop: ShopCode, args: Args):
     }
     const kind = cat?.kind ?? "OTHER";
     const prev = existing.get(p.id);
-    const changed = !prev || prev.source_hash !== p.sourceHash;
+    // 사람이 카테고리 종류를 바꿨으면 분석 항목이 달라지니 다시 분석한다(받아 둔 이미지 글은 재사용, 판매 중인 것만)
+    const changed = !prev || prev.source_hash !== p.sourceHash || prev.kind !== kind;
     summary.byKind[kind] = (summary.byKind[kind] ?? 0) + 1;
     summary.byStock[p.stockStatus] = (summary.byStock[p.stockStatus] ?? 0) + 1;
     if (changed) summary.queued++;
@@ -257,7 +258,7 @@ async function collectShop(service: Service | null, shop: ShopCode, args: Args):
       source_hash: p.sourceHash,
       raw: p.raw as Json,
       last_seen_at: new Date().toISOString(),
-      // 상세페이지가 바뀐 상품만 다시 분석 대기로. 종류가 기타면 분석하지 않는다.
+      // 상세페이지나 종류가 바뀐 상품만 다시 분석 대기로. 종류가 기타면 분석하지 않는다.
       ...(changed
         ? {
             analysis_state: kind === "OTHER" ? "skipped" : "queued",

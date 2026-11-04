@@ -8,7 +8,7 @@ import { kstToIso } from "@/lib/automation/time";
 import { triggerShootEditRun, triggerShootPlanRun, triggerShotlistRun } from "@/lib/github-dispatch";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
-import { finalBlocking, splitHashtags } from "@/lib/shoot/final-check";
+import { certifiedFunctionsOf, finalBlocking, splitHashtags } from "@/lib/shoot/final-check";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -260,7 +260,7 @@ export async function skipShootAction(input: z.infer<typeof idSchema>): Promise<
 
 // ─── 촬영 · 올리기 ────────────────────────────────────────────────────────────
 
-type Cut = { no: number; done?: boolean } & Record<string, unknown>;
+type Cut = { no: number; done?: boolean; skipped?: boolean } & Record<string, unknown>;
 type Clip = { cut: number; path: string; name: string; size: number; type: string; uploaded_at: string; uploaded_by: string };
 
 async function loadRequest(service: Service, requestId: string, orgId: string) {
@@ -324,6 +324,39 @@ export async function toggleCutAction(input: z.infer<typeof cutSchema>): Promise
   return { ok: true };
 }
 
+const skipCutSchema = z.object({ requestId: z.string().uuid(), no: z.number().int().min(1).max(20), skipped: z.boolean() });
+
+/**
+ * 못 찍는 컷 빼기 / 되돌리기. 예전엔 한 컷이라도 못 찍으면 "다 올렸어요"를 못 눌러 칸 전체가 멈췄다(2026-11-04).
+ * 찍는 사람이 현장에서 판단하니 촬영 권한으로 되고, 뺀 컷은 완성본 확인에 표시돼 관리자가 본다.
+ */
+export async function skipCutAction(input: z.infer<typeof skipCutSchema>): Promise<ShootResult> {
+  const parsed = skipCutSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
+    if (req.status !== "OPEN") return "이미 편집으로 넘어간 촬영 요청입니다.";
+    const cuts = (req.cuts ?? []) as Cut[];
+    if (parsed.data.skipped && !cuts.some((c) => c.no !== parsed.data.no && !c.skipped)) return "컷을 모두 뺄 수는 없어요. 이 칸을 찍지 못하면 촬영 기획에서 칸을 건너뛰어 주세요.";
+    const clips = (req.clips ?? []) as Clip[];
+    const old = parsed.data.skipped ? clips.filter((c) => c.cut === parsed.data.no) : [];
+    return {
+      patch: {
+        cuts: cuts.map((c) => (c.no === parsed.data.no ? { ...c, skipped: parsed.data.skipped, done: false } : c)) as unknown as Json,
+        ...(old.length ? { clips: clips.filter((c) => c.cut !== parsed.data.no) as unknown as Json } : {}),
+      },
+      after: async () => {
+        if (old.length) await service.storage.from("media").remove(old.map((c) => c.path));
+      },
+    };
+  });
+  if (!r.ok) return r;
+  revalidatePath("/shoot/uploads");
+  return { ok: true };
+}
+
 const MAX_CLIP_BYTES = 1024 * 1024 * 1024; // media 버킷 한도(0014)와 같게
 
 const clipSchema = z.object({
@@ -361,7 +394,7 @@ export async function addClipAction(input: z.infer<typeof clipSchema>): Promise<
         uploaded_by: auth.userId,
       },
     ].sort((a, b) => a.cut - b.cut);
-    const nextCuts = cuts.map((c) => (c.no === parsed.data.cut ? { ...c, done: true } : c));
+    const nextCuts = cuts.map((c) => (c.no === parsed.data.cut ? { ...c, done: true, skipped: false } : c));
     return {
       patch: { clips: next as unknown as Json, cuts: nextCuts as unknown as Json },
       // 같은 컷의 예전 촬영본은 저장이 된 뒤에만 지운다
@@ -403,7 +436,7 @@ export async function removeClipAction(input: z.infer<typeof removeSchema>): Pro
 
 const finishSchema = z.object({ requestId: z.string().uuid() });
 
-/** 다 올렸어요 → 편집 대기. 컷마다 촬영본이 있어야 한다. */
+/** 다 올렸어요 → 편집 대기. 뺀 컷을 뺀 컷마다 촬영본이 있어야 한다. */
 export async function finishUploadAction(input: z.infer<typeof finishSchema>): Promise<ShootResult> {
   const parsed = finishSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -415,7 +448,9 @@ export async function finishUploadAction(input: z.infer<typeof finishSchema>): P
   if (req.status !== "OPEN") return { ok: false, error: "이미 편집으로 넘어간 촬영 요청입니다." };
   const cuts = (req.cuts ?? []) as Cut[];
   const clips = (req.clips ?? []) as Clip[];
-  const missing = cuts.filter((c) => !clips.some((k) => k.cut === c.no)).map((c) => c.no);
+  const active = cuts.filter((c) => !c.skipped);
+  if (!active.length) return { ok: false, error: "남은 컷이 없어요. 뺀 컷을 되돌려 주세요." };
+  const missing = active.filter((c) => !clips.some((k) => k.cut === c.no)).map((c) => c.no);
   if (missing.length) return { ok: false, error: `${missing.join(", ")}번 컷 촬영본이 아직 없어요.` };
 
   const { data: moved, error } = await service
@@ -474,7 +509,8 @@ export async function saveCaptionAction(input: z.infer<typeof captionSchema>): P
 const reEditSchema = z.object({
   requestId: z.string().uuid(),
   cuts: z
-    .array(z.object({ no: z.number().int().min(1).max(20), onScreen: z.string().max(40), subtitle: z.string().max(120).nullable() }))
+    // subtitle을 안 보내면 그 컷 자막은 그대로(말한 시각에 맞춘 자막 유지), 보내면 그 글로 바꾼다
+    .array(z.object({ no: z.number().int().min(1).max(20), onScreen: z.string().max(40), subtitle: z.string().max(120).optional() }))
     .max(20),
 });
 
@@ -495,7 +531,8 @@ export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise
   const fix = new Map(parsed.data.cuts.map((c) => [c.no, c]));
   const cuts = ((req.cuts ?? []) as Cut[]).map((c) => {
     const f = fix.get(c.no);
-    return f ? { ...c, on_screen_override: f.onScreen.trim(), subtitle_override: f.subtitle == null ? null : f.subtitle.trim() } : c;
+    if (!f) return c;
+    return { ...c, on_screen_override: f.onScreen.trim(), ...(f.subtitle === undefined ? {} : { subtitle_override: f.subtitle.trim() }) };
   });
   const { data: moved, error } = await service
     .from("shoot_requests")
@@ -574,7 +611,7 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
   if (!plan.product_id) return { ok: false, error: "상품이 없는 칸입니다." };
 
   const [{ data: product }, { data: ruleRows }, { data: approvals }] = await Promise.all([
-    service.from("products").select("name, kind, stock_status, product_analyses(health_functional)").eq("id", plan.product_id).maybeSingle(),
+    service.from("products").select("name, kind, stock_status, product_analyses(health_functional, summary)").eq("id", plan.product_id).maybeSingle(),
     service.from("content_rules").select("id, scope, rule_type, phrase, match_type, reason, suggestion").eq("active", true),
     service.from("product_claim_approvals").select("claim").eq("product_id", plan.product_id),
   ]);
@@ -598,6 +635,7 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
       approvedClaims: (approvals ?? []).map((a) => a.claim),
       stockStatus: product.stock_status,
       healthFunctional: healthFunctionalOf(product.product_analyses),
+      certifiedFunctions: certifiedFunctionsOf(product.product_analyses),
     },
   );
   if (blocking.length) return { ok: false, error: `확인 전에 고칠 것: ${blocking.join(" · ")}` };

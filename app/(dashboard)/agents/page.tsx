@@ -38,7 +38,7 @@ function runTarget(input: Record<string, unknown>, plan: { slot_date: string; sl
   return parts.join(" ") || "—";
 }
 
-export default async function AgentsPage({ searchParams }: { searchParams: Promise<{ agent?: string }> }) {
+export default async function AgentsPage({ searchParams }: { searchParams: Promise<{ agent?: string; runs?: string }> }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
   const profile = await getCurrentProfile();
@@ -48,7 +48,8 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
 
   const sp = await searchParams;
   const selected: LearningAgent = LEARNING_AGENTS.includes(sp.agent as LearningAgent) ? (sp.agent as LearningAgent) : "select";
-  const runFilter = AGENTS.some((a) => a.key === sp.agent) ? sp.agent! : null;
+  // 플레이북 고르기(agent)와 실행 기록 거르기(runs)는 따로 — 한 값을 같이 쓰면 하나를 누를 때 다른 쪽도 바뀌었다
+  const runFilter = AGENTS.some((a) => a.key === sp.runs) ? sp.runs! : null;
   const since = daysAgoIso(STAT_DAYS);
 
   const [{ data: settings }, { data: playbooks }, { data: feedback }, { data: statRows }, runsQuery] = await Promise.all([
@@ -217,7 +218,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
             {LEARNING_AGENTS.map((k) => (
               <Link
                 key={k}
-                href={`/agents?agent=${k}#playbook`}
+                href={`/agents?agent=${k}${runFilter ? `&runs=${runFilter}` : ""}#playbook`}
                 aria-current={k === selected ? "page" : undefined}
                 className={cn(
                   "h-8 rounded-[6px] px-3 text-[13px] leading-8",
@@ -252,11 +253,11 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
             <CardDescription className="mt-1">에이전트가 언제, 무엇을 받아 어떤 스킬을 불렀고 무엇을 내놓았는지. 줄을 누르면 자세히 보여요.</CardDescription>
           </div>
           <nav className="flex flex-wrap gap-1.5" aria-label="에이전트별 보기">
-            <Link href="/agents#runs" className={buttonVariants({ variant: runFilter ? "outline" : "default", size: "sm" })}>
+            <Link href={`/agents?agent=${selected}#runs`} className={buttonVariants({ variant: runFilter ? "outline" : "default", size: "sm" })}>
               전체
             </Link>
             {AGENTS.filter((a) => ["select", "plan", "edit"].includes(a.key)).map((a) => (
-              <Link key={a.key} href={`/agents?agent=${a.key}#runs`} className={buttonVariants({ variant: runFilter === a.key ? "default" : "outline", size: "sm" })}>
+              <Link key={a.key} href={`/agents?agent=${selected}&runs=${a.key}#runs`} className={buttonVariants({ variant: runFilter === a.key ? "default" : "outline", size: "sm" })}>
                 {a.no} {a.name}
               </Link>
             ))}

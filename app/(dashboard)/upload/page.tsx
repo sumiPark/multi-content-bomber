@@ -117,7 +117,7 @@ export default async function UploadPage({
 
   // 토큰 만료(is_active=false) 계정도 목록에 남겨 마법사가 "비활성"으로 회색 표시한다
   // (선택은 불가). 연결 해제(0016)한 계정만 뺀다.
-  const [accountsRes, presetsRes, groupsRes, seriesRes] = await Promise.all([
+  const [accountsRes, presetsRes, groupsRes, seriesRes, seriesJobsRes] = await Promise.all([
     supabase
       .from("social_accounts")
       .select(
@@ -140,14 +140,26 @@ export default async function UploadPage({
       .select("id, name, social_account_id, series_episodes(episode_no)")
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
+    // 회차 번호는 올라갈 때 정해진다 — 아직 안 올라간 예약이 앞에 있으면 그만큼 뒤 번호가 된다
+    supabase
+      .from("publish_jobs")
+      .select("series_id")
+      .not("series_id", "is", null)
+      .in("status", ["PENDING", "PROCESSING", "RETRYING"])
+      .is("deleted_at", null),
   ]);
 
+  const pendingBySeries = new Map<string, number>();
+  for (const j of seriesJobsRes.data ?? []) {
+    if (j.series_id) pendingBySeries.set(j.series_id, (pendingBySeries.get(j.series_id) ?? 0) + 1);
+  }
   const seriesOptions = (seriesRes.data ?? []).map((s) => ({
     id: s.id,
     name: s.name,
     socialAccountId: s.social_account_id,
+    pendingCount: pendingBySeries.get(s.id) ?? 0,
     nextEpisodeNo:
-      Math.max(0, ...s.series_episodes.map((e) => e.episode_no)) + 1,
+      Math.max(0, ...s.series_episodes.map((e) => e.episode_no)) + 1 + (pendingBySeries.get(s.id) ?? 0),
   }));
 
   const initialDraft = draftId ? await loadDraft(supabase, draftId) : null;

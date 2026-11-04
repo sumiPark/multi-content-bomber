@@ -9,13 +9,13 @@ import { isPastSlot } from "@/lib/automation/deadline";
 import { kstDate } from "@/lib/automation/time";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
-import { finalBlocking } from "@/lib/shoot/final-check";
+import { certifiedFunctionsOf, finalBlocking } from "@/lib/shoot/final-check";
 import { AutoRefresh } from "@/components/ui/auto-refresh";
 
 // 완성본 확인 — 직접 찍은 영상을 사람이 마지막으로 한 번 본다. 확인하면 12 · 18시로 예약(기존 발행 큐).
 // 광고 문구 규칙 · 판매 상태에 걸리면 확인 버튼이 잠기고, 문구를 고쳐 다시 편집하면 풀린다.
 
-type Cut = { no: number; on_screen: string; on_screen_override?: string | null; subtitle_override?: string | null };
+type Cut = { no: number; on_screen: string; on_screen_override?: string | null; subtitle_override?: string | null; skipped?: boolean };
 type Edit = {
   seconds?: number;
   thumbnail?: string;
@@ -34,7 +34,7 @@ export default async function ShootReviewPage() {
   const { data: plans } = await supabase
     .from("content_plans")
     .select(
-      "id, slot_date, slot_time, status, product_id, script, social_accounts(display_name), products(name, kind, stock_status, represent_image_url, product_analyses(health_functional)), shoot_requests(id, status, rendered_path, edit, cuts, error)",
+      "id, slot_date, slot_time, status, product_id, script, social_accounts(display_name), products(name, kind, stock_status, represent_image_url, product_analyses(health_functional, summary)), shoot_requests(id, status, rendered_path, edit, cuts, error)",
     )
     .eq("track", "A")
     .in("status", ["SHOT", "RENDERED", "SCHEDULED"])
@@ -62,7 +62,7 @@ export default async function ShootReviewPage() {
     const thumb = (r?.edit as Edit | null)?.thumbnail;
     return [r?.rendered_path, thumb].filter((x): x is string => !!x);
   });
-  const { data: signed } = paths.length ? await supabase.storage.from("media").createSignedUrls(paths, 3600) : { data: [] };
+  const { data: signed } = paths.length ? await supabase.storage.from("media").createSignedUrls(paths, 6 * 3600) : { data: [] };
   const urlOf = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
 
   const cards: ReviewCardData[] = (plans ?? []).map((p) => {
@@ -85,6 +85,7 @@ export default async function ShootReviewPage() {
                 const row = (Array.isArray(a) ? a[0] : a) as { health_functional?: boolean | null } | null;
                 return row?.health_functional ?? null;
               })(),
+              certifiedFunctions: certifiedFunctionsOf(p.products.product_analyses),
             },
           )
         : [];
@@ -101,7 +102,8 @@ export default async function ShootReviewPage() {
       posterUrl: edit.thumbnail ? (urlOf.get(edit.thumbnail) ?? null) : null,
       seconds: edit.seconds ?? null,
       caption,
-      cuts: cuts.map((c) => {
+      skippedCuts: cuts.filter((c) => c.skipped).map((c) => c.no),
+      cuts: cuts.filter((c) => !c.skipped).map((c) => {
         const seg = segments.find((s) => s.cut === c.no);
         return {
           no: c.no,

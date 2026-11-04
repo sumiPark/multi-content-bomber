@@ -29,12 +29,14 @@ export interface CellPlan {
 
 export function cellStatus(
   plan: CellPlan | null,
-  slot: { date: string; time: string; track: string; active: boolean },
+  slot: { date: string; time: string; track: string; active: boolean; accountOff?: boolean },
   now = Date.now(),
 ): CellStatus {
   const past = isPastSlot(slot.date, slot.time, 0, now);
   if (!plan) {
     if (!slot.active) return { label: "꺼짐", tone: "idle", href: null };
+    // 토큰이 만료된 계정은 기획하지 않는다 — 이유 없는 "빈 칸" 대신 할 일을 알려 준다
+    if (slot.accountOff && !past && slot.date >= kstDate(0, now)) return { label: "계정 다시 연결", tone: "risk", href: "/accounts" };
     // 기획은 전날 만들어진다 — 오늘 칸인데 기획이 없으면 그대로 비게 되니 경고, 지난 날은 기록만
     const today = kstDate(0, now);
     if (slot.date < today || (slot.date === today && past)) return { label: "없음", tone: "idle", href: null };

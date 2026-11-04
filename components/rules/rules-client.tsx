@@ -184,6 +184,7 @@ export interface ClaimProduct {
   name: string;
   shopName: string;
   candidates: string[];
+  analysisConfirmed: boolean;
   approved: { id: string; claim: string; source: string }[];
 }
 
@@ -208,6 +209,11 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
           <Badge variant="outline" className="text-xs">
             확정 전 · AI 자동 업로드에 안 씀
           </Badge>
+        )}
+        {!product.analysisConfirmed && (
+          <Link href={`/products/${product.id}`} className="text-xs font-medium text-warn underline underline-offset-2">
+            상품 화면에서 분석 확인 필요
+          </Link>
         )}
       </div>
 

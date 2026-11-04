@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { CalendarCheck, Pencil, RotateCcw, Save, SkipForward, Upload } from "lucide-react";
 import {
   approveShootAction,
@@ -34,6 +34,8 @@ export interface ReviewCardData {
   seconds: number | null;
   caption: string;
   cuts: { no: number; onScreen: string; subtitle: string | null }[];
+  // 찍지 못해 뺀 컷 번호
+  skippedCuts: number[];
   // 확인을 막는 것(광고 문구 규칙 · 판매 상태) / 사람이 판단할 것(AI 점검)
   blocking: string[];
   warnings: string[];
@@ -68,12 +70,25 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
   const failed = card.requestStatus === "FAILED";
   const reviewable = card.status === "RENDERED";
   const captionChanged = caption.trim() !== card.caption.trim();
+  // 고친 컷만, 고친 칸만 보낸다 — 화면 문구만 고쳤는데 자막까지 다시 보내면 말한 시각에 맞춘 자막이 풀렸다(2026-11-04)
+  const changedCuts = texts.flatMap((t, i) => {
+    const subtitleChanged = (t.subtitle ?? "") !== (card.cuts[i].subtitle ?? "");
+    if (t.onScreen === card.cuts[i].onScreen && !subtitleChanged) return [];
+    return [{ no: t.no, onScreen: t.onScreen, ...(subtitleChanged ? { subtitle: t.subtitle ?? "" } : {}) }];
+  });
+  // 페이지를 오래 열어 두면 미리보기 링크가 만료된다 — 한 번만 새 링크를 받아 온다
+  const router = useRouter();
+  const refreshedOnce = useRef(false);
 
   return (
     <article className="grid gap-4 rounded-lg border bg-card p-4 md:grid-cols-[260px_1fr]">
       <div className="mx-auto w-full max-w-[260px]">
         {card.videoUrl ? (
-          <video src={card.videoUrl} poster={card.posterUrl ?? undefined} controls playsInline preload="metadata" className="aspect-[9/16] w-full rounded-md bg-black" />
+          <video src={card.videoUrl} poster={card.posterUrl ?? undefined} controls playsInline preload="metadata" onError={() => {
+            if (refreshedOnce.current) return;
+            refreshedOnce.current = true;
+            router.refresh();
+          }} className="aspect-[9/16] w-full rounded-md bg-black" />
         ) : (
           <div className="flex aspect-[9/16] w-full items-center justify-center rounded-md bg-muted px-4 text-center text-xs text-muted-foreground">
             {failed ? "편집에 실패했어요" : reviewable ? "영상을 불러오지 못했어요. 새로 고쳐 주세요." : "AI가 편집하고 있어요 (보통 몇 분)"}
@@ -99,6 +114,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
           {card.seconds != null && <span className="text-xs text-muted-foreground">{card.seconds.toFixed(1)}초</span>}
         </header>
         <p className="truncate text-sm">{card.productName}</p>
+        {card.skippedCuts.length > 0 && <p className="text-xs text-warn">찍지 못해 뺀 컷: {card.skippedCuts.join(", ")}번. 내용이 이어지는지 봐 주세요.</p>}
 
         {card.error && failed && (
           <details className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
@@ -143,7 +159,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
 
         {reviewable && editingTexts && card.requestId && (
           <div className="space-y-2 rounded-md border border-dashed p-2.5">
-            <p className="text-xs text-muted-foreground">컷마다 화면 문구 · 자막을 고치고 다시 편집하면 몇 분 뒤 새 완성본이 나와요. 자막을 비우면 그 컷 자막은 빠져요.</p>
+            <p className="text-xs text-muted-foreground">컷마다 화면 문구 · 자막을 고치고 다시 편집하면 몇 분 뒤 새 완성본이 나와요. 자막을 비우면 그 컷 자막은 빠져요. 화면 문구는 22자까지 큰 글자로 들어가고, 더 길면 글자가 작아져요.</p>
             {texts.map((t, i) => (
               <div key={t.no} className="grid gap-1 sm:grid-cols-[2rem_1fr_1.4fr] sm:items-center">
                 <span className="text-xs font-semibold">{t.no}.</span>
@@ -163,16 +179,10 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
             ))}
             <Button
               size="sm"
-              disabled={isPending}
+              disabled={isPending || changedCuts.length === 0}
               onClick={() =>
                 run(
-                  () =>
-                    reEditAction({
-                      requestId: card.requestId!,
-                      cuts: texts
-                        .filter((t, i) => t.onScreen !== card.cuts[i].onScreen || (t.subtitle ?? "") !== (card.cuts[i].subtitle ?? ""))
-                        .map((t) => ({ no: t.no, onScreen: t.onScreen, subtitle: t.subtitle })),
-                    }),
+                  () => reEditAction({ requestId: card.requestId!, cuts: changedCuts }),
                   "다시 편집을 시작했어요. 몇 분 뒤 새 완성본이 나와요.",
                   () => setEditingTexts(false),
                 )
