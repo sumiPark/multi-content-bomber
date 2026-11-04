@@ -24,6 +24,7 @@ import { loadDayBoard, loadYesterday, type DayBoard, type YesterdayLine } from "
 
 const THUMBNAIL_TTL_SECONDS = 3600;
 const UPCOMING_LIMIT = 5;
+const FAILED_WINDOW_DAYS = 90; // 배포 관리 목록 기간과 같다
 const STATS_WINDOW_DAYS = 14; // ② 통계용 슬림 윈도우 — 이번 주/지난 주 비교 + 실패 카운트 커버
 
 // 단건 보기 캡션 파싱 결과 타입.
@@ -78,9 +79,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
           <AtRiskAlert items={board.atRisk} />
           <TaskTiles board={board} />
           <DayBoardTable board={board} today={today} tomorrow={tomorrow} />
-          <YesterdayStrip lines={yesterday} />
         </>
       )}
+      <YesterdayStrip lines={yesterday} />
       <StatTiles data={data} />
       <UpcomingUploads items={data.upcoming} />
       <LinkedAccounts summaries={data.accounts} />
@@ -285,9 +286,18 @@ async function loadDashboardData(
 
   const jobs = jobRows ?? [];
   const accounts = accountRows ?? [];
+  // 실패 건수는 사이드바 · 배포 관리와 같은 기준(최근 90일) — 화면마다 숫자가 달랐다(2026-11-04)
+  const { count: failedCount } = await supabase
+    .from("publish_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "FAILED")
+    .is("deleted_at", null)
+    .gte("created_at", new Date(Date.now() - FAILED_WINDOW_DAYS * 86_400_000).toISOString());
 
+  const stats = computeJobStats(jobs);
   return {
-    ...computeJobStats(jobs),
+    ...stats,
+    failedCount: failedCount ?? stats.failedCount,
     accounts: computeAccountSummaries(accounts),
   };
 }
@@ -472,11 +482,14 @@ function computeAccountSummaries(accounts: AccountRow[]): AccountSummary[] {
       map.get(a.platform) ??
       ({ platform: a.platform, total: 0, active: 0, expired: 0 } as AccountSummary);
     entry.total += 1;
+    // 유튜브 · 틱톡은 짧은 토큰을 워커가 갱신하므로 만료 시각으로 판단하지 않는다(계정 연동 화면과 같은 기준).
+    // 예전엔 거의 늘 "토큰 만료"로 빨갛게 보였다(2026-11-04).
     const isExpired =
+      a.platform === "INSTAGRAM" &&
       a.token_expires_at !== null &&
       new Date(a.token_expires_at).getTime() <= now;
-    if (isExpired) entry.expired += 1;
-    else if (a.is_active) entry.active += 1;
+    if (isExpired || !a.is_active) entry.expired += 1;
+    else entry.active += 1;
     map.set(a.platform, entry);
   }
 
@@ -492,10 +505,7 @@ function buildHeaderSummary(data: DashboardData): string {
     parts.push(`오늘 예약 ${data.todayScheduledCount}건`);
   }
   if (data.uploadingCount > 0) {
-    parts.push(`진행중 ${data.uploadingCount}건`);
-  }
-  if (data.failedCount > 0) {
-    parts.push(`실패 ${data.failedCount}건`);
+    parts.push(`올리는 중 ${data.uploadingCount}건`);
   }
   if (parts.length === 0) {
     return "오늘은 예약된 업로드가 없어요. 새 콘텐츠를 만들어 일정을 시작해보세요.";

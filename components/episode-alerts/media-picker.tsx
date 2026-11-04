@@ -126,10 +126,10 @@ export function MediaPicker({
                     </span>
                   )}
                   <div className="space-y-0.5 p-1.5">
-                    <p className="line-clamp-1 text-[11px] leading-tight">
+                    <p className="line-clamp-1 text-xs leading-tight">
                       {m.caption?.trim() || mediaTypeLabel(m.mediaType)}
                     </p>
-                    <p className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <RelativeTime iso={m.timestamp} format="date" />
                       {m.commentsCount !== null && (
                         <span className="inline-flex items-center gap-0.5">
@@ -138,7 +138,7 @@ export function MediaPicker({
                       )}
                     </p>
                     {(locked || m.usedIn.length > 0) && (
-                      <p className="line-clamp-1 text-[10px] font-medium text-warn">
+                      <p className="line-clamp-1 text-xs font-medium text-warn">
                         {locked ??
                           m.usedIn.map((u) => `${u.seriesName} ${u.episodeNo}화`).join(", ")}
                       </p>

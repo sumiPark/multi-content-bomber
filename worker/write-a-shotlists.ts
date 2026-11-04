@@ -83,7 +83,7 @@ async function main() {
             .from("content_plans")
             .update({
               status: "BLOCKED",
-              check_result: { passed: false, issues: [{ kind: "stock", detail: `지금 판매 중이 아님 (${facts.stockStatus})` }] } as unknown as Json,
+              check_result: { passed: false, issues: [{ kind: "stock", detail: "지금 판매 중이 아닌 상품이에요" }] } as unknown as Json,
               note: "고른 뒤 판매 중이 아니게 돼서 촬영 목록을 만들지 않았어요. 다른 기획을 고르거나 건너뛰세요.",
             })
             .eq("id", plan.id)

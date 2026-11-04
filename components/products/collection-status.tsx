@@ -105,7 +105,7 @@ export function CollectionStatus({
               ))}
             </ul>
           )}
-          <p className="text-[11px] text-muted-foreground">매일 03시 자동 · 지금 수집 버튼으로 바로</p>
+          <p className="text-xs text-muted-foreground">매일 03시 자동 · 지금 수집 버튼으로 바로</p>
         </div>
 
         {/* 상세페이지 분석 */}
@@ -131,7 +131,6 @@ export function CollectionStatus({
               지난 실행: {as.done ?? 0}개 분석
               {as.tokens && ` · 토큰 입력 ${(as.tokens.input / 1000).toFixed(0)}K · 출력 ${(as.tokens.output / 1000).toFixed(0)}K`}
               {cost != null && ` · 약 ${won(cost)}`}
-              {as.model && ` · ${as.model}`}
             </p>
           )}
           {as.stoppedByDeadline && (
@@ -143,9 +142,9 @@ export function CollectionStatus({
       </div>
 
       {(failed.length > 0 || collectErrors.length > 0 || analyzeRun?.error || collectRun?.error) && (
-        <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs">
-          <p className="flex items-center gap-1 font-semibold text-destructive">
-            <AlertTriangle className="size-3.5" /> 확인이 필요한 오류
+        <div className="space-y-1 rounded-md border border-warn/40 bg-warn-soft p-3 text-xs">
+          <p className="flex items-center gap-1 font-semibold text-warn">
+            <AlertTriangle className="size-3.5" /> 일부 상품을 받거나 읽지 못했어요. 다음 수집 때 다시 시도해요.
           </p>
           {[collectRun?.error, analyzeRun?.error].filter(Boolean).map((e) => (
             <p key={e}>{e}</p>
@@ -182,7 +181,7 @@ function RunHeader({
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
       <span className="font-medium">{title}</span>
-      <Badge variant={badge.variant} className="text-[10px]">
+      <Badge variant={badge.variant} className="text-xs">
         {badge.label}
       </Badge>
       {run && (

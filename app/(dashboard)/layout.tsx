@@ -37,11 +37,13 @@ async function loadFailedJobCount(): Promise<number> {
   if (!profile?.organization_id) return 0;
 
   const supabase = await getServerSupabase();
+  // 대시보드 · 배포 관리와 같은 기준(최근 90일) — 전체를 세면 눌러 들어가도 안 보이는 옛 실패까지 셌다
   const { count } = await supabase
     .from("publish_jobs")
     .select("id", { count: "exact", head: true })
     .eq("status", "FAILED")
-    .is("deleted_at", null);
+    .is("deleted_at", null)
+    .gte("created_at", new Date(Date.now() - 90 * 86_400_000).toISOString());
 
   return count ?? 0;
 }

@@ -123,7 +123,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
       <header>
         <h1 className="text-xl font-bold tracking-[-0.01em]">편성표</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          어느 계정이 몇 시에 무엇을 올리는지 정하고, 한 주가 어디까지 왔는지 봐요. 지금 <b>AI 자동 업로드</b>는 {trackTimesLabel(activeRules, "B")}, <b>직접 촬영</b>은 {trackTimesLabel(activeRules, "A")}예요. 칸마다
+          어느 계정이 몇 시에 무엇을 올리는지 정하고, 한 주가 어디까지 왔는지 봐요. 지금 <b>AI 자동 업로드</b> {trackTimesLabel(activeRules, "B")} · <b>직접 촬영</b> {trackTimesLabel(activeRules, "A")}. 칸마다
           주제를 적어 두면 AI가 상품 · 기획을 고를 때 참고해요.
         </p>
       </header>

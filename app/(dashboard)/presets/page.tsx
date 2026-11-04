@@ -19,7 +19,7 @@ export default async function PresetsPage() {
   return (
     <main className="p-4 sm:p-6 space-y-6">
       <header>
-        <h1 className="text-xl font-bold tracking-[-0.01em]">캡션 프리셋</h1>
+        <h1 className="text-xl font-bold tracking-[-0.01em]">AI 프리셋</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           자주 쓰는 캡션 스타일을 저장해 AI 생성에 적용하세요. 워크스페이스
           멤버가 함께 사용합니다.

@@ -51,7 +51,7 @@ export function CategoryRow({
           onChange={(e) => save({ collect: e.target.checked })}
         />
         <span className={cn("truncate", !item.collect && "text-muted-foreground")}>{item.name}</span>
-        <span className="text-[11px] text-muted-foreground">#{item.categoryId}</span>
+        <span className="text-xs text-muted-foreground">#{item.categoryId}</span>
       </label>
       <select
         value={item.kind ?? ""}

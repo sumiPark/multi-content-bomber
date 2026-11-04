@@ -42,6 +42,8 @@ import { cn } from "@/lib/utils";
 
 type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
 
+const PLATFORM_KO: Record<Platform, string> = { YOUTUBE: "유튜브", INSTAGRAM: "인스타그램", TIKTOK: "틱톡" };
+
 export interface AccountRow {
   id: string;
   platform: Platform;
@@ -218,7 +220,7 @@ export function AccountsPage({
     <main className="space-y-6 p-4 sm:p-6">
       <header className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold tracking-[-0.01em]">계정 관리</h1>
+          <h1 className="text-xl font-bold tracking-[-0.01em]">계정 연동</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             소셜 계정을 그룹으로 묶어 관리하세요. 새 콘텐츠 만들 때 그룹
             단위로 한 번에 선택할 수 있어요.
@@ -239,7 +241,7 @@ export function AccountsPage({
       </header>
 
       {flashMessage && (
-        <div className="rounded-md border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm">
+        <div className="rounded-md border border-ok/30 bg-ok-soft px-4 py-3 text-sm">
           {flashMessage}
         </div>
       )}
@@ -647,14 +649,23 @@ function AccountItem({
         <p className="truncate text-xs font-medium leading-tight">
           {account.display_name ?? "(이름 없음)"}
         </p>
-        <p className="text-[10px] leading-tight text-muted-foreground">
-          {account.platform}
+        <p className="text-xs leading-tight text-muted-foreground">
+          {PLATFORM_KO[account.platform]}
         </p>
       </div>
       {status.label !== "활성" && (
-        <Badge variant={status.variant} className="text-[10px]">
+        <Badge variant={status.variant} className="text-xs">
           {status.label}
         </Badge>
+      )}
+      {/* 끊긴 계정은 여기서 바로 다시 연결 — 다른 화면들이 "계정 연동에서 다시 연결"하라고 안내한다 */}
+      {canManage && status.label !== "활성" && (
+        <a
+          href={`/api/auth/connect/${account.platform.toLowerCase()}`}
+          className="shrink-0 rounded-md border border-input bg-card px-2 py-1 text-xs font-medium hover:bg-surface-2"
+        >
+          다시 연결
+        </a>
       )}
       {canManage && (
         <>
@@ -664,7 +675,7 @@ function AccountItem({
               onChangeAccountGroup(account.id, e.target.value || null)
             }
             disabled={isPending}
-            className="rounded border bg-card px-1.5 py-0.5 text-[11px]"
+            className="rounded border bg-card px-1.5 py-0.5 text-xs"
             aria-label="그룹 이동"
             title="그룹 이동"
           >
@@ -713,7 +724,7 @@ function ConnectorCard() {
         <div className="mr-auto">
           <p className="text-sm font-semibold">계정 추가</p>
           <p className="text-xs text-muted-foreground">
-            플랫폼 OAuth로 새 계정을 연결합니다.
+            플랫폼에 로그인해 새 계정을 연결해요.
           </p>
         </div>
         {PLATFORM_BUTTONS.map((p) => (

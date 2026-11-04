@@ -13,8 +13,10 @@ import {
 } from "@/app/(dashboard)/shoot/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/components/ui/toast";
 
 // 완성본 하나 — 영상 미리보기 · 점검 결과 · 캡션 고치기 · 화면 문구/자막 고쳐 다시 편집 · 확인(예약) · 빼기.
 
@@ -43,11 +45,12 @@ function useRun() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const run = (fn: () => Promise<ShootResult>, after?: () => void) =>
+  const run = (fn: () => Promise<ShootResult>, done?: string, after?: () => void) =>
     startTransition(async () => {
       setError(null);
       const r = await fn();
       if (r.ok) {
+        if (done) toast(done);
         after?.();
         router.refresh();
       } else setError(r.error);
@@ -60,19 +63,20 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
   const [caption, setCaption] = useState(card.caption);
   const [editingTexts, setEditingTexts] = useState(false);
   const [texts, setTexts] = useState(card.cuts);
+  const [ask, setAsk] = useState<"skip" | "reopen" | null>(null);
   const editing = card.status === "SHOT" && card.requestStatus !== "FAILED";
   const failed = card.requestStatus === "FAILED";
   const reviewable = card.status === "RENDERED";
   const captionChanged = caption.trim() !== card.caption.trim();
 
   return (
-    <article className="grid gap-4 rounded-lg border p-4 md:grid-cols-[260px_1fr]">
+    <article className="grid gap-4 rounded-lg border bg-card p-4 md:grid-cols-[260px_1fr]">
       <div className="mx-auto w-full max-w-[260px]">
         {card.videoUrl ? (
           <video src={card.videoUrl} poster={card.posterUrl ?? undefined} controls playsInline preload="metadata" className="aspect-[9/16] w-full rounded-md bg-black" />
         ) : (
           <div className="flex aspect-[9/16] w-full items-center justify-center rounded-md bg-muted px-4 text-center text-xs text-muted-foreground">
-            {failed ? "편집에 실패했어요" : "AI가 편집하고 있어요 (보통 몇 분)"}
+            {failed ? "편집에 실패했어요" : reviewable ? "영상을 불러오지 못했어요. 새로 고쳐 주세요." : "AI가 편집하고 있어요 (보통 몇 분)"}
           </div>
         )}
       </div>
@@ -84,7 +88,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
             {card.slotDate.slice(5)} {card.slotTime}
           </span>
           {card.status === "SCHEDULED" ? (
-            <Badge variant="secondary">예약됨</Badge>
+            <Badge variant="ok">예약됨</Badge>
           ) : failed ? (
             <Badge variant="destructive">편집 실패</Badge>
           ) : editing ? (
@@ -96,9 +100,14 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
         </header>
         <p className="truncate text-sm">{card.productName}</p>
 
-        {card.error && failed && <p className="text-xs text-destructive">오류: {card.error}</p>}
+        {card.error && failed && (
+          <details className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
+            <summary className="cursor-pointer font-semibold">자동 편집이 실패했어요. 다시 편집하거나 촬영본을 다시 올려 주세요.</summary>
+            <p className="mt-1 break-all">{card.error}</p>
+          </details>
+        )}
         {reviewable && card.blocking.length > 0 && (
-          <ul className="space-y-0.5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+          <ul className="space-y-0.5 rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
             <li className="font-semibold">고쳐야 확인할 수 있어요</li>
             {card.blocking.map((b) => (
               <li key={b}>✗ {b}</li>
@@ -122,9 +131,9 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
         {(reviewable || editing) && canManage && (
           <div className="space-y-1.5">
             <p className="text-xs font-semibold text-muted-foreground">캡션</p>
-            <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={6} maxLength={2200} className="text-xs" />
+            <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={6} maxLength={2200} />
             {captionChanged && (
-              <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => saveCaptionAction({ planId: card.planId, caption }))}>
+              <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => saveCaptionAction({ planId: card.planId, caption }), "캡션을 저장했어요.")}>
                 <Save className="size-4" /> 캡션 저장
               </Button>
             )}
@@ -142,14 +151,12 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
                   value={t.onScreen}
                   maxLength={40}
                   placeholder="화면 문구"
-                  className="h-8 text-xs"
                   onChange={(e) => setTexts((prev) => prev.map((x, j) => (j === i ? { ...x, onScreen: e.target.value } : x)))}
                 />
                 <Input
                   value={t.subtitle ?? ""}
                   maxLength={120}
                   placeholder="자막 (말한 내용)"
-                  className="h-8 text-xs"
                   onChange={(e) => setTexts((prev) => prev.map((x, j) => (j === i ? { ...x, subtitle: e.target.value } : x)))}
                 />
               </div>
@@ -166,6 +173,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
                         .filter((t, i) => t.onScreen !== card.cuts[i].onScreen || (t.subtitle ?? "") !== (card.cuts[i].subtitle ?? ""))
                         .map((t) => ({ no: t.no, onScreen: t.onScreen, subtitle: t.subtitle })),
                     }),
+                  "다시 편집을 시작했어요. 몇 분 뒤 새 완성본이 나와요.",
                   () => setEditingTexts(false),
                 )
               }
@@ -180,7 +188,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
             {reviewable && (
               <Button
                 disabled={isPending || card.blocking.length > 0 || captionChanged || card.tooLate}
-                onClick={() => run(() => approveShootAction({ planId: card.planId }))}
+                onClick={() => run(() => approveShootAction({ planId: card.planId }), `${card.slotTime}로 예약했어요.`)}
               >
                 <CalendarCheck className="size-4" /> 확인 · {card.slotTime} 예약
               </Button>
@@ -191,7 +199,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
               </Button>
             )}
             {failed && card.requestId && (
-              <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => reEditAction({ requestId: card.requestId!, cuts: [] }))}>
+              <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => reEditAction({ requestId: card.requestId!, cuts: [] }), "다시 편집을 시작했어요.")}>
                 <RotateCcw className="size-4" /> 다시 편집
               </Button>
             )}
@@ -201,24 +209,48 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
                 size="sm"
                 variant="outline"
                 disabled={isPending}
-                onClick={() => {
-                  if (!window.confirm("촬영 · 올리기로 되돌려 촬영본을 다시 올릴까요? 올린 촬영본은 남아 있어 바꿀 컷만 다시 올리면 돼요.")) return;
-                  run(() => reopenShootAction({ requestId: card.requestId! }));
-                }}
+                onClick={() => setAsk("reopen")}
               >
                 <Upload className="size-4" /> 촬영본 다시 올리기
               </Button>
             )}
             {card.status !== "SCHEDULED" && (
-              <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => skipShootAction({ planId: card.planId }))}>
-                <SkipForward className="size-4" /> 이번엔 빼기
+              <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setAsk("skip")}>
+                <SkipForward className="size-4" /> 이 칸 건너뛰기
               </Button>
             )}
           </div>
         )}
-        {reviewable && captionChanged && <p className="text-[11px] text-muted-foreground">캡션을 저장해야 확인할 수 있어요.</p>}
-        {reviewable && card.tooLate && <p className="text-[11px] text-destructive">올릴 시각이 5분 안으로 다가와 예약할 수 없어요.</p>}
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {reviewable && captionChanged && <p className="text-xs text-muted-foreground">캡션을 저장해야 확인할 수 있어요.</p>}
+        {reviewable && card.tooLate && <p className="text-xs text-risk">올릴 시각이 지났거나 5분 안으로 다가와 예약할 수 없어요.</p>}
+        {error && <p className="text-xs text-risk">{error}</p>}
+        <ConfirmDialog
+          open={ask === "skip"}
+          title={`${card.slotTime} 칸을 건너뛸까요?`}
+          confirmLabel="건너뛰기"
+          danger
+          pending={isPending}
+          onClose={() => setAsk(null)}
+          onConfirm={() => {
+            setAsk(null);
+            run(() => skipShootAction({ planId: card.planId }), "이 칸을 건너뛰었어요.");
+          }}
+        >
+          <p>찍어 올린 영상도 올라가지 않아요. 건너뛰면 되돌릴 수 없어요.</p>
+        </ConfirmDialog>
+        <ConfirmDialog
+          open={ask === "reopen"}
+          title="촬영본을 다시 올릴까요?"
+          confirmLabel="촬영 · 올리기로 되돌리기"
+          pending={isPending}
+          onClose={() => setAsk(null)}
+          onConfirm={() => {
+            setAsk(null);
+            run(() => reopenShootAction({ requestId: card.requestId! }), "촬영 · 올리기로 되돌렸어요. 바꿀 컷만 다시 올려 주세요.");
+          }}
+        >
+          <p>올린 촬영본은 남아 있어요. 바꿀 컷만 다시 올리고 &lsquo;다 올렸어요&rsquo;를 누르면 다시 편집해요.</p>
+        </ConfirmDialog>
       </div>
     </article>
   );

@@ -84,7 +84,7 @@ export default async function RulesPage() {
       <PreviewCheck />
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">금지 표현 · 꼭 넣을 문구</h2>
+        <h2 className="text-base font-semibold">금지 표현 · 꼭 넣을 문구</h2>
         {canManage && <AddRuleForm />}
         <div className="grid gap-3 md:grid-cols-2">
           {scopes.map((scope) => {
@@ -112,7 +112,7 @@ export default async function RulesPage() {
 
       <section className="space-y-3">
         <div>
-          <h2 className="text-lg font-semibold">건기식 심의 문구</h2>
+          <h2 className="text-base font-semibold">건기식 심의 문구</h2>
           <p className="text-sm text-muted-foreground">
             상세페이지 분석이 건강기능식품으로 판정한 상품입니다. 확정한 기능성 문구만 영상 · 캡션에 쓰고, 확정 문구가
             없는 상품은 AI 자동 업로드 후보에서 뺍니다.

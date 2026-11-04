@@ -74,7 +74,7 @@ export function RuleRow({ rule, canManage }: { rule: RuleRowData; canManage: boo
       <div className="min-w-0 flex-1">
         <p>
           <code className="rounded bg-muted px-1">{rule.phrase}</code>
-          {rule.matchType === "REGEX" && <span className="ml-1 text-[10px] text-muted-foreground">정규식</span>}
+          {rule.matchType === "REGEX" && <span className="ml-1 text-xs text-muted-foreground">정규식</span>}
           {rule.suggestion && <span className="ml-2 text-xs text-muted-foreground">→ {rule.suggestion}</span>}
         </p>
         {rule.reason && <p className="text-xs text-muted-foreground">{rule.reason}</p>}
@@ -201,11 +201,11 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
         </Link>
         <span className="text-xs text-muted-foreground">{product.shopName}</span>
         {product.approved.length > 0 ? (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-xs">
             확정 {product.approved.length}개
           </Badge>
         ) : (
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="text-xs">
             확정 전 · AI 자동 업로드에 안 씀
           </Badge>
         )}
@@ -217,7 +217,7 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
             <li key={a.id} className="flex items-start gap-2 rounded bg-ok-soft px-2 py-1">
               <Check className="mt-0.5 size-3.5 shrink-0 text-ok" />
               <span className="flex-1">{a.claim}</span>
-              <span className="text-[10px] text-muted-foreground">{a.source === "MANUAL" ? "직접 입력" : "분석 후보"}</span>
+              <span className="text-xs text-muted-foreground">{a.source === "MANUAL" ? "직접 입력" : "분석 후보"}</span>
               {canManage && (
                 <button
                   type="button"
@@ -236,7 +236,7 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
 
       {pending.length > 0 && (
         <div>
-          <p className="text-[11px] text-muted-foreground">분석 후보 — 상세페이지 원문 그대로. 심의받은 문구와 같은지 확인하고 확정하세요.</p>
+          <p className="text-xs text-muted-foreground">분석 후보 — 상세페이지 원문 그대로. 심의받은 문구와 같은지 확인하고 확정하세요.</p>
           <ul className="mt-1 space-y-1 text-xs">
             {pending.map((c) => (
               <li key={c} className="flex items-start gap-2 rounded border px-2 py-1">
@@ -245,7 +245,7 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-6 px-2 text-[11px]"
+                    className="h-6 px-2 text-xs"
                     disabled={isPending}
                     onClick={() => run(() => approveClaimAction({ productId: product.id, claim: c, source: "ANALYSIS" }))}
                   >

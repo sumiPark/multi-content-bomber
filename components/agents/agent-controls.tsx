@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { Textarea } from "@/components/ui/textarea";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 // 에이전트 · 학습 화면의 조작 — 반영 방식 스위치 · 플레이북 고치기 / 되돌리기 · 피드백 제안 반영 / 거절.
@@ -23,26 +24,26 @@ function useRun() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
   const run = (fn: () => Promise<AgentsResult>, message: (r: AgentsResult & { ok: true }) => string, after?: () => void) =>
     startTransition(async () => {
       setError(null);
-      setDone(null);
       const r = await fn();
       if (r.ok) {
-        setDone(message(r));
+        toast(message(r));
         after?.();
         router.refresh();
       } else setError(r.error);
     });
-  return { isPending, error, done, run };
+  return { isPending, error, run };
 }
 
 export function ApprovalSwitch({ agent, mode, canManage }: { agent: string; mode: "HUMAN" | "AUTO"; canManage: boolean }) {
   const { isPending, error, run } = useRun();
-  const options: { value: "HUMAN" | "AUTO"; label: string }[] = [
+  // 자동 승인은 아직 고를 수 없다 — 제안을 만들고 자동 반영 · 되돌리기를 감시하는 쪽이 운영 7번(첫 리포트)에 생긴다.
+  // 그때까지 눌러도 아무 일이 없어서 막아 둔다.
+  const options: { value: "HUMAN" | "AUTO"; label: string; soon?: boolean }[] = [
     { value: "HUMAN", label: "사람 승인" },
-    { value: "AUTO", label: "자동 승인" },
+    { value: "AUTO", label: "자동 승인 · 준비 중", soon: true },
   ];
   return (
     <div className="space-y-1">
@@ -53,8 +54,8 @@ export function ApprovalSwitch({ agent, mode, canManage }: { agent: string; mode
             type="button"
             role="radio"
             aria-checked={mode === o.value}
-            disabled={!canManage || isPending}
-            onClick={() => mode !== o.value && run(() => setApprovalModeAction({ agent, mode: o.value }), () => "")}
+            disabled={!canManage || isPending || (o.soon && mode !== o.value)}
+            onClick={() => mode !== o.value && run(() => setApprovalModeAction({ agent, mode: o.value }), () => `반영 방식을 ${o.label}으로 바꿨어요.`)}
             className={cn(
               "h-7 rounded-[6px] px-2.5 text-xs transition-colors disabled:cursor-not-allowed",
               mode === o.value ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
@@ -91,7 +92,7 @@ export function PlaybookEditor({
   canManage: boolean;
   usesPlaybook: boolean;
 }) {
-  const { isPending, error, done, run } = useRun();
+  const { isPending, error, run } = useRun();
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(current?.body ?? "");
   const [note, setNote] = useState("");
@@ -159,7 +160,6 @@ export function PlaybookEditor({
           )}
         </div>
       )}
-      {done && <p className="text-xs text-ok">{done}</p>}
       {error && <p className="text-xs text-risk">{error}</p>}
 
       <div>

@@ -81,14 +81,14 @@ export function AccountBaselineCard({ account }: { account: BaselineAccount }) {
           <PlatformIcon platform="INSTAGRAM" size={22} />
           <CardTitle className="text-base">@{account.name}</CardTitle>
           {account.roleFocus && (
-            <Badge variant="outline" className="text-[10px]">
+            <Badge variant="outline" className="text-xs">
               {ROLE_LABEL[account.roleFocus]}
             </Badge>
           )}
           {account.roleNote && (
             <span className="text-xs text-muted-foreground">{account.roleNote}</span>
           )}
-          <span className="ml-auto text-[11px] text-muted-foreground">
+          <span className="ml-auto text-xs text-muted-foreground">
             {account.lastCollectedOn
               ? `${account.lastCollectedOn} 수집`
               : "아직 수집 전"}
@@ -168,11 +168,11 @@ function Stat({
 }) {
   return (
     <div className="rounded-md border bg-muted/20 px-3 py-2">
-      <p className="text-[11px] text-muted-foreground">{label}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-lg font-semibold tabular-nums">{value}</p>
       <p
         className={cn(
-          "truncate text-[11px] text-muted-foreground",
+          "truncate text-xs text-muted-foreground",
           tone === "up" && "text-ok",
           tone === "down" && "text-destructive",
         )}
@@ -212,7 +212,7 @@ function PostList({
             )}
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs">{p.caption?.split("\n")[0] || "(캡션 없음)"}</p>
-              <p className="text-[11px] text-muted-foreground tabular-nums">
+              <p className="text-xs text-muted-foreground tabular-nums">
                 {p.postedAt && <RelativeTime iso={p.postedAt} format="date" />}
                 {" · "}
                 {p.productType === "REELS" ? "릴스" : "피드"}

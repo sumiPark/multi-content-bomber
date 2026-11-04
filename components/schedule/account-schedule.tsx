@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Plus, UserMinus, UserPlus, X } from "lucide-react";
 import { addAccountAction, addSlotAction, removalImpactAction, removeAccountAction, updateScopesAction } from "@/app/(dashboard)/schedule/actions";
-import { ConfirmDialog } from "@/components/schedule/confirm-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SlotRuleCell, useScheduleRun, type SlotRuleCellData } from "@/components/schedule/slot-rule-cell";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -65,7 +65,7 @@ export function AccountScheduleCard({
   limits: LimitsData;
   canManage: boolean;
 }) {
-  const { isPending, error, message, run, setError } = useScheduleRun();
+  const { isPending, error, run, setError } = useScheduleRun();
   const [editScopes, setEditScopes] = useState(false);
   const [scopeValue, setScopeValue] = useState(scopes);
   const [adding, setAdding] = useState(false);
@@ -191,7 +191,6 @@ export function AccountScheduleCard({
           ))}
       </div>
       {full && canManage && <p className="text-xs text-muted-foreground">하루 {limits.maxSlots}칸이 다 찼어요. 칸을 지우면 새로 추가할 수 있어요.</p>}
-      {message && <p className="text-xs text-ok">{message}</p>}
       {error && <p className="text-xs text-risk">{error}</p>}
 
       <ConfirmDialog
@@ -231,7 +230,7 @@ export function AddAccountPanel({
   options: ScopeOptionData[];
   limits: LimitsData;
 }) {
-  const { isPending, error, message, run, setError } = useScheduleRun();
+  const { isPending, error, run, setError } = useScheduleRun();
   const [open, setOpen] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [scopes, setScopes] = useState<string[]>([]);
@@ -244,7 +243,6 @@ export function AddAccountPanel({
           <UserPlus className="size-4" /> 계정 넣기
         </Button>
         {candidates.length === 0 && <p className="text-xs text-muted-foreground">연결된 인스타그램 계정이 모두 편성에 있어요.</p>}
-        {message && <p className="text-xs text-ok">{message}</p>}
       </div>
     );
 

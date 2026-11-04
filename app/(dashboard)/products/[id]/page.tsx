@@ -96,7 +96,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             return (
               <div key={url} className="grid gap-2 rounded-lg border p-2 md:grid-cols-2">
                 <div className="max-h-[640px] overflow-y-auto rounded bg-muted/30">
-                  <p className="sticky top-0 bg-card/90 px-2 py-1 text-[11px] text-muted-foreground">image-{i}</p>
+                  <p className="sticky top-0 bg-card/90 px-2 py-1 text-xs text-muted-foreground">이미지 {i + 1}</p>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={url} alt={`상세 이미지 ${i + 1}`} loading="lazy" className="w-full" />
                 </div>
@@ -105,7 +105,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                     <>
                       <p className="whitespace-pre-wrap text-xs leading-relaxed">{e.text || "(글자 없음 — 사진만 있는 이미지)"}</p>
                       {e.uncertainties.length > 0 && (
-                        <p className="mt-2 text-[11px] text-warn">
+                        <p className="mt-2 text-xs text-warn">
                           확실하지 않음: {e.uncertainties.join(" · ")}
                         </p>
                       )}
@@ -147,13 +147,13 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               <p className="text-muted-foreground">
                 아직 요약이 없어요.{" "}
                 {product.stock_status === "available"
-                  ? "다음 분석 run에서 읽습니다."
+                  ? "다음 분석 때 읽어요. 보통 매일 새벽에 돌아요."
                   : "판매 중인 상품만 분석해서, 다시 판매되면 그때 읽어요."}
               </p>
               <ProductActions productId={product.id} canManage={canManage} excluded={product.excluded} hasAnalysis={false} />
             </div>
           )}
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             몰 상품 번호 {product.shop_product_id} · 마지막 수집 <RelativeTime iso={product.last_seen_at} />
           </p>
         </aside>

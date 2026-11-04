@@ -212,7 +212,7 @@ export function TemplateEditor({
                   type="button"
                   disabled={busy}
                   onClick={() => insert(i, v.key)}
-                  className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition hover:border-primary/40 hover:text-primary disabled:opacity-50"
+                  className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-primary disabled:opacity-50"
                 >
                   <Plus className="size-3" />
                   {VARIABLE_LABEL[v.key]}

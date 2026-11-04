@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
+import { triggerShootPlanRun } from "@/lib/github-dispatch";
 import {
   cancelPlans,
   clearScheduleCancelled,
@@ -137,7 +138,8 @@ export async function addSlotAction(input: { accountId: string; time: string; tr
   });
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
   await clearScheduleCancelled(service, parsed.data.accountId, parsed.data.time);
-  return done("다음 기획부터 이 칸도 채워요.");
+  if (parsed.data.track === "A") await triggerShootPlanRun(`slot added ${parsed.data.time}`).catch((e) => console.error("[schedule] 기획 트리거 실패:", e));
+  return done(parsed.data.track === "A" ? "칸을 추가했어요. 몇 분 뒤 기획안 후보가 생겨요." : "칸을 추가했어요. 다음 상품 제안(매일 오전 9시)부터 채워요.");
 }
 
 /** 빼기 전 경고용 — 앞으로의 기획 · 예약 건 수. ruleId를 주면 그 칸만. */
@@ -225,6 +227,7 @@ export async function addAccountAction(input: { accountId: string; scopes: strin
     return { ok: false, error: `칸을 만들지 못했어요: ${rErr.message}` };
   }
   for (const slot of parsed.data.slots) await clearScheduleCancelled(service, acc.id, slot.time);
+  if (parsed.data.slots.some((s) => s.track === "A")) await triggerShootPlanRun(`account added ${acc.id}`).catch((e) => console.error("[schedule] 기획 트리거 실패:", e));
   return done(`@${acc.display_name ?? ""} 계정을 편성에 넣었어요. 다음 기획(매일 05시 · 09시)부터 칸이 채워져요.`);
 }
 

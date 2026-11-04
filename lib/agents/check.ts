@@ -45,6 +45,9 @@ export interface CheckOptions {
   seconds?: number;
 }
 
+// 훅 채점 축 이름(.claude/skills/ig-reel-ko/hookscore_ko.py CHECK_KO와 같다)
+const HOOK_AXIS_KO: Record<string, string> = { LENGTH: "길이", SPECIFICITY: "구체성", STAKES: "긴장", FRONTLOAD: "앞쪽 배치", ADDRESS: "호명" };
+
 export async function checkScript(
   script: ScriptOutput,
   facts: ProductFacts,
@@ -62,7 +65,8 @@ export async function checkScript(
   const hookText = track === "A" ? (script.hooks[script.chosen_hook]?.spoken ?? spoken[0]) : spoken[0];
   const [hook] = scoreHooks([hookText ?? ""]);
   if (!hook || hook.score < MIN_HOOK_SCORE) {
-    issues.push({ kind: "hook", detail: `훅 점수 ${hook?.score ?? 0}점 (기준 ${MIN_HOOK_SCORE}점) — 가장 약한 축: ${hook?.weakest ?? "?"}` });
+    const weak = hook ? (HOOK_AXIS_KO[hook.weakest] ?? hook.weakest) : "?";
+    issues.push({ kind: "hook", detail: `첫 문장 점수 ${hook?.score ?? 0}점 (기준 ${MIN_HOOK_SCORE}점) — 가장 약한 부분: ${weak}` });
   }
 
   // 2. 길이 · 비트
@@ -89,15 +93,20 @@ export async function checkScript(
   const human = Math.min(toneSpoken.humanScore, toneCaption.humanScore);
   if (human < MIN_HUMAN_SCORE) {
     const worst = toneSpoken.humanScore <= toneCaption.humanScore ? "내레이션" : "캡션";
-    issues.push({ kind: "tone", detail: `${worst}의 AI 말투 점수 ${human}점 (기준 ${MIN_HUMAN_SCORE}점)` });
+    issues.push({ kind: "tone", detail: `${worst}이 AI가 쓴 말투 같아요 (사람 말투 점수 ${human}점, 기준 ${MIN_HUMAN_SCORE}점)` });
   }
 
   // 5. 캡션 형식
   const cap = checkCaption(script.caption.text, script.caption.keywords, handle);
-  if (cap.verdict !== "READY") issues.push({ kind: "caption", detail: `캡션 점검 ${cap.verdict}` });
+  if (cap.verdict !== "READY") {
+    // 무엇을 고칠지 보이게 — 예전엔 "캡션 점검 FIX"만 나왔다
+    const bad = ((cap.checks ?? []) as { check: string; status: string; detail: string }[]).filter((c) => c.status !== "PASS");
+    const why = bad.length ? bad.map((c) => `${c.check}: ${c.detail}`).join(" · ") : "형식을 확인해 주세요";
+    issues.push({ kind: "caption", detail: `캡션 — ${why}`.slice(0, 300) });
+  }
 
   // 6. 판매 상태 — 판매 중이 아닌 상품을 판매 중처럼 올리지 않는다
-  if (facts.stockStatus !== "available") issues.push({ kind: "stock", detail: `지금 판매 중이 아님 (${facts.stockStatus})` });
+  if (facts.stockStatus !== "available") issues.push({ kind: "stock", detail: "지금 판매 중이 아닌 상품이에요" });
 
   // 7. 근거 · 지어낸 체험 (AI 판단)
   const model = agentModel();

@@ -57,7 +57,7 @@ async function authorize(requireManage: boolean): Promise<Auth | { error: string
 
   const canManage = profile.role === "ADMIN" || profile.role === "MANAGER";
   if (requireManage && !canManage) {
-    return { error: "시리즈 댓글 자동화 설정은 관리자(ADMIN/MANAGER)만 바꿀 수 있어요." };
+    return { error: "시리즈 댓글 자동화 설정은 관리자 · 매니저만 바꿀 수 있어요." };
   }
   return { userId: user.id, organizationId: profile.organization_id, canManage };
 }

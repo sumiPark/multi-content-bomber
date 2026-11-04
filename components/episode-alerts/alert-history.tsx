@@ -64,7 +64,7 @@ export function StatusPill({ status }: { status: TaskStatus }) {
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium",
         s.className,
       )}
     >
@@ -247,7 +247,7 @@ function HistoryItem({ task, canManage }: { task: TaskView; canManage: boolean }
                     </span>
                     <span className="truncate font-medium">@{r.username ?? "알 수 없음"}</span>
                     {r.sentAt && (
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                      <span className="shrink-0 text-xs text-muted-foreground">
                         <RelativeTime iso={r.sentAt} />
                       </span>
                     )}

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "@/components/ui/toast";
 import { deleteContentsAction } from "@/app/(dashboard)/actions";
 
 export interface ContentItem {
@@ -61,15 +62,15 @@ export function ContentsLibrary({
 
   // 여기 오는 항목은 전부 초안(발행 잡 없음)이라 이력 손실 우려가 없다.
   // 발행된 콘텐츠의 삭제는 배포 관리의 포스팅 상세에서 처리한다.
-  function runDelete(ids: string[]) {
+  function runDelete(ids: string[], confirmed = false) {
     if (ids.length === 0) return;
     const message = `${ids.length}건을 삭제할까요? 미디어 파일도 함께 삭제되며 되돌릴 수 없습니다.`;
-    if (!window.confirm(message)) return;
+    if (!confirmed && !window.confirm(message)) return;
     startTransition(async () => {
       setActionMessage(null);
       const result = await deleteContentsAction({ contentIds: ids });
       if (result.ok) {
-        setActionMessage(`${result.deleted}건을 삭제했어요.${result.notice ? ` ${result.notice}` : ""}`);
+        toast(`${result.deleted}건을 삭제했어요.${result.notice ? ` ${result.notice}` : ""}`);
         setSelected(new Set());
         router.refresh();
       } else {
@@ -94,7 +95,7 @@ export function ContentsLibrary({
   return (
     <div className="space-y-3">
       {actionMessage && (
-        <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+        <div className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-sm text-risk">
           {actionMessage}
         </div>
       )}
@@ -129,20 +130,23 @@ export function ContentsLibrary({
             </Button>
           )}
           <Button
-            variant="outline"
+            variant="destructive"
             size="sm"
             onClick={() => runDelete(Array.from(selected))}
             disabled={selected.size === 0 || isPending}
-            className="text-destructive hover:text-destructive"
           >
             <Trash2 className="size-3.5" /> 선택 삭제
           </Button>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            onClick={() => runDelete(allIds)}
+            onClick={() => {
+              // 실수로 누르면 되돌릴 수 없어서 건수를 직접 입력하게 한다
+              const typed = window.prompt(`보이는 ${allIds.length}건을 모두 삭제해요. 되돌릴 수 없어요.\n계속하려면 ${allIds.length} 을(를) 입력해 주세요.`);
+              if (typed?.trim() === String(allIds.length)) runDelete(allIds, true);
+            }}
             disabled={allIds.length === 0 || isPending}
-            className="text-destructive hover:text-destructive"
+            className="text-muted-foreground hover:text-risk"
           >
             <Trash2 className="size-3.5" /> 전체 삭제
           </Button>

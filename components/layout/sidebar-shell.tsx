@@ -26,6 +26,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { signOut } from "@/app/(auth)/actions";
+import { Toaster } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 // 앱 셸 — DESIGN.md 6장(Marketing Hub와 같은 구조): 240px 사이드바(로고 → 조직 카드 → 메뉴 묶음 → 사용자) +
@@ -377,7 +378,9 @@ export function SidebarShell({
           </div>
         </header>
 
-        <main className="flex-1">{children}</main>
+        {/* 페이지가 각자 <main>을 가진다 — 여기서 또 쓰면 중첩된다 */}
+        <div className="flex-1">{children}</div>
+        <Toaster />
       </div>
     </div>
   );

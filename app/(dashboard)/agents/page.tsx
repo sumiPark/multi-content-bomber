@@ -320,7 +320,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
                         </div>
                         {output && (
                           <div>
-                            <p className="mb-1 text-xs font-semibold text-muted-foreground">내놓은 것 {r.model && <span className="font-normal">· {r.model}</span>}</p>
+                            <p className="mb-1 text-xs font-semibold text-muted-foreground">내놓은 것</p>
                             <pre className="max-h-80 overflow-auto rounded-md border bg-card p-3 text-xs leading-relaxed">
                               {output.length > 6000 ? `${output.slice(0, 6000)}\n…` : output}
                             </pre>

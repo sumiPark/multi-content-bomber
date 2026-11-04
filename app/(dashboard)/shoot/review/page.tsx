@@ -10,6 +10,7 @@ import { kstDate } from "@/lib/automation/time";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
 import { finalBlocking } from "@/lib/shoot/final-check";
+import { AutoRefresh } from "@/components/ui/auto-refresh";
 
 // 완성본 확인 — 직접 찍은 영상을 사람이 마지막으로 한 번 본다. 확인하면 12 · 18시로 예약(기존 발행 큐).
 // 광고 문구 규칙 · 판매 상태에 걸리면 확인 버튼이 잠기고, 문구를 고쳐 다시 편집하면 풀린다.
@@ -120,6 +121,7 @@ export default async function ShootReviewPage() {
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
+      <AutoRefresh active={cards.some((c) => c.status === "SHOT" && c.requestStatus !== "FAILED")} />
       <header>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold tracking-[-0.01em]">완성본 확인</h1>
@@ -127,7 +129,7 @@ export default async function ShootReviewPage() {
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           직접 찍은 영상을 AI가 편집한 완성본이에요. 보고 <b>확인하면 그 칸 시각에 자동으로 올라가요.</b> 화면 문구 · 자막이 틀리면 고쳐서 다시
-          편집하고, 캡션은 바로 고칠 수 있어요. 지금은 배경 음악 없이 촬영 원본 소리로 나가요.
+          편집하고, 캡션은 바로 고칠 수 있어요. 지금은 배경 음악 없이 촬영 원본 소리로 나가요.{!canManage && " 확인 · 예약은 관리자 · 매니저만 할 수 있어요."}
         </p>
       </header>
 
@@ -135,7 +137,7 @@ export default async function ShootReviewPage() {
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <Film className="size-10 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">확인할 완성본이 없어요</h2>
+            <h2 className="text-base font-semibold">확인할 완성본이 없어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
               <Link href="/shoot/uploads" className="underline">
                 촬영 · 올리기

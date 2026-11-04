@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { kstDate } from "@/lib/automation/time";
+import { AutoRefresh } from "@/components/ui/auto-refresh";
+import { isPastSlot } from "@/lib/automation/deadline";
 
 // 촬영 · 올리기 — 기획을 고른 칸마다 AI가 쓴 컷 목록대로 찍고, 컷마다 휴대폰에서 바로 올린다.
 // 큰 파일은 끊겨도 이어서 올라간다(tus). 다 올리면 자동 편집으로 넘어간다.
@@ -17,6 +19,11 @@ type SavedShotlist = {
   chosen_hook?: number;
   caption?: { text: string };
 };
+
+// 렌더 함수 밖에서 현재 시각을 읽는다(react-hooks/purity)
+function isPastIso(iso: string): boolean {
+  return Date.parse(iso) < Date.now();
+}
 
 export default async function ShootUploadsPage() {
   const user = await getSessionUser();
@@ -60,16 +67,23 @@ export default async function ShootUploadsPage() {
           done: !!c.done,
         })),
         clips: ((r.clips ?? []) as Clip[]).map((c) => ({ cut: c.cut, name: c.name, size: c.size })),
-        issues: ((plan.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),
+        // 찍는 사람이 고칠 수 있는 것만(화면 문구 · 대사) — 캡션 · 말투 점수는 찍을 때 고칠 수 없다
+        issues: ((plan.check_result as { issues?: { kind?: string; detail: string }[] } | null)?.issues ?? [])
+          .filter((i) => i.kind !== "caption" && i.kind !== "tone" && i.kind !== "hook")
+          .map((i) => i.detail),
         error: r.error,
+        pastSlot: isPastSlot(plan.slot_date, plan.slot_time),
+        pastDue: !!r.due_at && isPastIso(r.due_at),
       };
     })
     .sort((a, b) => (a.slotDate + a.slotTime).localeCompare(b.slotDate + b.slotTime));
 
   const open = cards.filter((c) => c.status === "OPEN").length;
+  const working = cards.some((c) => c.status === "UPLOADED" || c.status === "EDITING");
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
+      <AutoRefresh active={working} />
       <header>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold tracking-[-0.01em]">촬영 · 올리기</h1>
@@ -85,7 +99,7 @@ export default async function ShootUploadsPage() {
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <Video className="size-10 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">지금 찍을 촬영 요청이 없어요</h2>
+            <h2 className="text-base font-semibold">지금 찍을 촬영 요청이 없어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
               <Link href="/shoot/plans" className="underline">
                 촬영 기획 고르기

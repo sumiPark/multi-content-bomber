@@ -4,9 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { deleteSlotAction, removalImpactAction, updateSlotRuleAction, type ScheduleResult } from "@/app/(dashboard)/schedule/actions";
-import { ConfirmDialog } from "@/components/schedule/confirm-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 // 편성표 칸 하나 — 시각 · 방식 · 주제 고치기, 켜기/끄기, 지우기(앞으로의 기획 · 예약이 있으면 경고 뒤 취소).
@@ -36,25 +37,24 @@ export function useScheduleRun() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const run = (fn: () => Promise<ScheduleResult>, after?: () => void) =>
+  // 결과는 토스트로 — 칸 · 계정을 지우면 카드가 사라져 카드 안의 안내는 보이지 않는다
+  const run = (fn: () => Promise<ScheduleResult>, after?: () => void, done = "저장했어요.") =>
     startTransition(async () => {
       setError(null);
-      setMessage(null);
       const r = await fn();
       if (r.ok) {
-        if (r.message) setMessage(r.message);
+        toast(r.message ?? done);
         after?.();
         router.refresh();
       } else setError(r.error);
     });
-  return { isPending, error, message, run, setError };
+  return { isPending, error, run, setError };
 }
 
 const selectClass = "h-8 rounded-md border border-input bg-card px-2 text-[13px] focus-visible:outline-2 focus-visible:outline-primary";
 
 export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canManage: boolean }) {
-  const { isPending, error, message, run, setError } = useScheduleRun();
+  const { isPending, error, run, setError } = useScheduleRun();
   const [editing, setEditing] = useState(false);
   const [time, setTime] = useState(rule.time);
   const [track, setTrack] = useState(rule.track);
@@ -133,7 +133,7 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
                 aria-checked={rule.active}
                 aria-label={rule.active ? `${rule.time} 칸 끄기` : `${rule.time} 칸 켜기`}
                 disabled={isPending}
-                onClick={() => run(() => updateSlotRuleAction({ ruleId: rule.id, active: !rule.active }))}
+                onClick={() => run(() => updateSlotRuleAction({ ruleId: rule.id, active: !rule.active }), undefined, rule.active ? `${rule.time} 칸을 껐어요. 이미 만든 기획은 그대로 진행돼요.` : `${rule.time} 칸을 켰어요.`)}
                 className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50", rule.active ? "bg-primary" : "bg-surface-3")}
               >
                 <span className={cn("absolute top-0.5 size-4 rounded-full bg-card shadow-sm transition-[left]", rule.active ? "left-[18px]" : "left-0.5")} />
@@ -160,10 +160,9 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
               </span>
             )}
           </div>
-          {!rule.active && <p className="text-xs text-muted-foreground">꺼짐 — 기획하지 않아요</p>}
+          {!rule.active && <p className="text-xs text-muted-foreground">꺼짐 — 새로 기획하지 않아요 (이미 만든 기획은 그대로)</p>}
         </>
       )}
-      {message && <p className="text-xs text-ok">{message}</p>}
       {error && <p className="text-xs text-risk">{error}</p>}
 
       <ConfirmDialog
@@ -173,7 +172,7 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
         confirmLabel={confirm && confirm.plans > 0 ? "그래도 지우고 모두 취소" : "지우기"}
         pending={isPending}
         onClose={() => setConfirm(null)}
-        onConfirm={() => run(() => deleteSlotAction({ ruleId: rule.id }), () => setConfirm(null))}
+        onConfirm={() => run(() => deleteSlotAction({ ruleId: rule.id }), () => setConfirm(null), "칸을 지웠어요.")}
       >
         {confirm && confirm.scheduled > 0 && (
           <p className="rounded-md bg-risk-soft px-3 py-2 font-semibold text-risk">예약된 발행이 {confirm.scheduled}건 있어요. 지우면 예약이 취소돼 올라가지 않아요.</p>

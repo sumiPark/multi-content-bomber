@@ -12,6 +12,8 @@ import {
 import { won } from "@/components/products/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 // B 칸 하나 — 제안 상품 · 이유 · 대안. 컨펌 / 대안으로 바꿔 컨펌 / 건너뛰기.
@@ -45,14 +47,14 @@ export interface PlanCardData {
   issues: string[];
 }
 
-const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" }> = {
+const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" | "ok" }> = {
   PROPOSED: { label: "확인 대기", variant: "default" },
   CONFIRMED: { label: "확인됨 · 대본 대기", variant: "secondary" },
   SCRIPTED: { label: "대본 완료 · 영상 준비 중", variant: "secondary" },
   RENDERED: { label: "영상 완료", variant: "secondary" },
   BLOCKED: { label: "점검에 걸림", variant: "destructive" },
-  SCHEDULED: { label: "예약됨", variant: "secondary" },
-  PUBLISHED: { label: "발행됨", variant: "secondary" },
+  SCHEDULED: { label: "예약됨", variant: "ok" },
+  PUBLISHED: { label: "발행됨", variant: "ok" },
   SKIPPED: { label: "건너뜀", variant: "outline" },
   FAILED: { label: "실패", variant: "destructive" },
 };
@@ -61,12 +63,14 @@ function useRun() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const run = (fn: () => Promise<ConfirmResult>) =>
+  const run = (fn: () => Promise<ConfirmResult>, done?: string) =>
     startTransition(async () => {
       setError(null);
       const r = await fn();
-      if (r.ok) router.refresh();
-      else setError(r.error);
+      if (r.ok) {
+        if (done) toast(done);
+        router.refresh();
+      } else setError(r.error);
     });
   return { isPending, error, run };
 }
@@ -77,12 +81,13 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
   // 점검에 걸려 멈춘 칸은 확인 마감과 상관없이 올릴 시각 전까지 고칠 수 있다
   const editable = canManage && (blocked ? !plan.pastSlot : (plan.status === "PROPOSED" || plan.status === "CONFIRMED") && !plan.pastDeadline);
   const soldOut = !!plan.product && plan.product.stock !== "available";
+  const [askSkip, setAskSkip] = useState(false);
   const s = STATUS[plan.status] ?? { label: plan.status, variant: "outline" as const };
 
   return (
-    <div className={cn("space-y-3 rounded-lg border p-4", plan.status === "SKIPPED" && "opacity-60")}>
+    <div className={cn("space-y-3 rounded-lg border bg-card p-4", plan.status === "SKIPPED" && "opacity-60")}>
       <div className="flex items-center gap-2">
-        <span className="text-lg font-bold tabular-nums">{plan.slotTime}</span>
+        <span className="text-base font-bold tabular-nums">{plan.slotTime}</span>
         <Badge variant={s.variant}>{s.label}</Badge>
         {plan.productChanged && <Badge variant="outline">사람이 바꿈</Badge>}
       </div>
@@ -104,7 +109,7 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
       )}
 
       {plan.issues.length > 0 && (
-        <ul className="space-y-0.5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <ul className="space-y-0.5 rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
           {plan.issues.map((i) => (
             <li key={i}>✗ {i}</li>
           ))}
@@ -120,7 +125,7 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
             {plan.script.beats.map((b, i) => (
               <li key={i}>
                 <span className="text-muted-foreground">{i === 0 ? "훅" : i}.</span> {b.spoken}
-                {b.onScreen && <span className="ml-1 rounded bg-muted px-1 text-[11px]">{b.onScreen}</span>}
+                {b.onScreen && <span className="ml-1 rounded bg-muted px-1 text-xs">{b.onScreen}</span>}
               </li>
             ))}
           </ol>
@@ -138,16 +143,16 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
       {editable && (
         <div className="flex flex-wrap gap-2">
           {plan.status === "PROPOSED" && (
-            <Button size="sm" disabled={isPending || soldOut} onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: null }))}>
+            <Button size="sm" disabled={isPending || soldOut} onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: null }), "확인했어요. AI가 대본을 쓸 거예요.")}>
               <Check className="size-4" /> 이 상품으로 확인
             </Button>
           )}
           {blocked && (
-            <Button size="sm" disabled={isPending || soldOut} onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: null }))}>
+            <Button size="sm" disabled={isPending || soldOut} onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: null }), "다시 쓰기를 시작했어요. 몇 분 뒤 새로 고쳐 주세요.")}>
               <RotateCcw className="size-4" /> 이 상품으로 다시 쓰기
             </Button>
           )}
-          <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => skipPlanAction({ planId: plan.id }))}>
+          <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setAskSkip(true)}>
             <SkipForward className="size-4" /> 이 칸 건너뛰기
           </Button>
         </div>
@@ -162,9 +167,9 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
               <Button
                 size="sm"
                 variant="outline"
-                className="ml-auto h-7 shrink-0 text-xs"
+                className="ml-auto shrink-0"
                 disabled={isPending}
-                onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: a.product.id }))}
+                onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: a.product.id }), "상품을 바꿔 확인했어요.")}
               >
                 이걸로 바꾸기
               </Button>
@@ -172,7 +177,20 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
           ))}
         </div>
       )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-xs text-risk">{error}</p>}
+      <ConfirmDialog
+        open={askSkip}
+        title={`${plan.slotTime} 칸을 건너뛸까요?`}
+        confirmLabel="건너뛰기"
+        pending={isPending}
+        onClose={() => setAskSkip(false)}
+        onConfirm={() => {
+          setAskSkip(false);
+          run(() => skipPlanAction({ planId: plan.id }), "이 칸을 건너뛰었어요.");
+        }}
+      >
+        <p>건너뛰면 되돌릴 수 없어요. 이 칸은 그날 비게 돼요.</p>
+      </ConfirmDialog>
     </div>
   );
 }
@@ -191,7 +209,7 @@ export function ProductRow({ product, compact }: { product: ProductBrief; compac
         <p className={cn("truncate font-medium", compact ? "text-xs" : "text-sm")}>{product.name}</p>
         <p className="truncate text-xs text-muted-foreground">
           {won(product.price)}
-          {product.stock !== "available" && <span className="text-destructive"> · 지금 판매 중 아님</span>}
+          {product.stock !== "available" && <span className="text-risk"> · 지금 판매 중 아님</span>}
           {!compact && product.oneLine && ` · ${product.oneLine}`}
         </p>
       </div>
@@ -207,27 +225,24 @@ export function ProductRow({ product, compact }: { product: ProductBrief; compac
 export function ConfirmAllButton({ slotDate, count }: { slotDate: string; count: number }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
   return (
     <div className="flex flex-col items-end gap-1">
       <Button
         disabled={isPending}
         onClick={() =>
           startTransition(async () => {
-            setMessage(null);
+            setError(null);
             const r = await confirmAllAction({ slotDate });
-            if (!r.ok) return setMessage({ text: r.error, ok: false });
-            setMessage({
-              text: `${r.count ?? 0}개를 확인했어요.${r.soldOut ? ` ${r.soldOut}개는 판매 중이 아니라 남겨 뒀어요. 다른 후보로 바꾸거나 건너뛰어 주세요.` : ""}`,
-              ok: true,
-            });
+            if (!r.ok) return setError(r.error);
+            toast(`${r.count ?? 0}개를 확인했어요.${r.soldOut ? ` ${r.soldOut}개는 판매 중이 아니라 남겨 뒀어요.` : ""}`);
             router.refresh();
           })
         }
       >
         <Check className="size-4" /> {count}개 모두 그대로 확인
       </Button>
-      {message && <p className={cn("text-xs", message.ok ? "text-ok" : "text-risk")}>{message.text}</p>}
+      {error && <p className="text-xs text-risk">{error}</p>}
     </div>
   );
 }

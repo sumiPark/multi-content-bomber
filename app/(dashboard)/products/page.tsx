@@ -163,7 +163,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <Package className="size-10 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">아직 수집된 상품이 없어요</h2>
+            <h2 className="text-base font-semibold">아직 수집된 상품이 없어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
               오른쪽 위 <b>지금 수집</b>을 누르거나 다음 03시 자동 수집을 기다리세요.
             </p>
@@ -264,15 +264,16 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                         </p>
                         {(p.analysis_note || p.analysis_error) && (
                           <p className={cn("truncate text-xs", p.analysis_error ? "text-destructive" : "text-warn")}>
-                            {p.analysis_error ?? p.analysis_note}
+                            {/* 원본 이미지 주소는 목록에서 뺀다 — 상세에서 볼 수 있다 */}
+                            {(p.analysis_error ?? p.analysis_note ?? "").replace(/:?\s*https?:\/\/\S+/g, "")}
                           </p>
                         )}
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
-                        <Badge variant={ANALYSIS_BADGE[p.analysis_state] ?? "outline"} className="text-[10px]">
+                        <Badge variant={ANALYSIS_BADGE[p.analysis_state] ?? "outline"} className="text-xs">
                           {ANALYSIS_LABEL[p.analysis_state] ?? p.analysis_state}
                         </Badge>
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
                           <RelativeTime iso={p.updated_at} format="date" />
                         </span>
                       </div>

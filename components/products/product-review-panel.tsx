@@ -115,19 +115,19 @@ export function ProductReviewPanel(props: {
 
   return (
     <div className="space-y-4 rounded-lg border p-4">
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         {props.approvedAt ? (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-xs">
             사람 확인 <RelativeTime iso={props.approvedAt} format="date" />
           </Badge>
         ) : (
-          <Badge variant="outline" className="text-[10px]">
+          <Badge variant="outline" className="text-xs">
             확인 전
           </Badge>
         )}
-        {props.edited && <Badge variant="outline" className="text-[10px]">고친 요약</Badge>}
+        {props.edited && <Badge variant="outline" className="text-xs">고친 요약</Badge>}
         <span>
-          {props.model} · <RelativeTime iso={props.analyzedAt} />
+          <RelativeTime iso={props.analyzedAt} /> 분석
         </span>
       </div>
 
@@ -217,8 +217,8 @@ export function ProductReviewPanel(props: {
                   )}
                   <div>
                     <p>{c.claim}</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      “{c.quote}” {c.imageIndex != null && `· image-${c.imageIndex}`}
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      “{c.quote}” {c.imageIndex != null && `· 이미지 ${c.imageIndex + 1}`}
                     </p>
                   </div>
                 </div>

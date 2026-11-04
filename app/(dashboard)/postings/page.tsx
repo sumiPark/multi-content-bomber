@@ -84,14 +84,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
     return (
       <main className="p-4 sm:p-6">
         <h1 className="text-xl font-bold tracking-[-0.01em]">배포 관리</h1>
-        <p className="mt-4 text-sm text-destructive">
-          데이터 조회 실패: {error.message}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          마이그레이션 0007이 적용되지 않았다면{" "}
-          <code>supabase/migrations/0007_publish_jobs_management.sql</code>을
-          먼저 실행해주세요.
-        </p>
+        <p className="mt-4 text-sm text-risk">목록을 불러오지 못했어요. 잠시 뒤 새로 고쳐 주세요.</p>
+        <details className="mt-1 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">자세히</summary>
+          <p className="mt-1 break-all">{error.message}</p>
+        </details>
       </main>
     );
   }

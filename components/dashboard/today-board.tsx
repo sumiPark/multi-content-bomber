@@ -20,7 +20,7 @@ const TONE_CLASS: Record<CellTone, string> = {
 
 const TASKS: { key: CellTask; label: string; due: string }[] = [
   { key: "confirm", label: "상품 확인", due: "올리는 날 07시까지" },
-  { key: "plans", label: "촬영 기획 고르기", due: "올리기 전날까지" },
+  { key: "plans", label: "촬영 기획 고르기", due: "일찍 고를수록 찍을 시간이 많아요" },
   { key: "shoot", label: "촬영 · 올리기", due: "올리기 3시간 전까지 (안내)" },
   { key: "review", label: "완성본 확인", due: "올릴 시각 전까지" },
 ];
@@ -49,7 +49,24 @@ export function BlockedAlert({ items }: { items: DayBoard["blocked"] }) {
           </li>
         ))}
       </ul>
-      {items.length > 4 && <p className="mt-1.5 text-xs text-risk">외 {items.length - 4}개 — 편성표에서 모두 볼 수 있어요</p>}
+      {items.length > 4 && (
+        <details className="mt-1.5 text-[13px]">
+          <summary className="cursor-pointer text-xs font-semibold text-risk">외 {items.length - 4}개 더 보기</summary>
+          <ul className="mt-1.5 space-y-1">
+            {items.slice(4).map((b) => (
+              <li key={b.key}>
+                {b.href ? (
+                  <Link href={b.href} className="underline underline-offset-2">
+                    {b.label}
+                  </Link>
+                ) : (
+                  b.label
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
@@ -77,7 +94,24 @@ export function AtRiskAlert({ items }: { items: DayBoard["atRisk"] }) {
           </li>
         ))}
       </ul>
-      {items.length > 5 && <p className="mt-1.5 text-xs text-warn">외 {items.length - 5}개 — 편성표에서 모두 볼 수 있어요</p>}
+      {items.length > 5 && (
+        <details className="mt-1.5 text-[13px]">
+          <summary className="cursor-pointer text-xs font-semibold text-warn">외 {items.length - 5}개 더 보기</summary>
+          <ul className="mt-1.5 space-y-1">
+            {items.slice(5).map((b) => (
+              <li key={b.key}>
+                {b.href ? (
+                  <Link href={b.href} className="underline underline-offset-2">
+                    {b.label}
+                  </Link>
+                ) : (
+                  b.label
+                )}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
@@ -117,7 +151,7 @@ export function TaskTiles({ board }: { board: DayBoard }) {
             {board.done}
             <small className="ml-0.5 text-sm font-medium text-muted-foreground">/ {board.total}</small>
           </span>
-          <span className="mt-auto pt-1 text-xs text-muted-foreground">AI 진행 중 {board.aiWorking}칸</span>
+          <span className="mt-auto pt-1 text-xs text-muted-foreground">이날 칸 기준 · 진행 중 {board.aiWorking}칸</span>
         </Link>
       </div>
       {totalTodo === 0 && board.blocked.length === 0 && (

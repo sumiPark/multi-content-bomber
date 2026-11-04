@@ -114,10 +114,10 @@ export default async function Page({ searchParams }: AccountsPageProps) {
       canManage={canManage}
       flashMessage={
         params.connected
-          ? `${params.connected.toUpperCase()} 계정이 연결되었습니다.`
+          ? `${({ YOUTUBE: "유튜브", INSTAGRAM: "인스타그램", TIKTOK: "틱톡" } as Record<string, string>)[params.connected.toUpperCase()] ?? params.connected} 계정을 연결했어요.`
           : null
       }
-      flashError={params.error ? decodeURIComponent(params.error) : null}
+      flashError={params.error ?? null}
     />
   );
 }

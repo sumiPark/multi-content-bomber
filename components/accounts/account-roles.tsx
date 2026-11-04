@@ -135,7 +135,7 @@ function RoleRow({
         <p className="text-sm font-medium leading-tight">
           @{account.display_name ?? "(이름 없음)"}
         </p>
-        <p className="text-[11px] leading-tight text-muted-foreground">
+        <p className="text-xs leading-tight text-muted-foreground">
           {account.last_collected_on
             ? `마지막 수집 ${account.last_collected_on}`
             : "아직 수집 전"}
@@ -170,7 +170,7 @@ function RoleRow({
         </Button>
       )}
 
-      <Badge variant={status.variant} className="text-[10px]">
+      <Badge variant={status.variant} className="text-xs">
         {status.label}
       </Badge>
       {status.needsReconnect && canManage && (

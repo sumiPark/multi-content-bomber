@@ -9,7 +9,7 @@ import { RelativeTime } from "@/components/ui/relative-time";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { loadTrackTimes } from "@/lib/schedule/track-times";
 import { confirmDeadlineIso, isPastSlot, isPastDeadline } from "@/lib/automation/deadline";
-import { addDays, kstDate } from "@/lib/automation/time";
+import { kstDate } from "@/lib/automation/time";
 import { cn } from "@/lib/utils";
 
 // B 상품 컨펌 — 상품 선정 에이전트(1)가 낸 내일 B 칸(08 · 21시) 제안을 사람이 확인만 한다.
@@ -126,7 +126,8 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const proposed = (plans ?? []).filter(
     (p) => p.status === "PROPOSED" && !isPastDeadline(slotDate, deadlineBy.get(p.social_account_id) ?? "07:00"),
   ).length;
-  const dates = [kstDate(0), tomorrow, addDays(tomorrow, 1)];
+  // 상품 제안은 내일 칸까지만 만든다 — 모레 탭은 늘 비어 있어 뺐다(주소로 다른 날짜를 열면 그 날짜도 탭에 보인다)
+  const dates = [kstDate(0), tomorrow, ...(slotDate > tomorrow || slotDate < kstDate(0) ? [slotDate] : [])];
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
@@ -134,7 +135,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold tracking-[-0.01em]">AI 자동 업로드</h1>
-            <Badge variant="outline">매일 {times.B}</Badge>
+            {times.B !== "칸 없음" && <Badge variant="outline">매일 {times.B}</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             AI 자동 업로드 칸({times.B})의 <b>상품을 확인</b>하면 AI가 대본 · 캡션을 쓰고 점검해요. 올리는 날 오전 7시까지 확인하지 않은 칸은 건너뜁니다.{" "}
@@ -151,7 +152,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
             href={`/auto/confirm?date=${d}`}
             className={cn(buttonVariants({ variant: d === slotDate ? "default" : "outline", size: "sm" }))}
           >
-            {d === kstDate(0) ? "오늘" : d === tomorrow ? "내일" : "모레"} {d.slice(5)}
+            {d === kstDate(0) ? "오늘" : d === tomorrow ? "내일" : ""} {d.slice(5)}
           </Link>
         ))}
       </nav>
@@ -160,7 +161,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <CalendarCheck className="size-10 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">{slotDate}에 올릴 상품 제안이 아직 없어요</h2>
+            <h2 className="text-base font-semibold">{slotDate}에 올릴 상품 제안이 아직 없어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
               AI가 매일 아침 9시에 다음 날 올릴 상품을 골라 둬요. 판매 중이고 상세페이지 분석이 끝난 상품만 후보가 됩니다.
             </p>
@@ -170,7 +171,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         [...byAccount.values()].map((g) => (
           <section key={g.name} className="space-y-3">
             <div className="flex items-baseline gap-2">
-              <h2 className="text-lg font-semibold">@{g.name}</h2>
+              <h2 className="text-base font-semibold">@{g.name}</h2>
               <span className="text-xs text-muted-foreground">
                 확인 마감 <RelativeTime iso={g.deadlineIso} />
               </span>

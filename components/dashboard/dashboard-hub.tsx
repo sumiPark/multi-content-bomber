@@ -103,7 +103,7 @@ export function FailureAlertBar({
   const message =
     failedCount === 1 && topFailureSummary
       ? topFailureSummary
-      : `${failedCount}건 실패 — 포스팅 관리에서 확인`;
+      : `발행 실패 ${failedCount}건 — 배포 관리에서 확인해 주세요`;
 
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3">
@@ -115,7 +115,7 @@ export function FailureAlertBar({
         href="/postings?status=failed"
         className="flex shrink-0 items-center gap-1 text-sm font-medium text-destructive hover:underline"
       >
-        재시도
+        보기
         <ArrowRight className="size-3.5" />
       </Link>
     </div>
@@ -145,7 +145,7 @@ export function StatTiles({ data }: { data: DashboardData }) {
       icon: CalendarClock,
     },
     {
-      label: "진행중",
+      label: "올리는 중",
       value: data.uploadingCount,
       hint: data.uploadingHint ?? "대기 없음",
       href: "/postings?status=uploading",
@@ -216,10 +216,8 @@ function StatTile({
     <Link
       href={href}
       className={cn(
-        "group/tile block rounded-xl bg-card p-4 ring-1 transition hover:bg-accent/40",
-        destructive
-          ? "ring-destructive/30 hover:ring-destructive/50"
-          : "ring-foreground/10 hover:ring-foreground/20",
+        "group/tile block rounded-lg border bg-card p-4 transition hover:bg-surface-2",
+        destructive && "border-risk/40",
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -235,7 +233,7 @@ function StatTile({
       </div>
       <p
         className={cn(
-          "mt-2 text-xl font-bold tracking-[-0.01em] tabular-nums",
+          "mt-1 text-2xl font-bold tabular-nums",
           destructive && "text-destructive",
         )}
       >
@@ -254,9 +252,9 @@ const STATUS_BADGE: Record<
   { label: string; className: string }
 > = {
   scheduled: { label: "예약중", className: "bg-warn-soft text-warn border-warn/30" },
-  uploading: { label: "업로드중", className: "bg-brand-soft text-primary border-primary/30" },
+  uploading: { label: "올리는 중", className: "bg-brand-soft text-primary border-primary/30" },
   failed: { label: "실패", className: "bg-risk-soft text-risk border-risk/30" },
-  pending: { label: "대기", className: "bg-zinc-100 text-zinc-700 border-zinc-300" },
+  pending: { label: "대기", className: "bg-surface-2 text-ink-2 border-border" },
 };
 
 function deriveDisplayStatus(
@@ -316,24 +314,24 @@ function UpcomingRow({ job }: { job: UpcomingJob }) {
   return (
     <li>
       <Link
-        href={`/?content=${job.contentId}`}
+        href={`/postings?status=${display === "pending" ? "pending" : display}`}
         className={cn(
-          "flex items-center gap-3 rounded-lg border bg-card p-3 transition hover:bg-accent/40",
-          isFailed && "border-destructive/40 bg-destructive/5",
+          "flex items-center gap-3 rounded-lg border bg-card p-3 transition hover:bg-surface-2",
+          isFailed && "border-risk/40 bg-risk-soft",
         )}
       >
         <div
           className={cn(
             "flex size-10 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground",
-            isFailed && "border-destructive/30 text-destructive",
+            isFailed && "border-risk/30 text-risk",
           )}
           aria-hidden
         >
           {job.mediaType === "VIDEO" ? (
-            <span className="text-[10px] font-semibold">VIDEO</span>
+            <span className="text-xs font-semibold">영상</span>
           ) : (
-            <span className="text-[10px] font-semibold">
-              IMG{job.mediaCount > 1 ? `×${job.mediaCount}` : ""}
+            <span className="text-xs font-semibold">
+              사진{job.mediaCount > 1 ? ` ${job.mediaCount}` : ""}
             </span>
           )}
         </div>
@@ -375,15 +373,9 @@ function UpcomingRow({ job }: { job: UpcomingJob }) {
 // ⑤ Linked accounts (per platform)
 
 const PLATFORM_LABEL: Record<Platform, string> = {
-  YOUTUBE: "YouTube",
-  INSTAGRAM: "Instagram",
-  TIKTOK: "TikTok",
-};
-
-const PLATFORM_BG: Record<Platform, string> = {
-  YOUTUBE: "bg-risk-soft",
-  INSTAGRAM: "bg-fuchsia-50 dark:bg-fuchsia-950/40",
-  TIKTOK: "bg-zinc-100 dark:bg-zinc-900/60",
+  YOUTUBE: "유튜브",
+  INSTAGRAM: "인스타그램",
+  TIKTOK: "틱톡",
 };
 
 const ALL_PLATFORMS: Platform[] = ["YOUTUBE", "INSTAGRAM", "TIKTOK"];
@@ -423,21 +415,11 @@ function AccountCard({ summary }: { summary: AccountSummary }) {
 
   return (
     <Link
-      href={`/accounts?platform=${summary.platform.toLowerCase()}`}
-      className={cn(
-        "group block rounded-xl bg-card p-4 ring-1 transition hover:bg-accent/40",
-        hasExpired
-          ? "ring-destructive/40 hover:ring-destructive/60"
-          : "ring-foreground/10 hover:ring-foreground/20",
-      )}
+      href="/accounts"
+      className={cn("group block rounded-lg border bg-card p-4 transition hover:bg-surface-2", hasExpired && "border-risk/40")}
     >
       <div className="flex items-start justify-between">
-        <div
-          className={cn(
-            "flex size-10 items-center justify-center rounded-lg",
-            PLATFORM_BG[summary.platform],
-          )}
-        >
+        <div className="flex size-10 items-center justify-center rounded-lg bg-surface-2">
           <PlatformIcon platform={summary.platform} size={22} />
         </div>
         <ArrowRight className="size-4 text-muted-foreground/50 transition group-hover:translate-x-0.5 group-hover:text-foreground" />
@@ -454,10 +436,8 @@ function AccountCard({ summary }: { summary: AccountSummary }) {
           <span className="text-muted-foreground">연동하기 →</span>
         ) : hasExpired ? (
           <>
-            <span className="size-1.5 rounded-full bg-destructive" />
-            <span className="text-destructive">
-              {summary.expired}개 토큰 만료
-            </span>
+            <span className="size-1.5 rounded-full bg-risk" />
+            <span className="text-risk">{summary.expired}개 다시 연결 필요</span>
           </>
         ) : (
           <>
@@ -476,9 +456,9 @@ function AccountCard({ summary }: { summary: AccountSummary }) {
 // ⑥ Quick actions
 
 const QUICK_ACTIONS = [
-  { href: "/presets", label: "캡션 프리셋", icon: Sparkles },
-  { href: "/accounts", label: "계정 추가", icon: Link2 },
-  { href: "/uploads", label: "업로드 이력", icon: History },
+  { href: "/presets", label: "AI 프리셋", icon: Sparkles },
+  { href: "/accounts", label: "계정 연동", icon: Link2 },
+  { href: "/postings", label: "배포 관리", icon: History },
 ] as const;
 
 export function QuickActions() {
@@ -490,7 +470,7 @@ export function QuickActions() {
           <Link
             key={href}
             href={href}
-            className="group flex items-center gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10 transition hover:bg-accent/40 hover:ring-foreground/20"
+            className="group flex items-center gap-3 rounded-lg border bg-card p-4 transition hover:bg-surface-2"
           >
             <div className="flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground transition group-hover:bg-foreground/10 group-hover:text-foreground">
               <Icon className="size-4" />

@@ -48,6 +48,11 @@ const RISK_REVIEW_MS = 2 * HOUR; // 완성본 확인 전 · 편집 중
 // 내일 칸 기획이 만들어지는 시각(KST, 기획 워커 05시 · 09시 + 여유) — 이 뒤에도 비어 있으면 경고
 const NEXT_DAY_PLANNED_BY = "10:00";
 
+/** 확인 마감이 지난 상품 확인 칸은 눌러도 고칠 수 없다 — 표에서 할 일 버튼을 뺀다(정리 워커가 곧 건너뜀으로 바꾼다). */
+function boardStatus(st: CellStatus, pastConfirmDeadline: boolean): CellStatus {
+  return st.task === "confirm" && pastConfirmDeadline ? { label: "확인 마감 지남", tone: "idle", href: st.href } : st;
+}
+
 function hoursLeft(ms: number): string {
   const h = Math.floor(ms / HOUR);
   return h >= 1 ? `${h}시간` : `${Math.max(1, Math.round(ms / 60_000))}분`;
@@ -187,7 +192,9 @@ export async function loadDayBoard(supabase: Supabase, date: string, now = Date.
           ? `기획안 후보 ${ideas.length}개`
           : (p.products?.name ?? null)
         : null,
-      status: p ? statusOf(p) : cellStatus(null, { date, time: r.slot_time, track: r.track, active: true }, now),
+      status: !p
+        ? cellStatus(null, { date, time: r.slot_time, track: r.track, active: true }, now)
+        : boardStatus(statusOf(p), isPastDeadline(p.slot_date, deadlineOf.get(p.social_account_id) ?? "07:00", now)),
     });
   }
   rows.sort((a, b) => a.time.localeCompare(b.time) || a.account.localeCompare(b.account));

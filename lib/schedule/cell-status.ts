@@ -37,7 +37,7 @@ export function cellStatus(
     if (!slot.active) return { label: "꺼짐", tone: "idle", href: null };
     // 기획은 전날 만들어진다 — 오늘 칸인데 기획이 없으면 그대로 비게 되니 경고, 지난 날은 기록만
     const today = kstDate(0, now);
-    if (slot.date < today) return { label: "없음", tone: "idle", href: null };
+    if (slot.date < today || (slot.date === today && past)) return { label: "없음", tone: "idle", href: null };
     if (slot.date === today) return { label: "빈 칸", tone: "risk", href: null };
     return { label: "기획 전", tone: "idle", href: null };
   }

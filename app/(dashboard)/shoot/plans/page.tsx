@@ -10,6 +10,7 @@ import { loadTrackTimes } from "@/lib/schedule/track-times";
 import { isPastSlot } from "@/lib/automation/deadline";
 import { addDays, kstDate } from "@/lib/automation/time";
 import { cn } from "@/lib/utils";
+import { AutoRefresh } from "@/components/ui/auto-refresh";
 
 // 촬영 기획 고르기 — 직접 촬영 칸(12 · 18시)마다 AI가 낸 기획안 후보 중 하나를 고르거나 상품을 직접 지정한다.
 // 고르면 AI가 촬영 컷 리스트를 쓰고 "촬영 · 올리기" 화면에 촬영 요청이 생긴다.
@@ -93,15 +94,17 @@ export default async function ShootPlansPage({ searchParams }: { searchParams: P
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
+      <AutoRefresh active={(plans ?? []).some((p) => p.status === "CONFIRMED")} />
       <header>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold tracking-[-0.01em]">촬영 기획 고르기</h1>
-          <Badge variant="outline">매일 {times.A}</Badge>
+          {times.A !== "칸 없음" && <Badge variant="outline">매일 {times.A}</Badge>}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           직접 촬영 칸({times.A})은 직접 찍어 올려요. AI가 칸마다 찍을 거리 2~3개를 골라 두니 <b>하나를 고르거나 상품을 직접 지정</b>하세요.
           고르면 AI가 찍을 컷 목록을 만들어 <Link href="/shoot/uploads" className="underline">촬영 · 올리기</Link>에 올려 둡니다.
           {toChoose > 0 && <b> 고를 칸 {toChoose}개.</b>}
+          {!canManage && " 고르기 · 지정은 관리자 · 매니저만 할 수 있어요."}
         </p>
       </header>
 
@@ -121,16 +124,16 @@ export default async function ShootPlansPage({ searchParams }: { searchParams: P
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <Clapperboard className="size-10 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">{slotDate}에 찍을 기획안이 아직 없어요</h2>
+            <h2 className="text-base font-semibold">{slotDate}에 찍을 기획안이 아직 없어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
-              AI가 매일 새벽 5시에 다음 날 직접 촬영 칸의 기획안 후보를 만들어 둬요. 판매 중이고 상세페이지 분석이 끝난 상품만 후보가 됩니다.
+              AI가 매일 새벽 5시에 오늘 ~ 모레의 빈 직접 촬영 칸에 기획안 후보를 만들어 둬요. 판매 중이고 상세페이지 분석이 끝난 상품만 후보가 됩니다.
             </p>
           </CardContent>
         </Card>
       ) : (
         [...byAccount.values()].map((g) => (
           <section key={g.name} className="space-y-3">
-            <h2 className="text-lg font-semibold">@{g.name}</h2>
+            <h2 className="text-base font-semibold">@{g.name}</h2>
             <div className="grid gap-3 md:grid-cols-2">
               {g.plans.map((p) => (
                 <ShootPlanCard key={p.id} plan={p} canManage={canManage} />
