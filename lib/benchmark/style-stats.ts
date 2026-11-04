@@ -97,9 +97,10 @@ export interface StyleStats {
   standouts: StyleStandout[];
 }
 
-// 잘된 릴스에서 3개 넘게 나오고, 평소 릴스보다 비율이 20%포인트 넘게 높은 것만 특징으로 본다
+// 잘된 릴스와 평소 릴스를 8개 넘게 봤고, 잘된 릴스에서 3개 넘게 나오며, 비율이 20%포인트 넘게 높은 것만 특징으로 본다.
+// 5개끼리 비교하니 5/5 대 1/5 같은 값이 결론처럼 나왔다(2026-11-04 reu_japan).
 const MIN_HITS = 3;
-const MIN_GROUP = 5;
+const MIN_GROUP = 8;
 const MIN_GAP = 0.2;
 
 export function computeStyleStats(rows: StyleRow[]): StyleStats {

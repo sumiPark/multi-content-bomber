@@ -7,7 +7,7 @@ import type { StyleDimension, StyleStandout } from "@/lib/benchmark/style-stats"
 // 잘된 릴스 종합 분석 — 왜 잘됐을지 · 어떤 특징이 있는지 · 영상 스타일.
 // 비율은 코드가 센 값이고, 문장만 AI가 썼다. 잘된 릴스와 같은 계정의 평소 릴스를 나란히 둔다. 서버 컴포넌트.
 
-// 영상을 직접 본 릴스가 이보다 적으면 표본이 적다고 먼저 알린다
+// 영상을 직접 본 잘된 릴스가 이보다 적으면 표본이 적다고 먼저 알린다 (style-stats의 특징 판단 기준과 같다)
 const MIN_VIDEOS = 8;
 
 const pct = (n: number, total: number) => (total ? Math.round((n / total) * 100) : 0);
@@ -39,7 +39,13 @@ function StyleRow({ d }: { d: StyleDimension }) {
         {top.value} <span className="font-normal text-muted-foreground tabular-nums">{top.hit}/{d.hitTotal}</span>
       </td>
       <td className="py-2 text-[13px] text-ink-2">
-        {normalTop.value} <span className="text-muted-foreground tabular-nums">{normalTop.normal}/{d.normalTotal}</span>
+        {normalTop.normal > 0 ? (
+          <>
+            {normalTop.value} <span className="text-muted-foreground tabular-nums">{normalTop.normal}/{d.normalTotal}</span>
+          </>
+        ) : (
+          "-"
+        )}
       </td>
     </tr>
   );
@@ -64,7 +70,7 @@ export function BenchmarkInsightPanel({ insight, hasHits }: { insight: Insight |
   const standouts = new Map<string, StyleStandout>(stats.standouts.map((s) => [s.id, s]));
   const videos = stats.hits.video + stats.normals.video;
   const covers = stats.hits.cover + stats.normals.cover;
-  const dimensions = stats.dimensions.filter((d) => d.hitTotal > 0);
+  const dimensions = stats.dimensions.filter((d) => d.values.some((v) => v.hit > 0));
 
   return (
     <section aria-label="잘된 릴스 종합 분석" className="space-y-3 rounded-lg border bg-card p-4">
@@ -80,8 +86,10 @@ export function BenchmarkInsightPanel({ insight, hasHits }: { insight: Insight |
 
       <p className="rounded-md bg-brand-soft px-3 py-2.5 text-[15px] font-semibold">{summary.headline}</p>
 
-      {videos < MIN_VIDEOS && (
-        <p className="text-xs text-warn">영상을 직접 본 릴스가 {videos}개뿐이에요. 나머지 {covers}개는 표지와 캡션만 봐서, 아래 영상 스타일은 참고로만 보세요.</p>
+      {stats.hits.video < MIN_VIDEOS && (
+        <p className="text-xs text-warn">
+          잘된 릴스 {stats.hits.total}개 중 영상을 직접 본 건 {stats.hits.video}개뿐이에요. 나머지는 표지와 캡션만 봐서 특징을 판단하기엔 적어요.
+        </p>
       )}
 
       {summary.points.length > 0 && (
@@ -115,6 +123,7 @@ export function BenchmarkInsightPanel({ insight, hasHits }: { insight: Insight |
       <details className="rounded-md bg-surface-2 px-3 py-2.5" open={summary.points.length === 0}>
         <summary className="cursor-pointer text-[13px] font-semibold">영상 스타일 자세히</summary>
         {summary.styleSummary && <p className="mt-2 text-[13px] text-ink-2">{summary.styleSummary}</p>}
+        {dimensions.length > 0 && (
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-[420px]">
             <thead>
@@ -131,10 +140,11 @@ export function BenchmarkInsightPanel({ insight, hasHits }: { insight: Insight |
             </tbody>
           </table>
         </div>
+        )}
       </details>
 
       <p className="text-xs text-muted-foreground">
-        영상을 본 릴스 {videos}개, 표지와 캡션만 본 릴스 {covers}개예요. 인스타가 영상 주소를 안 주는 릴스는 표지만 봐요. 영상은 분석 뒤 바로 지우고 저장하지 않아요.
+        영상을 본 릴스 {videos}개, 표지와 캡션만 본 릴스 {covers}개예요. 인스타가 영상 주소를 안 주는 릴스(저작권 음원이 든 릴스 등)는 표지만 봐서, 영상 스타일은 음악 위주 릴스가 덜 반영돼요. 영상은 분석 뒤 바로 지우고 저장하지 않아요.
         {summary.caution && ` ${summary.caution}`} 많이 나왔다고 그게 원인인 건 아니니 시험해 보고 판단하세요.
       </p>
     </section>

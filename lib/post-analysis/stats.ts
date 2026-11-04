@@ -86,6 +86,9 @@ function halfOf(iso: string): string {
   return `${d.getUTCFullYear()}${d.getUTCMonth() < 6 ? "상" : "하"}`;
 }
 
+/** 글자 수 자르기 — 이모지 한가운데서 잘리면 깨진 글자가 남아 OpenAI · jsonb가 거절한다(2026-11-04 실측 400 Invalid body). */
+export const clip = (s: string, n: number) => s.slice(0, n).replace(/\p{Cs}/gu, "");
+
 const round = (n: number | null, digits = 1) => (n == null ? null : Math.round(n * 10 ** digits) / 10 ** digits);
 
 export interface TopicLift {
@@ -221,7 +224,7 @@ export function computeStats(rows: ReelRow[], captions: Map<string, string>, now
     overall2xRate: valid.length ? Math.round((valid.filter(over2xOfHalf).length / valid.length) * 100) : 0,
     topics: topicLifts,
     top: rankBy.slice(0, 12).map((r) => ({
-      title: r.title.slice(0, 60),
+      title: clip(r.title, 60),
       views: r.views as number,
       x: round(x(r)) as number,
       date: r.postedAt ? kstDay(r.postedAt) : null,
@@ -231,6 +234,6 @@ export function computeStats(rows: ReelRow[], captions: Map<string, string>, now
       event: isEventLike(caption(r)),
       ad: isAdEstimated(r),
     })),
-    bottom: rankBy.slice(-8).map((r) => ({ title: r.title.slice(0, 60), views: r.views as number, x: round(x(r), 2) as number, date: r.postedAt ? kstDay(r.postedAt) : null })),
+    bottom: rankBy.slice(-8).map((r) => ({ title: clip(r.title, 60), views: r.views as number, x: round(x(r), 2) as number, date: r.postedAt ? kstDay(r.postedAt) : null })),
   };
 }

@@ -1,5 +1,6 @@
 import "@/lib/platforms/server-guard";
 import { instagramRequest } from "@/lib/platforms/instagram-comments";
+import { clip } from "@/lib/post-analysis/stats";
 
 // 다른 계정 읽기 — Meta Business Discovery (graph.facebook.com, 시스템 사용자 mcb 키).
 //
@@ -81,5 +82,5 @@ export function firstLine(caption: string | null | undefined): string {
     out = out ? `${out} ${line}` : line;
     if (out.length >= HOOK_MIN) break;
   }
-  return out.slice(0, HOOK_MAX);
+  return clip(out, HOOK_MAX);
 }

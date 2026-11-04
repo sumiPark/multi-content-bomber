@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { z } from "zod";
 import { agentModel } from "@/lib/agents/runner";
 import { numbersBacked, type Usage } from "@/lib/post-analysis/interpret";
+import { clip } from "@/lib/post-analysis/stats";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import { probe, snapshot } from "@/lib/shoot/ffmpeg";
@@ -15,7 +16,8 @@ import { CONTENT_FORMAT, OPENING, PERSON, SCREEN_TEXT, SHOOTING, type InsightSum
 // 다른 계정 릴스 영상 스타일 판정 — GitHub Actions 러너(apt ffmpeg)에서만 돈다. Vercel에서 부르면 안 된다.
 //
 // 영상 · 프레임 · 음성은 임시 폴더에서 분석하고 바로 지운다. 저장하는 건 판정 값과 짧은 메모뿐이다.
-// 인스타가 영상 주소를 안 주는 릴스가 많다(2026-11-04 실측 bluebottle 3/4, jjoongb 0/9) — 그럴 땐 표지와 캡션만 본다.
+// 인스타가 영상 주소를 안 주는 릴스가 많다(2026-11-04 실측 릴스 546개 중 184개만 있음) — 그럴 땐 표지와 캡션만 본다.
+// Meta 문서상 저작권 음원이 든 릴스는 주소가 빠지므로, 영상을 본 릴스는 말하는 영상 쪽으로 치우칠 수 있다.
 
 const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
 const MAX_BYTES = 150 * 1024 * 1024;
@@ -65,7 +67,7 @@ async function transcribeOpening(file: string, dir: string, usage: { audioSec: n
     .map((s) => s.text.trim())
     .join(" ")
     .trim();
-  return { speech: text.length >= SPEECH_MIN_CHARS, firstWords: text.slice(0, 120) };
+  return { speech: text.length >= SPEECH_MIN_CHARS, firstWords: clip(text, 120) };
 }
 
 async function frameUrl(input: string | Buffer): Promise<string> {
@@ -128,7 +130,7 @@ export async function analyzeVideo(url: string, caption: string, usage: Usage & 
       }
     }
 
-    const judged = await judge(images, `캡션 앞부분: ${caption.slice(0, 200) || "(없음)"}\n받아쓰기 앞부분: ${spoken.firstWords || "(말 없음)"}\n길이 ${Math.round(duration)}초`, usage);
+    const judged = await judge(images, `캡션 앞부분: ${clip(caption, 200) || "(없음)"}\n받아쓰기 앞부분: ${spoken.firstWords || "(말 없음)"}\n길이 ${Math.round(duration)}초`, usage);
     return {
       ...judged,
       durationSec: Math.round(duration * 10) / 10,
@@ -145,7 +147,7 @@ export async function analyzeCover(thumbnailUrl: string, caption: string, usage:
   const res = await fetch(thumbnailUrl, { signal: AbortSignal.timeout(20_000) });
   if (!res.ok) throw new Error(`표지 받기 실패 ${res.status}`);
   const image = await frameUrl(Buffer.from(await res.arrayBuffer()));
-  return judge([image], `표지 한 장만 있어요. 캡션 앞부분: ${caption.slice(0, 200) || "(없음)"}`, usage);
+  return judge([image], `표지 한 장만 있어요. 캡션 앞부분: ${clip(caption, 200) || "(없음)"}`, usage);
 }
 
 const summarySchema = z.object({

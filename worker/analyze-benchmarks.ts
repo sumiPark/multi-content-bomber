@@ -6,6 +6,7 @@ import { agentModel } from "@/lib/agents/runner";
 import { firstLine, HIT_MULTIPLE } from "@/lib/benchmark/discovery";
 import { computeStyleStats, type ReelStyle, type StyleRow, type StyleSource } from "@/lib/benchmark/style-stats";
 import { analyzeCover, analyzeVideo, writeInsight } from "@/lib/benchmark/video-style";
+import { clip } from "@/lib/post-analysis/stats";
 import { checkText, type ContentRule } from "@/lib/rules/check";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
@@ -55,13 +56,13 @@ function arg(argv: string[], flag: string): string | undefined {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
-/** 잘된 릴스와, 같은 계정에서 시기가 가장 가까운 평소 릴스를 짝지어 고른다. */
+/** 잘된 릴스와, 같은 계정에서 시기가 가장 가까운 평소 릴스를 짝지어 고른다. 영상을 볼 수 있는 릴스를 먼저 고른다. */
 function pickReels(posts: Post[], now: number): { hits: Post[]; normals: Post[] } {
   const matured = posts.filter((p) => !p.ad_suspected && p.multiple != null && p.posted_at && now - Date.parse(p.posted_at) >= YOUNG_DAYS * DAY_MS);
   const perAccount = new Map<string, number>();
   const hits = matured
     .filter((p) => (p.multiple as number) >= HIT_MULTIPLE && (p.multiple as number) < CAMPAIGN_MULTIPLE)
-    .sort((a, b) => (b.multiple as number) - (a.multiple as number))
+    .sort((a, b) => Number(!!b.video_url) - Number(!!a.video_url) || (b.multiple as number) - (a.multiple as number))
     .filter((p) => {
       const n = perAccount.get(p.benchmark_account_id) ?? 0;
       if (n >= HITS_PER_ACCOUNT) return false;
@@ -75,7 +76,7 @@ function pickReels(posts: Post[], now: number): { hits: Post[]; normals: Post[] 
     const at = Date.parse(h.posted_at as string);
     const best = matured
       .filter((p) => p.benchmark_account_id === h.benchmark_account_id && !used.has(p.id) && (p.multiple as number) >= NORMAL_RANGE[0] && (p.multiple as number) <= NORMAL_RANGE[1])
-      .sort((a, b) => Math.abs(Date.parse(a.posted_at as string) - at) - Math.abs(Date.parse(b.posted_at as string) - at))[0];
+      .sort((a, b) => Number(!!b.video_url) - Number(!!a.video_url) || Math.abs(Date.parse(a.posted_at as string) - at) - Math.abs(Date.parse(b.posted_at as string) - at))[0];
     if (!best) return [];
     used.add(best.id);
     return [best];
@@ -244,7 +245,7 @@ async function main() {
       const styleById = new Map(hitRows.map((r) => [r.id, r.style]));
       const reels = hits.flatMap((p) => {
         const s = styleById.get(p.id);
-        return s ? [{ username: usernames.get(p.benchmark_account_id) ?? "", multiple: p.multiple as number, hookLine: s.hookLine || firstLine(p.caption).slice(0, 40), note: s.note }] : [];
+        return s ? [{ username: usernames.get(p.benchmark_account_id) ?? "", multiple: p.multiple as number, hookLine: s.hookLine || clip(firstLine(p.caption), 40), note: s.note }] : [];
       });
       const { summary, dropped } = await writeInsight(label, account.role_note, stats, reels, insightUsage);
       // 그대로 쓰면 광고 문구 규칙에 걸리는 제안은 뺀다
