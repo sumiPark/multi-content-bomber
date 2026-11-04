@@ -33,8 +33,23 @@ export interface ProfileSnapshot {
   profile_picture_url: string | null;
   // 다시 채점할지 정하는 기준 (score-profile.ts profileFingerprint)
   fingerprint?: string;
+  // 피드 진열 분석 (표지를 받지 못했으면 없음)
+  feed_review?: FeedReview;
   // 어디서 온 값인지 — 화면에서 "API" / "직접 입력" 표시
   source: Record<string, "api" | "manual">;
+}
+
+export const FEED_CHECK_IDS = ["unity", "legibility", "identity", "rhythm"] as const;
+export type FeedCheckId = (typeof FEED_CHECK_IDS)[number];
+export type FeedVerdict = "good" | "mixed" | "poor";
+
+export interface FeedReview {
+  // media 버킷 경로 — 조직/profile-feed/계정/채점.jpg (AI가 본 그 이미지)
+  mosaic_path: string | null;
+  cells: number;
+  summary: string;
+  checks: { id: FeedCheckId; verdict: FeedVerdict; finding: string }[];
+  suggestions: string[];
 }
 
 export const REVIEW_ITEM_IDS = [

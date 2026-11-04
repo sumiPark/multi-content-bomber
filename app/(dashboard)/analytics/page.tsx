@@ -18,6 +18,7 @@ import { AnalyticsTabs, type AnalyticsTab } from "@/components/analytics/analyti
 import { CollectNowButton } from "@/components/analytics/collect-now-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import type { ProfileSnapshot } from "@/lib/account-review/types";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { loadBenchmark } from "@/lib/benchmark/load";
 
@@ -158,6 +159,22 @@ export default async function AnalyticsPage({
   const tab: AnalyticsTab =
     tabParam === "profile" || tabParam === "posts" || tabParam === "compare" ? tabParam : collected && scoredCount === 0 ? "posts" : "profile";
 
+  // 피드 진열 분석 이미지 — 비공개 저장소라 프로필 점수 탭을 열 때 서명 주소를 만든다
+  const feedImages = new Map<string, string>();
+  if (tab === "profile") {
+    const paths = scoreAccounts.flatMap((a) => {
+      const snap = reviewsByAccount.get(a.id)?.find((r) => r.status === "DONE")?.snapshot as ProfileSnapshot | undefined;
+      return snap?.feed_review?.mosaic_path ? [{ id: a.id, path: snap.feed_review.mosaic_path }] : [];
+    });
+    if (paths.length) {
+      const { data: signed } = await supabase.storage.from("media").createSignedUrls(paths.map((p) => p.path), 3600);
+      for (const p of paths) {
+        const url = signed?.find((x) => x.path === p.path)?.signedUrl;
+        if (url) feedImages.set(p.id, url);
+      }
+    }
+  }
+
   // 다른 계정 비교(0037) — 탭 숫자용 건수는 항상, 내용은 그 탭을 열 때만 읽는다
   const { data: linkRows } = await supabase.from("benchmark_links").select("social_account_id, benchmark_account_id");
   const compareCount = new Set((linkRows ?? []).map((l) => l.benchmark_account_id)).size;
@@ -222,7 +239,7 @@ export default async function AnalyticsPage({
               {scoreAccounts
                 .filter((a) => a.active)
                 .map((a) => (
-                  <ProfileScoreCard key={a.id} account={a} history={reviewsByAccount.get(a.id) ?? []} />
+                  <ProfileScoreCard key={a.id} account={a} history={reviewsByAccount.get(a.id) ?? []} feedImageUrl={feedImages.get(a.id) ?? null} />
                 ))}
             </section>
           ) : !collected ? (

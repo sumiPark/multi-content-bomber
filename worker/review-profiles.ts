@@ -1,6 +1,7 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
 
+import { writeFileSync } from "fs";
 import { getProfileDetails, type ProfileDetails } from "@/lib/account-review/instagram-profile";
 import { profileFingerprint, scoreProfile } from "@/lib/account-review/score-profile";
 import type { ProfileManualInput, ProfileSnapshot } from "@/lib/account-review/types";
@@ -24,7 +25,8 @@ import type { Json } from "@/types/database";
 //   3. 채점 → profile_reviews DONE. 캡처에서 읽은 값(manual_input)은 마지막 행에서 이어받는다.
 // 대기 요청(PENDING, 캡처 저장)은 그 계정 차례에 같이 처리한다. 20분 넘게 RUNNING이면 멈춘 것으로 본다.
 //
-// 옵션: --dry-run (DB에 안 씀) · --account <id> (그 계정만) · --force (바뀐 게 없어도 채점)
+// 옵션: --dry-run (DB에 안 씀) · --account <id> (그 계정만) · --force (바뀐 게 없어도 채점) ·
+//       --mosaic-out <파일> (dry-run 때 피드 합성 이미지 저장)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STALE_MS = 20 * 60_000;
@@ -94,7 +96,7 @@ async function reviewAccount(
   service: Service,
   account: AccountRow,
   rules: ContentRule[],
-  opts: { dryRun: boolean; force: boolean; today: string },
+  opts: { dryRun: boolean; force: boolean; today: string; mosaicOut?: string },
 ): Promise<string> {
   const label = account.display_name ?? account.id;
   const { data: rows } = await service
@@ -145,7 +147,8 @@ async function reviewAccount(
 
   // 2. 다시 채점할지
   const lastSnap = (lastDone?.snapshot ?? null) as ProfileSnapshot | null;
-  const changed = !lastSnap || lastSnap.fingerprint !== profileFingerprint(api, manual);
+  // 피드 진열 분석이 없는 옛 채점도 다시 한다
+  const changed = !lastSnap || !lastSnap.feed_review || lastSnap.fingerprint !== profileFingerprint(api, manual);
   const old = !lastDone?.finished_at || now - Date.parse(lastDone.finished_at) > RESCORE_DAYS * DAY_MS;
   if (!opts.force && pending.length === 0 && !changed && !old) {
     return `${label}: 바뀐 것 없음 — 채점 안 함 (스토리 ${api.liveStories ?? "?"}개)`;
@@ -195,8 +198,20 @@ async function reviewAccount(
       rules,
     });
     if (opts.dryRun) {
-      console.log(JSON.stringify({ items: result.items, rewrites: result.rewrites, summary: result.summary }, null, 2));
+      console.log(JSON.stringify({ items: result.items, rewrites: result.rewrites, summary: result.summary, feed: result.snapshot.feed_review }, null, 2));
+      if (result.feedMosaic && opts.mosaicOut) writeFileSync(opts.mosaicOut, result.feedMosaic);
     } else {
+      // 피드 합성 이미지 — 하위 폴더라 임시 저장 정리(cleanup-drafts)가 보지 않는다. 못 올려도 채점 결과는 저장한다.
+      if (result.feedMosaic && result.snapshot.feed_review) {
+        const path = `${account.organization_id}/profile-feed/${account.id}/${reviewId}.jpg`;
+        const { error: upErr } = await service.storage.from("media").upload(path, result.feedMosaic, { contentType: "image/jpeg", upsert: true });
+        if (upErr) console.warn(`[review-profiles] ${label}: 피드 이미지 저장 실패: ${upErr.message}`);
+        else {
+          result.snapshot.feed_review.mosaic_path = path;
+          const oldPath = lastSnap?.feed_review?.mosaic_path;
+          if (oldPath && oldPath !== path) await service.storage.from("media").remove([oldPath]);
+        }
+      }
       await service
         .from("profile_reviews")
         .update({
@@ -257,7 +272,7 @@ async function main() {
   let failed = 0;
   for (const account of accounts as AccountRow[]) {
     try {
-      console.log(`[review-profiles] ${await reviewAccount(service, account, rules, { dryRun, force, today })}`);
+      console.log(`[review-profiles] ${await reviewAccount(service, account, rules, { dryRun, force, today, mosaicOut: arg(argv, "--mosaic-out") })}`);
     } catch (err) {
       failed++;
       console.error(`[review-profiles] ${err instanceof Error ? err.message : String(err)}`);

@@ -1,11 +1,12 @@
 import { AlertTriangle, ArrowDown, ArrowUp, Loader2, Unplug } from "lucide-react";
 import Link from "next/link";
 import { CopyButton } from "@/components/account-review/copy-button";
+import { FeedReviewSection } from "@/components/account-review/feed-review";
 import { ScreenshotUpload } from "@/components/account-review/screenshot-upload";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { RelativeTime } from "@/components/ui/relative-time";
-import type { ProfileManualInput, ReviewItem, ReviewRewrite, ReviewStatus } from "@/lib/account-review/types";
+import type { ProfileManualInput, ProfileSnapshot, ReviewItem, ReviewRewrite, ReviewStatus } from "@/lib/account-review/types";
 import { cn } from "@/lib/utils";
 
 // 분석 · 프로필 점수 — 요약 칸(계정마다 점수 막대 하나) + 계정별 상세(항목 막대 · 고칠 순서).
@@ -280,8 +281,18 @@ function Rewrites({ rewrites, start = 0 }: { rewrites: ReviewRewrite[]; start?: 
 
 const TOP_REWRITES = 3;
 
-export function ProfileScoreCard({ account, history }: { account: ProfileScoreAccount; history: ReviewRow[] }) {
+export function ProfileScoreCard({
+  account,
+  history,
+  feedImageUrl,
+}: {
+  account: ProfileScoreAccount;
+  history: ReviewRow[];
+  // 피드 합성 이미지의 서명 주소 (저장소는 비공개)
+  feedImageUrl: string | null;
+}) {
   const s = summarize(history);
+  const snapshot = (s.latest?.snapshot ?? null) as ProfileSnapshot | null;
   // 캡처 값은 가장 최근 행에서 이어받는다(워커와 같은 규칙)
   const current = (history[0]?.manual_input ?? {}) as ProfileManualInput;
   const top = s.rewrites.slice(0, TOP_REWRITES);
@@ -360,6 +371,10 @@ export function ProfileScoreCard({ account, history }: { account: ProfileScoreAc
             <ScreenshotUpload accountId={account.id} current={current} />
           </div>
         </div>
+
+        {snapshot?.feed_review && (
+          <FeedReviewSection review={snapshot.feed_review} imageUrl={feedImageUrl} pinnedCount={snapshot.pinned_count} />
+        )}
 
         {s.latest && (
           <div className="grid gap-6 border-t pt-5 xl:grid-cols-2">

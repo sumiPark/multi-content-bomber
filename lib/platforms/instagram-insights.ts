@@ -134,9 +134,9 @@ export async function listRecentMedia(
         mediaType: m.media_type ?? null,
         mediaProductType: m.media_product_type ?? null,
         permalink: m.permalink ?? null,
-        // 영상은 thumbnail_url, 이미지는 media_url이 미리보기.
+        // 영상은 thumbnail_url, 이미지 · 캐러셀(첫 장)은 media_url이 미리보기.
         thumbnailUrl:
-          m.thumbnail_url ?? (m.media_type === "IMAGE" ? m.media_url ?? null : null),
+          m.thumbnail_url ?? (m.media_type !== "VIDEO" ? m.media_url ?? null : null),
         timestamp: m.timestamp ?? null,
         likeCount: m.like_count ?? null,
         commentsCount: m.comments_count ?? null,
