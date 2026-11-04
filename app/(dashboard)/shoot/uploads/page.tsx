@@ -1,79 +1,67 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Video } from "lucide-react";
-import { ShootRequestCard, type ShootRequestCardData } from "@/components/shoot/shoot-request-card";
+import { ChevronRight, Video } from "lucide-react";
+import { AccountTabs } from "@/components/shoot/account-tabs";
+import { AutoRefresh } from "@/components/ui/auto-refresh";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
-import { AutoRefresh } from "@/components/ui/auto-refresh";
+import { ideaTitleOf, REQUEST_SELECT, REQUEST_STATUS, type RequestRow } from "@/lib/shoot/request-data";
 
-// 촬영 · 올리기 — 고른 기획마다 AI가 쓴 컷 목록대로 찍고, 컷마다 휴대폰에서 바로 올린다.
-// 큰 파일은 끊겨도 이어서 올라간다(tus). 다 올리면 자동 편집으로 넘어간다.
-
-type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; done?: boolean; skipped?: boolean };
-type Clip = { cut: number; name: string; size: number };
-type SavedShotlist = {
-  hooks?: { spoken: string; on_screen: string; score?: number | null }[];
-  chosen_hook?: number;
-  caption?: { text: string };
-  fixed?: { hook?: unknown; notes?: string[] };
-};
+// 촬영 · 올리기 목록 — 고른 기획을 짧은 줄로 보여 주고, 줄을 누르면 상세(/shoot/uploads/[id])에서 컷을 보고 올린다.
 
 export const metadata = { title: "촬영 · 올리기 | MCB" };
 
-export default async function ShootUploadsPage() {
+// 사람 차례인 것부터
+const ORDER: Record<string, number> = { OPEN: 0, FAILED: 1, EDITED: 2, UPLOADED: 3, EDITING: 4 };
+
+export default async function ShootUploadsPage({ searchParams }: { searchParams: Promise<{ account?: string }> }) {
   const user = await getSessionUser();
   if (!user) redirect("/login");
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
   const supabase = await getServerSupabase();
+  const { account: accountParam } = await searchParams;
 
-  const { data: requests } = await supabase
+  const { data } = await supabase
     .from("shoot_requests")
-    .select(
-      "id, status, cuts, clips, created_at, error, content_plans!inner(id, status, human_brief, script, check_result, social_accounts(display_name), products(name, url, represent_image_url))",
-    )
+    .select(REQUEST_SELECT)
     .in("status", ["OPEN", "UPLOADED", "EDITING", "EDITED", "FAILED"])
-    // 받거나 올린 뒤의 기획은 완성본 받기에서 본다
+    // 올린 뒤의 기획은 완성본 받기에서 본다
     .in("content_plans.status", ["SCRIPTED", "SHOT", "RENDERED"])
     .order("created_at", { ascending: true });
 
-  const cards: ShootRequestCardData[] = (requests ?? [])
+  const rows = (data ?? [])
     .map((r) => {
-      const plan = r.content_plans;
-      const script = (plan.script ?? {}) as SavedShotlist;
-      const hook = script.hooks?.[script.chosen_hook ?? 0];
+      const row = r as unknown as RequestRow;
+      const cuts = ((r.cuts ?? []) as unknown as { no: number; skipped?: boolean; seconds?: number }[]).filter((c) => !c.skipped);
+      const clips = (r.clips ?? []) as unknown as { cut: number }[];
+      const product = row.content_plans.products;
       return {
         id: r.id,
         status: r.status,
-        account: plan.social_accounts?.display_name ?? "",
-        product: plan.products ? { name: plan.products.name, url: plan.products.url, image: plan.products.represent_image_url } : null,
-        brief: plan.human_brief,
-        hook: hook ? { spoken: hook.spoken, onScreen: hook.on_screen, score: hook.score ?? null } : null,
-        caption: script.caption?.text ?? "",
-        fixedHook: !!script.fixed?.hook,
-        fixedNotes: script.fixed?.notes ?? [],
-        cuts: ((r.cuts ?? []) as Cut[]).map((c) => ({
-          no: c.no,
-          seconds: c.seconds,
-          shot: c.shot,
-          how: c.how,
-          onScreen: c.on_screen,
-          voice: c.voice,
-          done: !!c.done,
-          skipped: !!c.skipped,
-        })),
-        clips: ((r.clips ?? []) as Clip[]).map((c) => ({ cut: c.cut, name: c.name, size: c.size })),
-        // 찍는 사람이 고칠 수 있는 것만(화면 문구 · 대사) — 캡션 · 말투 점수는 찍을 때 고칠 수 없다
-        issues: ((plan.check_result as { issues?: { kind?: string; detail: string }[] } | null)?.issues ?? [])
-          .filter((i) => i.kind !== "caption" && i.kind !== "tone" && i.kind !== "hook")
-          .map((i) => i.detail),
-        error: r.error,
+        accountId: r.content_plans.social_account_id,
+        account: row.content_plans.social_accounts?.display_name ?? "",
+        title: ideaTitleOf(row.content_plans.proposal) ?? product?.name ?? "기획",
+        productName: product?.name ?? null,
+        image: product?.represent_image_url ?? null,
+        total: cuts.length,
+        uploaded: cuts.filter((c) => clips.some((k) => k.cut === c.no)).length,
+        seconds: Math.round(cuts.reduce((sum, c) => sum + (c.seconds ?? 0), 0)),
       };
-    });
+    })
+    .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9));
 
-  const open = cards.filter((c) => c.status === "OPEN").length;
-  const working = cards.some((c) => c.status === "UPLOADED" || c.status === "EDITING");
+  const accounts = new Map<string, { name: string; count: number }>();
+  for (const r of rows) accounts.set(r.accountId, { name: r.account, count: (accounts.get(r.accountId)?.count ?? 0) + 1 });
+  const active = accountParam && accounts.has(accountParam) ? accountParam : "all";
+  const visible = active === "all" ? rows : rows.filter((r) => r.accountId === active);
+  const open = rows.filter((r) => r.status === "OPEN").length;
+  const working = rows.some((r) => r.status === "UPLOADED" || r.status === "EDITING");
+  const tabs = [
+    { key: "all", label: "전체", count: rows.length, href: "/shoot/uploads" },
+    ...[...accounts.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name)).map(([id, a]) => ({ key: id, label: `@${a.name}`, count: a.count, href: `/shoot/uploads?account=${id}` })),
+  ];
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
@@ -83,31 +71,66 @@ export default async function ShootUploadsPage() {
           <h1 className="text-xl font-bold tracking-[-0.01em]">촬영 · 올리기</h1>
           {open > 0 && <Badge>찍을 것 {open}건</Badge>}
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          컷 목록대로 찍고 <b>컷마다 휴대폰에서 바로 올리세요.</b> 큰 영상은 끊겨도 같은 파일을 다시 고르면 이어서 올라가요. 다 올리면 AI가 컷을 잇고
-          화면 문구를 입혀요.
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+          찍을 영상을 눌러 컷 목록을 보고 <b>컷마다 휴대폰에서 바로 올리세요.</b> 다 올리면 AI가 컷을 잇고 화면 문구를 입혀요.
         </p>
       </header>
 
-      {cards.length === 0 ? (
+      {rows.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <Video className="size-10 text-muted-foreground" />
-            <h2 className="text-base font-semibold">지금 찍을 촬영 요청이 없어요</h2>
+            <h2 className="text-base font-semibold">지금 찍을 영상이 없어요</h2>
             <p className="max-w-md text-sm text-muted-foreground">
               <Link href="/shoot/plans" className="underline">
                 촬영 기획 고르기
               </Link>
-              에서 찍을 거리를 고르면 몇 분 뒤 여기에 컷 목록이 생겨요.
+              에서 찍을 거리를 고르면 몇 분 뒤 여기에 생겨요.
             </p>
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
-          {cards.map((c) => (
-            <ShootRequestCard key={c.id} request={c} orgId={profile.organization_id!} userId={user.id} />
-          ))}
-        </div>
+        <>
+          {accounts.size > 1 && <AccountTabs tabs={tabs} active={active} label="계정별 보기" />}
+          <ul className="divide-y overflow-hidden rounded-lg border bg-card">
+            {visible.map((r) => {
+              const s = REQUEST_STATUS[r.status] ?? { label: r.status, variant: "outline" as const };
+              const percent = r.total ? Math.round((r.uploaded / r.total) * 100) : 0;
+              return (
+                <li key={r.id}>
+                  <Link href={`/shoot/uploads/${r.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2">
+                    {r.image ? (
+                      // 몰 CDN 이미지
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={r.image} alt="" className="size-12 shrink-0 rounded object-cover" />
+                    ) : (
+                      <span className="size-12 shrink-0 rounded bg-muted" />
+                    )}
+                    <span className="min-w-0 flex-1 space-y-1">
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="text-sm font-semibold">{r.title}</span>
+                        <Badge variant={s.variant}>{s.label}</Badge>
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        @{r.account}
+                        {r.productName && r.productName !== r.title && ` · ${r.productName}`}
+                      </span>
+                      {r.status === "OPEN" && (
+                        <span className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
+                          <span className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-3" aria-hidden>
+                            <span className="block h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
+                          </span>
+                          컷 {r.uploaded}/{r.total} 올림 · 약 {r.seconds}초
+                        </span>
+                      )}
+                    </span>
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </main>
   );

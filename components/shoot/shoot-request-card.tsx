@@ -16,16 +16,18 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
+import { REQUEST_STATUS } from "@/lib/shoot/request-data";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
-// 촬영 요청 하나 — 컷 목록(찍을 것 · 찍는 법 · 화면 문구 · 대사), 컷마다 촬영본 올리기, 다 올렸어요.
+// 촬영 요청 하나(상세 화면) — 컷 목록(찍을 것 · 찍는 법 · 화면 문구 · 대사), 컷마다 촬영본 올리기, 다 올렸어요.
 // 업로드는 Supabase Storage의 tus(이어 올리기) 엔드포인트로 — 휴대폰에서 끊겨도 같은 파일을 다시 고르면 이어서 올라간다.
 
 export interface ShootRequestCardData {
   id: string;
   status: string;
   account: string;
+  ideaTitle: string | null;
   product: { name: string; url: string; image: string | null } | null;
   brief: string | null;
   hook: { spoken: string; onScreen: string; score: number | null } | null;
@@ -38,14 +40,6 @@ export interface ShootRequestCardData {
   issues: string[];
   error: string | null;
 }
-
-const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" | "ok" }> = {
-  OPEN: { label: "촬영 중", variant: "default" },
-  UPLOADED: { label: "다 올림 · 편집 대기", variant: "secondary" },
-  EDITING: { label: "자동 편집 중", variant: "secondary" },
-  EDITED: { label: "편집 완료", variant: "ok" },
-  FAILED: { label: "편집 실패", variant: "destructive" },
-};
 
 // media 버킷이 받는 영상 형식(0005)
 const VIDEO_TYPES: Record<string, string> = { "video/mp4": "mp4", "video/quicktime": "mov" };
@@ -85,7 +79,7 @@ function useRun() {
 
 export function ShootRequestCard({ request, orgId, userId }: { request: ShootRequestCardData; orgId: string; userId: string }) {
   const { isPending, error, run } = useRun();
-  const s = STATUS[request.status] ?? { label: request.status, variant: "outline" as const };
+  const s = REQUEST_STATUS[request.status] ?? { label: request.status, variant: "outline" as const };
   const open = request.status === "OPEN";
   const clipOf = new Map(request.clips.map((c) => [c.cut, c]));
   const activeCuts = request.cuts.filter((c) => !c.skipped);

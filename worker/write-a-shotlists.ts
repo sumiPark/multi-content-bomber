@@ -89,7 +89,11 @@ async function main() {
 
       const proposal = (plan.proposal ?? {}) as { ideas?: PlanAIdea[]; chosen?: number | null };
       const chosen = proposal.chosen != null ? proposal.ideas?.[proposal.chosen] : undefined;
-      const idea = chosen && chosen.product_id === plan.product_id ? { title: chosen.title, format: chosen.format, concept: chosen.concept } : null;
+      // 사람이 초안을 읽고 골랐으니 컷 리스트도 그 흐름을 따른다
+      const draftText = chosen?.draft
+        ? `\n사람이 읽고 고른 대본 초안 — 이 흐름과 첫 문장을 유지하고, 규칙에 걸리는 표현과 근거 없는 내용만 고친다.\n첫 문장: ${chosen.draft.hook}\n${chosen.draft.beats.map((b) => `- ${b.scene}: ${b.line}`).join("\n")}`
+        : "";
+      const idea = chosen && chosen.product_id === plan.product_id ? { title: chosen.title, format: chosen.format, concept: `${chosen.concept}${draftText}` } : null;
 
       const concept = await loadAccountConcept(service, plan.social_account_id);
       const hasPhrases = concept.shootHooks.length > 0 || concept.shootEndings.length > 0;

@@ -12,7 +12,8 @@ import type { Json } from "@/types/database";
 // 직접 촬영 기획 워커 — 촬영 설정에서 켠 계정(track_settings.shoot_enabled)의 기획 목록을 계정당 5개로 유지한다.
 // 날짜 · 시각은 없다. 사람은 찍을 수 있을 때 "촬영 기획 고르기"에서 고른다(2026-11-04 사용자 결정).
 //
-// 1. 정리: 판매 중이 아니거나 쓸 수 없게 된 상품의 기획, 14일 동안 안 고른 기획을 목록에서 뺀다(건너뜀으로 남긴다)
+// 1. 정리: 판매 중이 아니거나 쓸 수 없게 된 상품의 기획, 14일 동안 안 고른 기획을 목록에서 뺀다(건너뜀으로 남긴다).
+//    대본 초안이 없는 기획은 사람이 보고 고를 수 없어 지우고 새로 만든다(같은 상품을 다시 낼 수 있게 건너뜀으로 남기지 않는다)
 // 2. 채우기: 계정마다 모자란 만큼만 AI가 기획한다. 5개가 다 있으면 AI를 부르지 않는다
 //
 // 옵션: --dry-run (DB에 안 씀) · --account <display_name>
@@ -33,7 +34,7 @@ type Service = ReturnType<typeof createServiceClient>;
 async function tidyList(service: Service, accountId: string, dryRun: boolean): Promise<number> {
   const { data, error } = await service
     .from("content_plans")
-    .select("id, created_at, products(stock_status, excluded, analysis_state)")
+    .select("id, created_at, proposal, products(stock_status, excluded, analysis_state)")
     .eq("social_account_id", accountId)
     .eq("track", "A")
     .eq("status", "PROPOSED");
@@ -42,16 +43,22 @@ async function tidyList(service: Service, accountId: string, dryRun: boolean): P
   const cutoff = Date.now() - KEEP_DAYS * 86_400_000;
   const notSelling: string[] = [];
   const old: string[] = [];
+  const noDraft: string[] = [];
   for (const p of data ?? []) {
     const product = p.products;
+    if (!(p.proposal as { ideas?: { draft?: unknown }[] } | null)?.ideas?.[0]?.draft) {
+      noDraft.push(p.id);
+      continue;
+    }
     if (!product || product.stock_status !== "available" || product.excluded || product.analysis_state !== "ready") notSelling.push(p.id);
     else if (Date.parse(p.created_at) < cutoff) old.push(p.id);
   }
   if (!dryRun) {
+    if (noDraft.length) await service.from("content_plans").delete().in("id", noDraft).eq("status", "PROPOSED");
     if (notSelling.length) await service.from("content_plans").update({ status: "SKIPPED", note: "판매 중이 아니게 돼 목록에서 뺐어요" }).in("id", notSelling).eq("status", "PROPOSED");
     if (old.length) await service.from("content_plans").update({ status: "SKIPPED", note: `${KEEP_DAYS}일 동안 고르지 않아 새 기획으로 바꿨어요` }).in("id", old).eq("status", "PROPOSED");
   }
-  return notSelling.length + old.length;
+  return notSelling.length + old.length + noDraft.length;
 }
 
 async function main() {
@@ -122,7 +129,8 @@ async function main() {
       console.log(`[plan-a] @${acc.display_name} ${need}개 요청 → ${result.output.ideas.length}개 — 스킬 ${result.skillCalls.length}번 · 토큰 입력 ${result.tokens.input} · 출력 ${result.tokens.output}`);
       for (const i of result.output.ideas) {
         picked.add(i.product_id);
-        console.log(`  · [${i.format}] ${i.title} — ${nameOf.get(i.product_id) ?? i.product_id}\n    ${i.concept}\n    이유: ${i.why}`);
+        console.log(`  · [${i.format}] ${i.title} — ${nameOf.get(i.product_id) ?? i.product_id}\n    ${i.concept}\n    이유: ${i.why}\n    첫 문장: ${i.draft.hook}`);
+        for (const b of i.draft.beats) console.log(`      - ${b.scene}: ${b.line}`);
       }
 
       if (!dryRun && result.output.ideas.length) {

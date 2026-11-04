@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { Camera, Plus, RefreshCw, Search, SkipForward, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { Camera, ChevronRight, Plus, RefreshCw, Search, SkipForward, Trash2, X } from "lucide-react";
 import {
   addWantedProductAction,
   chooseIdeaAction,
@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 
-// 촬영 기획 고르기의 부품 — 계정 머리(새로 고침 · 원하는 상품 추가), 목록의 기획 카드, 진행 중인 기획 줄.
+// 촬영 기획 고르기의 부품 — 계정 머리(새로 고침 · 원하는 상품 추가), 기획 목록 + 대본 서랍, 진행 중인 기획 줄.
 
 export interface ShootIdeaData {
   id: string;
@@ -31,11 +31,14 @@ export interface ShootIdeaData {
   format: string;
   concept: string;
   why: string;
+  draft: { hook: string; beats: { scene: string; line: string }[] } | null;
   product: ProductBrief | null;
 }
 
 export interface ShootProgressData {
   id: string;
+  // 촬영 요청이 있으면 그 상세로 바로 간다
+  requestId: string | null;
   status: string;
   title: string | null;
   humanBrief: string | null;
@@ -73,46 +76,145 @@ function useRun() {
   return { isPending, error, run, warning, setWarning };
 }
 
-export function ShootIdeaCard({ idea, canManage }: { idea: ShootIdeaData; canManage: boolean }) {
-  const { isPending, error, run, warning, setWarning } = useRun();
-  const chose = "골랐어요. 찍을 컷 목록을 만들고 있어요.";
+/** 계정 기획 목록 — 짧은 줄로 훑고, 누르면 오른쪽 서랍에서 대본 초안을 읽고 고른다. */
+export function ShootIdeaList({ ideas, account, canManage }: { ideas: ShootIdeaData[]; account: string; canManage: boolean }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = ideas.find((i) => i.id === openId) ?? null;
   return (
-    <article className="flex flex-col gap-2.5 rounded-lg border bg-card p-4">
-      <div className="min-w-0">
-        <h3 className="text-sm font-semibold">{idea.title}</h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">{idea.format}</p>
-      </div>
-      <p className="text-[13px] leading-relaxed">{idea.concept}</p>
-      {idea.product && <ProductRow product={idea.product} compact />}
-      <p className="text-xs text-muted-foreground">AI 이유: {idea.why}</p>
-      {canManage && (
-        <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
-          <Button
-            size="sm"
-            disabled={isPending || !idea.product}
-            onClick={() =>
-              run(
-                () => chooseIdeaAction({ planId: idea.id }),
-                chose,
-                () => chooseIdeaAction({ planId: idea.id, force: true }),
-              )
-            }
-          >
-            <Camera className="size-4" /> 이걸로 찍기
+    <>
+      <ul className="divide-y overflow-hidden rounded-lg border bg-card">
+        {ideas.map((idea) => (
+          <li key={idea.id}>
+            <button type="button" onClick={() => setOpenId(idea.id)} className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-2">
+              {idea.product?.image ? (
+                // 몰 CDN 이미지
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={idea.product.image} alt="" className="size-12 shrink-0 rounded object-cover" />
+              ) : (
+                <span className="size-12 shrink-0 rounded bg-muted" />
+              )}
+              <span className="min-w-0 flex-1 space-y-0.5">
+                <span className="block text-sm font-semibold">
+                  {idea.title} <span className="text-xs font-normal text-muted-foreground">· {idea.format}</span>
+                </span>
+                {idea.draft && <span className="block truncate text-[13px] text-ink-2">“{idea.draft.hook}”</span>}
+                <span className="block truncate text-xs text-muted-foreground">
+                  {idea.product?.name ?? "상품 정보 없음"}
+                  {idea.product && ` · ${won(idea.product.price)}`}
+                </span>
+              </span>
+              <span className="hidden shrink-0 text-xs font-medium text-primary sm:inline">대본 보기</span>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {open && <IdeaDrawer key={open.id} idea={open} account={account} canManage={canManage} onClose={() => setOpenId(null)} />}
+    </>
+  );
+}
+
+function IdeaDrawer({ idea, account, canManage, onClose }: { idea: ShootIdeaData; account: string; canManage: boolean; onClose: () => void }) {
+  const { isPending, error, run, warning, setWarning } = useRun();
+  const ref = useRef<HTMLDialogElement>(null);
+  const chose = "골랐어요. 찍을 컷 목록을 만들고 있어요.";
+  useEffect(() => {
+    const d = ref.current;
+    if (d && !d.open) d.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={ref}
+      onClose={onClose}
+      onClick={(e) => e.target === ref.current && onClose()}
+      aria-label={`${idea.title} 대본`}
+      className="fixed inset-y-0 right-0 left-auto m-0 h-dvh max-h-none w-[480px] max-w-full border-l bg-card p-0 text-foreground shadow-[0_8px_24px_rgb(16_24_40/.12),0_2px_6px_rgb(16_24_40/.08)] backdrop:bg-black/40"
+    >
+      <div className="flex h-full flex-col">
+        <header className="flex items-start justify-between gap-3 border-b px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">
+              @{account} · {idea.format}
+            </p>
+            <h2 className="mt-0.5 text-base font-bold">{idea.title}</h2>
+          </div>
+          <Button size="icon" variant="ghost" className="size-8 shrink-0" aria-label="닫기" onClick={onClose}>
+            <X className="size-4" />
           </Button>
-          <Button size="sm" variant="ghost" className="text-muted-foreground" disabled={isPending} onClick={() => run(() => dismissIdeaAction({ planId: idea.id }), "기획을 지웠어요. 내일 새벽에 새 기획으로 채워요.")}>
-            <Trash2 className="size-4" /> 지우기
-          </Button>
+        </header>
+
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          {idea.product && <ProductRow product={idea.product} />}
+
+          {idea.draft ? (
+            <section className="space-y-2.5">
+              <h3 className="text-[13px] font-semibold text-muted-foreground">대본 초안</h3>
+              <p className="rounded-md bg-brand-soft px-3 py-2.5 text-sm font-semibold">“{idea.draft.hook}”</p>
+              <ol className="space-y-2.5">
+                {idea.draft.beats.map((b, i) => (
+                  <li key={i} className="flex gap-2.5 text-[13px]">
+                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-2 text-xs font-semibold tabular-nums text-ink-2">{i + 1}</span>
+                    <span className="min-w-0">
+                      <span className="block leading-relaxed font-medium">{b.line}</span>
+                      <span className="block text-xs leading-relaxed text-muted-foreground">{b.scene}</span>
+                    </span>
+                  </li>
+                ))}
+              </ol>
+              <p className="text-xs text-muted-foreground">고르면 이 흐름대로 AI가 컷 목록 · 화면 문구 · 캡션을 쓰고 광고 문구 규칙을 점검해요. 그때 문구가 조금 바뀔 수 있어요.</p>
+            </section>
+          ) : (
+            <p className="rounded-md border border-dashed px-3 py-2.5 text-xs text-muted-foreground">이 기획은 대본 초안이 없어요. 내일 새벽에 초안이 있는 기획으로 바뀌어요.</p>
+          )}
+
+          <section className="space-y-1">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">어떻게 찍나요</h3>
+            <p className="text-[13px] leading-relaxed">{idea.concept}</p>
+          </section>
+          <section className="space-y-1">
+            <h3 className="text-[13px] font-semibold text-muted-foreground">AI가 고른 이유</h3>
+            <p className="text-[13px] leading-relaxed">{idea.why}</p>
+          </section>
         </div>
-      )}
-      {error && <p className="text-xs text-risk">{error}</p>}
-      <DuplicateDialog warning={warning} pending={isPending} onClose={() => setWarning(null)} onConfirm={() => {
-        if (!warning) return;
-        const { retry, done } = warning;
-        setWarning(null);
-        run(retry, done);
-      }} />
-    </article>
+
+        {canManage && (
+          <footer className="space-y-2 border-t px-5 py-3">
+            {error && <p className="text-xs text-risk">{error}</p>}
+            <div className="flex items-center gap-2">
+              <Button
+                className="flex-1"
+                disabled={isPending || !idea.product}
+                onClick={() =>
+                  run(
+                    () => chooseIdeaAction({ planId: idea.id }),
+                    chose,
+                    () => chooseIdeaAction({ planId: idea.id, force: true }),
+                    onClose,
+                  )
+                }
+              >
+                <Camera className="size-4" /> 이걸로 찍기
+              </Button>
+              <Button variant="ghost" className="text-muted-foreground" disabled={isPending} onClick={() => run(() => dismissIdeaAction({ planId: idea.id }), "기획을 지웠어요. 내일 새벽에 새 기획으로 채워요.", undefined, onClose)}>
+                <Trash2 className="size-4" /> 지우기
+              </Button>
+            </div>
+          </footer>
+        )}
+      </div>
+      <DuplicateDialog
+        warning={warning}
+        pending={isPending}
+        onClose={() => setWarning(null)}
+        onConfirm={() => {
+          if (!warning) return;
+          const { retry, done } = warning;
+          setWarning(null);
+          run(retry, done, undefined, onClose);
+        }}
+      />
+    </dialog>
   );
 }
 
@@ -140,6 +242,7 @@ export function ShootProgressRow({ plan, canManage }: { plan: ShootProgressData;
   const [askSkip, setAskSkip] = useState(false);
   const s = STATUS[plan.status] ?? { label: plan.status, variant: "outline" as const };
   const hasVideo = plan.status === "SHOT" || plan.status === "RENDERED";
+  const href = plan.status === "SCRIPTED" && plan.requestId ? `/shoot/uploads/${plan.requestId}` : s.href;
   return (
     <li className="space-y-2 rounded-md border bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -147,8 +250,8 @@ export function ShootProgressRow({ plan, canManage }: { plan: ShootProgressData;
         <span className="min-w-0 text-[13px] font-semibold">{plan.title ?? plan.product?.name ?? "기획"}</span>
         {!plan.title && <Badge variant="outline">직접 추가</Badge>}
         <span className="ml-auto flex items-center gap-1">
-          {s.href && (
-            <Link href={s.href} className="text-xs font-medium underline underline-offset-2">
+          {href && (
+            <Link href={href} className="text-xs font-medium underline underline-offset-2">
               {s.go} →
             </Link>
           )}
