@@ -949,6 +949,75 @@ export type Database = {
         }
         Relationships: []
       }
+      post_analyses: {
+        Row: {
+          actions: Json
+          created_at: string
+          findings: Json
+          id: string
+          model: string | null
+          organization_id: string
+          reels_count: number
+          social_account_id: string
+          stats: Json
+          tokens_input: number | null
+          tokens_output: number | null
+        }
+        Insert: {
+          actions?: Json
+          created_at?: string
+          findings?: Json
+          id?: string
+          model?: string | null
+          organization_id: string
+          reels_count?: number
+          social_account_id: string
+          stats?: Json
+          tokens_input?: number | null
+          tokens_output?: number | null
+        }
+        Update: {
+          actions?: Json
+          created_at?: string
+          findings?: Json
+          id?: string
+          model?: string | null
+          organization_id?: string
+          reels_count?: number
+          social_account_id?: string
+          stats?: Json
+          tokens_input?: number | null
+          tokens_output?: number | null
+        }
+        Relationships: []
+      }
+      post_history_sync: {
+        Row: {
+          listed_at: string | null
+          media_listed: number | null
+          organization_id: string
+          reels_listed: number | null
+          social_account_id: string
+          updated_at: string
+        }
+        Insert: {
+          listed_at?: string | null
+          media_listed?: number | null
+          organization_id: string
+          reels_listed?: number | null
+          social_account_id: string
+          updated_at?: string
+        }
+        Update: {
+          listed_at?: string | null
+          media_listed?: number | null
+          organization_id?: string
+          reels_listed?: number | null
+          social_account_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       post_metrics: {
         Row: {
           avg_watch_time_ms: number | null
@@ -2057,6 +2126,8 @@ export type Database = {
           posted_at: string | null
           publish_job_id: string | null
           social_account_id: string
+          insights_checked_at: string | null
+          thumb_path: string | null
           thumbnail_url: string | null
           updated_at: string
         }
@@ -2064,6 +2135,7 @@ export type Database = {
           caption?: string | null
           first_seen_at?: string
           id?: string
+          insights_checked_at?: string | null
           media_product_type?: string | null
           media_type?: string | null
           organization_id: string
@@ -2072,6 +2144,7 @@ export type Database = {
           posted_at?: string | null
           publish_job_id?: string | null
           social_account_id: string
+          thumb_path?: string | null
           thumbnail_url?: string | null
           updated_at?: string
         }
@@ -2079,6 +2152,7 @@ export type Database = {
           caption?: string | null
           first_seen_at?: string
           id?: string
+          insights_checked_at?: string | null
           media_product_type?: string | null
           media_type?: string | null
           organization_id?: string
@@ -2087,6 +2161,7 @@ export type Database = {
           posted_at?: string | null
           publish_job_id?: string | null
           social_account_id?: string
+          thumb_path?: string | null
           thumbnail_url?: string | null
           updated_at?: string
         }
@@ -2202,6 +2277,28 @@ export type Database = {
       }
     }
     Views: {
+      account_reel_stats: {
+        Row: {
+          avg_watch_time_ms: number | null
+          caption: string | null
+          comments: number | null
+          insights_checked_at: string | null
+          likes: number | null
+          organization_id: string | null
+          permalink: string | null
+          platform_media_id: string | null
+          post_id: string | null
+          posted_at: string | null
+          reach: number | null
+          saved: number | null
+          shares: number | null
+          social_account_id: string | null
+          thumb_path: string | null
+          thumbnail_url: string | null
+          views: number | null
+        }
+        Relationships: []
+      }
       episode_alert_task_stats: {
         Row: {
           excluded: number | null

@@ -16,14 +16,17 @@ import {
 import { BenchmarkView } from "@/components/benchmark/benchmark-view";
 import { AnalyticsTabs, type AnalyticsTab } from "@/components/analytics/analytics-tabs";
 import { CollectNowButton } from "@/components/analytics/collect-now-button";
+import { PostPerformance } from "@/components/posts/post-performance";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { ProfileSnapshot } from "@/lib/account-review/types";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { loadBenchmark } from "@/lib/benchmark/load";
+import { loadPostPerformance } from "@/lib/post-analysis/load";
+import { cn } from "@/lib/utils";
 
-// 분석 — 탭 셋: 프로필 점수(매일 04:30 자동 채점, 0034) · 게시물 성과(인스타 계정별 기준선) · 다른 계정 비교(0037).
-// 게시물 성과 데이터는 성과 수집 워커(worker/collect-metrics.ts)가 매일 04시(KST)에 쌓는다(0024).
+// 분석 — 탭 셋: 프로필 점수(매일 04:30 자동 채점, 0034) · 게시물 성과(계정별 지난 릴스 전체 + 기준선, 0040) · 다른 계정 비교(0037).
+// 게시물 성과 데이터는 성과 수집 워커(worker/collect-metrics.ts, 매일 04시)와 지난 릴스 워커(worker/sync-post-history.ts, 05:10)가 쌓는다.
 // 트랙(A 혼합 / B 자동)별 비교는 운영 시작 뒤(7 첫 리포트)에 붙인다.
 
 const BASELINE_POSTS = 30;
@@ -187,6 +190,12 @@ export default async function AnalyticsPage({
   const compareData = tab === "compare" && compareSelected ? await loadBenchmark(supabase, compareSelected.id, compareNow) : null;
   const canEditCompare = profile.role === "ADMIN" || profile.role === "MANAGER";
 
+  // 게시물 성과 — 계정 하나씩. 지난 릴스 전체를 읽으니 그 탭을 열 때만
+  const postsSelected = tab === "posts" ? (scoreAccounts.find((a) => a.id === accountParam) ?? scoreAccounts[0] ?? null) : null;
+  const postsData = postsSelected ? await loadPostPerformance(supabase, postsSelected.id) : null;
+  const postsBaseline = postsSelected ? baselines.find((b) => b.id === postsSelected.id) ?? null : null;
+  const postsNow = pageNow();
+
   return (
     <main className="space-y-5 p-4 sm:p-6">
       <header className="flex items-start justify-between gap-3">
@@ -200,7 +209,7 @@ export default async function AnalyticsPage({
               ? "프로필을 12개 기준으로 매일 04:30에 자동 채점하고, 점수를 가장 많이 깎는 곳부터 고칠 문구를 드려요. 인스타에는 아무것도 바꾸지 않아요. 마음에 드는 문구를 직접 붙여 넣으세요."
               : tab === "compare"
                 ? "우리 계정마다 참고할 계정을 두고, 그 계정 릴스가 평소보다 몇 배 잘됐는지 매일 읽어요. 고른 이유와 숫자 근거를 함께 보여 드려요."
-                : "인스타 계정마다 지금 수준을 숫자로 잡아 둡니다. 매일 04시에 팔로워와 최근 게시물 성과를 자동으로 수집해요."}
+                : "계정의 지난 릴스 전체를 평소 조회수와 견줘 봐요. 어떤 릴스가 평소보다 몇 배 잘됐는지, 무엇을 더 만들지 숫자로 보여 드려요. 매일 새벽에 자동으로 수집해요."}
           </p>
         </div>
         {tab === "posts" && accounts.length > 0 && (
@@ -242,26 +251,48 @@ export default async function AnalyticsPage({
                   <ProfileScoreCard key={a.id} account={a} history={reviewsByAccount.get(a.id) ?? []} feedImageUrl={feedImages.get(a.id) ?? null} />
                 ))}
             </section>
-          ) : !collected ? (
-            <EmptyState
-              title="아직 수집된 데이터가 없어요"
-              body={
-                <>
-                  오른쪽 위 <b>지금 수집</b>을 누르거나 다음 04시 자동 수집을
-                  기다리세요. 조회 · 도달 · 저장 · 공유까지 보려면{" "}
-                  <Link href="/accounts" className="underline underline-offset-2">
-                    계정 연동
-                  </Link>
-                  에서 성과 권한이 있는지 먼저 확인하세요.
-                </>
-              }
-            />
           ) : (
-            <div className="space-y-4">
-              {baselines.map((b) => (
-                <AccountBaselineCard key={b.id} account={b} />
-              ))}
-            </div>
+            <section aria-label="게시물 성과" className="space-y-4">
+              <nav aria-label="계정 고르기" className="inline-flex w-fit max-w-full items-center overflow-x-auto rounded-md border bg-surface-2 p-[2px]">
+                {scoreAccounts.map((a) => {
+                  const on = a.id === postsSelected?.id;
+                  return (
+                    <Link
+                      key={a.id}
+                      href={`/analytics?tab=posts&account=${a.id}`}
+                      aria-current={on ? "page" : undefined}
+                      className={cn(
+                        "inline-flex h-[30px] items-center rounded-[6px] px-3 text-[12.5px] font-medium whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                        on && "bg-card font-semibold text-foreground shadow-[0_1px_2px_rgb(16_24_40/0.12)]",
+                      )}
+                    >
+                      {a.name}
+                    </Link>
+                  );
+                })}
+              </nav>
+
+              {postsData && postsSelected && <PostPerformance key={postsSelected.id} data={postsData} now={postsNow} />}
+
+              <h2 className="pt-2 text-[15px] font-semibold">최근 게시물 · 팔로워</h2>
+              {!collected ? (
+                <EmptyState
+                  title="아직 수집된 데이터가 없어요"
+                  body={
+                    <>
+                      오른쪽 위 <b>지금 수집</b>을 누르거나 다음 04시 자동 수집을
+                      기다리세요. 조회 · 도달 · 저장 · 공유까지 보려면{" "}
+                      <Link href="/accounts" className="underline underline-offset-2">
+                        계정 연동
+                      </Link>
+                      에서 성과 권한이 있는지 먼저 확인하세요.
+                    </>
+                  }
+                />
+              ) : (
+                postsBaseline && <AccountBaselineCard account={postsBaseline} />
+              )}
+            </section>
           )}
         </>
       )}

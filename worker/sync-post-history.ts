@@ -1,0 +1,355 @@
+// .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
+import "./load-env";
+
+import sharp from "sharp";
+import { firstLine } from "@/lib/benchmark/discovery";
+import { decryptToken } from "@/lib/crypto";
+import { resolveOrgId } from "@/lib/agents/playbook";
+import { agentModel } from "@/lib/agents/runner";
+import { InstagramApiError, getInstagramMedia } from "@/lib/platforms/instagram-comments";
+import {
+  getMediaInsights,
+  getMediaInsightsBySystem,
+  getProfile,
+  isPermissionError,
+  listRecentMedia,
+  listSystemAccounts,
+  type MetricValues,
+} from "@/lib/platforms/instagram-insights";
+import { suggestTopics, writeFindings, type Usage } from "@/lib/post-analysis/interpret";
+import { computeStats, type ReelRow } from "@/lib/post-analysis/stats";
+import { createServiceClient } from "@/lib/supabase/service";
+import { kstDate } from "@/lib/automation/time";
+import type { Json } from "@/types/database";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 게시물 성과 워커(ig-audit-ko). "한 번 실행하고 종료"하는 배치. 인스타에는 쓰지 않는다.
+//
+// .github/workflows/post-history.yml이 매일 05:10(KST) 깨운다. 계정마다:
+//   1. 지난 게시물 목록을 끝까지 한 번 읽어 릴스를 social_posts에 넣는다 (그 뒤 새 릴스는 성과 수집이 넣는다)
+//   2. 성과를 아직 안 읽은 릴스를 읽는다 — mcb 키 우선(실측 4,257번에 사용량 1%), 시간 예산을 넘으면 다음 실행에
+//   3. 잘된 릴스 · 최근 릴스의 표지를 보관한다 — 인스타 표지 주소는 며칠 뒤 만료된다
+//   4. 지난 분석이 7일 넘었으면 통계 + AI 해석을 새로 쓴다 (post_analyses)
+//
+// 옵션: --account <id> · --no-ai (해석 건너뜀) · --force-ai (7일 안 지났어도)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const RUN_BUDGET_MS = 40 * 60_000;
+const MAX_MEDIA = 30_000;
+const ANALYSIS_DAYS = 7;
+const THUMB_RECENT = 60;
+const THUMB_PER_RUN = 300;
+const THUMB_WIDTH = 240;
+const PAGE = 1000;
+const DAY_MS = 86_400_000;
+
+type Service = ReturnType<typeof createServiceClient>;
+
+function arg(argv: string[], flag: string): string | undefined {
+  const i = argv.indexOf(flag);
+  return i >= 0 ? argv[i + 1] : undefined;
+}
+
+const toInt = (v: number | undefined) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null);
+
+interface StatRow {
+  post_id: string;
+  platform_media_id: string;
+  permalink: string | null;
+  caption: string | null;
+  thumb_path: string | null;
+  thumbnail_url: string | null;
+  posted_at: string | null;
+  insights_checked_at: string | null;
+  views: number | null;
+  reach: number | null;
+  likes: number | null;
+  comments: number | null;
+  saved: number | null;
+  shares: number | null;
+  avg_watch_time_ms: number | null;
+}
+
+async function loadRows(service: Service, accountId: string): Promise<StatRow[]> {
+  const rows: StatRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await service
+      .from("account_reel_stats")
+      .select("post_id, platform_media_id, permalink, caption, thumb_path, thumbnail_url, posted_at, insights_checked_at, views, reach, likes, comments, saved, shares, avg_watch_time_ms")
+      .eq("social_account_id", accountId)
+      .order("posted_at", { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`릴스 조회 실패: ${error.message}`);
+    rows.push(...((data ?? []) as StatRow[]));
+    if (!data || data.length < PAGE) return rows;
+  }
+}
+
+/** 1. 지난 게시물 목록 — 한 번만. */
+async function listHistory(service: Service, account: { id: string; organization_id: string }, token: string): Promise<void> {
+  const { data: sync } = await service.from("post_history_sync").select("listed_at").eq("social_account_id", account.id).maybeSingle();
+  if (sync?.listed_at) return;
+  const media = await listRecentMedia(token, MAX_MEDIA);
+  const reels = media.filter((m) => m.mediaProductType === "REELS");
+  for (let i = 0; i < reels.length; i += 500) {
+    const { error } = await service.from("social_posts").upsert(
+      reels.slice(i, i + 500).map((m) => ({
+        organization_id: account.organization_id,
+        social_account_id: account.id,
+        platform_media_id: m.id,
+        media_type: m.mediaType,
+        media_product_type: m.mediaProductType,
+        permalink: m.permalink,
+        caption: m.caption?.slice(0, 2000) ?? null,
+        thumbnail_url: m.thumbnailUrl,
+        posted_at: m.timestamp,
+      })),
+      { onConflict: "social_account_id,platform_media_id" },
+    );
+    if (error) throw new Error(`릴스 저장 실패: ${error.message}`);
+  }
+  await service.from("post_history_sync").upsert({
+    social_account_id: account.id,
+    organization_id: account.organization_id,
+    listed_at: new Date().toISOString(),
+    media_listed: media.length,
+    reels_listed: reels.length,
+    updated_at: new Date().toISOString(),
+  });
+  console.log(`[post-history] 지난 게시물 ${media.length}개 중 릴스 ${reels.length}개`);
+}
+
+/** 2. 성과를 아직 안 읽은 릴스. 시간 예산을 넘으면 false (다음 실행에 이어서). */
+async function fillInsights(service: Service, accountToken: string, systemToken: string | null, rows: StatRow[], deadline: number): Promise<{ read: number; finished: boolean }> {
+  const todo = rows.filter((r) => r.views == null && !r.insights_checked_at);
+  const today = kstDate();
+  let read = 0;
+  let useAccount = !systemToken;
+  for (const r of todo) {
+    if (Date.now() > deadline) return { read, finished: false };
+    let v: MetricValues = {};
+    try {
+      v = useAccount
+        ? await getMediaInsights(accountToken, { id: r.platform_media_id, mediaProductType: "REELS" })
+        : await getMediaInsightsBySystem(systemToken as string, { id: r.platform_media_id, mediaProductType: "REELS" });
+    } catch (err) {
+      if (err instanceof InstagramApiError && err.kind === "RATE_LIMIT") return { read, finished: false };
+      // 시스템 키 문제는 계정 토큰으로 한 번 돌아간다. 계정을 비활성으로 표시하지 않는다.
+      if (!useAccount && err instanceof InstagramApiError && err.kind === "TOKEN") {
+        useAccount = true;
+        continue;
+      }
+      if (isPermissionError(err) || (err instanceof InstagramApiError && err.kind === "TOKEN")) return { read, finished: false };
+      // 삭제된 게시물 등은 표시만 하고 넘어간다
+    }
+    if (Object.keys(v).length) {
+      const { error } = await service.from("post_metrics").upsert(
+        {
+          post_id: r.post_id,
+          collected_on: today,
+          views: toInt(v.views),
+          reach: toInt(v.reach),
+          likes: toInt(v.likes),
+          comments: toInt(v.comments),
+          saved: toInt(v.saved),
+          shares: toInt(v.shares),
+          total_interactions: toInt(v.total_interactions),
+          avg_watch_time_ms: toInt(v.ig_reels_avg_watch_time),
+          total_watch_time_ms: toInt(v.ig_reels_video_view_total_time),
+          raw: v as unknown as Json,
+          collected_at: new Date().toISOString(),
+        },
+        { onConflict: "post_id,collected_on" },
+      );
+      if (error) throw new Error(`성과 저장 실패: ${error.message}`);
+      read++;
+    }
+    await service.from("social_posts").update({ insights_checked_at: new Date().toISOString() }).eq("id", r.post_id);
+  }
+  return { read, finished: true };
+}
+
+function toReelRows(rows: StatRow[], publicViews: Map<string, number>): ReelRow[] {
+  return rows.map((r) => ({
+    id: r.post_id,
+    mediaId: r.platform_media_id,
+    postedAt: r.posted_at,
+    url: r.permalink,
+    title: firstLine(r.caption),
+    views: r.views,
+    publicViews: publicViews.get(r.platform_media_id) ?? null,
+    reach: r.reach,
+    likes: r.likes,
+    comments: r.comments,
+    shares: r.shares,
+    saved: r.saved,
+    watchSec: r.avg_watch_time_ms != null ? r.avg_watch_time_ms / 1000 : null,
+    thumb: r.thumb_path,
+  }));
+}
+
+/** 3. 표지 보관 — 3배 넘은 릴스와 최근 릴스. 하위 폴더라 임시 저장 정리가 보지 않는다. */
+async function keepThumbs(service: Service, orgId: string, accountId: string, token: string, rows: StatRow[]): Promise<number> {
+  const withViews = rows.filter((r) => r.views != null).map((r) => r.views as number).sort((a, b) => a - b);
+  const base = withViews[Math.floor(withViews.length / 2)] ?? 0;
+  const wanted = [
+    ...rows.slice(0, THUMB_RECENT),
+    ...[...rows].filter((r) => base && (r.views ?? 0) >= base * 2).sort((a, b) => (b.views ?? 0) - (a.views ?? 0)),
+  ];
+  const seen = new Set<string>();
+  let saved = 0;
+  for (const r of wanted) {
+    if (saved >= THUMB_PER_RUN) break;
+    if (seen.has(r.post_id) || r.thumb_path) continue;
+    seen.add(r.post_id);
+    try {
+      let res = r.thumbnail_url ? await fetch(r.thumbnail_url, { signal: AbortSignal.timeout(15_000) }) : null;
+      if (!res?.ok) {
+        // 만료된 주소 — 새 주소를 받아 다시 시도
+        const fresh = await getInstagramMedia(r.platform_media_id, token);
+        if (!fresh.previewUrl) continue;
+        res = await fetch(fresh.previewUrl, { signal: AbortSignal.timeout(15_000) });
+        if (!res.ok) continue;
+      }
+      const jpeg = await sharp(Buffer.from(await res.arrayBuffer())).resize({ width: THUMB_WIDTH }).jpeg({ quality: 72 }).toBuffer();
+      const path = `${orgId}/reel-thumbs/${accountId}/${r.post_id}.jpg`;
+      const { error } = await service.storage.from("media").upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
+      if (error) continue;
+      await service.from("social_posts").update({ thumb_path: path }).eq("id", r.post_id);
+      saved++;
+    } catch (err) {
+      if (err instanceof InstagramApiError && err.kind === "RATE_LIMIT") break;
+      // 표지 하나 못 받아도 분석은 계속
+    }
+  }
+  return saved;
+}
+
+/** 4. 통계 + AI 해석. 실행 기록은 agent_runs(analyze). */
+async function analyze(service: Service, account: { id: string; organization_id: string; display_name: string | null; role_note: string | null }, handle: string, reels: ReelRow[], rows: StatRow[], force: boolean) {
+  if (!force) {
+    const { data: last } = await service.from("post_analyses").select("created_at").eq("social_account_id", account.id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (last && Date.now() - Date.parse(last.created_at) < ANALYSIS_DAYS * DAY_MS) return "최근 분석 있음";
+  }
+  const usable = reels.filter((r) => r.views != null);
+  if (usable.length < 10) return `릴스 ${usable.length}개뿐이라 분석 안 함`;
+
+  const now = Date.now();
+  const captions = new Map(rows.map((r) => [r.post_id, r.caption ?? ""]));
+  const usage: Usage = { input: 0, output: 0 };
+  const model = agentModel();
+  const { data: run } = await service
+    .from("agent_runs")
+    .insert({
+      organization_id: await resolveOrgId(service, { accountId: account.id }),
+      agent: "analyze",
+      model,
+      input: { task: "post_analysis", account: handle, reels: usable.length } as Json,
+    })
+    .select("id")
+    .single();
+  const finish = async (patch: { status: "success" | "failed"; output?: unknown; error?: string }) => {
+    if (!run) return;
+    await service
+      .from("agent_runs")
+      .update({ status: patch.status, output: (patch.output ?? null) as Json, error: patch.error ?? null, tokens_input: usage.input, tokens_output: usage.output, finished_at: new Date().toISOString() })
+      .eq("id", run.id);
+  };
+  try {
+    const titles = [...usable].sort((a, b) => (b.views as number) - (a.views as number)).map((r) => r.title).filter(Boolean);
+    const topics = await suggestTopics(titles, usage);
+    const stats = computeStats(usable, captions, now, topics);
+    const { findings, actions, dropped } = await writeFindings(handle, account.role_note, stats, usage);
+    const { error } = await service.from("post_analyses").insert({
+      organization_id: account.organization_id,
+      social_account_id: account.id,
+      reels_count: usable.length,
+      stats: stats as unknown as Json,
+      findings: findings as unknown as Json,
+      actions: actions as unknown as Json,
+      model,
+      tokens_input: usage.input,
+      tokens_output: usage.output,
+    });
+    if (error) throw new Error(`분석 저장 실패: ${error.message}`);
+    await finish({ status: "success", output: { reels: usable.length, findings: findings.length, dropped } });
+    return `분석 ${findings.length}개${dropped ? ` (근거 없는 숫자로 ${dropped}개 버림)` : ""} | 토큰 ${usage.input}/${usage.output}`;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await finish({ status: "failed", error: message });
+    return `분석 실패: ${message.slice(0, 200)}`;
+  }
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const onlyAccount = arg(argv, "--account");
+  const noAi = argv.includes("--no-ai");
+  const forceAi = argv.includes("--force-ai");
+  const service = createServiceClient();
+  const deadline = Date.now() + RUN_BUDGET_MS;
+
+  const systemToken = process.env.IG_DISCOVERY_TOKEN?.trim() || null;
+  let system: Map<string, string> | null = null;
+  if (systemToken) {
+    try {
+      system = await listSystemAccounts(systemToken);
+    } catch (err) {
+      console.warn("[post-history] 시스템 키를 못 씀:", err instanceof Error ? err.message : err);
+    }
+  }
+
+  let q = service
+    .from("social_accounts")
+    .select("id, organization_id, display_name, role_note, access_token_encrypted")
+    .eq("platform", "INSTAGRAM")
+    .eq("is_active", true)
+    .is("disconnected_at", null)
+    .not("access_token_encrypted", "is", null);
+  if (onlyAccount) q = q.eq("id", onlyAccount);
+  const { data: accounts, error } = await q;
+  if (error) {
+    console.error("[post-history] 계정 조회 실패:", error.message);
+    process.exitCode = 1;
+    return;
+  }
+
+  for (const account of accounts ?? []) {
+    const label = account.display_name ?? account.id;
+    try {
+      const token = decryptToken(account.access_token_encrypted as string);
+      const profile = await getProfile(token);
+      await listHistory(service, account, token);
+      let rows = await loadRows(service, account.id);
+      const useSystem = systemToken && system?.has(profile.username.toLowerCase()) ? systemToken : null;
+      const { read, finished } = await fillInsights(service, token, useSystem, rows, deadline);
+      if (read) rows = await loadRows(service, account.id);
+      const thumbs = await keepThumbs(service, account.organization_id, account.id, token, rows);
+
+      // 공개 조회수 — 다른 계정 비교 수집이 읽은 최근 릴스만 있다
+      const { data: own } = await service.from("benchmark_accounts").select("id").eq("own_account_id", account.id).maybeSingle();
+      const { data: pub } = own
+        ? await service.from("benchmark_posts").select("platform_media_id, view_count").eq("benchmark_account_id", own.id).not("view_count", "is", null)
+        : { data: [] };
+      const publicViews = new Map((pub ?? []).map((p) => [p.platform_media_id, p.view_count as number]));
+      const reels = toReelRows(rows, publicViews);
+      const left = rows.filter((r) => r.views == null && !r.insights_checked_at).length;
+      const analysis = noAi || !finished ? "건너뜀" : await analyze(service, account, profile.username, reels, rows, forceAi);
+      console.log(`[post-history] ${label}: 릴스 ${rows.length} | 이번에 성과 ${read}개 읽음 | 남음 ${finished ? left : "다음 실행"} | 표지 ${thumbs}개 | ${analysis}`);
+    } catch (err) {
+      // 이 워커는 계정 상태를 바꾸지 않는다 — 연결 끊김 표시는 성과 수집 워커 몫
+      console.error(`[post-history] ${label}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    if (Date.now() > deadline) {
+      console.log("[post-history] 시간 예산 끝 — 나머지는 다음 실행에");
+      break;
+    }
+  }
+}
+
+main()
+  .then(() => process.exit(process.exitCode ?? 0))
+  .catch((err) => {
+    console.error("[post-history] 치명적 오류:", err);
+    process.exit(1);
+  });

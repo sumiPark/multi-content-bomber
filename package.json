@@ -22,7 +22,8 @@
     "worker:shoot-edit": "tsx worker/edit-shoots.ts",
     "worker:cleanup-drafts": "tsx worker/cleanup-drafts.ts",
     "worker:profile-review": "tsx worker/review-profiles.ts",
-    "worker:benchmarks": "tsx worker/collect-benchmarks.ts"
+    "worker:benchmarks": "tsx worker/collect-benchmarks.ts",
+    "worker:post-history": "tsx worker/sync-post-history.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
