@@ -93,7 +93,7 @@ export default async function RulesPage() {
             const list = rules.filter((r) => r.scope === scope);
             if (list.length === 0) return null;
             return (
-              <div key={scope} className="rounded-lg border">
+              <div key={scope} className="rounded-lg border bg-card">
                 <h3 className="border-b bg-muted/30 px-3 py-2 text-sm font-semibold">
                   {SCOPE_LABEL[scope]}
                   <span className="ml-1.5 text-xs font-normal text-muted-foreground">
@@ -127,7 +127,7 @@ export default async function RulesPage() {
           </p>
         </div>
         {claimProducts.length === 0 ? (
-          <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+          <p className="rounded-md border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
             아직 건강기능식품으로 판정된 상품이 없어요. 상품 분석이 끝나면 여기에 나타납니다.
           </p>
         ) : (

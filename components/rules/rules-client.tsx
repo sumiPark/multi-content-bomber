@@ -110,7 +110,7 @@ export function AddRuleForm() {
 
   return (
     <form
-      className="flex flex-wrap items-end gap-2 rounded-lg border bg-muted/20 p-3 text-xs"
+      className="flex flex-wrap items-end gap-2 rounded-lg border bg-card p-3 text-xs"
       onSubmit={(e) => {
         e.preventDefault();
         run(
@@ -195,7 +195,7 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
   const pending = product.candidates.filter((c) => !approvedSet.has(c));
 
   return (
-    <div className="space-y-2 rounded-lg border p-3">
+    <div className="space-y-2 rounded-lg border bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
         <Link href={`/products/${product.id}`} className="text-sm font-medium hover:underline">
           {product.name}
@@ -299,7 +299,7 @@ export function PreviewCheck() {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="space-y-2 rounded-lg border p-3">
+    <div className="space-y-2 rounded-lg border bg-card p-3">
       <p className="text-sm font-semibold">미리 검사</p>
       <p className="text-xs text-muted-foreground">
         캡션이나 자막을 넣으면 지금 켜진 규칙으로 검사해요. AI 자동 업로드 영상은 올리기 전에 이 검사를 자동으로 거칩니다.

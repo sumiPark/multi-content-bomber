@@ -58,12 +58,12 @@ export default async function ProductCategoriesPage() {
       </header>
 
       {rows.length === 0 ? (
-        <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+        <p className="rounded-md border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">
           첫 수집 뒤에 카테고리가 나타나요.
         </p>
       ) : (
         SHOP_CODES.map((code) => (
-          <section key={code} className="rounded-lg border">
+          <section key={code} className="rounded-lg border bg-card">
             <h2 className="border-b bg-muted/30 px-3 py-2 text-sm font-semibold">{SHOPS[code].name}</h2>
             <ul className="divide-y">
               {ordered(code).map((c) => (

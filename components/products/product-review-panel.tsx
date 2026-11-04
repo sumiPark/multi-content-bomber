@@ -117,7 +117,7 @@ export function ProductReviewPanel(props: {
   );
 
   return (
-    <div className="space-y-4 rounded-lg border p-4">
+    <div className="space-y-4 rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         {props.approvedAt ? (
           <Badge variant="secondary" className="text-xs">

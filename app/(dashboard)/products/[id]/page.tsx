@@ -90,12 +90,12 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             상세페이지 {product.detail_image_urls.length}장 — 왼쪽 원본, 오른쪽 AI가 받아 적은 글
           </h2>
           {product.detail_image_urls.length === 0 && (
-            <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">상세 이미지가 없어요.</p>
+            <p className="rounded-md border border-dashed bg-card p-6 text-center text-sm text-muted-foreground">상세 이미지가 없어요.</p>
           )}
           {product.detail_image_urls.map((url, i) => {
             const e = extractByUrl.get(url);
             return (
-              <div key={url} className="grid gap-2 rounded-lg border p-2 md:grid-cols-2">
+              <div key={url} className="grid gap-2 rounded-lg border bg-card p-2 md:grid-cols-2">
                 <div className="max-h-[640px] overflow-y-auto rounded bg-muted/30">
                   <p className="sticky top-0 bg-card/90 px-2 py-1 text-xs text-muted-foreground">이미지 {i + 1}</p>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -145,7 +145,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               analyzedAt={analysis.analyzed_at}
             />
           ) : (
-            <div className="space-y-3 rounded-lg border p-4 text-sm">
+            <div className="space-y-3 rounded-lg border bg-card p-4 text-sm">
               <p className="text-muted-foreground">
                 아직 요약이 없어요.{" "}
                 {product.stock_status === "available"

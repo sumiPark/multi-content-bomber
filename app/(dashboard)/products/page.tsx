@@ -181,7 +181,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                   key={code}
                   href={hrefWith({ shop: code, page: undefined })}
                   className={cn(
-                    "rounded-lg border p-3 transition hover:bg-accent/40",
+                    "rounded-lg border bg-card p-3 transition hover:bg-surface-2",
                     sp.shop === code && "ring-2 ring-primary",
                   )}
                 >
@@ -233,7 +233,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           </form>
 
           {/* 목록 */}
-          <section className="overflow-hidden rounded-lg border">
+          <section className="overflow-hidden rounded-lg border bg-card">
             <div className="flex items-center justify-between border-b bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               <span>{total ?? 0}개</span>
               <span>

@@ -79,7 +79,7 @@ export function CollectionStatus({
   const collectErrors = (cs.shops ?? []).flatMap((s) => (s.errors ?? []).map((e) => `${SHOPS[s.shop as ShopCode]?.name ?? s.shop}: ${e}`));
 
   return (
-    <section className="space-y-3 rounded-lg border p-4">
+    <section className="space-y-3 rounded-lg border bg-card p-4">
       {running && <AutoRefresh intervalMs={20_000} />}
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-semibold">수집 · 분석 현황</h2>
