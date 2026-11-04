@@ -41,7 +41,7 @@ export interface ShootRequestCardData {
   // 저장한 후킹 문구를 썼는지 · 못 썼으면 왜 (계정 컨셉, 0039)
   fixedHook: boolean;
   fixedNotes: string[];
-  cuts: { no: number; seconds: number; shot: string; how: string; onScreen: string; voice: string; done: boolean; skipped: boolean }[];
+  cuts: { no: number; seconds: number; shot: string; how: string; onScreen: string; voice: string; narration: string; done: boolean; skipped: boolean }[];
   clips: { cut: number; name: string; size: number }[];
   issues: string[];
   error: string | null;
@@ -315,6 +315,7 @@ function CutRow({
           <p className="text-xs text-muted-foreground">찍는 법: {cut.how}</p>
           {cut.onScreen && <p className="text-xs">화면 문구: <span className="rounded bg-muted px-1">{cut.onScreen}</span></p>}
           {cut.voice && <p className="text-xs">말하기: “{cut.voice}”</p>}
+          {cut.narration && <p className="text-xs text-muted-foreground">AI 음성이 읽어요 (찍을 때 말하지 않아도 돼요): “{cut.narration}”</p>}
         </div>
       </div>
 

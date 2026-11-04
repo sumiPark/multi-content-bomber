@@ -14,7 +14,7 @@ export const REQUEST_STATUS: Record<string, { label: string; variant: "default" 
 export const REQUEST_SELECT =
   "id, status, cuts, clips, created_at, error, content_plans!inner(id, status, social_account_id, proposal, human_brief, script, check_result, social_accounts(display_name), products(name, url, represent_image_url))";
 
-type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; done?: boolean; skipped?: boolean };
+type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; narration?: string; done?: boolean; skipped?: boolean };
 type Clip = { cut: number; name: string; size: number };
 type SavedShotlist = {
   hooks?: { spoken: string; on_screen: string; score?: number | null }[];
@@ -48,7 +48,8 @@ export function ideaTitleOf(proposal: Json): string | null {
   return p.ideas?.[p.chosen ?? 0]?.title ?? null;
 }
 
-export function toRequestCard(r: RequestRow): ShootRequestCardData {
+/** liveVoice = 찍을 때 말한 소리를 쓰는 계정(0044). 아니면 말할 대사 대신 AI 음성이 읽을 글을 보여 준다. */
+export function toRequestCard(r: RequestRow, liveVoice: boolean): ShootRequestCardData {
   const plan = r.content_plans;
   const script = (plan.script ?? {}) as SavedShotlist;
   const hook = script.hooks?.[script.chosen_hook ?? 0];
@@ -73,7 +74,8 @@ export function toRequestCard(r: RequestRow): ShootRequestCardData {
       shot: c.shot,
       how: c.how,
       onScreen: c.on_screen,
-      voice: c.voice,
+      voice: liveVoice ? c.voice : "",
+      narration: liveVoice ? "" : c.narration || c.voice || "",
       done: !!c.done,
       skipped: !!c.skipped,
     })),

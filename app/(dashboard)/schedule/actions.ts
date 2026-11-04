@@ -355,6 +355,7 @@ const autoConceptSchema = z.object({
 const shootConceptSchema = z.object({
   accountId: z.string().uuid(),
   shootRole: roleSchema,
+  shootVoice: z.enum(["AI", "LIVE"]),
   shootConcept: conceptText,
   shootHooks: phraseLines,
   shootEndings: phraseLines,
@@ -422,6 +423,7 @@ export async function saveShootConceptAction(input: z.input<typeof shootConceptS
     social_account_id: d.accountId,
     organization_id: auth.orgId,
     shoot_role_focus: d.shootRole,
+    shoot_voice_mode: d.shootVoice,
     shoot_concept: d.shootConcept,
     shoot_hooks: d.shootHooks,
     shoot_endings: d.shootEndings,

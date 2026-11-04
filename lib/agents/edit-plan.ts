@@ -98,7 +98,8 @@ export interface EditPlanContext {
   readService?: Service;
   planId?: string;
   accountName: string;
-  roleFocus: string | null;
+  // 찍을 때 말한 소리를 쓰는지(0044). 영상 방향과 별개다
+  liveVoice: boolean;
   facts: ProductFacts;
   rules: ContentRule[];
   clips: EditClipInfo[];
@@ -124,7 +125,6 @@ function bullets(lines: string[]): string {
 function systemPrompt(ctx: EditPlanContext): string {
   const kit = editKit();
   const f = ctx.facts;
-  const person = ctx.roleFocus === "PERSON";
   const human = ctx.humanHook?.trim() || ctx.fixedHook?.trim();
   const hookAsk = human
     ? `사람이 정한 후킹이 있다: "${human}". 글자를 바꾸지 말고 hook.on_screen과 hook.spoken, 첫 비트의 말에 그대로 쓴다. 이 문장이 궁금해지는 첫 컷과 그 답이 나오는 흐름을 만든다.`
@@ -134,7 +134,7 @@ function systemPrompt(ctx: EditPlanContext): string {
     : `표지도 네가 만든다.${ctx.shotlistThumbnail?.title ? ` 컷 리스트의 표지 문구 "${ctx.shotlistThumbnail.title}"를 참고한다.` : ""}`;
   return `너는 인스타그램 @${ctx.accountName}의 릴스 편집자다. 사람이 찍은 원본을 보고, 직접 만든 것처럼 보이는 편집 계획을 세운다. 계획은 코드가 그대로 만든다.
 상품: ${f.shop} ${f.kindLabel} "${f.name}"
-${person ? "이 계정은 사람이 나와 말한다. 촬영본에 말이 있는 구간은 mode live로 그대로 쓰고, 말이 없는 구간에만 tts를 쓴다." : "이 계정의 촬영본에는 쓸 말이 없다. 모든 비트를 mode tts로 쓴다. 말투는 친근한 여성 수다체다."}
+${ctx.liveVoice ? "이 계정은 사람이 나와 말한다. 촬영본에 말이 있는 구간은 mode live로 그대로 쓰고, 말이 없는 구간에만 tts를 쓴다." : "이 계정의 촬영본에는 쓸 말이 없다. 모든 비트를 mode tts로 쓴다. 말투는 친근한 여성 수다체다."}
 
 순서 (스킬을 실제로 써라):
 1. get_product_facts를 읽고, 프레임 묶음에서 촬영본마다 쓸 구간과 뺄 구간을 판단한다(analysis). 시각이 애매하면 look_closer로 확인한다.

@@ -46,7 +46,7 @@ async function main() {
       return f;
     });
     const clips = files.map((f, i) => readClip(i + 1, f, { shot: `시험 ${i + 1}` }));
-    const r = await renderKitEdit({ workDir: join(workDir, "kit"), service: null, accountName: "smoke", roleFocus: "PRODUCT", facts, rules: [], clips, reusePlan: plan });
+    const r = await renderKitEdit({ workDir: join(workDir, "kit"), service: null, accountName: "smoke", liveVoice: false, facts, rules: [], clips, reusePlan: plan });
     console.log(`[edit-kit-smoke] 통과 — ${Math.round((Date.now() - started) / 1000)}초, 영상 ${r.seconds.toFixed(1)}초, ${(statSync(r.final).size / 1024 / 1024).toFixed(1)}MB, 표지 ${(statSync(r.cover).size / 1024).toFixed(0)}KB, ${r.loudness} LUFS`);
     console.log("경고:", r.warnings);
   } finally {

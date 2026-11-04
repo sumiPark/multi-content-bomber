@@ -30,6 +30,7 @@ export type Database = {
           shoot_hooks: string[]
           shoot_role_focus: string | null
           shoot_tone: string
+          shoot_voice_mode: string
           social_account_id: string
           updated_at: string
           updated_by: string | null
@@ -49,6 +50,7 @@ export type Database = {
           shoot_hooks?: string[]
           shoot_role_focus?: string | null
           shoot_tone?: string
+          shoot_voice_mode?: string
           social_account_id: string
           updated_at?: string
           updated_by?: string | null
@@ -68,6 +70,7 @@ export type Database = {
           shoot_hooks?: string[]
           shoot_role_focus?: string | null
           shoot_tone?: string
+          shoot_voice_mode?: string
           social_account_id?: string
           updated_at?: string
           updated_by?: string | null

@@ -54,6 +54,8 @@ export interface ShotlistContext {
   planId: string;
   accountName: string;
   roleFocus: string | null;
+  // 찍을 때 말한 소리를 쓰는지(0044). 기본은 AI 음성이라 사람이 나오는 계정도 말하지 않는다
+  liveVoice: boolean;
   roleNote: string | null;
   facts: ProductFacts;
   rules: ContentRule[];
@@ -73,7 +75,7 @@ export interface ShotlistContext {
 function systemPrompt(ctx: ShotlistContext): string {
   const f = ctx.facts;
   const person = ctx.roleFocus === "PERSON";
-  const focus = person ? "사람 중심(사람이 나와 말하고 쓰는 모습)" : ctx.roleFocus === "PRODUCT" ? "상품 중심(손 · 제형 · 구성 클로즈업, 얼굴 없이)" : "미정";
+  const focus = person ? (ctx.liveVoice ? "사람 중심(사람이 나와 말하고 쓰는 모습)" : "사람 중심(사람이 나와 쓰는 모습, 말은 하지 않고 AI 음성이 읽는다)") : ctx.roleFocus === "PRODUCT" ? "상품 중심(손 · 제형 · 구성 클로즈업, 얼굴 없이)" : "미정";
   const what = ctx.idea
     ? `고른 기획: "${ctx.idea.title}" (${ctx.idea.format}) — ${ctx.idea.concept}`
     : `사람이 상품을 직접 골랐다.${ctx.brief ? ` 메모: "${ctx.brief}" — 이 메모를 가장 먼저 반영한다.` : " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
@@ -93,7 +95,7 @@ ${kit.thumbnail_rules.map((r) => `   - ${r}`).join("\n")}
 3. 컷 리스트: 컷 5~8개, 컷마다 1.5~5초, 합계 15~25초. 첫 컷은 후킹 글자와 함께 궁금증을 만드는 장면이다(결과 · 단면 · 움직임 · 의외의 행동). 편집에서 잘라 쓰게 컷마다 동작을 2~3초 더 길게 찍으라고 how에 적는다.
    컷마다 장면이 바뀌어야 한다(같은 각도 연속 금지). 마지막 컷은 훅의 낱말을 되받아 다시 보게.
    how는 찍는 사람이 그대로 따라 할 수 있게 구체적으로: 위에서 · 옆에서 · 손 클로즈업 · 흰 배경 · 창가 빛 등.
-4. ${person ? "voice: 사람이 카메라 보고 말할 짧은 대사. 컷 길이 안에 말할 수 있게(1초에 6음절 안팎). time_script로 재고 경고를 없앤다." : "voice는 모두 빈 문자열이다. 찍는 사람은 말하지 않고, narration을 AI 음성이 읽는다. 말투는 친근한 수다체, 컷 길이 안에 읽을 수 있게(1초에 6음절 안팎). 말은 그 컷에서 보이는 것에 맞춘다. time_script로 재고 경고를 없앤다."}
+4. ${ctx.liveVoice ? "voice: 사람이 카메라 보고 말할 짧은 대사. 컷 길이 안에 말할 수 있게(1초에 6음절 안팎). time_script로 재고 경고를 없앤다." : "voice는 모두 빈 문자열이다. 찍는 사람은 말하지 않고, narration을 AI 음성이 읽는다. 말투는 친근한 수다체, 컷 길이 안에 읽을 수 있게(1초에 6음절 안팎). 말은 그 컷에서 보이는 것에 맞춘다. time_script로 재고 경고를 없앤다."}
 5. 캡션을 쓰고 check_caption으로 점검한다. 첫 줄 40자 이내, 요청은 하나, 해시태그 정확히 3개.
 6. 화면 문구 · 대사 · 캡션 전체를 check_ai_tone, check_rules로 점검하고 걸린 것을 고친다.
 

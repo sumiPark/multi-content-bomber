@@ -5,7 +5,7 @@ import type { Tables } from "@/types/database";
 // 영상 참고 내용 카드에 넘길 값 — 자동 콘텐츠 설정과 촬영 설정이 같이 쓴다. 카드는 자기 방식의 값만 보여 주고 저장한다.
 
 export const CONCEPT_SELECT =
-  "social_account_id, auto_role_focus, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, shoot_role_focus, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at";
+  "social_account_id, auto_role_focus, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, shoot_role_focus, shoot_voice_mode, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at";
 
 export type ConceptRow = Pick<
   Tables<"account_concepts">,
@@ -16,6 +16,7 @@ export type ConceptRow = Pick<
   | "auto_tone"
   | "auto_video_style"
   | "shoot_role_focus"
+  | "shoot_voice_mode"
   | "shoot_concept"
   | "shoot_hooks"
   | "shoot_endings"
@@ -42,6 +43,7 @@ export function conceptCardData(input: { accountId: string; name: string; row: C
     autoTone: c?.auto_tone ?? "",
     autoVideoStyle: c?.auto_video_style ?? "",
     shootRole: c?.shoot_role_focus ?? "",
+    shootVoice: c?.shoot_voice_mode ?? "AI",
     shootConcept: c?.shoot_concept ?? "",
     shootHooks: (c?.shoot_hooks ?? []).join("\n"),
     shootEndings: (c?.shoot_endings ?? []).join("\n"),

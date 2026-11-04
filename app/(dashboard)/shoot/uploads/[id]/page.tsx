@@ -22,7 +22,8 @@ export default async function ShootUploadDetailPage({ params }: { params: Promis
   const supabase = await getServerSupabase();
   const { data } = await supabase.from("shoot_requests").select(REQUEST_SELECT).eq("id", id).maybeSingle();
   if (!data || data.status === "CANCELLED") notFound();
-  const card = toRequestCard(data as unknown as RequestRow);
+  const { data: concept } = await supabase.from("account_concepts").select("shoot_voice_mode").eq("social_account_id", data.content_plans.social_account_id).maybeSingle();
+  const card = toRequestCard(data as unknown as RequestRow, concept?.shoot_voice_mode === "LIVE");
 
   return (
     <main className="space-y-4 p-4 sm:p-6">

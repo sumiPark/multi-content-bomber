@@ -14,6 +14,8 @@ export interface AccountConcept {
   // 영상 방향(0043) — 방식별로 따로. 전체 자동 영상과 직접 촬영 영상의 참고 내용은 섞이지 않는다
   autoRole: string | null;
   shootRole: string | null;
+  // 직접 촬영 음성(0044) — true면 찍을 때 말한 소리, 기본은 AI 음성. 영상 방향과 별개다
+  shootLiveVoice: boolean;
   // AI 자동 업로드 (완전 자동)
   autoConcept: string;
   autoHooks: string[];
@@ -32,6 +34,7 @@ export interface AccountConcept {
 const EMPTY: AccountConcept = {
   autoRole: null,
   shootRole: null,
+  shootLiveVoice: false,
   autoConcept: "",
   autoHooks: [],
   autoEndings: [],
@@ -49,7 +52,7 @@ const EMPTY: AccountConcept = {
 export async function loadAccountConcept(service: Service, accountId: string): Promise<AccountConcept> {
   const { data, error } = await service
     .from("account_concepts")
-    .select("auto_role_focus, shoot_role_focus, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params")
+    .select("auto_role_focus, shoot_role_focus, shoot_voice_mode, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params")
     .eq("social_account_id", accountId)
     .maybeSingle();
   if (error) console.warn(`[concept] 읽기 실패(${accountId}): ${error.message}`);
@@ -57,6 +60,7 @@ export async function loadAccountConcept(service: Service, accountId: string): P
   return {
     autoRole: data.auto_role_focus,
     shootRole: data.shoot_role_focus,
+    shootLiveVoice: data.shoot_voice_mode === "LIVE",
     autoConcept: data.auto_concept,
     autoHooks: data.auto_hooks,
     autoEndings: data.auto_endings,

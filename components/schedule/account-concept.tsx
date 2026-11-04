@@ -22,6 +22,8 @@ export interface ConceptCardData {
   autoTone: string;
   autoVideoStyle: string;
   shootRole: string;
+  // AI = AI 음성(기본), LIVE = 찍을 때 말한 소리
+  shootVoice: string;
   shootConcept: string;
   shootHooks: string;
   shootEndings: string;
@@ -35,9 +37,9 @@ export interface ConceptCardData {
 
 type Role = "" | "PRODUCT" | "PERSON";
 type AutoKey = "autoRole" | "autoConcept" | "autoHooks" | "autoEndings" | "autoTone" | "autoVideoStyle";
-type ShootKey = "shootRole" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
+type ShootKey = "shootRole" | "shootVoice" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
 const AUTO_KEYS: AutoKey[] = ["autoRole", "autoConcept", "autoHooks", "autoEndings", "autoTone", "autoVideoStyle"];
-const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
+const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootVoice", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
 
 function Field({
   label,
@@ -66,15 +68,34 @@ function Field({
           {value.length.toLocaleString("ko-KR")} / {max.toLocaleString("ko-KR")}
         </span>
       </span>
-      <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows} maxLength={max} placeholder={placeholder} disabled={disabled} className="bg-card text-[13px] leading-relaxed" />
+      {/* 예시가 저장된 값처럼 보이지 않게 "예시:"를 붙이고 글자를 더 연하게 한다 */}
+      <Textarea value={value} onChange={(e) => onChange(e.target.value)} rows={rows} maxLength={max} placeholder={`예시: ${placeholder}`} disabled={disabled} className="bg-card text-[13px] leading-relaxed placeholder:text-faint" />
       <span className="block text-xs text-muted-foreground">{help}</span>
+    </label>
+  );
+}
+
+function VoiceField({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
+  return (
+    <label className="block space-y-1">
+      <span className="text-[13px] font-semibold text-ink-2">음성</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-[13px] focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+      >
+        <option value="AI">AI 음성</option>
+        <option value="LIVE">찍을 때 말한 소리</option>
+      </select>
+      <span className="block text-xs text-muted-foreground">AI 음성은 찍을 때 말하지 않아도 돼요. 찍은 소리를 빼고 AI가 읽어요. 찍을 때 말한 소리를 고르면 컷 목록에 말할 대사가 들어가요.</span>
     </label>
   );
 }
 
 function RoleField({ value, help, onChange, disabled }: { value: string; help: string; onChange: (v: string) => void; disabled: boolean }) {
   return (
-    <label className="block max-w-xs space-y-1">
+    <label className="block space-y-1">
       <span className="text-[13px] font-semibold text-ink-2">영상 방향</span>
       <select
         value={value}
@@ -91,7 +112,7 @@ function RoleField({ value, help, onChange, disabled }: { value: string; help: s
   );
 }
 
-const PHRASE_HELP = "한 줄에 문구 하나, 10개까지. {상품}처럼 중괄호 안은 AI가 채우고 나머지 글자는 그대로 나가요. 말과 화면 문구에 똑같이 들어가요.";
+const PHRASE_HELP = "한 줄에 문구 하나, 10개까지. {상품}처럼 중괄호 안은 AI가 채우고 나머지 글자는 그대로 나가요. 음성과 화면 문구에 똑같이 들어가요.";
 
 export function AccountConceptCard({ data, canManage, mode, top, hideName }: { data: ConceptCardData; canManage: boolean; mode: "auto" | "shoot"; top?: React.ReactNode; hideName?: boolean }) {
   const { isPending, error, run } = useScheduleRun();
@@ -116,6 +137,7 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
         : saveShootConceptAction({
             accountId: data.accountId,
             shootRole: form.shootRole as Role,
+            shootVoice: form.shootVoice as "AI" | "LIVE",
             shootConcept: form.shootConcept,
             shootHooks: form.shootHooks,
             shootEndings: form.shootEndings,
@@ -131,7 +153,9 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
 
       {mode === "auto" ? (
         <>
-          <RoleField {...bind("autoRole")} help="AI가 만드는 영상의 장면과 말투 방향이에요. 직접 촬영과는 따로 정해요." />
+          <div className="max-w-xs">
+            <RoleField {...bind("autoRole")} help="AI가 만드는 영상의 장면과 말투 방향이에요. 직접 촬영과는 따로 정해요." />
+          </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <Field {...bind("autoHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 고를 때 이것만 보세요\n이거 모르고 사면 손해예요"} />
             <Field {...bind("autoEndings")} label="마지막 문구" rows={3} max={2000} help="영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"저장해 두고 살 때 꺼내 보세요"} />
@@ -147,9 +171,12 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
         </>
       ) : (
         <>
-          <RoleField {...bind("shootRole")} help="사람 중심은 찍을 때 말한 소리를 쓰고 사람이 나오는 컷으로 기획해요. 상품 중심이나 정하지 않음은 손 · 제품 위주에 AI 음성을 입혀요." />
           <div className="grid gap-4 lg:grid-cols-2">
-            <Field {...bind("shootHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP + " 말하지 않는 계정은 화면 문구에만 들어가요."} placeholder={"{상품} 잘라 보면 이래요\n사장이 직접 고른 {상품}"} />
+            <RoleField {...bind("shootRole")} help="어떤 장면으로 찍을지예요. 사람 중심은 사람이 나오는 컷, 상품 중심은 손 · 제품 위주로 기획해요." />
+            <VoiceField {...bind("shootVoice")} />
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Field {...bind("shootHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 잘라 보면 이래요\n사장이 직접 고른 {상품}"} />
             <Field {...bind("shootEndings")} label="마지막 문구" rows={3} max={2000} help="마지막 컷에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"궁금한 거 댓글로 물어보세요"} />
             <Field {...bind("shootTone")} label="말투 · 분위기" help="기획 초안 · 대사 · 화면 문구 · 캡션에 반영돼요." placeholder={"사장이 직접 말하듯 담백하게."} />
             <div className="space-y-2">

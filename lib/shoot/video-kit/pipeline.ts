@@ -33,7 +33,7 @@ export interface KitInput {
   readService?: Service;
   planId?: string;
   accountName: string;
-  roleFocus: string | null;
+  liveVoice: boolean;
   facts: ProductFacts;
   rules: ContentRule[];
   clips: KitClip[];
@@ -129,10 +129,20 @@ export function applyHumanText(plan: EditPlan, input: Pick<KitInput, "humanHook"
   return out;
 }
 
-/** 계획을 촬영본에 맞게 다듬는다 — 없는 촬영본 · 잘못된 구간은 버리고, 빠진 끝 카드는 그대로 둔다. */
-function sanitizePlan(plan: EditPlan, clips: KitClip[]): EditPlan {
+/**
+ * 계획을 촬영본에 맞게 다듬는다 — 없는 촬영본 · 잘못된 구간은 버리고, 빠진 끝 카드는 그대로 둔다.
+ * 말한 소리를 쓰지 않는 계정(기본)은 AI가 지시를 어기거나 예전 계획을 다시 써도 찍은 말이 나가지 않게
+ * live 비트를 AI 음성으로 바꾼다. 읽을 글은 자막 → 그 컷의 내레이션 순서로 채운다(2026-11-04).
+ */
+export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolean): EditPlan {
   const seconds = new Map(clips.map((c) => [c.no, c.duration]));
+  const narrationOf = new Map(clips.map((c) => [c.no, c.narration ?? ""]));
   const beats = plan.beats
+    .map((b) =>
+      liveVoice || b.mode !== "live"
+        ? b
+        : { ...b, mode: "tts" as const, tts: b.tts.trim() || b.captions.join(" ").trim() || b.cuts.map((c) => narrationOf.get(c.clip) ?? "").join(" ").trim() },
+    )
     .map((b) => ({
       ...b,
       cuts: b.cuts
@@ -388,7 +398,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       readService: input.readService,
       planId: input.planId,
       accountName: input.accountName,
-      roleFocus: input.roleFocus,
+      liveVoice: input.liveVoice,
       facts: input.facts,
       rules: input.rules,
       clips,
@@ -421,7 +431,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       for (const p of planProblems(applyHumanText(plan, input))) warnings.push(`편집 계획: ${p}`);
     }
   }
-  plan = sanitizePlan(applyHumanText(plan, input), clips);
+  plan = sanitizePlan(applyHumanText(plan, input), clips, input.liveVoice);
   // 첫 비트는 후킹 글자만 — 다른 그래픽이 겹치면 후킹이 묻힌다
   plan.beats[0] = { ...plan.beats[0], graphics: plan.beats[0].graphics.filter((g) => g.type === "ring" || g.type === "arrow") };
   warnings.push(...plan.warnings);
