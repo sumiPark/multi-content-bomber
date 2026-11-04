@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { loadTrackTimes } from "@/lib/schedule/track-times";
-import { confirmDeadlineIso, isPastDeadline } from "@/lib/automation/deadline";
+import { confirmDeadlineIso, isPastSlot, isPastDeadline } from "@/lib/automation/deadline";
 import { addDays, kstDate } from "@/lib/automation/time";
 import { cn } from "@/lib/utils";
 
@@ -50,7 +50,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
 
   const { data: plans } = await supabase
     .from("content_plans")
-    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, script, check_result, social_accounts(display_name)")
+    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, error, script, check_result, social_accounts(display_name)")
     .eq("slot_date", slotDate)
     .eq("track", "B")
     .order("slot_time", { ascending: true });
@@ -61,7 +61,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     for (const a of (p.proposal as Proposal)?.alternatives ?? []) productIds.add(a.product_id);
   }
   const accountIds = [...new Set((plans ?? []).map((p) => p.social_account_id))];
-  const [{ data: products }, { data: settings }] = await Promise.all([
+  const [{ data: products }, { data: settings }, { data: sameDay }] = await Promise.all([
     productIds.size
       ? supabase
           .from("products")
@@ -71,6 +71,8 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     accountIds.length
       ? supabase.from("track_settings").select("social_account_id, b_confirm_deadline").in("social_account_id", accountIds)
       : Promise.resolve({ data: [] }),
+    // 같은 날 다른 칸(직접 촬영 포함)이 쓰는 상품 — 다른 후보 목록에서 뺀다
+    supabase.from("content_plans").select("id, product_id").eq("slot_date", slotDate).not("status", "in", "(SKIPPED,FAILED)").not("product_id", "is", null),
   ]);
   type ProductRow = NonNullable<typeof products>[number];
   const productById = new Map<string, ProductRow>((products ?? []).map((p) => [p.id, p]));
@@ -106,10 +108,14 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       note: p.note,
       productChanged: p.product_changed,
       product: brief(p.product_id),
+      // 바꿀 수 있는 후보만 — 지금 상품 · 판매 중이 아닌 상품 · 같은 날 다른 칸이 쓰는 상품은 뺀다
       alternatives: (proposal.alternatives ?? [])
+        .filter((a) => a.product_id !== p.product_id && !(sameDay ?? []).some((x) => x.id !== p.id && x.product_id === a.product_id))
         .map((a) => ({ reason: a.reason, product: brief(a.product_id) }))
-        .filter((a): a is { reason: string; product: NonNullable<ReturnType<typeof brief>> } => !!a.product),
+        .filter((a): a is { reason: string; product: NonNullable<ReturnType<typeof brief>> } => !!a.product && a.product.stock === "available"),
       pastDeadline: isPastDeadline(slotDate, deadline),
+      pastSlot: isPastSlot(slotDate, p.slot_time),
+      error: p.error,
       script: summarizeScript(p.script),
       issues: ((p.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),
     });
@@ -131,8 +137,8 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
             <Badge variant="outline">매일 {times.B}</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            AI 자동 업로드 칸({times.B})은 AI가 릴스를 만들어 자동으로 올려요. 여기서는 <b>어떤 상품으로 만들지만 확인</b>하면 됩니다. 대본 ·
-            영상 · 점검 · 예약은 그 뒤에 자동으로 진행돼요. 올리는 날 오전 7시까지 확인하지 않은 칸은 건너뜁니다.
+            AI 자동 업로드 칸({times.B})의 <b>상품을 확인</b>하면 AI가 대본 · 캡션을 쓰고 점검해요. 올리는 날 오전 7시까지 확인하지 않은 칸은 건너뜁니다.{" "}
+            <b>지금은 대본까지만 자동이에요.</b> 영상 만들기 · 자동 게시는 준비 중이라 아직 올라가지 않아요.
           </p>
         </div>
         {canManage && proposed > 0 && <ConfirmAllButton slotDate={slotDate} count={proposed} />}

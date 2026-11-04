@@ -76,7 +76,7 @@ export async function checkScript(
 
   // 3. 광고 문구 규칙 — 내레이션 · 화면 문구 · 캡션 전부
   const allText = [...spoken, ...onScreen, script.caption.text].join("\n");
-  for (const h of checkText(allText, facts.kind, rules, facts.approvedClaims)) {
+  for (const h of checkText(allText, facts.kind, rules, facts.approvedClaims, { healthFunctional: facts.healthFunctional })) {
     issues.push({
       kind: "rules",
       detail: h.rule.ruleType === "BANNED" ? `금지 표현 "${h.matched}" — ${h.rule.reason ?? ""}` : `필수 문구 빠짐 "${h.rule.phrase}" — ${h.rule.reason ?? ""}`,

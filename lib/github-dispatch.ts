@@ -19,6 +19,8 @@ export const METRICS_DISPATCH_EVENT = "collect-metrics";
 // 상품 수집 · 상세 이미지 분석 워크플로(.github/workflows/products.yml).
 export const PRODUCTS_DISPATCH_EVENT = "collect-products";
 // 직접 촬영 콘텐츠 워크플로(.github/workflows/a-plan.yml) — 기획안 후보 · 컷 리스트.
+// AI 자동 업로드 — 상품 제안(빈 칸만) + 확인된 칸 대본 쓰기(b-plan.yml)
+export const AUTO_PLAN_DISPATCH_EVENT = "plan-b";
 export const SHOOT_PLAN_DISPATCH_EVENT = "plan-a";
 export const SHOTLIST_DISPATCH_EVENT = "a-shotlist";
 // 직접 촬영 편집 워크플로(.github/workflows/shoot-edit.yml).
@@ -83,6 +85,11 @@ export async function triggerShotlistRun(reason: string): Promise<void> {
 }
 
 /** 직접 촬영 편집 — "다 올렸어요" · "고친 문구로 다시 편집" 직후. 편집은 FFmpeg라 Actions에서만. */
+/** AI 자동 업로드 대본 다시 쓰기 — 점검에 걸린 칸을 사람이 고쳐 다시 확인했을 때. */
+export async function triggerAutoScriptRun(reason: string): Promise<void> {
+  await dispatch(AUTO_PLAN_DISPATCH_EVENT, reason);
+}
+
 export async function triggerShootEditRun(reason: string): Promise<void> {
   await dispatch(SHOOT_EDIT_DISPATCH_EVENT, reason);
 }

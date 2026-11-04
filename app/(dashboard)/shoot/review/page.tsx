@@ -33,7 +33,7 @@ export default async function ShootReviewPage() {
   const { data: plans } = await supabase
     .from("content_plans")
     .select(
-      "id, slot_date, slot_time, status, product_id, script, social_accounts(display_name), products(name, kind, stock_status, represent_image_url), shoot_requests(id, status, rendered_path, edit, cuts, error)",
+      "id, slot_date, slot_time, status, product_id, script, social_accounts(display_name), products(name, kind, stock_status, represent_image_url, product_analyses(health_functional)), shoot_requests(id, status, rendered_path, edit, cuts, error)",
     )
     .eq("track", "A")
     .in("status", ["SHOT", "RENDERED", "SCHEDULED"])
@@ -79,6 +79,11 @@ export default async function ShootReviewPage() {
               rules,
               approvedClaims: (approvals ?? []).filter((a) => a.product_id === p.product_id).map((a) => a.claim),
               stockStatus: p.products.stock_status,
+              healthFunctional: (() => {
+                const a = p.products.product_analyses as unknown;
+                const row = (Array.isArray(a) ? a[0] : a) as { health_functional?: boolean | null } | null;
+                return row?.health_functional ?? null;
+              })(),
             },
           )
         : [];

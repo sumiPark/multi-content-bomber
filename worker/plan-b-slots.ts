@@ -46,7 +46,7 @@ async function main() {
     if (expired.length) {
       await service
         .from("content_plans")
-        .update({ status: "SKIPPED", note: "컨펌 마감이 지나 건너뜀" })
+        .update({ status: "SKIPPED", note: "확인 마감이 지나 건너뛰었어요" })
         .in("id", expired.map((p) => p.id));
       console.log(`[plan-b] 마감 지난 제안 ${expired.length}개 건너뜀`);
     }
@@ -118,7 +118,7 @@ async function main() {
             status: st.b_full_auto ? "CONFIRMED" : "PROPOSED",
             product_id: p.product_id,
             proposal: { reason: p.reason, alternatives: p.alternatives, agentRunId: result.runId } as unknown as Json,
-            ...(st.b_full_auto ? { confirmed_at: new Date().toISOString(), note: "완전 자동 — AI가 상품까지 확정" } : {}),
+            ...(st.b_full_auto ? { confirmed_at: new Date().toISOString(), note: "사람 확인 없이 AI가 상품까지 정했어요" } : {}),
           })),
         );
         if (insErr) throw new Error(`content_plans 저장 실패: ${insErr.message}`);

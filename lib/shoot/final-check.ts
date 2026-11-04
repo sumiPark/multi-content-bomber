@@ -13,12 +13,12 @@ export interface FinalTexts {
 
 export function finalBlocking(
   texts: FinalTexts,
-  opts: { kind: ProductKind; rules: ContentRule[]; approvedClaims: string[]; stockStatus: string },
+  opts: { kind: ProductKind; rules: ContentRule[]; approvedClaims: string[]; stockStatus: string; healthFunctional?: boolean | null },
 ): string[] {
   const out: string[] = [];
   if (opts.stockStatus !== "available") out.push("지금 판매 중이 아닌 상품이에요");
   const all = [...texts.onScreen, ...texts.subtitles, texts.caption].filter(Boolean).join("\n");
-  for (const h of checkText(all, opts.kind, opts.rules, opts.approvedClaims)) {
+  for (const h of checkText(all, opts.kind, opts.rules, opts.approvedClaims, { healthFunctional: opts.healthFunctional })) {
     out.push(
       h.rule.ruleType === "BANNED"
         ? `금지 표현 "${h.matched}"${h.rule.suggestion ? ` → ${h.rule.suggestion}` : ""}`

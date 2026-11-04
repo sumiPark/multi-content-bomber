@@ -436,6 +436,12 @@ export async function finishUploadAction(input: z.infer<typeof finishSchema>): P
 
 // ─── 완성본 확인 ──────────────────────────────────────────────────────────────
 
+/** 상품 분석의 건강기능식품 판정 — 관계가 객체 · 배열 어느 쪽으로 와도. 없으면 null. */
+function healthFunctionalOf(a: unknown): boolean | null {
+  const row = (Array.isArray(a) ? a[0] : a) as { health_functional?: boolean | null } | null | undefined;
+  return row?.health_functional ?? null;
+}
+
 type EditResult = { segments?: { cut: number; onScreen: string; subtitles: { text: string }[] }[] };
 type SavedCaption = { caption?: { text: string; keywords?: string[] } };
 
@@ -568,7 +574,7 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
   if (!plan.product_id) return { ok: false, error: "상품이 없는 칸입니다." };
 
   const [{ data: product }, { data: ruleRows }, { data: approvals }] = await Promise.all([
-    service.from("products").select("name, kind, stock_status").eq("id", plan.product_id).maybeSingle(),
+    service.from("products").select("name, kind, stock_status, product_analyses(health_functional)").eq("id", plan.product_id).maybeSingle(),
     service.from("content_rules").select("id, scope, rule_type, phrase, match_type, reason, suggestion").eq("active", true),
     service.from("product_claim_approvals").select("claim").eq("product_id", plan.product_id),
   ]);
@@ -586,7 +592,13 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
   const segments = (req.edit as EditResult | null)?.segments ?? [];
   const blocking = finalBlocking(
     { caption: captionText, onScreen: segments.map((s) => s.onScreen), subtitles: segments.flatMap((s) => s.subtitles.map((t) => t.text)) },
-    { kind: (product.kind ?? "OTHER") as ProductKind, rules, approvedClaims: (approvals ?? []).map((a) => a.claim), stockStatus: product.stock_status },
+    {
+      kind: (product.kind ?? "OTHER") as ProductKind,
+      rules,
+      approvedClaims: (approvals ?? []).map((a) => a.claim),
+      stockStatus: product.stock_status,
+      healthFunctional: healthFunctionalOf(product.product_analyses),
+    },
   );
   if (blocking.length) return { ok: false, error: `확인 전에 고칠 것: ${blocking.join(" · ")}` };
 

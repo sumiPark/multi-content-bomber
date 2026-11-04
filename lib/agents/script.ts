@@ -113,7 +113,7 @@ export function writerSkills(ctx: Pick<ScriptContext, "facts" | "rules" | "accou
       description: "광고 문구 규칙(금지 표현 · 꼭 넣을 문구) 검사. 걸린 게 있으면 고쳐서 다시 검사한다.",
       input: z.object({ text: z.string() }),
       async run(args) {
-        return checkText((args as { text: string }).text, ctx.facts.kind, ctx.rules, ctx.facts.approvedClaims).map((h) => ({
+        return checkText((args as { text: string }).text, ctx.facts.kind, ctx.rules, ctx.facts.approvedClaims, { healthFunctional: ctx.facts.healthFunctional }).map((h) => ({
           type: h.rule.ruleType === "BANNED" ? "금지 표현" : "빠진 필수 문구",
           phrase: h.matched ?? h.rule.phrase,
           reason: h.rule.reason,

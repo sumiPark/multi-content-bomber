@@ -44,12 +44,15 @@ export function isValidRegex(pattern: string): boolean {
 
 /**
  * @param approvedClaims 이 상품의 확정 심의 문구 — 그 안의 표현은 금지 검사에서 뺀다.
+ * @param opts.healthFunctional 상품 분석의 건강기능식품 판정. false면(일반 식품) 건기식 전용 "꼭 넣을 문구"를 요구하지 않는다 —
+ *   쿠마마켓 "식품"은 종류가 건기식으로 묶여 일반 식품에도 "건강기능식품" 표기를 요구했다(2026-11-04). 모르면(null) 요구한다.
  */
 export function checkText(
   text: string,
   kind: ProductKind,
   rules: ContentRule[],
   approvedClaims: string[] = [],
+  opts: { healthFunctional?: boolean | null } = {},
 ): RuleHit[] {
   // 확정 문구 부분을 지운 본문으로 금지 표현을 찾는다.
   let scrubbed = text;
@@ -70,6 +73,7 @@ export function checkText(
         hits.push({ rule, matched: rule.phrase });
       }
     } else {
+      if (rule.scope === "HEALTH_FOOD" && opts.healthFunctional === false) continue;
       // REQUIRED는 원문 전체(확정 문구 포함)에서 찾는다.
       const present =
         rule.matchType === "REGEX"
