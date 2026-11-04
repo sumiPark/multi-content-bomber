@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { AccountConceptCard } from "@/components/schedule/account-concept";
 import { AccountScheduleCard, AddAccountPanel } from "@/components/schedule/account-schedule";
 import { TrackBadge } from "@/components/schedule/slot-rule-cell";
 import { buttonVariants } from "@/components/ui/button";
@@ -9,11 +10,13 @@ import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth
 import { addDays, kstDate } from "@/lib/automation/time";
 import { cellStatus, TONE_LABEL, type CellStatus, type CellTone } from "@/lib/schedule/cell-status";
 import { AUTO_EARLIEST, MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, SHOOT_LEAD_HOURS, trackTimesLabel } from "@/lib/schedule/slot-admin";
+import { describeEditStyle, parseEditStyle } from "@/lib/shoot/edit-style";
 import { cn } from "@/lib/utils";
 
-// 편성표 — 탭 두 개(주소 ?tab=manage로 구분 — 새로 고침 · 링크 공유해도 그 탭):
+// 편성표 — 탭 세 개(주소 ?tab=으로 구분 — 새로 고침 · 링크 공유해도 그 탭):
 //   주간 현황  계정 × 하루 칸이 한 주 동안 어디까지 왔는지
 //   편성 관리  계정 넣기 · 빼기, 쓸 상품, 칸 시각 · 방식 · 주제 · 켜기/끄기 AI 자동 업로드의 상품 선정과 직접 촬영 기획안 후보가 이 표를 보고 만들어진다.
+//   계정 컨셉  계정마다 AI 자동 업로드 · 직접 촬영의 방향과 스타일(0038). 기획 · 대본 · 컷 리스트 · 편집이 읽는다.
 
 export const metadata = { title: "편성표 | MCB" };
 
@@ -54,14 +57,14 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   const supabase = await getServerSupabase();
 
   const { week, tab: tabParam } = await searchParams;
-  const tab = tabParam === "manage" ? "manage" : "board";
+  const tab = tabParam === "manage" ? "manage" : tabParam === "concept" ? "concept" : "board";
   const today = kstDate(0);
   const start = mondayOf(week && /^\d{4}-\d{2}-\d{2}$/.test(week) && !Number.isNaN(Date.parse(week)) ? week : today);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const end = days[6];
   const thisWeek = mondayOf(today);
 
-  const [{ data: ruleRows }, { data: planRows }, { data: settingRows }, { data: igAccounts }] = await Promise.all([
+  const [{ data: ruleRows }, { data: planRows }, { data: settingRows }, { data: igAccounts }, { data: conceptRows }] = await Promise.all([
     supabase
       .from("slot_rules")
       .select("id, social_account_id, slot_time, track, active, topic, social_accounts(display_name, is_active, disconnected_at)")
@@ -71,16 +74,18 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
       .select("social_account_id, slot_date, slot_time, track, status, products(name), publish_jobs(status), shoot_requests(status)")
       .gte("slot_date", start)
       .lte("slot_date", end),
-    supabase.from("track_settings").select("social_account_id, product_scopes, social_accounts(display_name, disconnected_at)"),
+    supabase.from("track_settings").select("social_account_id, product_scopes, social_accounts(display_name, disconnected_at, role_focus)"),
     supabase.from("social_accounts").select("id, display_name").eq("platform", "INSTAGRAM").is("disconnected_at", null).order("display_name"),
+    supabase.from("account_concepts").select("social_account_id, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at"),
   ]);
 
   // 편성 계정(track_settings) — 칸이 아직 없는 계정도 편성 관리에 보인다. 연결 끊긴 계정은 뺀다
-  const accounts = new Map<string, { name: string; scopes: string[]; rules: NonNullable<typeof ruleRows> }>();
+  const accounts = new Map<string, { name: string; role: string | null; scopes: string[]; rules: NonNullable<typeof ruleRows> }>();
   for (const t of settingRows ?? []) {
     if (!t.social_accounts || t.social_accounts.disconnected_at) continue;
     const scopes = ((t.product_scopes ?? []) as { shop: string; kind: string }[]).map((x) => `${x.shop}:${x.kind}`);
-    accounts.set(t.social_account_id, { name: t.social_accounts.display_name ?? "", scopes, rules: [] });
+    const role = t.social_accounts.role_focus === "PERSON" ? "사람 중심" : t.social_accounts.role_focus === "PRODUCT" ? "상품 중심" : null;
+    accounts.set(t.social_account_id, { name: t.social_accounts.display_name ?? "", role, scopes, rules: [] });
   }
   for (const r of ruleRows ?? []) accounts.get(r.social_account_id)?.rules.push(r);
   const accountList = [...accounts.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name));
@@ -118,6 +123,32 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   }));
   const total = counts.todo + counts.wait + counts.ok + counts.risk + counts.idle;
 
+  const conceptOf = new Map((conceptRows ?? []).map((c) => [c.social_account_id, c]));
+  const conceptCards = accountList.map(([accountId, acc]) => {
+    const c = conceptOf.get(accountId);
+    const edit = parseEditStyle(c?.shoot_edit_params);
+    return {
+      accountId,
+      name: acc.name,
+      role: acc.role,
+      autoSlots: acc.rules.filter((r) => r.track === "B" && r.active).length,
+      shootSlots: acc.rules.filter((r) => r.track === "A" && r.active).length,
+      autoConcept: c?.auto_concept ?? "",
+      autoHooks: (c?.auto_hooks ?? []).join("\n"),
+      autoEndings: (c?.auto_endings ?? []).join("\n"),
+      autoTone: c?.auto_tone ?? "",
+      autoVideoStyle: c?.auto_video_style ?? "",
+      shootConcept: c?.shoot_concept ?? "",
+      shootHooks: (c?.shoot_hooks ?? []).join("\n"),
+      shootEndings: (c?.shoot_endings ?? []).join("\n"),
+      shootTone: c?.shoot_tone ?? "",
+      shootEditStyle: c?.shoot_edit_style ?? "",
+      editApplied: describeEditStyle(edit.style),
+      editUnsupported: edit.unsupported,
+      updatedAt: c?.updated_at ?? null,
+    };
+  });
+
   return (
     <main className="space-y-6 p-4 sm:p-6">
       <header>
@@ -133,6 +164,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
           [
             { key: "board", label: "주간 현황", href: "/schedule", count: null },
             { key: "manage", label: "편성 관리", href: "/schedule?tab=manage", count: accountList.length },
+            { key: "concept", label: "계정 컨셉", href: "/schedule?tab=concept", count: null },
           ] as const
         ).map((t) => (
           <Link
@@ -259,6 +291,29 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                 </CardContent>
               </Card>
         )
+      ) : tab === "concept" ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>계정 컨셉</CardTitle>
+                <CardDescription className="mt-1">
+                  계정마다 완전 자동(AI 자동 업로드)과 혼합(직접 촬영 + AI 편집)의 후킹 문구 · 말투 · 스타일을 저장해 두면, AI가 기획 · 대본 · 컷 리스트 · 편집에 계속 씁니다. 다음에 쓰는 대본부터 적용되고, 이미 쓴 대본은 그대로예요. 광고 문구 규칙과 상품 사실이 항상 먼저예요.
+                  {!canManage && " 관리자 · 매니저만 바꿀 수 있어요."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {conceptCards.length === 0 ? (
+                  <p className="rounded-md border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">
+                    편성에 넣은 계정이 없어요.{" "}
+                    <Link href="/schedule?tab=manage" className="underline underline-offset-2">
+                      편성 관리
+                    </Link>
+                    에서 먼저 계정을 넣어 주세요.
+                  </p>
+                ) : (
+                  conceptCards.map((c) => <AccountConceptCard key={c.accountId} data={c} canManage={canManage} />)
+                )}
+              </CardContent>
+            </Card>
       ) : (
             <Card>
               <CardHeader className="flex flex-wrap items-start justify-between gap-3">

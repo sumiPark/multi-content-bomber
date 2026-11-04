@@ -22,6 +22,7 @@ type SavedScript = {
   caption?: { text: string };
   hooks?: { spoken: string; score?: number | null }[];
   chosen_hook?: number;
+  fixed?: { hook?: unknown; notes?: string[] };
 };
 
 function summarizeScript(raw: unknown): PlanCardData["script"] {
@@ -31,6 +32,8 @@ function summarizeScript(raw: unknown): PlanCardData["script"] {
     hookScore: s.hooks?.[s.chosen_hook ?? 0]?.score ?? null,
     beats: s.beats.map((b) => ({ spoken: b.spoken, onScreen: b.on_screen })),
     caption: s.caption?.text ?? "",
+    fixedHook: !!s.fixed?.hook,
+    fixedNotes: s.fixed?.notes ?? [],
   };
 }
 

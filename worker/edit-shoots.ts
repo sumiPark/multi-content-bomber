@@ -8,10 +8,12 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { checkScript } from "@/lib/agents/check";
+import { loadAccountConcept } from "@/lib/agents/concept";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import type { ContentRule } from "@/lib/rules/check";
+import { PACE, type EditStyle } from "@/lib/shoot/edit-style";
 import { concatSegments, extractAudio, probe, renderSegment, snapshot, type SegmentSpec } from "@/lib/shoot/ffmpeg";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
@@ -118,12 +120,16 @@ interface Plan {
   onScreen: string;
   subtitles: Subtitle[];
   hdrTransfer: string | null;
+  // 자막 글은 점검을 위해 늘 남기고, 영상에 입힐지만 따로 — 사람이 그 컷 자막을 직접 썼으면 스타일과 상관없이 입힌다
+  showSubtitles: boolean;
 }
 
-async function planCut(cut: Cut, file: string, workDir: string, speaks: boolean): Promise<Plan> {
+async function planCut(cut: Cut, file: string, workDir: string, speaks: boolean, style: EditStyle): Promise<Plan> {
   const info = probe(file);
   if (info.duration < 0.5) throw new Error(`${cut.no}번 컷 촬영본이 너무 짧아요 (${info.duration.toFixed(1)}초)`);
   const onScreen = (cut.on_screen_override ?? cut.on_screen ?? "").trim();
+  const pace = PACE[style.pace];
+  const showSubtitles = style.subtitles || !!cut.subtitle_override?.trim();
 
   // 말하는 컷: 받아쓰기 시각으로 말 앞뒤만 남긴다(대본 길이보다 말이 길면 말을 살린다)
   if (speaks && info.hasAudio && cut.voice.trim()) {
@@ -133,19 +139,19 @@ async function planCut(cut: Cut, file: string, workDir: string, speaks: boolean)
     if (segs.length) {
       const first = words[0]?.start ?? segs[0].start;
       const last = words[words.length - 1]?.end ?? segs[segs.length - 1].end;
-      const start = Math.max(0, first - 0.25);
-      const end = Math.min(info.duration, last + 0.35);
+      const start = Math.max(0, first - pace.lead);
+      const end = Math.min(info.duration, last + pace.tail);
       // 사람이 고친 자막이 있으면 그걸로(빈 문자열 = 이 컷 자막 빼기)
       const subtitles = cut.subtitle_override != null
         ? chunkSubtitle(cut.subtitle_override, 0, end - start)
         : segs.flatMap((s) => chunkSubtitle(s.text, Math.max(first, s.start) - start, Math.min(end, s.end) - start));
-      return { cutNo: cut.no, input: file, start, duration: end - start, hasAudio: true, onScreen, subtitles, hdrTransfer: info.hdrTransfer };
+      return { cutNo: cut.no, input: file, start, duration: end - start, hasAudio: true, onScreen, subtitles, hdrTransfer: info.hdrTransfer, showSubtitles };
     }
   }
 
   // 말 없는 컷: 앞 흔들림을 빼고 컷 길이만큼. 짧게 찍었으면 있는 만큼.
   const start = info.duration > cut.seconds + LEAD_SKIP * 2 ? LEAD_SKIP : Math.min(0.1, info.duration * 0.05);
-  const duration = Math.min(cut.seconds, info.duration - start - 0.05);
+  const duration = Math.min(cut.seconds * pace.length, info.duration - start - 0.05);
   return {
     cutNo: cut.no,
     input: file,
@@ -155,6 +161,7 @@ async function planCut(cut: Cut, file: string, workDir: string, speaks: boolean)
     onScreen,
     subtitles: cut.subtitle_override ? chunkSubtitle(cut.subtitle_override, 0, duration) : [],
     hdrTransfer: info.hdrTransfer,
+    showSubtitles,
   };
 }
 
@@ -184,7 +191,7 @@ async function main() {
   let q = service
     .from("shoot_requests")
     .select(
-      "id, organization_id, plan_id, status, updated_at, cuts, clips, content_plans!inner(id, slot_time, product_id, script, social_accounts(display_name, role_focus))",
+      "id, organization_id, plan_id, status, updated_at, cuts, clips, content_plans!inner(id, social_account_id, slot_time, product_id, script, social_accounts(display_name, role_focus))",
     )
     .order("uploaded_at");
   // 편집 중(EDITING)인 채 STALE_EDIT_MS 넘게 멈춘 건 — 러너가 시간 제한 · 장애로 죽은 것 — 도 다시 집는다(2026-11-04).
@@ -222,6 +229,7 @@ async function main() {
       if (!cuts.length) throw new Error("편집할 컷이 없어요");
       const clips = (req.clips ?? []) as Clip[];
       const speaks = acc?.role_focus === "PERSON" || cuts.some((c) => c.voice?.trim());
+      const style = (await loadAccountConcept(service, plan.social_account_id)).editStyle;
 
       const plans: Plan[] = [];
       for (const cut of cuts) {
@@ -230,7 +238,7 @@ async function main() {
         const ext = clip.path.split(".").pop() ?? "mp4";
         const file = join(workDir, `in${cut.no}.${ext}`);
         await download(service, clip.path, file);
-        plans.push(await planCut(cut, file, workDir, speaks));
+        plans.push(await planCut(cut, file, workDir, speaks, style));
       }
 
       const segments: string[] = [];
@@ -242,8 +250,9 @@ async function main() {
           duration: p.duration,
           hasAudio: p.hasAudio,
           onScreen: p.onScreen,
-          subtitles: p.subtitles,
+          subtitles: p.showSubtitles ? p.subtitles : [],
           hdrTransfer: p.hdrTransfer,
+          style,
         };
         renderSegment(spec, out, workDir, `c${p.cutNo}`);
         segments.push(out);
@@ -296,6 +305,7 @@ async function main() {
         segments: plans.map((p) => ({ cut: p.cutNo, start: p.start, duration: p.duration, onScreen: p.onScreen, subtitles: p.subtitles })),
         check: { ...check, checkedAt: new Date().toISOString() },
         music: null,
+        style,
         editedAt: new Date().toISOString(),
       };
       const { data: prev } = await service.from("shoot_requests").select("rendered_path, edit").eq("id", req.id).maybeSingle();

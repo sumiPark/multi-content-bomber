@@ -43,7 +43,7 @@ export interface PlanCardData {
   // 대본 워커 오류(OpenAI 한도 등)
   error: string | null;
   // 대본 · 점검 결과 (확인 뒤 AI가 씀)
-  script: { hookScore: number | null; beats: { spoken: string; onScreen: string }[]; caption: string } | null;
+  script: { hookScore: number | null; beats: { spoken: string; onScreen: string }[]; caption: string; fixedHook: boolean; fixedNotes: string[] } | null;
   issues: string[];
 }
 
@@ -116,10 +116,18 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
         </ul>
       )}
 
+      {plan.script && plan.script.fixedNotes.length > 0 && (
+        <ul className="space-y-0.5 rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">
+          {plan.script.fixedNotes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      )}
+
       {plan.script && (
         <details className="rounded-md border px-3 py-2 text-xs">
           <summary className="cursor-pointer font-semibold">
-            AI가 쓴 대본 · 캡션{plan.script.hookScore != null && ` (훅 ${Math.round(plan.script.hookScore)}점)`}
+            AI가 쓴 대본 · 캡션{plan.script.fixedHook ? " (저장한 후킹 문구)" : plan.script.hookScore != null && ` (훅 ${Math.round(plan.script.hookScore)}점)`}
           </summary>
           <ol className="mt-2 space-y-1">
             {plan.script.beats.map((b, i) => (

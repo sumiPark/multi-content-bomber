@@ -18,6 +18,7 @@ type SavedShotlist = {
   hooks?: { spoken: string; on_screen: string; score?: number | null }[];
   chosen_hook?: number;
   caption?: { text: string };
+  fixed?: { hook?: unknown; notes?: string[] };
 };
 
 // 렌더 함수 밖에서 현재 시각을 읽는다(react-hooks/purity)
@@ -57,6 +58,8 @@ export default async function ShootUploadsPage() {
         brief: plan.human_brief,
         hook: hook ? { spoken: hook.spoken, onScreen: hook.on_screen, score: hook.score ?? null } : null,
         caption: script.caption?.text ?? "",
+        fixedHook: !!script.fixed?.hook,
+        fixedNotes: script.fixed?.notes ?? [],
         cuts: ((r.cuts ?? []) as Cut[]).map((c) => ({
           no: c.no,
           seconds: c.seconds,

@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { interpretEditStyle } from "@/lib/agents/concept";
+import { templateProblem } from "@/lib/agents/fixed-phrases";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { triggerShootPlanRun } from "@/lib/github-dispatch";
 import {
@@ -25,13 +27,13 @@ import type { Json } from "@/types/database";
 export type ScheduleResult = { ok: true; message?: string } | { ok: false; error: string };
 type Service = ReturnType<typeof createServiceClient>;
 
-async function authorize(): Promise<{ ok: true; orgId: string } | { ok: false; error: string }> {
+async function authorize(): Promise<{ ok: true; orgId: string; userId: string } | { ok: false; error: string }> {
   const user = await getSessionUser();
   if (!user) return { ok: false, error: "로그인이 필요합니다." };
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) return { ok: false, error: "소속된 조직이 없습니다." };
   if (profile.role !== "ADMIN" && profile.role !== "MANAGER") return { ok: false, error: "편성표를 바꿀 권한이 없습니다." };
-  return { ok: true, orgId: profile.organization_id };
+  return { ok: true, orgId: profile.organization_id, userId: user.id };
 }
 
 const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "시각 형식이 올바르지 않아요.");
@@ -267,4 +269,78 @@ export async function removeAccountAction(input: { accountId: string }): Promise
   const cancelled = await cancelPlans(service, await futurePlans(service, ts.social_account_id), "편성에서 계정을 빼 취소");
   const tail = cancelMessage(cancelled);
   return done(`@${ts.social_accounts?.display_name ?? ""} 계정을 편성에서 뺐어요.${tail ? ` ${tail}` : ""}`);
+}
+
+const conceptText = z.string().trim().max(1000, "1,000자 안으로 줄여 주세요.");
+// 한 줄에 문구 하나 — 빈 줄 · 같은 문구는 뺀다
+const phraseLines = z
+  .string()
+  .max(2000)
+  .transform((v) => [...new Set(v.split("\n").map((l) => l.trim()).filter(Boolean))])
+  .refine((l) => l.length <= 10, "문구는 10개까지 저장할 수 있어요.")
+  .refine((l) => l.every((t) => t.length <= 100), "문구 하나는 100자 안으로 적어 주세요.")
+  .superRefine((l, ctx) => {
+    const problem = l.map(templateProblem).find(Boolean);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  });
+const conceptSchema = z.object({
+  accountId: z.string().uuid(),
+  autoConcept: conceptText,
+  autoHooks: phraseLines,
+  autoEndings: phraseLines,
+  autoTone: conceptText,
+  autoVideoStyle: conceptText,
+  shootConcept: conceptText,
+  shootHooks: phraseLines,
+  shootEndings: phraseLines,
+  shootTone: conceptText,
+  shootEditStyle: conceptText,
+});
+
+/**
+ * 계정 컨셉 저장(0038) — 다음 기획부터 AI가 읽는다. 편집 스타일 글이 바뀌었을 때만 AI가 편집 값으로 다시 옮긴다.
+ * 옮기기가 실패해도 글은 저장하고, 옛 글의 값이 남지 않게 편집 값은 비운다(기본 편집).
+ */
+export async function saveConceptAction(input: z.input<typeof conceptSchema>): Promise<ScheduleResult> {
+  const parsed = conceptSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { accountId, autoConcept, autoHooks, autoEndings, autoTone, autoVideoStyle, shootConcept, shootHooks, shootEndings, shootTone, shootEditStyle } = parsed.data;
+  const { data: account } = await service.from("social_accounts").select("id").eq("id", accountId).eq("organization_id", auth.orgId).maybeSingle();
+  if (!account) return { ok: false, error: "계정을 찾을 수 없어요." };
+  const { data: prev } = await service.from("account_concepts").select("shoot_edit_style, shoot_edit_params").eq("social_account_id", accountId).maybeSingle();
+
+  let params: Json | null = prev?.shoot_edit_params ?? null;
+  let message: string | undefined;
+  if (!shootEditStyle) params = null;
+  else if (shootEditStyle !== prev?.shoot_edit_style || params == null) {
+    try {
+      params = (await interpretEditStyle(shootEditStyle)) as unknown as Json;
+    } catch (e) {
+      console.error("[schedule] 편집 스타일 읽기 실패:", e);
+      params = null;
+      message = "저장했어요. 다만 편집 스타일을 읽지 못해 편집은 기본으로 나가요. 잠시 뒤 다시 저장해 주세요.";
+    }
+  }
+
+  const { error } = await service.from("account_concepts").upsert({
+    social_account_id: accountId,
+    organization_id: auth.orgId,
+    auto_concept: autoConcept,
+    auto_hooks: autoHooks,
+    auto_endings: autoEndings,
+    auto_tone: autoTone,
+    auto_video_style: autoVideoStyle,
+    shoot_concept: shootConcept,
+    shoot_hooks: shootHooks,
+    shoot_endings: shootEndings,
+    shoot_tone: shootTone,
+    shoot_edit_style: shootEditStyle,
+    shoot_edit_params: params,
+    updated_by: auth.userId,
+  });
+  if (error) return { ok: false, error: error.message };
+  return done(message ?? "저장했어요. 다음에 쓰는 대본부터 AI가 읽어요.");
 }

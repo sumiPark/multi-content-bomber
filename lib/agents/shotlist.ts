@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { conceptBlock } from "@/lib/agents/concept";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { runAgent, type AgentResult } from "@/lib/agents/runner";
 import { writerSkills } from "@/lib/agents/script";
@@ -54,6 +55,12 @@ export interface ShotlistContext {
   idea: { title: string; format: string; concept: string } | null;
   // 직접 지정할 때 사람이 남긴 메모
   brief: string | null;
+  // 계정 컨셉(0038)
+  concept?: string | null;
+  tone?: string | null;
+  editStyle?: string | null;
+  // 사람이 고정한 첫 · 마지막 문구 안내 (fixed-phrases.ts)
+  phraseBlock?: string;
   fixRequests?: string[];
 }
 
@@ -85,7 +92,7 @@ ${what}
 - 건강기능식품 기능성 표현은 approvedClaims 문장 그대로만. 비어 있으면 기능성 · 건강 효과를 말하지 않는다.${f.kind === "COSMETIC" ? "\n- 화장품: 캡션에 '개인차'가 있음을 밝힌다. 치료 · 재생 · 염증 같은 표현을 쓰지 않는다. 미백 · 주름 개선 · 자외선 차단은 certifiedFunctions에 있는 것만 쓴다." : ""}
 - 재고 · 품절 · 할인 · 배송 같은 판매 상태는 말하지 않는다. 가격은 상품 사실의 price만.
 - 인사 · 자기소개 · "오늘은 ~ 소개해 드릴게요"로 시작하지 않는다. 최고 · 유일 · 100% 같은 단정을 쓰지 않는다.
-- 화면 문구는 한 컷 12자 안팎. 말투는 짧고 자연스러운 구어체, 번역투 · 상투어 · 같은 어미 반복을 피한다.`;
+- 화면 문구는 한 컷 12자 안팎. 말투는 짧고 자연스러운 구어체, 번역투 · 상투어 · 같은 어미 반복을 피한다.${conceptBlock("이 계정의 직접 촬영 컨셉", ctx.concept, "훅 · 찍는 방식을 이 방향에 맞춘다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "대사 · 화면 문구 · 캡션의 말투를 이것에 맞춘다.")}${conceptBlock("이 계정의 편집 스타일", ctx.editStyle, "편집에서 살릴 수 있게 컷 길이와 구도만 이 스타일에 맞춘다. 글자 색 · 위치 · 음악 같은 편집 지시는 편집 단계가 따로 하니 how나 다른 칸에 옮겨 적지 않는다.")}${ctx.phraseBlock ?? ""}`;
 }
 
 export async function writeShotlist(ctx: ShotlistContext, opts: { log: boolean }): Promise<AgentResult<ShotlistOutput>> {
@@ -103,7 +110,7 @@ export async function writeShotlist(ctx: ShotlistContext, opts: { log: boolean }
     service: opts.log ? ctx.service : null,
     readService: ctx.service,
     planId: ctx.planId,
-    input: { track: "A", product: ctx.facts.name, slotTime: ctx.slotTime, idea: ctx.idea, brief: ctx.brief, fixRequests: ctx.fixRequests ?? [] },
+    input: { track: "A", product: ctx.facts.name, slotTime: ctx.slotTime, idea: ctx.idea, brief: ctx.brief, fixRequests: ctx.fixRequests ?? [], concept: ctx.concept ?? null, tone: ctx.tone ?? null, editStyle: ctx.editStyle ?? null },
   });
 }
 

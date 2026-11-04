@@ -34,6 +34,9 @@ export interface ShootRequestCardData {
   brief: string | null;
   hook: { spoken: string; onScreen: string; score: number | null } | null;
   caption: string;
+  // 저장한 후킹 문구를 썼는지 · 못 썼으면 왜 (계정 컨셉, 0039)
+  fixedHook: boolean;
+  fixedNotes: string[];
   cuts: { no: number; seconds: number; shot: string; how: string; onScreen: string; voice: string; done: boolean; skipped: boolean }[];
   clips: { cut: number; name: string; size: number }[];
   issues: string[];
@@ -137,8 +140,16 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
       {request.hook && (
         <p className="rounded-md bg-muted/40 px-3 py-2 text-sm">
           첫 장면: <b>{request.hook.spoken}</b>
-          {request.hook.onScreen && <span className="ml-1 rounded bg-card px-1 text-xs">{request.hook.onScreen}</span>}
+          {request.hook.onScreen && request.hook.onScreen !== request.hook.spoken && <span className="ml-1 rounded bg-card px-1 text-xs">{request.hook.onScreen}</span>}
+          {request.fixedHook && <span className="ml-1 text-xs text-muted-foreground">저장한 후킹 문구</span>}
         </p>
+      )}
+      {request.fixedNotes.length > 0 && open && (
+        <ul className="space-y-0.5 rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">
+          {request.fixedNotes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
       )}
       {request.issues.length > 0 && open && (
         <details className="rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">

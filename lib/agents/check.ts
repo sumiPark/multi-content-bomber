@@ -43,6 +43,10 @@ export interface CheckOptions {
   track?: "A" | "B";
   // A: 컷 길이 합(초) — 말하는 속도 대신 이걸로 길이를 잰다
   seconds?: number;
+  // 첫 문장이 사람이 고정한 문구면 점수로 막지 않는다 — 다시 써도 글자가 그대로라 칸이 멈추기만 한다
+  fixedHook?: boolean;
+  // 사람이 고정한 문구 — AI 말투 점수에서 뺀다(사람이 쓴 글을 AI 티로 잡지 않는다)
+  fixedTexts?: string[];
 }
 
 // 훅 채점 축 이름(.claude/skills/ig-reel-ko/hookscore_ko.py CHECK_KO와 같다)
@@ -63,8 +67,8 @@ export async function checkScript(
   // 1. 훅 — 고른 훅을 다시 채점한다(작가 에이전트의 자기 채점을 믿지 않음).
   //    B는 첫 비트, A는 고른 훅 문장(말하지 않는 계정은 첫 컷이 짧은 화면 문구뿐이라).
   const hookText = track === "A" ? (script.hooks[script.chosen_hook]?.spoken ?? spoken[0]) : spoken[0];
-  const [hook] = scoreHooks([hookText ?? ""]);
-  if (!hook || hook.score < MIN_HOOK_SCORE) {
+  const hook = opts.fixedHook ? null : scoreHooks([hookText ?? ""])[0];
+  if (!opts.fixedHook && (!hook || hook.score < MIN_HOOK_SCORE)) {
     const weak = hook ? (HOOK_AXIS_KO[hook.weakest] ?? hook.weakest) : "?";
     issues.push({ kind: "hook", detail: `첫 문장 점수 ${hook?.score ?? 0}점 (기준 ${MIN_HOOK_SCORE}점) — 가장 약한 부분: ${weak}` });
   }
@@ -88,7 +92,7 @@ export async function checkScript(
   }
 
   // 4. AI 말투 — 내레이션과 캡션 각각
-  const toneSpoken = checkTone(spoken.join("\n"));
+  const toneSpoken = checkTone(spoken.filter((l) => !opts.fixedTexts?.includes(l)).join("\n"));
   const toneCaption = checkTone(script.caption.text);
   const human = Math.min(toneSpoken.humanScore, toneCaption.humanScore);
   if (human < MIN_HUMAN_SCORE) {

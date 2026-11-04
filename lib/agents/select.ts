@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { conceptBlock } from "@/lib/agents/concept";
 import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner";
 import { addDays } from "@/lib/automation/time";
 import { KIND_LABEL, SHOPS, type ProductKind, type ShopCode } from "@/lib/products/shops";
@@ -24,6 +25,8 @@ export interface SelectContext {
   slotTimes: string[];
   // 편성표 칸 주제 (slot_time → 주제, 0031). 사람이 정한 것만 들어 있다.
   slotTopics?: Record<string, string>;
+  // 계정 컨셉(0038) — AI 자동 칸은 auto_concept, 직접 촬영 칸은 shoot_concept
+  concept?: string | null;
   // 이번 실행에서 앞 계정이 이미 고른 상품 (아직 DB에 없을 수 있어 따로 넘긴다)
   alsoBlocked: Set<string>;
 }
@@ -208,7 +211,7 @@ function systemPrompt(ctx: SelectContext): string {
 - 판매량 · 후기가 많은 상품은 근거가 되지만 그것만 보지 말고, 최근 게시물 반응(account_recent_posts)이 있으면 참고한다.
 - 과일은 제철 · 지금 판매 중인 상품을 고른다. 건강기능식품은 기능성 표현에 기대지 않는 특징이 있는지 본다.
 - reason은 사람이 컨펌할 때 읽는다. 짧고 구체적으로(왜 이 상품, 왜 이 시간대).
-- 후보가 칸 수보다 적으면 있는 만큼만 고른다.${topicLine(ctx, "상품")}`;
+- 후보가 칸 수보다 적으면 있는 만큼만 고른다.${topicLine(ctx, "상품")}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "이 방향에 맞는 상품을 먼저 고르고, reason에 왜 맞는지 적는다.")}`;
 }
 
 export async function selectProducts(
@@ -226,7 +229,7 @@ export async function selectProducts(
     service: opts.log ? ctx.service : null,
     readService: ctx.service,
     accountId: ctx.accountId,
-    input: { account: ctx.accountName, slotDate: ctx.slotDate, slotTimes: ctx.slotTimes, slotTopics: ctx.slotTopics ?? {} },
+    input: { account: ctx.accountName, slotDate: ctx.slotDate, slotTimes: ctx.slotTimes, slotTopics: ctx.slotTopics ?? {}, concept: ctx.concept ?? null },
   });
 
   // 코드로 한 번 더: 후보에서 받은 id만, 칸마다 하나, 같은 상품 중복 없음.

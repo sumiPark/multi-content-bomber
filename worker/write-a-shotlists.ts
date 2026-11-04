@@ -1,6 +1,8 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
 
+import { loadAccountConcept } from "@/lib/agents/concept";
+import { applyToShotlist, dropFailedPhrases, fixedPhraseBlock, fixedRecord, preparePhrases, recentTemplates } from "@/lib/agents/fixed-phrases";
 import { checkScript, type CheckResult } from "@/lib/agents/check";
 import { scoreHooks } from "@/lib/agents/ko-skills";
 import { loadProductFacts } from "@/lib/agents/product-facts";
@@ -97,11 +99,21 @@ async function main() {
       const chosen = proposal.chosen != null ? proposal.ideas?.[proposal.chosen] : undefined;
       const idea = chosen && chosen.product_id === plan.product_id ? { title: chosen.title, format: chosen.format, concept: chosen.concept } : null;
 
+      const concept = await loadAccountConcept(service, plan.social_account_id);
+      const hasPhrases = concept.shootHooks.length > 0 || concept.shootEndings.length > 0;
+      const phrases = await preparePhrases({
+        facts,
+        rules,
+        hooks: concept.shootHooks,
+        endings: concept.shootEndings,
+        recent: hasPhrases ? await recentTemplates(service, plan.social_account_id, "A", kstDate(-14)) : [],
+      });
       let shotlist: ShotlistOutput | null = null;
       let check: CheckResult | null = null;
       let fixRequests: string[] | undefined;
-      let tokens = 0;
-      for (let attempt = 0; attempt <= MAX_REWRITES; attempt++) {
+      let tokens = phrases.tokens.input + phrases.tokens.output;
+      let maxAttempts = MAX_REWRITES;
+      for (let attempt = 0; attempt <= maxAttempts; attempt++) {
         const res = await writeShotlist(
           {
             service,
@@ -114,23 +126,33 @@ async function main() {
             rules,
             idea,
             brief: plan.human_brief,
+            concept: concept.shootConcept,
+            tone: concept.shootTone,
+            editStyle: concept.shootEditStyle,
+            phraseBlock: fixedPhraseBlock(phrases),
             fixRequests,
           },
           { log: !dryRun },
         );
-        shotlist = res.output;
+        shotlist = applyToShotlist(res.output, phrases, acc?.role_focus === "PERSON");
         tokens += res.tokens.input + res.tokens.output;
         const seconds = shotlist.cuts.reduce((sum, c) => sum + c.seconds, 0);
-        check = await checkScript(shotlistAsScript(shotlist), facts, rules, acc?.display_name ?? "", { track: "A", seconds });
+        check = await checkScript(shotlistAsScript(shotlist), facts, rules, acc?.display_name ?? "", { track: "A", seconds, fixedHook: phrases.hooks.length > 0, fixedTexts: [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t) });
         tokens += check.tokens.input + check.tokens.output;
         console.log(`[a-shotlist] ${label} ${facts.name} — ${attempt + 1}번째: ${check.passed ? "통과" : `걸림 ${check.issues.length}건`} (스킬 ${res.skillCalls.length}번)`);
         if (check.passed) break;
+        // 고정 문구가 걸렸으면 글자를 고칠 수 없으니 다음 문구로 한 번 더 쓴다(최대 3번 더)
+        if (dropFailedPhrases(phrases, check.issues) && maxAttempts < MAX_REWRITES + 3) maxAttempts++;
         fixRequests = check.issues.map((i) => i.detail);
       }
       if (!shotlist || !check) continue;
 
       const hookScores = scoreHooks(shotlist.hooks.map((h) => h.spoken));
-      const saved = { ...shotlist, hooks: shotlist.hooks.map((h, i) => ({ ...h, score: hookScores[i]?.score ?? null })) };
+      const saved = {
+        ...shotlist,
+        hooks: shotlist.hooks.map((h, i) => ({ ...h, score: hookScores[i]?.score ?? null })),
+        ...(hasPhrases ? { fixed: fixedRecord(phrases) } : {}),
+      };
 
       console.log(`  훅: ${shotlist.hooks[shotlist.chosen_hook]?.spoken}`);
       for (const [i, c] of shotlist.cuts.entries()) {

@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { EditStyle } from "@/lib/shoot/edit-style";
 
 // 직접 촬영 편집용 FFmpeg 다리 — GitHub Actions 러너(apt ffmpeg + fonts-nanum)에서 돈다. Vercel에서 부르면 안 된다.
 // 로컬 시험은 FFMPEG_PATH · FFPROBE_PATH · SHOOT_FONT 환경변수로 경로를 준다.
@@ -110,6 +111,7 @@ interface TextLayer {
   top: number;
   size: number;
   box: boolean;
+  color?: string;
   // 이 시간(조각 기준 초)에만 보이기
   from?: number;
   to?: number;
@@ -126,7 +128,7 @@ function drawtext(layer: TextLayer, workDir: string, tag: string): string[] {
       `textfile='${esc(file)}'`,
       "expansion=none",
       `fontsize=${layer.size}`,
-      "fontcolor=white",
+      `fontcolor=${layer.color ?? "white"}`,
       "borderw=5",
       "bordercolor=black@0.85",
       ...(layer.box ? ["box=1", "boxcolor=black@0.45", "boxborderw=18"] : []),
@@ -137,6 +139,17 @@ function drawtext(layer: TextLayer, workDir: string, tag: string): string[] {
   });
 }
 
+// 편집 스타일 값 → FFmpeg (lib/shoot/edit-style.ts). 기본 값은 예전 편집과 똑같다.
+const TEXT_SIZE = { small: { chars: 14, size: 68 }, normal: { chars: 11, size: 84 }, large: { chars: 9, size: 100 } } as const;
+const TEXT_TOP = { top: 0.18, middle: 0.38 } as const;
+const TEXT_COLOR = { white: "white", yellow: "0xFFE14D" } as const;
+const COLOR_FILTERS: Record<EditStyle["color"], string[]> = {
+  natural: [],
+  bright: ["eq=brightness=0.03:saturation=1.12"],
+  warm: ["colorbalance=rm=0.05:bm=-0.05:rh=0.03:bh=-0.03"],
+  muted: ["eq=saturation=0.8"],
+};
+
 export interface SegmentSpec {
   input: string;
   start: number;
@@ -146,6 +159,7 @@ export interface SegmentSpec {
   onScreen: string;
   subtitles: { text: string; from: number; to: number }[];
   hdrTransfer: string | null;
+  style: EditStyle;
 }
 
 /** 컷 하나 → 1080x1920 · 30fps · H.264 · AAC 48kHz 스테레오 조각 (모두 같은 규격이라 이어 붙일 때 다시 인코딩하지 않는다). */
@@ -156,7 +170,17 @@ export function renderSegment(spec: SegmentSpec, out: string, workDir: string, t
     `crop=${OUT_W}:${OUT_H}`,
     `fps=${FPS}`,
     "setsar=1",
-    ...drawtext({ ...fitLines(spec.onScreen, 11, 84), top: 0.18, box: false }, workDir, `${tag}-top`),
+    ...COLOR_FILTERS[spec.style.color],
+    ...drawtext(
+      {
+        ...fitLines(spec.onScreen, TEXT_SIZE[spec.style.textSize].chars, TEXT_SIZE[spec.style.textSize].size),
+        top: TEXT_TOP[spec.style.textPosition],
+        box: spec.style.textBox,
+        color: TEXT_COLOR[spec.style.textColor],
+      },
+      workDir,
+      `${tag}-top`,
+    ),
     ...spec.subtitles.flatMap((sub, i) =>
       drawtext({ ...fitLines(sub.text, 16, 52), top: 0.66, box: true, from: sub.from, to: sub.to }, workDir, `${tag}-sub${i}`),
     ),
@@ -194,30 +218,14 @@ export function renderSegment(spec: SegmentSpec, out: string, workDir: string, t
 export function concatSegments(segments: string[], out: string, workDir: string): void {
   const list = join(workDir, "concat.txt");
   writeFileSync(list, segments.map((s) => `file '${s.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n"), "utf8");
-  run(FFMPEG, [
-    "-y",
-    "-v",
-    "error",
-    "-f",
-    "concat",
-    "-safe",
-    "0",
-    "-i",
-    list,
-    "-c:v",
-    "copy",
-    "-af",
-    "loudnorm=I=-14:TP=-1.5:LRA=11",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "160k",
-    "-ar",
-    "48000",
-    "-movflags",
-    "+faststart",
-    out,
-  ]);
+  const args = (audio: string[]) => ["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", list, "-c:v", "copy", ...audio, "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", out];
+  try {
+    run(FFMPEG, args(["-af", "loudnorm=I=-14:TP=-1.5:LRA=11"]));
+  } catch (e) {
+    // 컷이 모두 무음이면 loudnorm이 NaN을 내 실패한다 — 소리 크기를 맞출 것도 없으니 그대로 잇는다
+    console.warn("[ffmpeg] 소리 크기 맞추기 실패, 그대로 잇습니다:", e instanceof Error ? e.message : e);
+    run(FFMPEG, args([]));
+  }
 }
 
 /** 조각의 소리만 뽑기 (자막 받아쓰기용, 16kHz 모노). */

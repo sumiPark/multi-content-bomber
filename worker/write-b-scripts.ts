@@ -1,6 +1,8 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
 
+import { loadAccountConcept } from "@/lib/agents/concept";
+import { applyToScript, dropFailedPhrases, fixedPhraseBlock, fixedRecord, preparePhrases, recentTemplates } from "@/lib/agents/fixed-phrases";
 import { checkScript, type CheckResult } from "@/lib/agents/check";
 import { scoreHooks } from "@/lib/agents/ko-skills";
 import { loadProductFacts } from "@/lib/agents/product-facts";
@@ -48,7 +50,7 @@ async function main() {
 
   let q = service
     .from("content_plans")
-    .select("id, slot_date, slot_time, status, product_id, social_accounts(display_name, role_focus, role_note)")
+    .select("id, social_account_id, slot_date, slot_time, status, product_id, social_accounts(display_name, role_focus, role_note)")
     .eq("track", "B")
     .order("slot_date")
     .order("slot_time");
@@ -83,12 +85,22 @@ async function main() {
         }
         continue;
       }
+      const concept = await loadAccountConcept(service, plan.social_account_id);
+      const hasPhrases = concept.autoHooks.length > 0 || concept.autoEndings.length > 0;
+      const phrases = await preparePhrases({
+        facts,
+        rules,
+        hooks: concept.autoHooks,
+        endings: concept.autoEndings,
+        recent: hasPhrases ? await recentTemplates(service, plan.social_account_id, "B", kstDate(-14)) : [],
+      });
       let script: ScriptOutput | null = null;
       let check: CheckResult | null = null;
       let fixRequests: string[] | undefined;
-      let tokens = 0;
+      let tokens = phrases.tokens.input + phrases.tokens.output;
+      let maxAttempts = MAX_REWRITES;
 
-      for (let attempt = 0; attempt <= MAX_REWRITES; attempt++) {
+      for (let attempt = 0; attempt <= maxAttempts; attempt++) {
         const res = await writeScript(
           {
             service,
@@ -99,16 +111,22 @@ async function main() {
             slotTime: plan.slot_time,
             facts,
             rules,
+            concept: concept.autoConcept,
+            tone: concept.autoTone,
+            videoStyle: concept.autoVideoStyle,
+            phraseBlock: fixedPhraseBlock(phrases),
             fixRequests,
           },
           { log: !dryRun },
         );
-        script = res.output;
+        script = applyToScript(res.output, phrases);
         tokens += res.tokens.input + res.tokens.output;
-        check = await checkScript(script, facts, rules, acc?.display_name ?? "");
+        check = await checkScript(script, facts, rules, acc?.display_name ?? "", { fixedHook: phrases.hooks.length > 0, fixedTexts: [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t) });
         tokens += check.tokens.input + check.tokens.output;
         console.log(`[b-script] ${label} ${facts.name} — ${attempt + 1}번째: ${check.passed ? "통과" : `걸림 ${check.issues.length}건`} (스킬 ${res.skillCalls.length}번)`);
         if (check.passed) break;
+        // 고정 문구가 걸렸으면 글자를 고칠 수 없으니 다음 문구로 한 번 더 쓴다(최대 3번 더)
+        if (dropFailedPhrases(phrases, check.issues) && maxAttempts < MAX_REWRITES + 3) maxAttempts++;
         fixRequests = check.issues.map((i) => i.detail);
       }
       if (!script || !check) continue;
@@ -118,6 +136,7 @@ async function main() {
       const saved = {
         ...script,
         hooks: script.hooks.map((h, i) => ({ ...h, score: hookScores[i]?.score ?? null })),
+        ...(hasPhrases ? { fixed: fixedRecord(phrases) } : {}),
       };
 
       console.log(`  훅: ${script.beats[0]?.spoken}`);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { conceptBlock } from "@/lib/agents/concept";
 import { runAgent, type AgentResult } from "@/lib/agents/runner";
 import { selectSkills, topicLine, type SelectContext } from "@/lib/agents/select";
 import { KIND_LABEL, SHOPS } from "@/lib/products/shops";
@@ -43,7 +44,7 @@ function systemPrompt(ctx: PlanAContext): string {
 - 근거가 있는 특징(topClaims · get_product)을 찍을 거리로 바꾼다. 최근 게시물 반응(account_recent_posts)이 있으면 잘된 형식을 참고한다.
 - 건강기능식품은 기능성 효과를 보여 주는 기획을 하지 않는다(구성 · 먹는 방법 · 맛 · 포장 위주).
 - why는 사람이 고를 때 읽는다. 짧고 구체적으로.
-- 후보가 모자라면 있는 만큼만.${topicLine(ctx, "상품 · 기획")}`;
+- 후보가 모자라면 있는 만큼만.${topicLine(ctx, "상품 · 기획")}${conceptBlock("이 계정의 직접 촬영 컨셉", ctx.concept, "기획 형식 · 찍는 방식 · 분위기를 이 방향에 맞추고, why에 어떻게 맞췄는지 적는다.")}`;
 }
 
 export async function planShootIdeas(ctx: PlanAContext, opts: { log: boolean }): Promise<AgentResult<PlanAOutput>> {
@@ -59,7 +60,7 @@ export async function planShootIdeas(ctx: PlanAContext, opts: { log: boolean }):
     service: opts.log ? ctx.service : null,
     readService: ctx.service,
     accountId: ctx.accountId,
-    input: { track: "A", account: ctx.accountName, slotDate: ctx.slotDate, slotTimes: ctx.slotTimes, slotTopics: ctx.slotTopics ?? {} },
+    input: { track: "A", account: ctx.accountName, slotDate: ctx.slotDate, slotTimes: ctx.slotTimes, slotTopics: ctx.slotTopics ?? {}, concept: ctx.concept ?? null },
   });
 
   // 코드로 한 번 더: 후보에서 받은 id만, 칸마다 하나, 한 상품은 한 칸에만, 칸당 최대 3개.

@@ -1,6 +1,7 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
 
+import { loadAccountConcept } from "@/lib/agents/concept";
 import { selectProducts, type ProductScope } from "@/lib/agents/select";
 import { isPastDeadline } from "@/lib/automation/deadline";
 import { kstDate } from "@/lib/automation/time";
@@ -74,9 +75,11 @@ async function main() {
     }
 
     try {
+      const concept = await loadAccountConcept(service, st.social_account_id);
       const result = await selectProducts(
         {
           service,
+          concept: [concept.autoConcept, concept.autoTone && `말투 · 분위기: ${concept.autoTone}`].filter(Boolean).join("\n"),
           accountId: st.social_account_id,
           accountName: acc.display_name ?? "",
           roleFocus: acc.role_focus,

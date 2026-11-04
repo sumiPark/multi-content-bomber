@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      account_concepts: {
+        Row: {
+          auto_concept: string
+          auto_endings: string[]
+          auto_hooks: string[]
+          auto_tone: string
+          auto_video_style: string
+          organization_id: string
+          shoot_concept: string
+          shoot_edit_params: Json | null
+          shoot_edit_style: string
+          shoot_endings: string[]
+          shoot_hooks: string[]
+          shoot_tone: string
+          social_account_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          auto_concept?: string
+          auto_endings?: string[]
+          auto_hooks?: string[]
+          auto_tone?: string
+          auto_video_style?: string
+          organization_id: string
+          shoot_concept?: string
+          shoot_edit_params?: Json | null
+          shoot_edit_style?: string
+          shoot_endings?: string[]
+          shoot_hooks?: string[]
+          shoot_tone?: string
+          social_account_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          auto_concept?: string
+          auto_endings?: string[]
+          auto_hooks?: string[]
+          auto_tone?: string
+          auto_video_style?: string
+          organization_id?: string
+          shoot_concept?: string
+          shoot_edit_params?: Json | null
+          shoot_edit_style?: string
+          shoot_endings?: string[]
+          shoot_hooks?: string[]
+          shoot_tone?: string
+          social_account_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       account_daily: {
         Row: {
           accounts_engaged: number | null
