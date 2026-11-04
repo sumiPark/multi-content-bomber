@@ -8,7 +8,7 @@ import { SlotRuleCell, useScheduleRun, type SlotRuleCellData } from "@/component
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-// 편성표 "편성 관리" 탭 — 계정마다 쓸 상품 · 하루 칸, 계정 넣기 · 빼기. 규칙(하루 최대 칸 · 칸 사이 간격 · AI 자동은 08시 이후)은
+// 자동 업로드 일정 "편성 관리" 탭 — 계정마다 쓸 상품 · 하루 칸, 계정 넣기 · 빼기. 규칙(하루 최대 칸 · 칸 사이 간격 · 08시 이후)은
 // 서버(lib/schedule/slot-admin.ts)가 다시 확인하고, 여기서는 미리 알려 주기만 한다.
 
 export interface ScopeOptionData {
@@ -20,12 +20,11 @@ export interface LimitsData {
   maxSlots: number;
   minGapHours: number;
   autoEarliest: string;
-  shootLeadHours: number;
 }
 
 const selectClass = "h-9 rounded-md border border-input bg-card px-2.5 text-[13px] focus-visible:outline-2 focus-visible:outline-primary";
 
-function ScopeChecks({ options, value, onChange }: { options: ScopeOptionData[]; value: string[]; onChange: (v: string[]) => void }) {
+export function ScopeChecks({ options, value, onChange }: { options: ScopeOptionData[]; value: string[]; onChange: (v: string[]) => void }) {
   return (
     <div className="flex flex-wrap gap-1.5" role="group" aria-label="쓸 상품">
       {options.map((o) => {
@@ -70,7 +69,6 @@ export function AccountScheduleCard({
   const [scopeValue, setScopeValue] = useState(scopes);
   const [adding, setAdding] = useState(false);
   const [newTime, setNewTime] = useState("");
-  const [newTrack, setNewTrack] = useState("A");
   const [confirm, setConfirm] = useState<{ plans: number; scheduled: number } | null>(null);
   const [checking, startChecking] = useTransition();
   const full = rules.length >= limits.maxSlots;
@@ -158,19 +156,13 @@ export function AccountScheduleCard({
               className="space-y-2 rounded-lg border border-dashed p-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                run(() => addSlotAction({ accountId, time: newTime, track: newTrack }), () => {
+                run(() => addSlotAction({ accountId, time: newTime, track: "B" }), () => {
                   setAdding(false);
                   setNewTime("");
                 });
               }}
             >
-              <div className="flex flex-wrap gap-1.5">
-                <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} aria-label="새 칸 시각" required className={cn(selectClass, "h-8 tabular-nums")} />
-                <select value={newTrack} onChange={(e) => setNewTrack(e.target.value)} aria-label="새 칸 방식" className={cn(selectClass, "h-8")}>
-                  <option value="B">AI 자동</option>
-                  <option value="A">직접 촬영</option>
-                </select>
-              </div>
+              <input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} aria-label="새 칸 시각" required className={cn(selectClass, "h-8 tabular-nums")} />
               <div className="flex gap-1.5">
                 <Button type="submit" size="sm" disabled={isPending || !newTime}>
                   추가
@@ -216,8 +208,6 @@ export function AccountScheduleCard({
 
 const DEFAULT_SLOTS = [
   { time: "08:00", track: "B" },
-  { time: "12:00", track: "A" },
-  { time: "18:00", track: "A" },
   { time: "21:00", track: "B" },
 ];
 
@@ -252,7 +242,7 @@ export function AddAccountPanel({
       onSubmit={(e) => {
         e.preventDefault();
         if (!accountId) return setError("계정을 골라 주세요.");
-        run(() => addAccountAction({ accountId, scopes, slots }), () => {
+        run(() => addAccountAction({ accountId, scopes, slots: slots.map((s) => ({ time: s.time, track: "B" })) }), () => {
           setOpen(false);
           setAccountId("");
           setScopes([]);
@@ -294,15 +284,6 @@ export function AddAccountPanel({
                 required
                 className={cn(selectClass, "tabular-nums")}
               />
-              <select
-                value={s.track}
-                onChange={(e) => setSlots((prev) => prev.map((x, j) => (j === i ? { ...x, track: e.target.value } : x)))}
-                aria-label={`${i + 1}번째 칸 방식`}
-                className={selectClass}
-              >
-                <option value="B">AI 자동</option>
-                <option value="A">직접 촬영</option>
-              </select>
               <Button type="button" size="icon" variant="ghost" className="size-8" aria-label={`${i + 1}번째 칸 빼기`} disabled={slots.length <= 1} onClick={() => setSlots((prev) => prev.filter((_, j) => j !== i))}>
                 <X className="size-4" />
               </Button>
@@ -310,13 +291,12 @@ export function AddAccountPanel({
           ))}
         </ul>
         {slots.length < limits.maxSlots && (
-          <Button type="button" size="sm" variant="ghost" onClick={() => setSlots((prev) => [...prev, { time: "", track: "A" }])}>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setSlots((prev) => [...prev, { time: "", track: "B" }])}>
             <Plus className="size-3.5" /> 칸 추가
           </Button>
         )}
         <p className="text-xs text-muted-foreground">
-          하루 {limits.maxSlots}칸까지, 같은 계정 칸 사이는 {limits.minGapHours}시간 이상. AI 자동 칸은 {limits.autoEarliest} 이후만 고를 수 있어요. 직접 촬영 칸은 올리기{" "}
-          {limits.shootLeadHours}시간 전까지 찍어 올리면 돼요.
+          하루 {limits.maxSlots}칸까지, 같은 계정 칸 사이는 {limits.minGapHours}시간 이상. {limits.autoEarliest} 이후만 고를 수 있어요.
         </p>
       </div>
       {error && <p className="text-xs text-risk">{error}</p>}

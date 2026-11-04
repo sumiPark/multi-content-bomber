@@ -1,23 +1,13 @@
 import { confirmDeadlineIso, isPastDeadline, isPastSlot } from "@/lib/automation/deadline";
 import { addDays, kstDate, kstToIso } from "@/lib/automation/time";
-import { cellStatus, type CellStatus, type CellTask } from "@/lib/schedule/cell-status";
+import { cellStatus, type CellTone } from "@/lib/schedule/cell-status";
 import type { getServerSupabase } from "@/lib/auth";
 
-// 대시보드 "오늘 할 일" — 하루 발행 칸 판(계정 × 칸) + 사람 할 일 개수 + 멈춘 칸.
-// 할 일 · 멈춤은 오늘부터 7일 안의 칸을 같이 센다(내일 · 모레 칸의 상품 확인 · 기획 고르기 · 촬영도 지금 할 수 있어서).
-// 칸 상태 말은 편성표와 같은 cellStatus를 쓴다.
+// 대시보드 — 놓치면 안 되는 경고 + 업로드 예정(2026-11-04 사용자 결정으로 할 일 칸 · 하루 칸 표는 뺐다).
+//   경고: 멈춤(AI 자동 칸, 직접 촬영 편집 실패), 상품 확인 마감 임박, 계정 연결 끊김. 발행 실패는 위쪽 실패 줄이 따로 알린다.
+//   예정: 앞으로 7일의 AI 자동 칸 + 콘텐츠 생성에서 예약한 건.
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>;
-
-export interface BoardRow {
-  key: string;
-  time: string;
-  account: string;
-  track: string;
-  // 상품 이름, 기획안 후보만 있으면 "기획안 후보 n개", 기획이 없으면 null
-  subject: string | null;
-  status: CellStatus;
-}
 
 export interface BlockedItem {
   key: string;
@@ -26,32 +16,15 @@ export interface BlockedItem {
   href: string | null;
 }
 
-export interface DayBoard {
-  date: string;
-  rows: BoardRow[];
-  total: number;
-  done: number; // 예약 · 발행 끝
-  aiWorking: number;
-  empty: number; // 기획 없이 빈 칸(오늘만)
-  tasks: Record<CellTask, { count: number; href: string }>;
+export interface DashboardAlerts {
   blocked: BlockedItem[];
-  // 곧 비는 칸(5-4) — 마감까지 준비가 안 될 것 같은 오늘 · 내일 칸
   atRisk: BlockedItem[];
 }
 
-const TASK_DAYS = 7;
+const HORIZON_DAYS = 7;
 const HOUR = 3_600_000;
-// 곧 비는 칸 기준 — 이 시간 안에 마감 · 올릴 시각이 오는데 아직 사람 할 일이 남은 칸
-const RISK_CONFIRM_MS = 12 * HOUR; // 상품 확인 마감(올리는 날 07시)
-const RISK_SHOOT_MS = 8 * HOUR; // 직접 촬영 칸: 기획 고르기 · 촬영 전
-const RISK_REVIEW_MS = 2 * HOUR; // 완성본 확인 전 · 편집 중
-// 내일 칸 기획이 만들어지는 시각(KST, 기획 워커 05시 · 09시 + 여유) — 이 뒤에도 비어 있으면 경고
-const NEXT_DAY_PLANNED_BY = "10:00";
-
-/** 확인 마감이 지난 상품 확인 칸은 눌러도 고칠 수 없다 — 표에서 할 일 버튼을 뺀다(정리 워커가 곧 건너뜀으로 바꾼다). */
-function boardStatus(st: CellStatus, pastConfirmDeadline: boolean): CellStatus {
-  return st.task === "confirm" && pastConfirmDeadline ? { label: "확인 마감 지남", tone: "idle", href: st.href } : st;
-}
+// 상품 확인 마감(올리는 날 07시)이 이 시간 안으로 오면 경고
+const RISK_CONFIRM_MS = 12 * HOUR;
 
 function hoursLeft(ms: number): string {
   const h = Math.floor(ms / HOUR);
@@ -65,166 +38,141 @@ function dayName(date: string, today: string): string {
   return `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
 }
 
-export async function loadDayBoard(supabase: Supabase, date: string, now = Date.now()): Promise<DayBoard> {
+export async function loadDashboardAlerts(supabase: Supabase, now = Date.now()): Promise<DashboardAlerts> {
   const today = kstDate(0, now);
-  const horizon = addDays(today, TASK_DAYS);
-  const from = date < today ? date : today;
-  const to = date > horizon ? date : horizon;
+  const horizon = addDays(today, HORIZON_DAYS);
 
-  const [{ data: rules }, { data: plans }, { data: settings }] = await Promise.all([
-    supabase
-      .from("slot_rules")
-      // 끈 칸도 읽는다 — 이미 만든 기획은 그대로 올라가니 표에서 빠지면 안 된다
-      .select("social_account_id, slot_time, track, active, social_accounts(display_name, disconnected_at, is_active)"),
+  const [{ data: plans }, { data: settings }, { data: rules }, { data: failedEdits }] = await Promise.all([
     supabase
       .from("content_plans")
-      .select("id, social_account_id, slot_date, slot_time, track, status, proposal, note, error, products(name), publish_jobs(status), shoot_requests(status, error), social_accounts(display_name)")
-      .gte("slot_date", from)
-      .lte("slot_date", to),
-    supabase.from("track_settings").select("social_account_id, b_confirm_deadline"),
+      .select("id, social_account_id, slot_date, slot_time, status, note, error, publish_jobs(status), social_accounts(display_name)")
+      .eq("track", "B")
+      .gte("slot_date", today)
+      .lte("slot_date", horizon),
+    supabase.from("track_settings").select("social_account_id, b_confirm_deadline, shoot_enabled, social_accounts(display_name, is_active, disconnected_at)"),
+    supabase.from("slot_rules").select("social_account_id").eq("track", "B").eq("active", true),
+    supabase.from("shoot_requests").select("id, error, content_plans!inner(status, social_accounts(display_name))").eq("status", "FAILED").eq("content_plans.status", "SHOT"),
   ]);
 
   const deadlineOf = new Map((settings ?? []).map((s) => [s.social_account_id, s.b_confirm_deadline ?? "07:00"]));
-  const statusOf = (p: NonNullable<typeof plans>[number]) =>
-    cellStatus(
-      {
-        track: p.track,
-        status: p.status,
-        slot_date: p.slot_date,
-        slot_time: p.slot_time,
-        jobStatus: p.publish_jobs?.status ?? null,
-        requestStatus: p.shoot_requests?.status ?? null,
-      },
-      { date: p.slot_date, time: p.slot_time, track: p.track, active: true },
-      now,
-    );
-
-  // ── 할 일 · 멈춤: 오늘 ~ 7일 뒤, 올릴 시각(상품 확인은 확인 마감)이 안 지난 칸만
-  const tasks: DayBoard["tasks"] = {
-    confirm: { count: 0, href: "/auto/confirm" },
-    plans: { count: 0, href: "/shoot/plans" },
-    shoot: { count: 0, href: "/shoot/uploads" },
-    review: { count: 0, href: "/shoot/review" },
-  };
-  const firstDate: Partial<Record<CellTask, string>> = {};
   const blocked: BlockedItem[] = [];
-  for (const p of plans ?? []) {
-    if (p.slot_date < today || p.slot_date > horizon) continue;
-    if (isPastSlot(p.slot_date, p.slot_time, 0, now)) continue;
-    const st = statusOf(p);
-    if (st.task) {
-      if (st.task === "confirm" && isPastDeadline(p.slot_date, deadlineOf.get(p.social_account_id) ?? "07:00", now)) continue;
-      tasks[st.task].count += 1;
-      if (!firstDate[st.task] || p.slot_date < firstDate[st.task]!) firstDate[st.task] = p.slot_date;
-    } else if (st.tone === "risk" && st.label !== "발행 실패") {
-      // 발행 실패는 위쪽 발행 실패 줄이 따로 알린다
-      blocked.push({
-        key: p.id,
-        label: `@${p.social_accounts?.display_name ?? ""} ${dayName(p.slot_date, today)} ${p.slot_time} — ${st.label}`,
-        reason: p.shoot_requests?.error ?? p.error ?? p.note ?? null,
-        href: st.href,
-      });
-    }
-  }
-  if (firstDate.confirm) tasks.confirm.href = `/auto/confirm?date=${firstDate.confirm}`;
-  if (firstDate.plans) tasks.plans.href = `/shoot/plans?date=${firstDate.plans}`;
-
-  // ── 곧 비는 칸: 오늘 · 내일, 올릴 시각이 안 지난 칸
-  const tomorrow = addDays(today, 1);
   const atRisk: BlockedItem[] = [];
-  const planBySlot = new Map((plans ?? []).map((p) => [`${p.social_account_id}|${p.slot_date}|${p.slot_time}`, p]));
-  const emptyCount: Record<string, number> = {};
-  const offAccounts = new Map<string, string>();
-  for (const date of [today, tomorrow]) {
-    for (const r of rules ?? []) {
-      if (!r.active || !r.social_accounts || r.social_accounts.disconnected_at) continue;
-      if (isPastSlot(date, r.slot_time, 0, now)) continue;
-      const p = planBySlot.get(`${r.social_account_id}|${date}|${r.slot_time}`);
-      const name = `@${r.social_accounts.display_name ?? ""} ${dayName(date, today)} ${r.slot_time}`;
-      if (!p) {
-        // 토큰이 만료된 계정은 기획하지 않는다 — 빈 칸으로 세지 않고 다시 연결하라고 따로 알린다
-        if (r.social_accounts.is_active === false) {
-          offAccounts.set(r.social_account_id, r.social_accounts.display_name ?? "");
-          continue;
-        }
-        if (date === today || now >= Date.parse(kstToIso(today, NEXT_DAY_PLANNED_BY))) emptyCount[date] = (emptyCount[date] ?? 0) + 1;
-        continue;
-      }
-      const st = statusOf(p);
-      const toSlot = Date.parse(kstToIso(date, r.slot_time)) - now;
-      if (st.task === "confirm") {
-        const toDeadline = Date.parse(confirmDeadlineIso(date, deadlineOf.get(r.social_account_id) ?? "07:00")) - now;
-        if (toDeadline > 0 && toDeadline <= RISK_CONFIRM_MS)
-          atRisk.push({ key: p.id, label: `${name} — 상품 확인 전`, reason: `확인 마감까지 ${hoursLeft(toDeadline)}, 안 하면 이 칸은 건너뛰어요`, href: st.href });
-      } else if ((st.task === "plans" || st.task === "shoot") && toSlot <= RISK_SHOOT_MS) {
-        atRisk.push({
-          key: p.id,
-          label: `${name} — ${st.task === "plans" ? "기획 고르기 전" : "촬영 전"}`,
-          reason: `올릴 시각까지 ${hoursLeft(toSlot)}, 완성본 확인까지 못 가면 건너뛰어요`,
-          href: st.href,
-        });
-      } else if ((st.task === "review" || (st.tone === "wait" && p.track === "A")) && toSlot <= RISK_REVIEW_MS) {
-        atRisk.push({
-          key: p.id,
-          label: `${name} — ${st.label}`,
-          reason: `올릴 시각까지 ${hoursLeft(toSlot)}, ${st.task === "review" ? "확인하지 않으면" : "편집이 늦어지면"} 건너뛰어요`,
-          href: st.href,
-        });
-      }
+
+  for (const p of plans ?? []) {
+    const date = p.slot_date as string;
+    const time = p.slot_time as string;
+    if (isPastSlot(date, time, 0, now)) continue;
+    const st = cellStatus({ status: p.status, jobStatus: p.publish_jobs?.status ?? null }, { date, time, active: true }, now);
+    const name = `@${p.social_accounts?.display_name ?? ""} ${dayName(date, today)} ${time}`;
+    if (st.task === "confirm") {
+      const deadline = deadlineOf.get(p.social_account_id) ?? "07:00";
+      if (isPastDeadline(date, deadline, now)) continue;
+      const toDeadline = Date.parse(confirmDeadlineIso(date, deadline)) - now;
+      if (toDeadline > 0 && toDeadline <= RISK_CONFIRM_MS) atRisk.push({ key: p.id, label: `${name} — 상품 확인 전`, reason: `확인 마감까지 ${hoursLeft(toDeadline)}, 안 하면 이 칸은 건너뛰어요`, href: st.href });
+    } else if (st.tone === "risk" && st.label !== "발행 실패") {
+      blocked.push({ key: p.id, label: `${name} — ${st.label}`, reason: p.error ?? p.note ?? null, href: st.href });
     }
   }
-  for (const [date, n] of Object.entries(emptyCount).sort())
-    atRisk.unshift({
-      key: `empty-${date}`,
-      label: `${dayName(date, today)} 기획 없는 칸 ${n}개`,
-      reason: "이대로면 그 시각에 아무것도 안 올라가요",
-      href: date === today ? "/schedule" : `/schedule?week=${date}`,
-    });
 
-  for (const [id, name] of offAccounts)
-    atRisk.unshift({
-      key: `off-${id}`,
-      label: `@${name} 연결이 끊겨 기획을 못 해요`,
-      reason: "다시 연결하면 다음 기획부터 칸을 채워요",
-      href: "/accounts",
-    });
-
-  // ── 고른 날의 칸 판
-  const planOf = new Map((plans ?? []).filter((p) => p.slot_date === date).map((p) => [`${p.social_account_id}|${p.slot_time}`, p]));
-  const rows: BoardRow[] = [];
-  for (const r of rules ?? []) {
-    if (!r.social_accounts || r.social_accounts.disconnected_at) continue;
-    const p = planOf.get(`${r.social_account_id}|${r.slot_time}`);
-    if (!r.active && !p) continue;
-    const ideas = ((p?.proposal ?? {}) as { ideas?: unknown[] }).ideas;
-    rows.push({
-      key: `${r.social_account_id}|${r.slot_time}`,
-      time: r.slot_time,
-      account: r.social_accounts.display_name ?? "",
-      track: r.track,
-      subject: p
-        ? p.track === "A" && p.status === "PROPOSED" && ideas?.length
-          ? `기획안 후보 ${ideas.length}개`
-          : (p.products?.name ?? null)
-        : null,
-      status: !p
-        ? cellStatus(null, { date, time: r.slot_time, track: r.track, active: true, accountOff: r.social_accounts.is_active === false }, now)
-        : boardStatus(statusOf(p), isPastDeadline(p.slot_date, deadlineOf.get(p.social_account_id) ?? "07:00", now)),
+  for (const r of failedEdits ?? []) {
+    blocked.push({
+      key: r.id,
+      label: `@${r.content_plans.social_accounts?.display_name ?? ""} 직접 촬영 — 편집 실패`,
+      reason: r.error,
+      href: "/shoot/review",
     });
   }
-  rows.sort((a, b) => a.time.localeCompare(b.time) || a.account.localeCompare(b.account));
 
-  return {
-    date,
-    rows,
-    total: rows.length,
-    done: rows.filter((r) => r.status.tone === "ok").length,
-    aiWorking: rows.filter((r) => r.status.tone === "wait").length,
-    empty: rows.filter((r) => r.status.label === "빈 칸").length,
-    tasks,
-    blocked,
-    atRisk,
-  };
+  const inUse = new Set((rules ?? []).map((r) => r.social_account_id));
+  for (const s of settings ?? []) {
+    const acc = s.social_accounts;
+    if (!acc || acc.disconnected_at || acc.is_active !== false) continue;
+    if (!s.shoot_enabled && !inUse.has(s.social_account_id)) continue;
+    atRisk.unshift({ key: `off-${s.social_account_id}`, label: `@${acc.display_name ?? ""} 연결이 끊겼어요`, reason: "다시 연결해야 기획과 발행이 이어져요", href: "/accounts" });
+  }
+  return { blocked, atRisk };
+}
+
+export interface UploadItem {
+  key: string;
+  at: string;
+  account: string;
+  // AI 자동 업로드인지(아니면 콘텐츠 생성에서 직접 예약)
+  auto: boolean;
+  subject: string | null;
+  label: string;
+  tone: CellTone;
+  href: string | null;
+}
+
+export interface UploadSchedule {
+  items: UploadItem[];
+  total: number;
+}
+
+const UPLOAD_LIMIT = 15;
+
+export async function loadUploadSchedule(supabase: Supabase, now = Date.now()): Promise<UploadSchedule> {
+  const today = kstDate(0, now);
+  const horizon = addDays(today, HORIZON_DAYS);
+  const until = kstToIso(addDays(horizon, 1), "00:00");
+
+  const [{ data: plans }, { data: jobs }] = await Promise.all([
+    supabase
+      .from("content_plans")
+      .select("id, slot_date, slot_time, status, publish_job_id, products(name), publish_jobs(status), social_accounts(display_name, disconnected_at)")
+      .eq("track", "B")
+      .gte("slot_date", today)
+      .lte("slot_date", horizon)
+      .not("status", "in", "(SKIPPED,FAILED,PUBLISHED)"),
+    supabase
+      .from("publish_jobs")
+      .select("id, status, scheduled_for, social_accounts!inner(display_name), contents!inner(internal_title, ai_captions)")
+      .is("deleted_at", null)
+      .in("status", ["PENDING", "RETRYING", "PROCESSING"])
+      .not("scheduled_for", "is", null)
+      .lt("scheduled_for", until)
+      .order("scheduled_for"),
+  ]);
+
+  const items: UploadItem[] = [];
+  const autoJobs = new Set<string>();
+  for (const p of plans ?? []) {
+    const date = p.slot_date as string;
+    const time = p.slot_time as string;
+    if (p.publish_job_id) autoJobs.add(p.publish_job_id);
+    if (isPastSlot(date, time, 0, now) || p.social_accounts?.disconnected_at) continue;
+    const st = cellStatus({ status: p.status, jobStatus: p.publish_jobs?.status ?? null }, { date, time, active: true }, now);
+    if (st.label === "발행 취소" || st.label === "발행됨") continue;
+    items.push({
+      key: `plan-${p.id}`,
+      at: kstToIso(date, time),
+      account: p.social_accounts?.display_name ?? "",
+      auto: true,
+      subject: p.products?.name ?? null,
+      label: st.label,
+      tone: st.tone,
+      href: st.href,
+    });
+  }
+
+  for (const j of jobs ?? []) {
+    if (autoJobs.has(j.id)) continue;
+    const captions = j.contents.ai_captions as { instagram?: { caption?: string } } | null;
+    items.push({
+      key: `job-${j.id}`,
+      at: j.scheduled_for as string,
+      account: j.social_accounts.display_name ?? "",
+      auto: false,
+      subject: j.contents.internal_title ?? captions?.instagram?.caption?.split("\n")[0]?.slice(0, 60) ?? null,
+      label: j.status === "PENDING" ? "예약됨" : "올리는 중",
+      tone: j.status === "PENDING" ? "ok" : "wait",
+      href: "/postings?status=scheduled",
+    });
+  }
+
+  items.sort((a, b) => a.at.localeCompare(b.at));
+  return { items: items.slice(0, UPLOAD_LIMIT), total: items.length };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

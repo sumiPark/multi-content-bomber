@@ -18,7 +18,8 @@ import {
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
-// 편성표 "편성 관리" (slot_rules 0031, track_settings 0028) — ADMIN · MANAGER.
+// 자동 업로드 일정 "편성 관리" (slot_rules 0031, track_settings 0028) — ADMIN · MANAGER. 칸은 AI 자동 칸만(직접 촬영은 0042부터 칸이 아니다).
+//   촬영 설정의 계정 켜기 · 끄기(track_settings.shoot_enabled)와 계정 컨셉 저장도 여기서 한다.
 //   · 칸: 주제 · 켜기/끄기 · 시각 · 방식 바꾸기, 칸 추가 · 삭제
 //   · 계정: 편성에 넣기(쓸 상품 + 기본 칸) · 쓸 상품 바꾸기 · 빼기
 // 시각을 바꾸면 앞으로의 기획도 새 시각으로 옮기고, 칸 · 계정을 빼면 앞으로의 기획 · 예약 발행을 취소한다
@@ -32,12 +33,12 @@ async function authorize(): Promise<{ ok: true; orgId: string; userId: string } 
   if (!user) return { ok: false, error: "로그인이 필요합니다." };
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) return { ok: false, error: "소속된 조직이 없습니다." };
-  if (profile.role !== "ADMIN" && profile.role !== "MANAGER") return { ok: false, error: "편성표를 바꿀 권한이 없습니다." };
+  if (profile.role !== "ADMIN" && profile.role !== "MANAGER") return { ok: false, error: "자동 업로드 일정을 바꿀 권한이 없습니다." };
   return { ok: true, orgId: profile.organization_id, userId: user.id };
 }
 
 const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "시각 형식이 올바르지 않아요.");
-const trackSchema = z.enum(["A", "B"]);
+const trackSchema = z.literal("B");
 const scopesSchema = z.array(z.enum(SCOPE_OPTIONS.map((o) => o.key) as [string, ...string[]])).min(1, "쓸 상품을 하나 이상 골라 주세요.");
 
 function scopesJson(keys: string[]): Json {
@@ -45,7 +46,7 @@ function scopesJson(keys: string[]): Json {
 }
 
 async function accountRules(service: Service, accountId: string) {
-  const { data } = await service.from("slot_rules").select("id, slot_time, track").eq("social_account_id", accountId);
+  const { data } = await service.from("slot_rules").select("id, slot_time, track").eq("social_account_id", accountId).eq("track", "B");
   return data ?? [];
 }
 
@@ -58,6 +59,8 @@ function cancelMessage(c: { plans: number; jobs: number; uploading: number }): s
 
 function done(message?: string): ScheduleResult {
   revalidatePath("/schedule");
+  revalidatePath("/shoot/settings");
+  revalidatePath("/shoot/plans");
   revalidatePath("/");
   return { ok: true, message };
 }
@@ -78,7 +81,7 @@ export async function updateSlotRuleAction(input: z.infer<typeof updateSchema>):
   const auth = await authorize();
   if (!auth.ok) return auth;
 
-  const { ruleId, topic, active, time, track } = parsed.data;
+  const { ruleId, topic, active, time } = parsed.data;
   const service = createServiceClient();
   const { data: rule } = await service
     .from("slot_rules")
@@ -88,26 +91,21 @@ export async function updateSlotRuleAction(input: z.infer<typeof updateSchema>):
     .maybeSingle();
   if (!rule) return { ok: false, error: "칸을 찾지 못했어요." };
 
-  const patch: { topic?: string | null; active?: boolean; slot_time?: string; track?: string } = {};
+  const patch: { topic?: string | null; active?: boolean; slot_time?: string } = {};
   if (topic !== undefined) patch.topic = topic ? topic : null;
   if (active !== undefined) patch.active = active;
   const newTime = time ?? rule.slot_time;
-  const newTrack = track ?? rule.track;
   let message: string | undefined;
 
-  if (newTime !== rule.slot_time || newTrack !== rule.track) {
+  if (newTime !== rule.slot_time) {
     const others = (await accountRules(service, rule.social_account_id)).filter((r) => r.id !== rule.id);
-    const invalid = validateSlots([...others.map((r) => ({ time: r.slot_time, track: r.track })), { time: newTime, track: newTrack }]);
+    const invalid = validateSlots([...others.map((r) => ({ time: r.slot_time, track: r.track })), { time: newTime, track: "B" }]);
     if (invalid) return { ok: false, error: invalid };
-    if (newTrack !== rule.track) patch.track = newTrack;
-    if (newTime !== rule.slot_time) {
-      // 앞으로의 기획도 새 시각으로(예약된 발행은 예약 시각도) — 옮기지 못하면 칸 시각도 그대로 둔다
-      const moved = await movePlans(service, rule.social_account_id, rule.slot_time, newTime);
-      if (!moved.ok) return { ok: false, error: moved.error };
-      patch.slot_time = newTime;
-      message = moved.moved > 0 ? `앞으로의 기획 ${moved.moved}개도 ${newTime}로 옮겼어요.` : undefined;
-    }
-    if (newTrack !== rule.track) message = `${message ? `${message} ` : ""}이미 기획이 있는 날은 예전 방식 그대로이고, 기획이 없는 날부터 새 방식으로 기획해요.`;
+    // 앞으로의 기획도 새 시각으로(예약된 발행은 예약 시각도) — 옮기지 못하면 칸 시각도 그대로 둔다
+    const moved = await movePlans(service, rule.social_account_id, rule.slot_time, newTime);
+    if (!moved.ok) return { ok: false, error: moved.error };
+    patch.slot_time = newTime;
+    message = moved.moved > 0 ? `앞으로의 기획 ${moved.moved}개도 ${newTime}로 옮겼어요.` : undefined;
   }
   if (Object.keys(patch).length === 0) return { ok: true };
 
@@ -140,8 +138,7 @@ export async function addSlotAction(input: { accountId: string; time: string; tr
   });
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
   await clearScheduleCancelled(service, parsed.data.accountId, parsed.data.time);
-  if (parsed.data.track === "A") await triggerShootPlanRun(`slot added ${parsed.data.time}`).catch((e) => console.error("[schedule] 기획 트리거 실패:", e));
-  return done(parsed.data.track === "A" ? "칸을 추가했어요. 몇 분 뒤 기획안 후보가 생겨요." : "칸을 추가했어요. 다음 상품 제안(매일 오전 9시)부터 채워요.");
+  return done("칸을 추가했어요. 다음 상품 제안(매일 오전 9시)부터 채워요.");
 }
 
 /** 빼기 전 경고용 — 앞으로의 기획 · 예약 건 수. ruleId를 주면 그 칸만. */
@@ -212,12 +209,13 @@ export async function addAccountAction(input: { accountId: string; scopes: strin
     .maybeSingle();
   if (!acc || acc.disconnected_at) return { ok: false, error: "연결된 계정을 찾지 못했어요." };
   if (acc.platform !== "INSTAGRAM") return { ok: false, error: "지금은 인스타그램 계정만 편성에 넣을 수 있어요." };
-  const { data: exists } = await service.from("track_settings").select("social_account_id").eq("social_account_id", acc.id).maybeSingle();
-  if (exists) return { ok: false, error: "이미 편성에 있는 계정이에요." };
+  const { data: exists } = await service.from("track_settings").select("social_account_id, product_scopes").eq("social_account_id", acc.id).maybeSingle();
+  // 직접 촬영만 쓰던 계정은 설정이 이미 있다 — 칸이 있어야 이미 편성에 있는 계정이다
+  if (exists && (await accountRules(service, acc.id)).length > 0) return { ok: false, error: "이미 편성에 있는 계정이에요." };
 
-  const { error } = await service
-    .from("track_settings")
-    .insert({ social_account_id: acc.id, organization_id: auth.orgId, product_scopes: scopesJson(parsed.data.scopes) });
+  const { error } = exists
+    ? await service.from("track_settings").update({ product_scopes: scopesJson(parsed.data.scopes) }).eq("social_account_id", acc.id)
+    : await service.from("track_settings").insert({ social_account_id: acc.id, organization_id: auth.orgId, product_scopes: scopesJson(parsed.data.scopes) });
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
   // 예전에 빼면서 남은 칸이 없게(빼기는 칸도 지운다) — 그래도 남아 있으면 지우고 새로
   await service.from("slot_rules").delete().eq("social_account_id", acc.id);
@@ -225,12 +223,13 @@ export async function addAccountAction(input: { accountId: string; scopes: strin
     parsed.data.slots.map((s) => ({ organization_id: auth.orgId, social_account_id: acc.id, slot_time: s.time, track: s.track })),
   );
   if (rErr) {
-    await service.from("track_settings").delete().eq("social_account_id", acc.id);
+    // 직접 촬영 설정이 있던 계정의 행은 지우지 않는다
+    if (!exists) await service.from("track_settings").delete().eq("social_account_id", acc.id);
+    else await service.from("track_settings").update({ product_scopes: exists.product_scopes }).eq("social_account_id", acc.id);
     return { ok: false, error: `칸을 만들지 못했어요: ${rErr.message}` };
   }
   for (const slot of parsed.data.slots) await clearScheduleCancelled(service, acc.id, slot.time);
-  if (parsed.data.slots.some((s) => s.track === "A")) await triggerShootPlanRun(`account added ${acc.id}`).catch((e) => console.error("[schedule] 기획 트리거 실패:", e));
-  return done(`@${acc.display_name ?? ""} 계정을 편성에 넣었어요. 다음 기획(매일 05시 · 09시)부터 칸이 채워져요.`);
+  return done(`@${acc.display_name ?? ""} 계정을 편성에 넣었어요. 다음 상품 제안(매일 오전 9시)부터 칸이 채워져요.`);
 }
 
 export async function updateScopesAction(input: { accountId: string; scopes: string[] }): Promise<ScheduleResult> {
@@ -257,18 +256,73 @@ export async function removeAccountAction(input: { accountId: string }): Promise
   const service = createServiceClient();
   const { data: ts } = await service
     .from("track_settings")
-    .select("social_account_id, social_accounts(display_name)")
+    .select("social_account_id, shoot_enabled, social_accounts(display_name)")
     .eq("social_account_id", parsed.data.accountId)
     .eq("organization_id", auth.orgId)
     .maybeSingle();
   if (!ts) return { ok: false, error: "편성에 없는 계정이에요." };
   // 계정 설정 · 칸을 먼저 지운다(기획 워커가 더는 이 계정을 돌지 않는다) → 앞으로의 기획 · 예약 발행 취소(지난 기록은 남긴다)
-  const { error } = await service.from("track_settings").delete().eq("social_account_id", ts.social_account_id);
-  if (error) return { ok: false, error: `빼지 못했어요: ${error.message}` };
+  // 직접 촬영을 쓰는 계정은 설정(쓸 상품)을 함께 쓰므로 칸만 지운다
+  if (!ts.shoot_enabled) {
+    const { error } = await service.from("track_settings").delete().eq("social_account_id", ts.social_account_id);
+    if (error) return { ok: false, error: `빼지 못했어요: ${error.message}` };
+  }
   await service.from("slot_rules").delete().eq("social_account_id", ts.social_account_id);
   const cancelled = await cancelPlans(service, await futurePlans(service, ts.social_account_id), "편성에서 계정을 빼 취소");
   const tail = cancelMessage(cancelled);
   return done(`@${ts.social_accounts?.display_name ?? ""} 계정을 편성에서 뺐어요.${tail ? ` ${tail}` : ""}`);
+}
+
+// ── 촬영 설정: 직접 촬영 기획을 만들 계정 ─────────────────────────────────────
+
+/** 기획 목록을 만들 계정 추가 — 쓸 상품 범위는 AI 자동과 함께 쓴다. 저장하면 바로 목록을 채운다. */
+export async function enableShootAccountAction(input: { accountId: string; scopes: string[] }): Promise<ScheduleResult> {
+  const parsed = z.object({ accountId: z.string().uuid(), scopes: scopesSchema }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "입력값이 올바르지 않아요." };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data: acc } = await service
+    .from("social_accounts")
+    .select("id, platform, disconnected_at, display_name")
+    .eq("id", parsed.data.accountId)
+    .eq("organization_id", auth.orgId)
+    .maybeSingle();
+  if (!acc || acc.disconnected_at) return { ok: false, error: "연결된 계정을 찾지 못했어요." };
+  if (acc.platform !== "INSTAGRAM") return { ok: false, error: "지금은 인스타그램 계정만 추가할 수 있어요." };
+  const { error } = await service
+    .from("track_settings")
+    .upsert({ social_account_id: acc.id, organization_id: auth.orgId, product_scopes: scopesJson(parsed.data.scopes), shoot_enabled: true }, { onConflict: "social_account_id" });
+  if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
+  await triggerShootPlanRun(`account enabled ${acc.id}`).catch((e) => console.error("[schedule] 기획 트리거 실패:", e));
+  return done(`@${acc.display_name ?? ""} 계정을 추가했어요. 몇 분 뒤 기획이 생겨요.`);
+}
+
+/** 기획 목록 끄기 — 고르기 전 기획은 빼고, 이미 고른 기획은 끝까지 진행한다. */
+export async function disableShootAccountAction(input: { accountId: string }): Promise<ScheduleResult> {
+  const parsed = z.object({ accountId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "입력값이 올바르지 않아요." };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data: ts } = await service
+    .from("track_settings")
+    .select("social_account_id, social_accounts(display_name)")
+    .eq("social_account_id", parsed.data.accountId)
+    .eq("organization_id", auth.orgId)
+    .maybeSingle();
+  if (!ts) return { ok: false, error: "촬영 설정에 없는 계정이에요." };
+  const { error } = await service.from("track_settings").update({ shoot_enabled: false }).eq("social_account_id", ts.social_account_id);
+  if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
+  await service
+    .from("content_plans")
+    .update({ status: "SKIPPED", note: "촬영 설정에서 계정을 꺼 목록에서 뺐어요" })
+    .eq("social_account_id", ts.social_account_id)
+    .eq("track", "A")
+    .eq("status", "PROPOSED");
+  // AI 자동 칸도 없는 계정은 설정을 남겨 둘 이유가 없다
+  if ((await accountRules(service, ts.social_account_id)).length === 0) await service.from("track_settings").delete().eq("social_account_id", ts.social_account_id);
+  return done(`@${ts.social_accounts?.display_name ?? ""} 계정을 뺐어요. 이미 고른 기획은 끝까지 진행돼요.`);
 }
 
 const conceptText = z.string().trim().max(1000, "1,000자 안으로 줄여 주세요.");

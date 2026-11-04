@@ -105,7 +105,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     const proposal = (p.proposal ?? {}) as Proposal;
     group.plans.push({
       id: p.id,
-      slotTime: p.slot_time,
+      slotTime: p.slot_time as string,
       status: p.status,
       reason: proposal.reason ?? null,
       note: p.note,
@@ -117,7 +117,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         .map((a) => ({ reason: a.reason, product: brief(a.product_id) }))
         .filter((a): a is { reason: string; product: NonNullable<ReturnType<typeof brief>> } => !!a.product && a.product.stock === "available"),
       pastDeadline: isPastDeadline(slotDate, deadline),
-      pastSlot: isPastSlot(slotDate, p.slot_time),
+      pastSlot: isPastSlot(slotDate, p.slot_time as string),
       error: p.error,
       script: summarizeScript(p.script),
       issues: ((p.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),

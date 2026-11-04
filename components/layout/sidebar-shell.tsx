@@ -24,6 +24,7 @@ import {
   Video,
   Wand2,
   XIcon,
+  SlidersHorizontal,
 } from "lucide-react";
 import { signOut } from "@/app/(auth)/actions";
 import { Toaster } from "@/components/ui/toast";
@@ -72,8 +73,6 @@ const NAV_GROUPS: NavGroup[] = [
   {
     items: [
       { href: "/", label: "대시보드", icon: LayoutDashboard },
-      // 편성표(5단계) — 예전 "예약 규칙(준비 중)" 자리. 계정별 하루 칸 · 주제 · 주간 진행
-      { href: "/schedule", label: "편성표", icon: CalendarClock },
       { href: "/analytics", label: "분석", icon: BarChart3, badgeKind: "new" },
       // 에이전트 · 학습(5단계) — 에이전트별 반영 방식 · 플레이북 · 피드백 제안 · 실행 기록
       { href: "/agents", label: "에이전트 · 학습", icon: Bot },
@@ -97,18 +96,21 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "AI 자동 콘텐츠",
     items: [
+      // 자동으로 생성 · 업로드되는 일정만(2026-11-04 편성표에서 이름을 바꾸고 이 묶음으로 옮김). 계정별 하루 칸 · 주제 · 주간 진행
+      { href: "/schedule", label: "자동 업로드 일정", icon: CalendarClock },
       { href: "/auto/confirm", label: "AI 자동 업로드", icon: CalendarCheck },
       { href: "/products", label: "상품 분석", icon: Package },
       { href: "/rules", label: "광고 문구 규칙", icon: ShieldCheck },
     ],
   },
-  // 직접 촬영 콘텐츠(2026-11 신규) — 12 · 18시 칸. 사람이 찍고 AI가 편집한다.
+  // 직접 촬영 콘텐츠(2026-11 신규) — 날짜 · 시각 없는 기획 목록. 사람이 찍고 AI가 편집한 뒤 받아서 직접 올린다.
   {
     label: "직접 촬영 콘텐츠",
     items: [
       { href: "/shoot/plans", label: "촬영 기획 고르기", icon: Clapperboard },
       { href: "/shoot/uploads", label: "촬영 · 올리기", icon: Video },
-      { href: "/shoot/review", label: "완성본 확인", icon: Film },
+      { href: "/shoot/review", label: "완성본 받기", icon: Film },
+      { href: "/shoot/settings", label: "촬영 설정", icon: SlidersHorizontal },
     ],
   },
   {

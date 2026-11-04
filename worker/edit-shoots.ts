@@ -23,7 +23,7 @@ import type { Json } from "@/types/database";
 //   1. 컷마다 쓸 구간을 고른다 — 말하는 컷은 받아쓰기(whisper) 시각으로 말 앞뒤만, 아니면 앞 흔들림을 빼고 컷 길이만큼
 //   2. 1080x1920으로 맞추고 화면 문구(위) · 말 자막(아래)을 입힌다 — 사람이 고친 문구가 있으면 그걸로
 //   3. 이어 붙이고 소리 크기를 맞춘다. 음악은 아직 없음(AI 음악 도구를 정하면 여기서 깐다)
-//   4. 실제로 들어간 문구 · 자막 · 캡션으로 점검(4)을 다시 돌린다 → 완성본 확인 화면에 보인다
+//   4. 실제로 들어간 문구 · 자막 · 캡션으로 점검(4)을 다시 돌린다 → 완성본 받기 화면에 보인다
 //   끝나면 shoot_requests EDITED + content_plans RENDERED.
 //
 // FFmpeg가 필요해 GitHub Actions(.github/workflows/shoot-edit.yml)에서만 돈다.
@@ -39,7 +39,7 @@ type Cut = {
   how: string;
   on_screen: string;
   voice: string;
-  // 완성본 확인에서 사람이 고친 문구 (있으면 이걸 쓴다)
+  // 완성본 받기에서 사람이 고친 문구 (있으면 이걸 쓴다)
   on_screen_override?: string | null;
   subtitle_override?: string | null;
   // 못 찍어서 뺀 컷 — 편집에서 건너뛴다
@@ -191,7 +191,7 @@ async function main() {
   let q = service
     .from("shoot_requests")
     .select(
-      "id, organization_id, plan_id, status, updated_at, cuts, clips, content_plans!inner(id, social_account_id, slot_time, product_id, script, social_accounts(display_name, role_focus))",
+      "id, organization_id, plan_id, status, updated_at, cuts, clips, content_plans!inner(id, social_account_id, product_id, script, social_accounts(display_name, role_focus))",
     )
     .order("uploaded_at");
   // 편집 중(EDITING)인 채 STALE_EDIT_MS 넘게 멈춘 건 — 러너가 시간 제한 · 장애로 죽은 것 — 도 다시 집는다(2026-11-04).
@@ -208,7 +208,7 @@ async function main() {
   for (const req of requests) {
     const plan = req.content_plans;
     const acc = plan.social_accounts;
-    const label = `@${acc?.display_name} ${plan.slot_time} (${req.id.slice(0, 8)})`;
+    const label = `@${acc?.display_name} (${req.id.slice(0, 8)})`;
     // 선점 — 동시에 두 run이 같은 요청을 편집하지 않게
     if (!dryRun) {
       let claim = service.from("shoot_requests").update({ status: "EDITING", error: null }).eq("id", req.id);

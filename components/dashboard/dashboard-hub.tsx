@@ -12,11 +12,8 @@ import {
   Upload,
   XCircle,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { PlatformIcon } from "@/components/ui/platform-icon";
-import { RelativeTime } from "@/components/ui/relative-time";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,18 +27,6 @@ export type PublishStatus =
   | "FAILED"
   | "RETRYING"
   | "CANCELLED";
-
-export interface UpcomingJob {
-  id: string;
-  contentId: string;
-  status: PublishStatus;
-  scheduledFor: string | null;
-  lastError: string | null;
-  contentLabel: string;
-  mediaType: "IMAGE" | "VIDEO";
-  mediaCount: number;
-  platform: Platform;
-}
 
 export interface AccountSummary {
   platform: Platform;
@@ -59,7 +44,6 @@ export interface DashboardData {
   topFailureSummary: string | null;
   thisWeekCompleted: number;
   weekDelta: number;
-  upcoming: UpcomingJob[];
   accounts: AccountSummary[];
 }
 
@@ -241,131 +225,6 @@ function StatTile({
       </p>
       <p className={cn("mt-1 text-xs", hintClass)}>{hint}</p>
     </Link>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ④ Upcoming uploads
-
-const STATUS_BADGE: Record<
-  "scheduled" | "uploading" | "failed" | "pending",
-  { label: string; className: string }
-> = {
-  scheduled: { label: "예약중", className: "bg-warn-soft text-warn border-warn/30" },
-  uploading: { label: "올리는 중", className: "bg-brand-soft text-primary border-primary/30" },
-  failed: { label: "실패", className: "bg-risk-soft text-risk border-risk/30" },
-  pending: { label: "대기", className: "bg-surface-2 text-ink-2 border-border" },
-};
-
-function deriveDisplayStatus(
-  status: PublishStatus,
-  scheduledFor: string | null,
-): keyof typeof STATUS_BADGE {
-  if (status === "FAILED") return "failed";
-  if (status === "PROCESSING" || status === "RETRYING") return "uploading";
-  if (scheduledFor && new Date(scheduledFor).getTime() > Date.now())
-    return "scheduled";
-  return "pending";
-}
-
-export function UpcomingUploads({ items }: { items: UpcomingJob[] }) {
-  return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-base font-semibold">예정된 업로드</h2>
-        <Link
-          href="/postings"
-          className="flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground"
-        >
-          전체 보기
-          <ArrowRight className="size-3" />
-        </Link>
-      </div>
-
-      {items.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 py-10 text-center text-sm text-muted-foreground">
-            <CalendarClock className="size-6 text-muted-foreground/60" />
-            <p>예정된 업로드가 없어요.</p>
-            <Link
-              href="/upload"
-              className="text-foreground underline-offset-4 hover:underline"
-            >
-              첫 콘텐츠 만들기 →
-            </Link>
-          </CardContent>
-        </Card>
-      ) : (
-        <ul className="space-y-2">
-          {items.map((job) => (
-            <UpcomingRow key={job.id} job={job} />
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function UpcomingRow({ job }: { job: UpcomingJob }) {
-  const display = deriveDisplayStatus(job.status, job.scheduledFor);
-  const isFailed = display === "failed";
-  const badge = STATUS_BADGE[display];
-
-  return (
-    <li>
-      <Link
-        href={`/postings?status=${display === "pending" ? "pending" : display}`}
-        className={cn(
-          "flex items-center gap-3 rounded-lg border bg-card p-3 transition hover:bg-surface-2",
-          isFailed && "border-risk/40 bg-risk-soft",
-        )}
-      >
-        <div
-          className={cn(
-            "flex size-10 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground",
-            isFailed && "border-risk/30 text-risk",
-          )}
-          aria-hidden
-        >
-          {job.mediaType === "VIDEO" ? (
-            <span className="text-xs font-semibold">영상</span>
-          ) : (
-            <span className="text-xs font-semibold">
-              사진{job.mediaCount > 1 ? ` ${job.mediaCount}` : ""}
-            </span>
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="line-clamp-1 text-sm font-medium">
-              {job.contentLabel}
-            </p>
-          </div>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-            {job.scheduledFor ? (
-              <RelativeTime iso={job.scheduledFor} />
-            ) : (
-              <span>예약 없음</span>
-            )}
-            <span aria-hidden>·</span>
-            <PlatformIcon platform={job.platform} size={14} />
-          </div>
-          {isFailed && job.lastError && (
-            <p className="mt-1 line-clamp-1 text-xs text-destructive">
-              {job.lastError}
-            </p>
-          )}
-        </div>
-
-        <Badge
-          variant="outline"
-          className={cn("font-medium", badge.className)}
-        >
-          {badge.label}
-        </Badge>
-      </Link>
-    </li>
   );
 }
 

@@ -48,7 +48,6 @@ export interface ShotlistContext {
   accountName: string;
   roleFocus: string | null;
   roleNote: string | null;
-  slotTime: string;
   facts: ProductFacts;
   rules: ContentRule[];
   // 사람이 고른 기획안 (직접 지정이면 null)
@@ -70,8 +69,8 @@ function systemPrompt(ctx: ShotlistContext): string {
   const focus = person ? "사람 중심(사람이 나와 말하고 쓰는 모습)" : ctx.roleFocus === "PRODUCT" ? "상품 중심(손 · 제형 · 구성 클로즈업, 얼굴 없이)" : "미정";
   const what = ctx.idea
     ? `고른 기획: "${ctx.idea.title}" (${ctx.idea.format}) — ${ctx.idea.concept}`
-    : `사람이 상품을 직접 지정했다.${ctx.brief ? ` 메모: "${ctx.brief}" — 이 메모를 가장 먼저 반영한다.` : " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
-  return `너는 인스타그램 @${ctx.accountName}의 릴스 촬영 감독 겸 대본 작가다. 사람이 휴대폰으로 컷 리스트대로 찍어 올리면 AI가 컷을 잇고 화면 문구를 입힌다. ${ctx.slotTime}에 올라간다.
+    : `사람이 상품을 직접 골랐다.${ctx.brief ? ` 메모: "${ctx.brief}" — 이 메모를 가장 먼저 반영한다.` : " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
+  return `너는 인스타그램 @${ctx.accountName}의 릴스 촬영 감독 겸 대본 작가다. 사람이 휴대폰으로 컷 리스트대로 찍어 올리면 AI가 컷을 잇고 화면 문구를 입힌다.
 계정 역할: ${focus}${ctx.roleNote ? ` — ${ctx.roleNote}` : ""}
 상품: ${f.shop} ${f.kindLabel} "${f.name}"
 ${what}
@@ -102,7 +101,7 @@ export async function writeShotlist(ctx: ShotlistContext, opts: { log: boolean }
   return runAgent({
     agent: "plan",
     system: systemPrompt(ctx),
-    user: `${ctx.facts.name}로 ${ctx.slotTime} 릴스 촬영 컷 리스트 · 화면 문구 · 캡션을 써 줘.${fix}`,
+    user: `${ctx.facts.name}로 릴스 촬영 컷 리스트 · 화면 문구 · 캡션을 써 줘.${fix}`,
     skills: writerSkills(ctx),
     outputSchema: shotlistSchema,
     outputName: "shot_list",
@@ -110,7 +109,7 @@ export async function writeShotlist(ctx: ShotlistContext, opts: { log: boolean }
     service: opts.log ? ctx.service : null,
     readService: ctx.service,
     planId: ctx.planId,
-    input: { track: "A", product: ctx.facts.name, slotTime: ctx.slotTime, idea: ctx.idea, brief: ctx.brief, fixRequests: ctx.fixRequests ?? [], concept: ctx.concept ?? null, tone: ctx.tone ?? null, editStyle: ctx.editStyle ?? null },
+    input: { track: "A", product: ctx.facts.name, idea: ctx.idea, brief: ctx.brief, fixRequests: ctx.fixRequests ?? [], concept: ctx.concept ?? null, tone: ctx.tone ?? null, editStyle: ctx.editStyle ?? null },
   });
 }
 

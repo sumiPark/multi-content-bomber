@@ -15,7 +15,6 @@ import {
 } from "@/app/(dashboard)/shoot/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RelativeTime } from "@/components/ui/relative-time";
 import { toast } from "@/components/ui/toast";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -27,9 +26,6 @@ export interface ShootRequestCardData {
   id: string;
   status: string;
   account: string;
-  slotDate: string;
-  slotTime: string;
-  dueIso: string | null;
   product: { name: string; url: string; image: string | null } | null;
   brief: string | null;
   hook: { spoken: string; onScreen: string; score: number | null } | null;
@@ -41,9 +37,6 @@ export interface ShootRequestCardData {
   clips: { cut: number; name: string; size: number }[];
   issues: string[];
   error: string | null;
-  // 서버에서 계산 — 렌더 중 시계를 읽지 않으려고
-  pastSlot: boolean;
-  pastDue: boolean;
 }
 
 const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" | "ok" }> = {
@@ -93,8 +86,7 @@ function useRun() {
 export function ShootRequestCard({ request, orgId, userId }: { request: ShootRequestCardData; orgId: string; userId: string }) {
   const { isPending, error, run } = useRun();
   const s = STATUS[request.status] ?? { label: request.status, variant: "outline" as const };
-  // 올릴 시각이 지난 칸은 더 찍어도 예약되지 않는다 — 다음 정리 때 건너뜀이 된다
-  const open = request.status === "OPEN" && !request.pastSlot;
+  const open = request.status === "OPEN";
   const clipOf = new Map(request.clips.map((c) => [c.cut, c]));
   const activeCuts = request.cuts.filter((c) => !c.skipped);
   const uploaded = activeCuts.filter((c) => clipOf.has(c.no)).length;
@@ -104,20 +96,11 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
     <article className="space-y-3 rounded-lg border bg-card p-4">
       <header className="flex flex-wrap items-center gap-2">
         <span className="font-semibold">@{request.account}</span>
-        <span className="text-sm tabular-nums">
-          {request.slotDate.slice(5)} {request.slotTime}
-        </span>
         <Badge variant={s.variant}>{s.label}</Badge>
         {(request.status === "EDITED" || request.status === "FAILED") && (
           <Link href="/shoot/review" className="text-xs font-medium underline">
-            완성본 확인으로 →
+            완성본 받기로 →
           </Link>
-        )}
-        {request.status === "OPEN" && request.pastSlot && <Badge variant="destructive">올릴 시각 지남</Badge>}
-        {open && request.dueIso && (
-          <span className={cn("text-xs", request.pastDue ? "font-semibold text-warn" : "text-muted-foreground")}>
-            {request.pastDue ? "촬영 마감 지남" : "촬영 마감"} <RelativeTime iso={request.dueIso} />
-          </span>
         )}
       </header>
 
@@ -181,7 +164,7 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
 
       {request.error && (
         <details className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
-          <summary className="cursor-pointer font-semibold">자동 편집이 실패했어요. 완성본 확인에서 다시 편집하거나 촬영본을 다시 올릴 수 있어요.</summary>
+          <summary className="cursor-pointer font-semibold">자동 편집이 실패했어요. 완성본 받기에서 다시 편집하거나 촬영본을 다시 올릴 수 있어요.</summary>
           <p className="mt-1 break-all">{request.error}</p>
         </details>
       )}

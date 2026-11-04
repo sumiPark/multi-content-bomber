@@ -233,7 +233,7 @@ export function extractAudio(input: string, out: string): void {
   run(FFMPEG, ["-y", "-v", "error", "-i", input, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "64k", out]);
 }
 
-/** 미리보기 그림 한 장 (완성본 확인 화면 · 표지 후보). */
+/** 미리보기 그림 한 장 (완성본 받기 화면 · 표지 후보). */
 export function snapshot(input: string, at: number, out: string): void {
   run(FFMPEG, ["-y", "-v", "error", "-ss", at.toFixed(2), "-i", input, "-frames:v", "1", "-q:v", "3", out]);
 }

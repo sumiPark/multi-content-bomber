@@ -1,7 +1,7 @@
 import type { ProductKind } from "@/lib/products/shops";
 import { checkText, type ContentRule } from "@/lib/rules/check";
 
-// 완성본 확인의 마지막 관문 — 화면(확인 버튼 잠금)과 서버 액션(예약 직전)이 같이 쓴다.
+// 완성본을 받기 전 경고 — 화면(경고 + 확인 체크)과 서버 액션(받기 직전)이 같이 쓴다.
 // 코드로 확실히 아는 것만 막는다: 광고 문구 규칙(금지 표현 · 필수 문구), 판매 상태.
 // 편집 때 AI 점검(근거 · 지어낸 체험 · 말투 · 훅)은 "확인할 것"으로 보여 주고 사람이 판단한다.
 

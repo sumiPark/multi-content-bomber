@@ -1,7 +1,7 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
 
-import { kstDate } from "@/lib/automation/time";
+import { POSTED_KEEP_DAYS, shootFilesDeleteAt, UNPOSTED_KEEP_DAYS } from "@/lib/shoot/retention";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -16,8 +16,8 @@ import { createServiceClient } from "@/lib/supabase/service";
 //         7일 넘었고 어떤 contents에도 안 쓰인 파일(2단계에서 올리고 캡션 전에 나간 것).
 //         직접 촬영(`조직/사용자/shoot/…`)은 하위 폴더라 보지 않는다.
 //
-// 대상 3. 직접 촬영 — 올릴 날이 SHOOT_KEEP_DAYS 넘게 지난 칸의 촬영 원본(clips).
-//         예약까지 못 간 칸(칸에 콘텐츠가 없음)은 완성본 · 표지도 지운다. 예약된 완성본은 콘텐츠 파일이라 남긴다.
+// 대상 3. 직접 촬영 — 보관 기간(lib/shoot/retention.ts: 올린 뒤 14일 · 안 올리면 편집 뒤 30일)이 지난 촬영 원본과 완성본 · 표지.
+//         예전 자동 예약 기록의 완성본은 발행 콘텐츠가 쓰므로 남긴다.
 //
 // 발행 잡이 하나라도 있는 콘텐츠와 그 파일은 건드리지 않는다(발행 이력 보존 — 실패 · 취소 포함).
 //
@@ -34,8 +34,6 @@ const BUCKET = "media";
 const CLEANUP_SINCE = "2026-11-04T00:00:00+09:00";
 const PAGE = 1000;
 const REMOVE_BATCH = 100;
-// 촬영 원본 보관 기간 — 완성본이 잘못됐을 때 다시 편집할 여유. 이후엔 원본 없이도 발행 기록 · 완성본은 남는다.
-const SHOOT_KEEP_DAYS = 14;
 
 type Service = ReturnType<typeof createServiceClient>;
 
@@ -122,21 +120,23 @@ async function listWizardUploads(service: Service): Promise<{ path: string; crea
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 
 async function cleanupShootFiles(service: Service, apply: boolean): Promise<void> {
-  const cutoff = kstDate(-SHOOT_KEEP_DAYS);
   const { data, error } = await service
     .from("shoot_requests")
-    .select("id, clips, rendered_path, edit, content_plans!inner(slot_date, content_id)")
-    .lt("content_plans.slot_date", cutoff);
+    .select("id, clips, rendered_path, edit, updated_at, content_plans!inner(track, posted_at, content_id)")
+    .eq("content_plans.track", "A");
   if (error) throw new Error(`촬영 요청 조회 실패: ${error.message}`);
 
+  const now = Date.now();
   let requests = 0;
   let files = 0;
   let bytes = 0;
   for (const r of data ?? []) {
     const clips = (Array.isArray(r.clips) ? r.clips : []) as { path: string; size?: number }[];
-    const edit = (r.edit ?? null) as { thumbnail?: string | null } | null;
-    // 예약까지 못 간 칸의 완성본은 어디에도 안 쓰인다
-    const unused = r.content_plans.content_id ? [] : [r.rendered_path, edit?.thumbnail].filter((p): p is string => !!p);
+    const edit = (r.edit ?? null) as { thumbnail?: string | null; editedAt?: string | null } | null;
+    const plan = r.content_plans;
+    if (now < shootFilesDeleteAt({ postedAt: plan.posted_at, editedAt: edit?.editedAt, updatedAt: r.updated_at })) continue;
+    // 예전 자동 예약 기록(content_id 있음)의 완성본은 발행 콘텐츠가 쓰므로 두고, 그 밖의 완성본은 함께 지운다
+    const unused = plan.content_id ? [] : [r.rendered_path, edit?.thumbnail].filter((p): p is string => !!p);
     const paths = [...clips.map((c) => c.path), ...unused];
     if (!paths.length) continue;
     requests++;
@@ -158,7 +158,7 @@ async function cleanupShootFiles(service: Service, apply: boolean): Promise<void
       .eq("id", r.id);
     if (saveErr) console.warn(`[cleanup-drafts] 촬영 요청 저장 실패(${r.id}): ${saveErr.message}`);
   }
-  console.log(`  3) 올릴 날이 ${SHOOT_KEEP_DAYS}일 넘게 지난 직접 촬영: 요청 ${requests}개 · 파일 ${files}개 · 촬영 원본 약 ${mb(bytes)}${apply ? " (지움)" : ""}`);
+  console.log(`  3) 보관 기간이 지난 직접 촬영(올린 뒤 ${POSTED_KEEP_DAYS}일 · 안 올리면 ${UNPOSTED_KEEP_DAYS}일): 요청 ${requests}개 · 파일 ${files}개 · 촬영 원본 약 ${mb(bytes)}${apply ? " 지움" : " (시험, 안 지움)"}`);
 }
 
 async function main() {

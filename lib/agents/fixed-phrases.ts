@@ -246,9 +246,10 @@ export async function recentTemplates(service: Service, accountId: string, track
     .select("script")
     .eq("social_account_id", accountId)
     .eq("track", track)
-    .gte("slot_date", since)
+    // 직접 촬영 기획은 날짜가 없어 만든 때로 본다
+    .gte(track === "A" ? "created_at" : "slot_date", since)
     .not("script", "is", null)
-    .order("slot_date", { ascending: false })
+    .order(track === "A" ? "created_at" : "slot_date", { ascending: false })
     .limit(30);
   const out: string[] = [];
   for (const p of data ?? []) {

@@ -43,7 +43,7 @@ async function main() {
       .eq("track", "B")
       .eq("status", "PROPOSED");
     const deadlineOf = new Map((settings ?? []).map((s) => [s.social_account_id, s.b_confirm_deadline ?? "07:00"]));
-    const expired = (open ?? []).filter((p) => isPastDeadline(p.slot_date, deadlineOf.get(p.social_account_id) ?? "07:00"));
+    const expired = (open ?? []).filter((p) => isPastDeadline(p.slot_date as string, deadlineOf.get(p.social_account_id) ?? "07:00"));
     if (expired.length) {
       await service
         .from("content_plans")

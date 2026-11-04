@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Camera, RefreshCw, Search, SkipForward } from "lucide-react";
+import { Camera, Plus, RefreshCw, Search, SkipForward, Trash2 } from "lucide-react";
 import {
+  addWantedProductAction,
   chooseIdeaAction,
-  pickProductAction,
-  regenerateIdeasAction,
+  dismissIdeaAction,
+  refreshIdeasAction,
   searchProductsAction,
   skipShootAction,
   type ProductHit,
@@ -21,201 +22,231 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
-import { cn } from "@/lib/utils";
 
-// 직접 촬영 칸 하나 — AI 기획안 후보 고르기 · 상품 직접 지정 · 다시 만들기 · 건너뛰기.
+// 촬영 기획 고르기의 부품 — 계정 머리(새로 고침 · 원하는 상품 추가), 목록의 기획 카드, 진행 중인 기획 줄.
 
-export interface ShootPlanCardData {
+export interface ShootIdeaData {
   id: string;
-  slotTime: string;
-  status: string;
+  title: string;
+  format: string;
+  concept: string;
+  why: string;
   product: ProductBrief | null;
-  productChanged: boolean;
+}
+
+export interface ShootProgressData {
+  id: string;
+  status: string;
+  title: string | null;
   humanBrief: string | null;
-  chosen: number | null;
-  ideas: { title: string; format: string; concept: string; why: string; product: ProductBrief | null }[];
+  product: ProductBrief | null;
   note: string | null;
   error: string | null;
   issues: string[];
-  pastSlot: boolean;
 }
 
-const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" | "ok" }> = {
-  PROPOSED: { label: "고르기 전", variant: "default" },
+const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" | "ok"; href?: string; go?: string }> = {
   CONFIRMED: { label: "찍을 컷 목록 만드는 중", variant: "secondary" },
-  SCRIPTED: { label: "촬영 대기", variant: "secondary" },
-  SHOT: { label: "촬영 완료 · 편집 대기", variant: "secondary" },
-  RENDERED: { label: "편집 완료 · 확인 대기", variant: "secondary" },
+  SCRIPTED: { label: "촬영 대기", variant: "default", href: "/shoot/uploads", go: "촬영 · 올리기로" },
+  SHOT: { label: "편집 중", variant: "secondary", href: "/shoot/review", go: "완성본 받기로" },
+  RENDERED: { label: "편집 완료", variant: "ok", href: "/shoot/review", go: "완성본 받기로" },
   BLOCKED: { label: "멈춤", variant: "destructive" },
-  SCHEDULED: { label: "예약됨", variant: "ok" },
-  PUBLISHED: { label: "발행됨", variant: "ok" },
-  SKIPPED: { label: "건너뜀", variant: "outline" },
-  FAILED: { label: "실패", variant: "destructive" },
 };
 
 function useRun() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const run = (fn: () => Promise<ShootResult>, done?: string) =>
+  // 상품 중복 경고가 오면 막지 않고 물어본 뒤 force로 다시 부른다
+  const [warning, setWarning] = useState<{ text: string; retry: () => Promise<ShootResult>; done?: string } | null>(null);
+  const run = (fn: () => Promise<ShootResult>, done?: string, retry?: () => Promise<ShootResult>, after?: () => void) =>
     startTransition(async () => {
       setError(null);
       const r = await fn();
       if (r.ok) {
         if (done) toast(done);
+        after?.();
         router.refresh();
-      } else setError(r.error);
+      } else if (r.warning && retry) setWarning({ text: r.error, retry, done });
+      else setError(r.error);
     });
-  return { isPending, error, run };
+  return { isPending, error, run, warning, setWarning };
 }
 
-export function ShootPlanCard({ plan, canManage }: { plan: ShootPlanCardData; canManage: boolean }) {
-  const { isPending, error, run } = useRun();
-  const [picking, setPicking] = useState(false);
-  const s = STATUS[plan.status] ?? { label: plan.status, variant: "outline" as const };
-  // 촬영본을 올리기 전까지는 다시 고를 수 있다(서버가 한 번 더 확인)
-  const choosable = canManage && !plan.pastSlot && ["PROPOSED", "CONFIRMED", "SCRIPTED", "BLOCKED"].includes(plan.status);
-  const skippable = canManage && !["SCHEDULED", "PUBLISHED", "SKIPPED"].includes(plan.status);
-  // 후보를 고르기 전에 건너뛴 칸은 직접 지정이 아니다
-  const directPick = plan.chosen == null && plan.status !== "PROPOSED" && plan.status !== "SKIPPED";
-  const [askSkip, setAskSkip] = useState(false);
-
+export function ShootIdeaCard({ idea, canManage }: { idea: ShootIdeaData; canManage: boolean }) {
+  const { isPending, error, run, warning, setWarning } = useRun();
+  const chose = "골랐어요. 찍을 컷 목록을 만들고 있어요.";
   return (
-    <div className={cn("space-y-3 rounded-lg border bg-card p-4", plan.status === "SKIPPED" && "opacity-60")}>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-base font-bold tabular-nums">{plan.slotTime}</span>
-        <Badge variant={s.variant}>{s.label}</Badge>
-        {directPick && <Badge variant="outline">직접 지정</Badge>}
-        {plan.status === "SCRIPTED" && (
-          <Link href="/shoot/uploads" className="ml-auto text-xs font-medium underline">
-            촬영 · 올리기로 →
-          </Link>
-        )}
-        {plan.status === "RENDERED" && (
-          <Link href="/shoot/review" className="ml-auto text-xs font-medium underline">
-            완성본 확인으로 →
-          </Link>
-        )}
+    <article className="flex flex-col gap-2.5 rounded-lg border bg-card p-4">
+      <div className="min-w-0">
+        <h3 className="text-sm font-semibold">{idea.title}</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">{idea.format}</p>
       </div>
-
-      {plan.status !== "PROPOSED" && plan.status !== "SKIPPED" && plan.product && (
-        <div className="space-y-1.5 rounded-md bg-muted/40 p-2">
-          <ProductRow product={plan.product} />
-          {plan.chosen != null && plan.ideas[plan.chosen] && (
-            <p className="text-xs">
-              <b>{plan.ideas[plan.chosen].title}</b> · {plan.ideas[plan.chosen].concept}
-            </p>
-          )}
-          {plan.humanBrief && <p className="text-xs">메모: {plan.humanBrief}</p>}
+      <p className="text-[13px] leading-relaxed">{idea.concept}</p>
+      {idea.product && <ProductRow product={idea.product} compact />}
+      <p className="text-xs text-muted-foreground">AI 이유: {idea.why}</p>
+      {canManage && (
+        <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
+          <Button
+            size="sm"
+            disabled={isPending || !idea.product}
+            onClick={() =>
+              run(
+                () => chooseIdeaAction({ planId: idea.id }),
+                chose,
+                () => chooseIdeaAction({ planId: idea.id, force: true }),
+              )
+            }
+          >
+            <Camera className="size-4" /> 이걸로 찍기
+          </Button>
+          <Button size="sm" variant="ghost" className="text-muted-foreground" disabled={isPending} onClick={() => run(() => dismissIdeaAction({ planId: idea.id }), "기획을 지웠어요. 내일 새벽에 새 기획으로 채워요.")}>
+            <Trash2 className="size-4" /> 지우기
+          </Button>
         </div>
       )}
+      {error && <p className="text-xs text-risk">{error}</p>}
+      <DuplicateDialog warning={warning} pending={isPending} onClose={() => setWarning(null)} onConfirm={() => {
+        if (!warning) return;
+        const { retry, done } = warning;
+        setWarning(null);
+        run(retry, done);
+      }} />
+    </article>
+  );
+}
+
+function DuplicateDialog({
+  warning,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  warning: { text: string } | null;
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <ConfirmDialog open={warning !== null} title="겹치는 상품이에요" confirmLabel="그래도 찍기" pending={pending} onClose={onClose} onConfirm={onConfirm}>
+      <p>{warning?.text}</p>
+      <p>비슷한 시기에 같은 상품이 올라갈 수 있어요. 그래도 이 상품으로 찍을까요?</p>
+    </ConfirmDialog>
+  );
+}
+
+export function ShootProgressRow({ plan, canManage }: { plan: ShootProgressData; canManage: boolean }) {
+  const { isPending, error, run } = useRun();
+  const [askSkip, setAskSkip] = useState(false);
+  const s = STATUS[plan.status] ?? { label: plan.status, variant: "outline" as const };
+  const hasVideo = plan.status === "SHOT" || plan.status === "RENDERED";
+  return (
+    <li className="space-y-2 rounded-md border bg-card p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={s.variant}>{s.label}</Badge>
+        <span className="min-w-0 text-[13px] font-semibold">{plan.title ?? plan.product?.name ?? "기획"}</span>
+        {!plan.title && <Badge variant="outline">직접 추가</Badge>}
+        <span className="ml-auto flex items-center gap-1">
+          {s.href && (
+            <Link href={s.href} className="text-xs font-medium underline underline-offset-2">
+              {s.go} →
+            </Link>
+          )}
+          {canManage && (
+            <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setAskSkip(true)}>
+              <SkipForward className="size-4" /> 빼기
+            </Button>
+          )}
+        </span>
+      </div>
+      {plan.title && plan.product && <p className="text-xs text-muted-foreground">{plan.product.name}</p>}
+      {plan.humanBrief && <p className="text-xs">메모: {plan.humanBrief}</p>}
       {plan.note && <p className="text-xs text-muted-foreground">{plan.note}</p>}
       {plan.error && (
         <details className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
-          <summary className="cursor-pointer font-semibold">컷 목록을 만들다 오류가 났어요. 다른 기획을 고르거나 잠시 뒤 다시 해 주세요.</summary>
+          <summary className="cursor-pointer font-semibold">컷 목록을 만들다 오류가 났어요. 이 기획을 빼고 다른 기획을 고르거나 잠시 뒤 다시 해 주세요.</summary>
           <p className="mt-1 break-all">{plan.error}</p>
         </details>
       )}
-      {plan.issues.length > 0 && plan.status === "BLOCKED" && (
+      {plan.status === "BLOCKED" && plan.issues.length > 0 && (
         <ul className="space-y-0.5 rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
           {plan.issues.map((i) => (
             <li key={i}>✗ {i}</li>
           ))}
         </ul>
       )}
-
-      {plan.ideas.length > 0 && (plan.status === "PROPOSED" || choosable) && (
-        <div className="space-y-2">
-          {plan.status !== "PROPOSED" && <p className="text-xs font-semibold text-muted-foreground">다른 후보로 바꾸기</p>}
-          {plan.ideas.map((idea, i) =>
-            plan.status !== "PROPOSED" && i === plan.chosen ? null : (
-              <div key={i} className="space-y-1.5 rounded-md border p-2.5">
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">
-                      {idea.title} <span className="text-xs font-normal text-muted-foreground">· {idea.format}</span>
-                    </p>
-                    <p className="text-xs leading-relaxed">{idea.concept}</p>
-                  </div>
-                  {choosable && (
-                    <Button
-                      size="sm"
-                      variant={plan.status === "PROPOSED" ? "default" : "outline"}
-                      className="shrink-0"
-                      disabled={isPending || !idea.product}
-                      onClick={() => run(() => chooseIdeaAction({ planId: plan.id, ideaIndex: i }), "골랐어요. 찍을 컷 목록을 만들고 있어요.")}
-                    >
-                      <Camera className="size-4" /> 이걸로 찍기
-                    </Button>
-                  )}
-                </div>
-                {idea.product && <ProductRow product={idea.product} compact />}
-                <p className="text-xs text-muted-foreground">AI 이유: {idea.why}</p>
-              </div>
-            ),
-          )}
-        </div>
-      )}
-
-      {(choosable || skippable) && (
-        <div className="flex flex-wrap gap-2">
-          {choosable && (
-            <Button size="sm" variant="outline" disabled={isPending} onClick={() => setPicking((v) => !v)}>
-              <Search className="size-4" /> 상품 직접 고르기
-            </Button>
-          )}
-          {canManage && plan.status === "PROPOSED" && !plan.pastSlot && (
-            <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => regenerateIdeasAction({ planId: plan.id }), "후보를 다시 만들고 있어요. 몇 분 뒤 이 칸에 새 후보가 나와요.")}>
-              <RefreshCw className="size-4" /> 후보 다시 만들기
-            </Button>
-          )}
-          {skippable && (
-            <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setAskSkip(true)}>
-              <SkipForward className="size-4" /> 이 칸 건너뛰기
-            </Button>
-          )}
-        </div>
-      )}
-
-      {picking && choosable && <DirectPick planId={plan.id} onDone={() => setPicking(false)} />}
       {error && <p className="text-xs text-risk">{error}</p>}
       <ConfirmDialog
         open={askSkip}
-        title={`${plan.slotTime} 칸을 건너뛸까요?`}
-        confirmLabel="건너뛰기"
-        danger={["SHOT", "RENDERED"].includes(plan.status)}
+        title="이 기획을 뺄까요?"
+        confirmLabel="빼기"
+        danger={hasVideo}
         pending={isPending}
         onClose={() => setAskSkip(false)}
         onConfirm={() => {
           setAskSkip(false);
-          run(() => skipShootAction({ planId: plan.id }), "이 칸을 건너뛰었어요.");
+          run(() => skipShootAction({ planId: plan.id }), "기획을 뺐어요.");
         }}
       >
-        <p>{["SHOT", "RENDERED"].includes(plan.status) ? "이미 찍어 올린 영상도 올라가지 않아요. " : ""}건너뛰면 되돌릴 수 없어요.</p>
+        <p>{hasVideo ? "찍어 올린 영상도 받을 수 없게 돼요. " : ""}빼면 되돌릴 수 없어요.</p>
+      </ConfirmDialog>
+    </li>
+  );
+}
+
+export function ShootAccountActions({ accountId, name, listCount }: { accountId: string; name: string; listCount: number }) {
+  const { isPending, error, run } = useRun();
+  const [adding, setAdding] = useState(false);
+  const [askRefresh, setAskRefresh] = useState(false);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>
+          <Plus className="size-4" /> 원하는 상품 추가
+        </Button>
+        <Button size="sm" variant="outline" disabled={isPending} onClick={() => setAskRefresh(true)}>
+          <RefreshCw className="size-4" /> 새로 고침
+        </Button>
+      </div>
+      {adding && <WantedProduct accountId={accountId} onDone={() => setAdding(false)} />}
+      {error && <p className="text-xs text-risk">{error}</p>}
+      <ConfirmDialog
+        open={askRefresh}
+        title={`@${name} 기획을 새로 만들까요?`}
+        confirmLabel="새로 고침"
+        pending={isPending}
+        onClose={() => setAskRefresh(false)}
+        onConfirm={() => {
+          setAskRefresh(false);
+          run(() => refreshIdeasAction({ accountId }), "목록을 비웠어요. 몇 분 뒤 새 기획이 나와요.");
+        }}
+      >
+        <p>{listCount > 0 ? `고르기 전 기획 ${listCount}개를 빼고` : "목록을"} AI가 다른 상품으로 새로 채워요. 고른 기획은 그대로예요.</p>
       </ConfirmDialog>
     </div>
   );
 }
 
-function DirectPick({ planId, onDone }: { planId: string; onDone: () => void }) {
-  const { isPending, error, run } = useRun();
+function WantedProduct({ accountId, onDone }: { accountId: string; onDone: () => void }) {
+  const { isPending, error, run, warning, setWarning } = useRun();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ProductHit[] | null>(null);
   const [selected, setSelected] = useState<ProductHit | null>(null);
   const [brief, setBrief] = useState("");
   const [searching, startSearch] = useTransition();
   const [searchError, setSearchError] = useState<string | null>(null);
+  const added = "상품을 추가했어요. 찍을 컷 목록을 만들고 있어요.";
 
   const search = () =>
     startSearch(async () => {
       setSearchError(null);
-      const r = await searchProductsAction({ planId, query });
+      const r = await searchProductsAction({ accountId, query });
       if (r.ok) setHits(r.hits);
       else setSearchError(r.error);
     });
 
   return (
-    <div className="space-y-2 rounded-md border border-dashed p-3">
+    <div className="max-w-xl space-y-2 rounded-md border border-dashed bg-card p-3">
       <form
         className="flex gap-2"
         onSubmit={(e) => {
@@ -223,19 +254,19 @@ function DirectPick({ planId, onDone }: { planId: string; onDone: () => void }) 
           search();
         }}
       >
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="상품 이름으로 찾기" />
-        <Button size="sm" type="submit" disabled={searching || !query.trim()}>
-          찾기
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="상품 이름으로 찾기" aria-label="상품 이름" />
+        <Button size="sm" type="submit" className="h-9" disabled={searching || !query.trim()}>
+          <Search className="size-4" /> 찾기
         </Button>
       </form>
       <p className="text-xs text-muted-foreground">이 계정이 쓰는 몰 · 종류 중 판매 중이고 상세페이지 분석이 끝난 상품만 나와요.</p>
-      {searchError && <p className="text-xs text-destructive">{searchError}</p>}
+      {searchError && <p className="text-xs text-risk">{searchError}</p>}
       {hits && hits.length === 0 && <p className="text-xs text-muted-foreground">찾는 상품이 없어요.</p>}
       {hits && hits.length > 0 && !selected && (
         <ul className="max-h-64 space-y-1 overflow-y-auto">
           {hits.map((h) => (
             <li key={h.id}>
-              <button type="button" onClick={() => setSelected(h)} className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left hover:bg-muted">
+              <button type="button" onClick={() => setSelected(h)} className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-surface-2">
                 {h.image ? (
                   // 몰 CDN 이미지
                   // eslint-disable-next-line @next/next/no-img-element
@@ -273,17 +304,26 @@ function DirectPick({ planId, onDone }: { planId: string; onDone: () => void }) 
           <Button
             size="sm"
             disabled={isPending}
-            onClick={() => run(async () => {
-              const r = await pickProductAction({ planId, productId: selected.id, brief: brief.trim() || null });
-              if (r.ok) onDone();
-              return r;
-            })}
+            onClick={() =>
+              run(
+                () => addWantedProductAction({ accountId, productId: selected.id, brief: brief.trim() || null }),
+                added,
+                () => addWantedProductAction({ accountId, productId: selected.id, brief: brief.trim() || null, force: true }),
+                onDone,
+              )
+            }
           >
             <Camera className="size-4" /> 이 상품으로 찍기
           </Button>
         </div>
       )}
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-xs text-risk">{error}</p>}
+      <DuplicateDialog warning={warning} pending={isPending} onClose={() => setWarning(null)} onConfirm={() => {
+        if (!warning) return;
+        const { retry, done } = warning;
+        setWarning(null);
+        run(retry, done, undefined, onDone);
+      }} />
     </div>
   );
 }

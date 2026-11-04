@@ -55,7 +55,8 @@ multi-content-bomber/
 │       ├── postings/page.tsx           # 배포 관리
 │       ├── analytics/page.tsx          # 분석 (Phase 1 골격)
 │       ├── auto-reply/page.tsx         # DM 자동 응답 (coming soon)
-│       ├── schedule/{page,actions}.ts  # 편성표 (계정별 하루 칸 · 주제 · 주간 진행)
+│       ├── schedule/{page,actions}.ts  # 자동 업로드 일정 (AI 자동 칸만 · 주제 · 주간 진행)
+│       ├── shoot/{plans,uploads,review,settings}  # 직접 촬영: 기획 목록 → 촬영 → 완성본 받기 → 올렸어요 + 릴스 연결
 │       ├── schedule-rules/page.tsx     # /schedule 영구 리다이렉트 (구 예약 규칙)
 │       └── uploads/page.tsx            # /postings 영구 리다이렉트 (구 업로드 이력)
 │

@@ -6,7 +6,7 @@ import type { createServiceClient } from "@/lib/supabase/service";
 // 편성 관리(계정 넣기 · 빼기, 칸 시각 · 방식 바꾸기) — 2026-11-03 사용자 결정:
 //   · 인스타 계정만. 계정당 하루 최대 4칸, 같은 계정 칸 사이 2시간 이상(숫자만 바꾸면 늘릴 수 있게 여기 둔다)
 //   · AI 자동 칸은 08시 이후만 — 상품 확인 마감이 아직 "올리는 날 07시" 고정이라(영상 만들기 시간을 잰 뒤 다시 정함)
-//   · 직접 촬영 촬영 마감(안내용)은 올리기 3시간 전
+//   · 직접 촬영은 날짜 · 시각 칸이 아니다(0042) — 칸은 AI 자동 칸만
 //   · 칸 시각을 바꾸면 앞으로의 기획도 새 시각으로 옮긴다(예약된 발행은 예약 시각도)
 //   · 계정 · 칸을 빼면 앞으로의 기획 · 예약 발행을 모두 취소(화면에서 예약 건 경고 뒤). 지난 기록은 남긴다
 
@@ -15,7 +15,6 @@ type Service = ReturnType<typeof createServiceClient>;
 export const MAX_SLOTS_PER_DAY = 4;
 export const MIN_GAP_MINUTES = 120;
 export const AUTO_EARLIEST = "08:00";
-export const SHOOT_LEAD_HOURS = 3;
 
 export interface ScopeOption {
   key: string;
@@ -42,7 +41,7 @@ export const TRACK_LABEL: Record<string, string> = { B: "AI 자동", A: "직접 
  * 화면 안내용 "08 · 21시" — 켜진 칸들의 시각을 모아 보여 준다. 계정마다 시각이 달라 많으면 많이 쓰는 4개 + "등".
  * 칸이 없으면 "칸 없음".
  */
-export function trackTimesLabel(rules: { slot_time: string; track: string }[], track: "A" | "B"): string {
+export function trackTimesLabel(rules: { slot_time: string; track: string }[], track: "B"): string {
   const count = new Map<string, number>();
   for (const r of rules) if (r.track === track) count.set(r.slot_time, (count.get(r.slot_time) ?? 0) + 1);
   if (count.size === 0) return "칸 없음";
@@ -58,8 +57,8 @@ export function validateSlots(slots: { time: string; track: string }[]): string 
   if (slots.length > MAX_SLOTS_PER_DAY) return `계정당 하루 ${MAX_SLOTS_PER_DAY}칸까지예요.`;
   for (const s of slots) {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.time)) return `시각 형식이 올바르지 않아요 (${s.time}).`;
-    if (s.track !== "A" && s.track !== "B") return "방식이 올바르지 않아요.";
-    if (s.track === "B" && s.time < AUTO_EARLIEST)
+    if (s.track !== "B") return "방식이 올바르지 않아요.";
+    if (s.time < AUTO_EARLIEST)
       return `AI 자동 칸은 ${AUTO_EARLIEST} 이후만 고를 수 있어요 (상품 확인 마감이 올리는 날 07시라서).`;
   }
   const sorted = [...slots].sort((a, b) => a.time.localeCompare(b.time));
@@ -72,11 +71,6 @@ export function validateSlots(slots: { time: string; track: string }[]): string 
     if (gap < MIN_GAP_MINUTES) return `${cur.time}와 ${next.time} 칸 사이가 ${MIN_GAP_MINUTES / 60}시간보다 가까워요.`;
   }
   return null;
-}
-
-/** 직접 촬영 촬영 마감(안내용) — 올리기 SHOOT_LEAD_HOURS시간 전. */
-export function shootDueIso(slotDate: string, slotTime: string): string {
-  return new Date(Date.parse(kstToIso(slotDate, slotTime)) - SHOOT_LEAD_HOURS * 3_600_000).toISOString();
 }
 
 // 아직 안 끝난 칸 — 이 상태의 앞으로 칸은 옮기거나 취소한다
@@ -96,12 +90,14 @@ export async function futurePlans(service: Service, accountId: string, slotTime?
     .from("content_plans")
     .select("id, slot_date, slot_time, status, publish_job_id")
     .eq("social_account_id", accountId)
+    .eq("track", "B")
     .gte("slot_date", kstDate(-1, now))
     .in("status", OPEN_STATUSES);
   if (slotTime) q = q.eq("slot_time", slotTime);
   const { data, error } = await q;
   if (error) throw new Error(`기획 조회 실패: ${error.message}`);
-  return (data ?? []).filter((p) => Date.parse(kstToIso(p.slot_date, p.slot_time)) > now);
+  // AI 자동 칸은 날짜 · 시각이 반드시 있다(0042 제약)
+  return ((data ?? []) as FuturePlan[]).filter((p) => Date.parse(kstToIso(p.slot_date, p.slot_time)) > now);
 }
 
 // 촬영 요청 중 아직 안 끝난 것 — 칸을 취소하면 함께 취소한다(편집 중 · 편집 끝 · 실패 포함, 2026-11-04)
@@ -155,16 +151,17 @@ export async function clearScheduleCancelled(service: Service, accountId: string
     .from("content_plans")
     .select("id, slot_date, slot_time")
     .eq("social_account_id", accountId)
+    .eq("track", "B")
     .eq("slot_time", slotTime)
     .eq("status", "SKIPPED")
     .like("note", `${SCHEDULE_CANCEL_NOTE_PREFIX}%`)
     .gte("slot_date", kstDate(-1, now));
-  const ids = (data ?? []).filter((p) => Date.parse(kstToIso(p.slot_date, p.slot_time)) > now).map((p) => p.id);
+  const ids = (data ?? []).filter((p) => Date.parse(kstToIso(p.slot_date as string, p.slot_time as string)) > now).map((p) => p.id);
   if (ids.length) await service.from("content_plans").delete().in("id", ids);
 }
 
 /**
- * 칸 시각을 바꿀 때 앞으로의 기획을 새 시각으로 옮긴다 — 예약된 발행은 예약 시각도, 촬영 요청은 촬영 마감도.
+ * 칸 시각을 바꿀 때 앞으로의 기획을 새 시각으로 옮긴다 — 예약된 발행은 예약 시각도.
  * 새 시각이 이미 지난 날(오늘 칸을 지금보다 이른 시각으로)이 있으면 옮기지 않고 이유를 돌려준다.
  */
 export async function movePlans(
@@ -194,7 +191,7 @@ export async function movePlans(
       .eq("social_account_id", accountId)
       .eq("slot_time", toTime)
       .in("slot_date", plans.map((p) => p.slot_date));
-    if (clash?.length) return { ok: false, error: `${clash[0].slot_date.slice(5)} ${toTime}에 예전 기록이 있어 옮길 수 없어요. 다른 시각을 골라 주세요.` };
+    if (clash?.length) return { ok: false, error: `${String(clash[0].slot_date).slice(5)} ${toTime}에 예전 기록이 있어 옮길 수 없어요. 다른 시각을 골라 주세요.` };
   }
   for (const p of plans) {
     const { error: planErr } = await service.from("content_plans").update({ slot_time: toTime }).eq("id", p.id);
@@ -202,9 +199,8 @@ export async function movePlans(
     const status = p.publish_job_id ? jobStatus.get(p.publish_job_id) : null;
     if (p.publish_job_id && (status === "PENDING" || status === "RETRYING")) {
       await service.from("publish_jobs").update({ scheduled_for: kstToIso(p.slot_date, toTime) }).eq("id", p.publish_job_id).in("status", ["PENDING", "RETRYING"]);
-      await appendPublishHistory(service, [p.publish_job_id], { status, message: `편성표에서 시각 변경 ${fromTime} → ${toTime}` });
+      await appendPublishHistory(service, [p.publish_job_id], { status, message: `자동 업로드 일정에서 시각 변경 ${fromTime} → ${toTime}` });
     }
-    await service.from("shoot_requests").update({ due_at: shootDueIso(p.slot_date, toTime) }).eq("plan_id", p.id).in("status", ["OPEN", "UPLOADED"]);
   }
   return { ok: true, moved: plans.length };
 }

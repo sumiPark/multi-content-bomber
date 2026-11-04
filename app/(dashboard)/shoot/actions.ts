@@ -3,20 +3,22 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
-import { isPastSlot } from "@/lib/automation/deadline";
-import { kstToIso } from "@/lib/automation/time";
+import { getInstagramAuth } from "@/lib/episode-alerts/server";
 import { triggerShootEditRun, triggerShootPlanRun, triggerShotlistRun } from "@/lib/github-dispatch";
+import { listRecentMedia } from "@/lib/platforms/instagram-insights";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
-import { certifiedFunctionsOf, finalBlocking, splitHashtags } from "@/lib/shoot/final-check";
+import { duplicateWarning } from "@/lib/shoot/duplicates";
+import { certifiedFunctionsOf, finalBlocking } from "@/lib/shoot/final-check";
+import { buildPackageTexts, safeFileName, type PackageCut, type PackageScript, type PackageSegment, type TextFile } from "@/lib/shoot/package";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
-// 직접 촬영 콘텐츠(12 · 18시 칸, 0030). 사람이 기획을 고르거나 상품을 직접 지정 → 컷 리스트(워커) →
-// 컷마다 촬영본을 올리고 "다 올렸어요" → 자동 편집(다음 단계) → 완성본 확인 → 예약.
-// 고르기 · 지정 · 건너뛰기는 ADMIN · MANAGER, 촬영본 올리기는 조직 누구나(찍는 사람이 STAFF일 수 있다).
+// 직접 촬영 콘텐츠(0030 · 0042). 계정별 기획 목록에서 고르거나 원하는 상품을 추가 → 컷 리스트(워커) →
+// 컷마다 촬영본을 올리고 "다 올렸어요" → 자동 편집 → 완성본 · 다시 편집용 파일 받기 → 사람이 직접 올리고 "올렸어요" + 릴스 연결.
+// 자동 예약은 없다. 고르기 · 추가 · 새로 고침은 ADMIN · MANAGER, 촬영본 올리기 · 받기 · 올렸어요는 조직 누구나.
 
-export type ShootResult = { ok: true } | { ok: false; error: string };
+export type ShootResult = { ok: true } | { ok: false; error: string; warning?: boolean };
 type Service = ReturnType<typeof createServiceClient>;
 
 async function authorize(level: "plan" | "shoot"): Promise<{ ok: true; userId: string; orgId: string } | { ok: false; error: string }> {
@@ -33,7 +35,7 @@ async function authorize(level: "plan" | "shoot"): Promise<{ ok: true; userId: s
 async function loadPlan(service: Service, planId: string, orgId: string) {
   const { data } = await service
     .from("content_plans")
-    .select("id, status, slot_date, slot_time, product_id, proposal, social_account_id, shoot_requests(id, clips)")
+    .select("id, status, product_id, proposal, social_account_id, shoot_requests(id, clips)")
     .eq("id", planId)
     .eq("organization_id", orgId)
     .eq("track", "A")
@@ -41,66 +43,25 @@ async function loadPlan(service: Service, planId: string, orgId: string) {
   return data;
 }
 
-type LoadedPlan = NonNullable<Awaited<ReturnType<typeof loadPlan>>>;
-
-/** 고르기 · 바꾸기가 되는 칸인지 — 촬영본을 올리기 전까지, 올릴 시각 전까지. */
-function canRechoose(plan: LoadedPlan): string | null {
-  if (!["PROPOSED", "CONFIRMED", "SCRIPTED", "BLOCKED"].includes(plan.status)) return "이미 촬영본을 올린 칸이라 바꿀 수 없어요.";
-  const clips = (plan.shoot_requests?.clips ?? []) as unknown[];
-  if (clips.length > 0) return "이미 촬영본을 올린 칸이라 바꿀 수 없어요.";
-  if (isPastSlot(plan.slot_date, plan.slot_time)) return "올릴 시각이 지난 칸입니다.";
-  return null;
-}
-
-/** 같은 날 다른 칸(다른 계정 포함)이 이미 쓰는 상품인지. */
-async function usedSameDay(service: Service, plan: LoadedPlan, productId: string): Promise<boolean> {
+async function accountSettings(service: Service, accountId: string, orgId: string) {
   const { data } = await service
-    .from("content_plans")
-    .select("id")
-    .eq("slot_date", plan.slot_date)
-    .eq("product_id", productId)
-    .neq("id", plan.id)
-    .not("status", "in", "(SKIPPED,FAILED)")
-    .limit(1);
-  return (data?.length ?? 0) > 0;
+    .from("track_settings")
+    .select("product_scopes, repeat_gap_days, shoot_enabled")
+    .eq("social_account_id", accountId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+  return data;
 }
 
-/** 고른 상품으로 컷 리스트를 새로 쓰게 — 기존 촬영 요청(올린 촬영본 없음)은 지운다. */
-async function confirmAndQueue(
-  service: Service,
-  plan: LoadedPlan,
-  userId: string,
-  patch: { product_id: string; product_changed: boolean; human_brief: string | null; chosen: number | null },
-): Promise<ShootResult> {
-  if (plan.shoot_requests) await service.from("shoot_requests").delete().eq("id", plan.shoot_requests.id);
-  const proposal = { ...((plan.proposal ?? {}) as Record<string, unknown>), chosen: patch.chosen };
-  const { error } = await service
-    .from("content_plans")
-    .update({
-      status: "CONFIRMED",
-      product_id: patch.product_id,
-      product_changed: patch.product_changed,
-      human_brief: patch.human_brief,
-      proposal: proposal as unknown as Json,
-      script: null,
-      check_result: null,
-      note: null,
-      error: null,
-      confirmed_by: userId,
-      confirmed_at: new Date().toISOString(),
-    })
-    .eq("id", plan.id);
-  if (error) return { ok: false, error: error.message };
-  // 실패해도 다음 05시 실행이 집어 간다 — 즉시성만 손해
-  await triggerShotlistRun(`plan ${plan.id}`).catch((e) => console.error("[shoot] 컷 리스트 트리거 실패:", e));
+function revalidateShoot() {
   revalidatePath("/shoot/plans");
   revalidatePath("/shoot/uploads");
-  return { ok: true };
+  revalidatePath("/shoot/review");
 }
 
-const chooseSchema = z.object({ planId: z.string().uuid(), ideaIndex: z.number().int().min(0).max(5) });
+const chooseSchema = z.object({ planId: z.string().uuid(), force: z.boolean().optional() });
 
-/** AI 후보 중 하나로 찍기. */
+/** 목록의 기획으로 찍기 — 컷 리스트를 쓰게 한다. 다른 계정과 겹치거나 최근에 쓴 상품이면 경고 뒤 진행(force). */
 export async function chooseIdeaAction(input: z.infer<typeof chooseSchema>): Promise<ShootResult> {
   const parsed = chooseSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -108,39 +69,50 @@ export async function chooseIdeaAction(input: z.infer<typeof chooseSchema>): Pro
   if (!auth.ok) return auth;
   const service = createServiceClient();
   const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
-  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
-  const blocked = canRechoose(plan);
-  if (blocked) return { ok: false, error: blocked };
+  if (!plan) return { ok: false, error: "기획을 찾을 수 없습니다." };
+  if (plan.status !== "PROPOSED") return { ok: false, error: "이미 고른 기획이에요. 새로 고쳐 주세요." };
+  if (!plan.product_id) return { ok: false, error: "상품이 없는 기획이에요." };
 
-  const ideas = ((plan.proposal as { ideas?: { product_id: string }[] })?.ideas ?? []);
-  const idea = ideas[parsed.data.ideaIndex];
-  if (!idea) return { ok: false, error: "후보를 찾을 수 없습니다." };
-  if (await usedSameDay(service, plan, idea.product_id)) return { ok: false, error: "같은 날 다른 칸에서 이미 쓰는 상품이에요." };
-  return confirmAndQueue(service, plan, auth.userId, {
-    product_id: idea.product_id,
-    product_changed: parsed.data.ideaIndex !== 0,
-    human_brief: null,
-    chosen: parsed.data.ideaIndex,
-  });
+  const { data: product } = await service.from("products").select("stock_status, excluded").eq("id", plan.product_id).maybeSingle();
+  if (!product || product.stock_status !== "available" || product.excluded) return { ok: false, error: "지금 판매 중이 아닌 상품이에요. 다른 기획을 골라 주세요." };
+
+  if (!parsed.data.force) {
+    const settings = await accountSettings(service, plan.social_account_id, auth.orgId);
+    const warning = await duplicateWarning(service, { accountId: plan.social_account_id, productId: plan.product_id, excludePlanId: plan.id, gapDays: settings?.repeat_gap_days ?? 14 });
+    if (warning) return { ok: false, error: warning, warning: true };
+  }
+
+  const proposal = { ...((plan.proposal ?? {}) as Record<string, unknown>), chosen: 0 };
+  const { data: moved, error } = await service
+    .from("content_plans")
+    .update({ status: "CONFIRMED", proposal: proposal as unknown as Json, note: null, error: null, confirmed_by: auth.userId, confirmed_at: new Date().toISOString() })
+    .eq("id", plan.id)
+    .eq("status", "PROPOSED")
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!moved?.length) return { ok: false, error: "이미 고른 기획이에요. 새로 고쳐 주세요." };
+  // 실패해도 다음 05시 실행이 집어 간다 — 즉시성만 손해
+  await triggerShotlistRun(`plan ${plan.id}`).catch((e) => console.error("[shoot] 컷 리스트 트리거 실패:", e));
+  revalidateShoot();
+  return { ok: true };
 }
 
-const pickSchema = z.object({
-  planId: z.string().uuid(),
+const wantedSchema = z.object({
+  accountId: z.string().uuid(),
   productId: z.string().uuid(),
   brief: z.string().trim().max(300).nullable(),
+  force: z.boolean().optional(),
 });
 
-/** 상품 직접 지정 (+ 찍고 싶은 것 메모). */
-export async function pickProductAction(input: z.infer<typeof pickSchema>): Promise<ShootResult> {
-  const parsed = pickSchema.safeParse(input);
+/** 원하는 상품 추가 (+ 찍고 싶은 것 메모) — 고른 것과 같아서 바로 컷 리스트를 쓴다. 목록 5개와 상관없다. */
+export async function addWantedProductAction(input: z.infer<typeof wantedSchema>): Promise<ShootResult> {
+  const parsed = wantedSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
   const auth = await authorize("plan");
   if (!auth.ok) return auth;
   const service = createServiceClient();
-  const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
-  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
-  const blocked = canRechoose(plan);
-  if (blocked) return { ok: false, error: blocked };
+  const settings = await accountSettings(service, parsed.data.accountId, auth.orgId);
+  if (!settings) return { ok: false, error: "촬영 설정에 없는 계정이에요." };
 
   const { data: product } = await service
     .from("products")
@@ -148,23 +120,36 @@ export async function pickProductAction(input: z.infer<typeof pickSchema>): Prom
     .eq("id", parsed.data.productId)
     .maybeSingle();
   if (!product) return { ok: false, error: "상품을 찾을 수 없습니다." };
-  const scopes = await accountScopes(service, plan.social_account_id);
+  const scopes = (settings.product_scopes ?? []) as { shop: string; kind: string }[];
   if (!scopes.some((s) => s.shop === product.shop_code && s.kind === product.kind)) return { ok: false, error: "이 계정에서 쓰지 않는 상품 종류예요." };
   if (product.stock_status !== "available" || product.excluded) return { ok: false, error: "지금 판매 중인 상품만 고를 수 있어요." };
   if (product.analysis_state !== "ready") return { ok: false, error: "상세페이지 분석이 끝난 상품만 고를 수 있어요." };
-  if (await usedSameDay(service, plan, product.id)) return { ok: false, error: "같은 날 다른 칸에서 이미 쓰는 상품이에요." };
 
-  return confirmAndQueue(service, plan, auth.userId, {
-    product_id: product.id,
-    product_changed: true,
-    human_brief: parsed.data.brief || null,
-    chosen: null,
-  });
-}
+  if (!parsed.data.force) {
+    const warning = await duplicateWarning(service, { accountId: parsed.data.accountId, productId: product.id, gapDays: settings.repeat_gap_days });
+    if (warning) return { ok: false, error: warning, warning: true };
+  }
 
-async function accountScopes(service: Service, accountId: string): Promise<{ shop: string; kind: string }[]> {
-  const { data } = await service.from("track_settings").select("product_scopes").eq("social_account_id", accountId).maybeSingle();
-  return (data?.product_scopes ?? []) as { shop: string; kind: string }[];
+  const { data: inserted, error } = await service
+    .from("content_plans")
+    .insert({
+      organization_id: auth.orgId,
+      social_account_id: parsed.data.accountId,
+      track: "A",
+      status: "CONFIRMED",
+      product_id: product.id,
+      product_changed: true,
+      human_brief: parsed.data.brief || null,
+      proposal: { ideas: [], chosen: null } as unknown as Json,
+      confirmed_by: auth.userId,
+      confirmed_at: new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (error || !inserted) return { ok: false, error: error?.message ?? "저장하지 못했어요." };
+  await triggerShotlistRun(`plan ${inserted.id}`).catch((e) => console.error("[shoot] 컷 리스트 트리거 실패:", e));
+  revalidateShoot();
+  return { ok: true };
 }
 
 export interface ProductHit {
@@ -175,9 +160,9 @@ export interface ProductHit {
   oneLine: string | null;
 }
 
-const searchSchema = z.object({ planId: z.string().uuid(), query: z.string().trim().min(1).max(50) });
+const searchSchema = z.object({ accountId: z.string().uuid(), query: z.string().trim().min(1).max(50) });
 
-/** 직접 지정용 상품 검색 — 이 계정이 쓰는 몰 · 종류, 판매 중, 분석 완료만. */
+/** 원하는 상품 찾기 — 이 계정이 쓰는 몰 · 종류, 판매 중, 분석 완료만. */
 export async function searchProductsAction(
   input: z.infer<typeof searchSchema>,
 ): Promise<{ ok: true; hits: ProductHit[] } | { ok: false; error: string }> {
@@ -186,12 +171,12 @@ export async function searchProductsAction(
   const auth = await authorize("plan");
   if (!auth.ok) return auth;
   const service = createServiceClient();
-  const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
-  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
+  const settings = await accountSettings(service, parsed.data.accountId, auth.orgId);
+  if (!settings) return { ok: false, error: "촬영 설정에 없는 계정이에요." };
 
   const pattern = `%${parsed.data.query.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
   const hits: ProductHit[] = [];
-  for (const scope of await accountScopes(service, plan.social_account_id)) {
+  for (const scope of (settings.product_scopes ?? []) as { shop: string; kind: string }[]) {
     const { data } = await service
       .from("products")
       .select("id, name, price, represent_image_url, product_analyses(summary)")
@@ -215,32 +200,59 @@ export async function searchProductsAction(
   return { ok: true, hits: hits.slice(0, 12) };
 }
 
-const idSchema = z.object({ planId: z.string().uuid() });
+const accountSchema = z.object({ accountId: z.string().uuid() });
 
-/** AI 후보 다시 만들기 — 제안만 지우고 기획 워커를 부른다(빈 칸만 채움). */
-export async function regenerateIdeasAction(input: z.infer<typeof idSchema>): Promise<ShootResult> {
-  const parsed = idSchema.safeParse(input);
+/** 계정 기획 목록 새로 고침 — 고르기 전 기획을 모두 빼고 기획 워커를 부른다. 지운 상품은 한동안 다시 내지 않는다. */
+export async function refreshIdeasAction(input: z.infer<typeof accountSchema>): Promise<ShootResult> {
+  const parsed = accountSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
   const auth = await authorize("plan");
   if (!auth.ok) return auth;
   const service = createServiceClient();
-  const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
-  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
-  if (plan.status !== "PROPOSED") return { ok: false, error: "고르기 전인 칸만 다시 만들 수 있어요." };
-  const { error } = await service.from("content_plans").delete().eq("id", plan.id).eq("status", "PROPOSED");
+  const settings = await accountSettings(service, parsed.data.accountId, auth.orgId);
+  if (!settings?.shoot_enabled) return { ok: false, error: "촬영 설정에서 켠 계정만 새로 고칠 수 있어요." };
+  const { error } = await service
+    .from("content_plans")
+    .update({ status: "SKIPPED", note: "목록을 새로 고쳐 뺐어요" })
+    .eq("social_account_id", parsed.data.accountId)
+    .eq("organization_id", auth.orgId)
+    .eq("track", "A")
+    .eq("status", "PROPOSED");
   if (error) return { ok: false, error: error.message };
   try {
-    await triggerShootPlanRun(`regenerate ${plan.id}`, plan.slot_date);
+    await triggerShootPlanRun(`refresh ${parsed.data.accountId}`);
   } catch (e) {
     console.error("[shoot] 기획 트리거 실패:", e);
-    revalidatePath("/shoot/plans");
-    return { ok: false, error: "후보를 지웠지만 다시 만들기 실행을 못 했어요. 내일 새벽 5시에 다시 채워집니다." };
+    revalidateShoot();
+    return { ok: false, error: "목록을 비웠지만 새 기획 만들기를 시작하지 못했어요. 내일 새벽 5시에 다시 채워져요." };
   }
-  revalidatePath("/shoot/plans");
+  revalidateShoot();
   return { ok: true };
 }
 
-/** 이 칸 건너뛰기 (발행 예약 전까지). */
+const idSchema = z.object({ planId: z.string().uuid() });
+
+/** 목록에서 기획 하나 지우기 — 다음 새벽에 부족한 만큼 채워진다. */
+export async function dismissIdeaAction(input: z.infer<typeof idSchema>): Promise<ShootResult> {
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("plan");
+  if (!auth.ok) return auth;
+  const { data, error } = await createServiceClient()
+    .from("content_plans")
+    .update({ status: "SKIPPED", note: "사람이 목록에서 지움" })
+    .eq("id", parsed.data.planId)
+    .eq("organization_id", auth.orgId)
+    .eq("track", "A")
+    .eq("status", "PROPOSED")
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "이미 고르거나 지운 기획이에요. 새로 고쳐 주세요." };
+  revalidateShoot();
+  return { ok: true };
+}
+
+/** 진행 중인 기획 빼기 (올렸어요 전까지) — 올린 촬영본도 함께 멈춘다. */
 export async function skipShootAction(input: z.infer<typeof idSchema>): Promise<ShootResult> {
   const parsed = idSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -248,13 +260,12 @@ export async function skipShootAction(input: z.infer<typeof idSchema>): Promise<
   if (!auth.ok) return auth;
   const service = createServiceClient();
   const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
-  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
-  if (["SCHEDULED", "PUBLISHED", "SKIPPED"].includes(plan.status)) return { ok: false, error: "건너뛸 수 없는 칸입니다." };
+  if (!plan) return { ok: false, error: "기획을 찾을 수 없습니다." };
+  if (["PUBLISHED", "SKIPPED"].includes(plan.status)) return { ok: false, error: "뺄 수 없는 기획입니다." };
   const { error } = await service.from("content_plans").update({ status: "SKIPPED", note: "사람이 건너뜀" }).eq("id", plan.id);
   if (error) return { ok: false, error: error.message };
   if (plan.shoot_requests) await service.from("shoot_requests").update({ status: "CANCELLED" }).eq("id", plan.shoot_requests.id);
-  revalidatePath("/shoot/plans");
-  revalidatePath("/shoot/uploads");
+  revalidateShoot();
   return { ok: true };
 }
 
@@ -328,7 +339,7 @@ const skipCutSchema = z.object({ requestId: z.string().uuid(), no: z.number().in
 
 /**
  * 못 찍는 컷 빼기 / 되돌리기. 예전엔 한 컷이라도 못 찍으면 "다 올렸어요"를 못 눌러 칸 전체가 멈췄다(2026-11-04).
- * 찍는 사람이 현장에서 판단하니 촬영 권한으로 되고, 뺀 컷은 완성본 확인에 표시돼 관리자가 본다.
+ * 찍는 사람이 현장에서 판단하니 촬영 권한으로 되고, 뺀 컷은 완성본 받기에 표시돼 사람이 본다.
  */
 export async function skipCutAction(input: z.infer<typeof skipCutSchema>): Promise<ShootResult> {
   const parsed = skipCutSchema.safeParse(input);
@@ -339,7 +350,7 @@ export async function skipCutAction(input: z.infer<typeof skipCutSchema>): Promi
   const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
     if (req.status !== "OPEN") return "이미 편집으로 넘어간 촬영 요청입니다.";
     const cuts = (req.cuts ?? []) as Cut[];
-    if (parsed.data.skipped && !cuts.some((c) => c.no !== parsed.data.no && !c.skipped)) return "컷을 모두 뺄 수는 없어요. 이 칸을 찍지 못하면 촬영 기획에서 칸을 건너뛰어 주세요.";
+    if (parsed.data.skipped && !cuts.some((c) => c.no !== parsed.data.no && !c.skipped)) return "컷을 모두 뺄 수는 없어요. 찍지 못하면 촬영 기획 고르기에서 이 기획을 빼 주세요.";
     const clips = (req.clips ?? []) as Clip[];
     const old = parsed.data.skipped ? clips.filter((c) => c.cut === parsed.data.no) : [];
     return {
@@ -469,7 +480,7 @@ export async function finishUploadAction(input: z.infer<typeof finishSchema>): P
   return { ok: true };
 }
 
-// ─── 완성본 확인 ──────────────────────────────────────────────────────────────
+// ─── 완성본 받기 ──────────────────────────────────────────────────────────────
 
 /** 상품 분석의 건강기능식품 판정 — 관계가 객체 · 배열 어느 쪽으로 와도. 없으면 null. */
 function healthFunctionalOf(a: unknown): boolean | null {
@@ -496,8 +507,8 @@ export async function saveCaptionAction(input: z.infer<typeof captionSchema>): P
     .eq("organization_id", auth.orgId)
     .eq("track", "A")
     .maybeSingle();
-  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
-  if (!["SCRIPTED", "SHOT", "RENDERED"].includes(plan.status)) return { ok: false, error: "예약된 뒤에는 고칠 수 없어요." };
+  if (!plan) return { ok: false, error: "기획을 찾을 수 없습니다." };
+  if (!["SCRIPTED", "SHOT", "RENDERED"].includes(plan.status)) return { ok: false, error: "이미 올린 기획은 고칠 수 없어요." };
   const script = (plan.script ?? {}) as SavedCaption & Record<string, unknown>;
   const next = { ...script, caption: { ...(script.caption ?? { keywords: [] }), text: parsed.data.caption }, caption_edited: true };
   const { error } = await service.from("content_plans").update({ script: next as unknown as Json }).eq("id", plan.id);
@@ -518,16 +529,15 @@ const reEditSchema = z.object({
 export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise<ShootResult> {
   const parsed = reEditSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
-  // 완성본 확인 화면의 기능 — 화면처럼 관리자 · 매니저만(예전엔 찍는 사람도 서버에서 됐다)
+  // 완성본 받기 화면의 고치기 기능 — 화면처럼 관리자 · 매니저만(예전엔 찍는 사람도 서버에서 됐다)
   const auth = await authorize("plan");
   if (!auth.ok) return auth;
   const service = createServiceClient();
   const req = await loadRequest(service, parsed.data.requestId, auth.orgId);
   if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
   if (req.status !== "EDITED" && req.status !== "FAILED") return { ok: false, error: "편집이 끝난 뒤에 다시 편집할 수 있어요." };
-  // 이미 예약된 칸은 다시 편집하지 않는다 — 다시 편집하면 예약된 영상 파일이 지워져 발행이 실패했다(2026-11-04)
   const { data: planRow } = await service.from("content_plans").select("status").eq("id", req.plan_id).maybeSingle();
-  if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 예약됐거나 끝난 칸이라 다시 편집할 수 없어요." };
+  if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 올렸거나 끝난 기획이라 다시 편집할 수 없어요." };
   const fix = new Map(parsed.data.cuts.map((c) => [c.no, c]));
   const cuts = ((req.cuts ?? []) as Cut[]).map((c) => {
     const f = fix.get(c.no);
@@ -553,7 +563,7 @@ const reopenSchema = z.object({ requestId: z.string().uuid() });
 
 /**
  * 촬영본 다시 올리기 — 편집이 실패했거나(예: 컷이 너무 짧음) 완성본에서 컷 하나를 다시 찍고 싶을 때.
- * 요청을 촬영 중(OPEN), 칸을 촬영 대기(SCRIPTED)로 되돌린다. 올린 촬영본은 남아 있어 바꿀 컷만 다시 올리면 된다.
+ * 요청을 촬영 중(OPEN), 기획을 촬영 대기(SCRIPTED)로 되돌린다. 올린 촬영본은 남아 있어 바꿀 컷만 다시 올리면 된다.
  * 예전엔 실패하면 같은 촬영본으로 다시 편집하거나 건너뛰는 수밖에 없었다(2026-11-04).
  */
 export async function reopenShootAction(input: z.infer<typeof reopenSchema>): Promise<ShootResult> {
@@ -565,9 +575,8 @@ export async function reopenShootAction(input: z.infer<typeof reopenSchema>): Pr
   const req = await loadRequest(service, parsed.data.requestId, auth.orgId);
   if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
   if (req.status !== "EDITED" && req.status !== "FAILED") return { ok: false, error: "편집이 끝났거나 실패한 칸만 다시 올릴 수 있어요." };
-  const { data: planRow } = await service.from("content_plans").select("status, slot_date, slot_time").eq("id", req.plan_id).maybeSingle();
-  if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 예약됐거나 끝난 칸이에요." };
-  if (isPastSlot(planRow.slot_date, planRow.slot_time)) return { ok: false, error: "올릴 시각이 지난 칸이에요." };
+  const { data: planRow } = await service.from("content_plans").select("status").eq("id", req.plan_id).maybeSingle();
+  if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 올렸거나 끝난 기획이에요." };
   const { data: moved, error } = await service
     .from("shoot_requests")
     .update({ status: "OPEN", error: null })
@@ -583,39 +592,34 @@ export async function reopenShootAction(input: z.infer<typeof reopenSchema>): Pr
   return { ok: true };
 }
 
-/** 완성본 확인 → 올릴 시각(12 · 18시)으로 예약. 기존 발행 큐(publish_jobs)에 그대로 들어간다. */
-export async function approveShootAction(input: z.infer<typeof idSchema>): Promise<ShootResult> {
-  const parsed = idSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
-  const auth = await authorize("plan");
-  if (!auth.ok) return auth;
-  const service = createServiceClient();
-  const { data: plan } = await service
+// ─── 받기 ─────────────────────────────────────────────────────────────────────
+
+const LINK_SECONDS = 3600;
+
+type PlanFiles = NonNullable<Awaited<ReturnType<typeof loadPlanForFiles>>>;
+
+async function loadPlanForFiles(service: Service, planId: string, orgId: string) {
+  const { data } = await service
     .from("content_plans")
     .select(
-      "id, status, slot_date, slot_time, product_id, social_account_id, script, social_accounts(display_name, disconnected_at, is_active), shoot_requests(id, status, rendered_path, edit)",
+      "id, status, product_id, social_account_id, script, warnings_ack, social_accounts(display_name), shoot_requests(id, status, rendered_path, edit, cuts, clips)",
     )
-    .eq("id", parsed.data.planId)
-    .eq("organization_id", auth.orgId)
+    .eq("id", planId)
+    .eq("organization_id", orgId)
     .eq("track", "A")
     .maybeSingle();
-  if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
-  if (plan.status !== "RENDERED") return { ok: false, error: "편집이 끝난 칸만 확인할 수 있어요." };
-  const req = plan.shoot_requests;
-  if (!req || req.status !== "EDITED" || !req.rendered_path) return { ok: false, error: "완성본이 없어요." };
-  // 발행 워커가 집어 가고 컨테이너를 만들 시간 — 올릴 시각 5분 전까지만
-  const scheduledFor = kstToIso(plan.slot_date, plan.slot_time);
-  if (isPastSlot(plan.slot_date, plan.slot_time, 5 * 60_000)) return { ok: false, error: "올릴 시각이 너무 가까워 예약할 수 없어요." };
-  const acc = plan.social_accounts;
-  if (!acc || acc.disconnected_at || !acc.is_active) return { ok: false, error: "계정 연결이 끊겨 있어요. 계정 연동에서 다시 연결해 주세요." };
-  if (!plan.product_id) return { ok: false, error: "상품이 없는 칸입니다." };
+  return data;
+}
 
+/** 지금 걸리는 광고 문구 규칙 · 판매 상태. 화면(완성본 받기)과 같은 계산. */
+async function currentBlocking(service: Service, plan: PlanFiles): Promise<string[]> {
+  if (!plan.product_id) return [];
   const [{ data: product }, { data: ruleRows }, { data: approvals }] = await Promise.all([
-    service.from("products").select("name, kind, stock_status, product_analyses(health_functional, summary)").eq("id", plan.product_id).maybeSingle(),
+    service.from("products").select("kind, stock_status, product_analyses(health_functional, summary)").eq("id", plan.product_id).maybeSingle(),
     service.from("content_rules").select("id, scope, rule_type, phrase, match_type, reason, suggestion").eq("active", true),
     service.from("product_claim_approvals").select("claim").eq("product_id", plan.product_id),
   ]);
-  if (!product) return { ok: false, error: "상품을 찾을 수 없습니다." };
+  if (!product) return [];
   const rules: ContentRule[] = (ruleRows ?? []).map((r) => ({
     id: r.id,
     scope: r.scope as ContentRule["scope"],
@@ -626,8 +630,8 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
     suggestion: r.suggestion,
   }));
   const captionText = ((plan.script ?? {}) as SavedCaption).caption?.text ?? "";
-  const segments = (req.edit as EditResult | null)?.segments ?? [];
-  const blocking = finalBlocking(
+  const segments = (plan.shoot_requests?.edit as EditResult | null)?.segments ?? [];
+  return finalBlocking(
     { caption: captionText, onScreen: segments.map((s) => s.onScreen), subtitles: segments.flatMap((s) => s.subtitles.map((t) => t.text)) },
     {
       kind: (product.kind ?? "OTHER") as ProductKind,
@@ -638,63 +642,232 @@ export async function approveShootAction(input: z.infer<typeof idSchema>): Promi
       certifiedFunctions: certifiedFunctionsOf(product.product_analyses),
     },
   );
-  if (blocking.length) return { ok: false, error: `확인 전에 고칠 것: ${blocking.join(" · ")}` };
+}
 
-  // 먼저 칸을 선점한다 — 관리자 두 명 · 탭 두 개에서 동시에 눌러도 예약이 하나만 생기게(2026-11-04).
-  // 아래에서 실패하면 RENDERED로 되돌린다.
-  const { data: claimed } = await service
+const ackSchema = z.object({ planId: z.string().uuid(), items: z.array(z.string().max(500)).min(1).max(50) });
+
+/** 광고 문구 · 판매 상태 경고를 확인했다고 남긴다 — 그래야 받을 수 있다. 새 경고가 생기면 다시 확인받는다. */
+export async function ackWarningsAction(input: z.infer<typeof ackSchema>): Promise<ShootResult> {
+  const parsed = ackSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const { data, error } = await createServiceClient()
     .from("content_plans")
-    .update({ status: "SCHEDULED", confirmed_by: auth.userId, confirmed_at: new Date().toISOString() })
-    .eq("id", plan.id)
-    .eq("status", "RENDERED")
+    .update({ warnings_ack: parsed.data.items as unknown as Json, warnings_ack_by: auth.userId, warnings_ack_at: new Date().toISOString() })
+    .eq("id", parsed.data.planId)
+    .eq("organization_id", auth.orgId)
+    .eq("track", "A")
     .select("id");
-  if (!claimed?.length) return { ok: false, error: "이미 확인됐거나 상태가 바뀐 칸이에요. 새로 고쳐 주세요." };
-  const release = () => service.from("content_plans").update({ status: "RENDERED", confirmed_by: null, confirmed_at: null }).eq("id", plan.id);
-
-  const { caption, hashtags } = splitHashtags(captionText);
-  const { data: content, error: cErr } = await service
-    .from("contents")
-    .insert({
-      organization_id: auth.orgId,
-      created_by: auth.userId,
-      media_type: "VIDEO",
-      media_urls: [req.rendered_path],
-      metadata: { source: "shoot", planId: plan.id, shootRequestId: req.id } as Json,
-      ai_captions: { instagram: { caption, hashtags } } as unknown as Json,
-      ai_analyzed_at: new Date().toISOString(),
-      internal_title: `[직접 촬영] ${product.name} · ${plan.slot_date.slice(5)} ${plan.slot_time}`.slice(0, 120),
-    })
-    .select("id")
-    .single();
-  if (cErr || !content) {
-    await release();
-    return { ok: false, error: `콘텐츠 저장 실패: ${cErr?.message}` };
-  }
-  const { data: job, error: jErr } = await service
-    .from("publish_jobs")
-    .insert({
-      content_id: content.id,
-      social_account_id: plan.social_account_id,
-      post_type: "REELS",
-      scheduled_for: scheduledFor,
-      // 사람이 직접 찍은 영상(AI는 편집만) — 플랫폼 AI 라벨 대상 아님
-      is_ai_generated: false,
-    })
-    .select("id")
-    .single();
-  if (jErr || !job) {
-    await service.from("contents").delete().eq("id", content.id);
-    await release();
-    return { ok: false, error: `발행 예약 실패: ${jErr?.message}` };
-  }
-  const { error: linkErr } = await service.from("content_plans").update({ content_id: content.id, publish_job_id: job.id }).eq("id", plan.id);
-  if (linkErr) {
-    // 칸과 예약을 잇지 못하면 발행 직전 확인 · 편성표가 이 예약을 모른다 — 예약을 취소하고 되돌린다
-    await service.from("publish_jobs").update({ status: "CANCELLED", cancelled_at: new Date().toISOString() }).eq("id", job.id);
-    await release();
-    return { ok: false, error: `예약을 칸에 잇지 못했어요: ${linkErr.message}` };
-  }
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) return { ok: false, error: "기획을 찾을 수 없습니다." };
   revalidatePath("/shoot/review");
-  revalidatePath("/postings");
+  return { ok: true };
+}
+
+export interface ShootFile {
+  name: string;
+  // 누르면 내려받는 주소
+  downloadUrl: string;
+  // ZIP으로 묶을 때 읽는 주소
+  rawUrl: string;
+  size: number | null;
+}
+
+export type ShootFilesResult =
+  | { ok: true; zipName: string; final: ShootFile | null; thumbnail: ShootFile | null; clips: (ShootFile & { cut: number })[]; texts: TextFile[] }
+  | { ok: false; error: string };
+
+const filesSchema = z.object({ planId: z.string().uuid() });
+
+/** 받을 파일 — 완성본 · 표지 · 컷별 촬영 원본 · 글 파일. 주소는 한 시간 뒤 만료된다. */
+export async function getShootFilesAction(input: z.infer<typeof filesSchema>): Promise<ShootFilesResult> {
+  const parsed = filesSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const plan = await loadPlanForFiles(service, parsed.data.planId, auth.orgId);
+  if (!plan) return { ok: false, error: "기획을 찾을 수 없습니다." };
+  const req = plan.shoot_requests;
+  if (!req) return { ok: false, error: "촬영 요청이 없어요." };
+  const editFailed = plan.status === "SHOT" && req.status === "FAILED";
+  if (plan.status !== "RENDERED" && plan.status !== "PUBLISHED" && !editFailed) return { ok: false, error: "편집이 끝나면 받을 수 있어요." };
+
+  if (plan.status !== "PUBLISHED") {
+    const blocking = await currentBlocking(service, plan);
+    const acked = new Set((plan.warnings_ack ?? []) as string[]);
+    if (blocking.some((b) => !acked.has(b))) return { ok: false, error: "걸린 내용을 먼저 확인해 주세요." };
+  }
+
+  const account = plan.social_accounts?.display_name ?? "";
+  const { data: productRow } = plan.product_id ? await service.from("products").select("name").eq("id", plan.product_id).maybeSingle() : { data: null };
+  const productName = productRow?.name ?? "";
+  const base = safeFileName(`${account}_${productName}`);
+  const sign = async (path: string, name: string, size: number | null): Promise<ShootFile> => {
+    const { data: raw, error: rawErr } = await service.storage.from("media").createSignedUrl(path, LINK_SECONDS);
+    if (!raw) throw new Error(rawErr?.message ?? "파일 주소를 만들지 못했어요.");
+    // SDK의 download 옵션은 한글 이름을 두 번 인코딩해 저장 이름이 깨진다(2026-11-04 실측) — 직접 붙인다
+    return { name, downloadUrl: `${raw.signedUrl}&download=${encodeURIComponent(name)}`, rawUrl: raw.signedUrl, size };
+  };
+
+  const edit = (req.edit ?? {}) as { thumbnail?: string | null; segments?: PackageSegment[] };
+  const clipRows = ((req.clips ?? []) as Clip[]).slice().sort((a, b) => a.cut - b.cut);
+  try {
+    const [final, thumbnail, clips] = await Promise.all([
+      req.rendered_path ? sign(req.rendered_path, `${base}_완성본.mp4`, null) : null,
+      edit.thumbnail ? sign(edit.thumbnail, `${base}_표지.jpg`, null) : null,
+      Promise.all(
+        clipRows.map(async (c) => {
+          const ext = c.path.split(".").pop() ?? "mp4";
+          return { cut: c.cut, ...(await sign(c.path, `${base}_컷${String(c.cut).padStart(2, "0")}_원본.${ext}`, c.size)) };
+        }),
+      ),
+    ]);
+    const script = (plan.script ?? null) as (PackageScript & SavedCaption) | null;
+    const texts = buildPackageTexts({
+      account,
+      productName,
+      caption: script?.caption?.text ?? "",
+      script,
+      cuts: (req.cuts ?? []) as unknown as PackageCut[],
+      segments: edit.segments ?? [],
+    });
+    return { ok: true, zipName: `${base}.zip`, final, thumbnail, clips, texts };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "파일 주소를 만들지 못했어요." };
+  }
+}
+
+// ─── 올렸어요 ─────────────────────────────────────────────────────────────────
+
+export interface RecentReel {
+  id: string;
+  caption: string | null;
+  thumbnailUrl: string | null;
+  permalink: string | null;
+  postedAt: string | null;
+  // 이미 다른 기획에 연결된 릴스
+  linked: boolean;
+}
+
+// 사람이 고를 최근 게시물 범위
+const RECENT_MEDIA_LIMIT = 30;
+
+async function recentReelsOf(service: Service, accountId: string) {
+  const auth = await getInstagramAuth(service, accountId);
+  const media = await listRecentMedia(auth.token, RECENT_MEDIA_LIMIT);
+  return media.filter((m) => m.mediaProductType === "REELS");
+}
+
+/** "올렸어요" — 인스타에 이미 올라간 이 계정의 최근 릴스를 불러온다. */
+export async function listRecentReelsAction(
+  input: z.infer<typeof filesSchema>,
+): Promise<{ ok: true; reels: RecentReel[] } | { ok: false; error: string }> {
+  const parsed = filesSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
+  if (!plan) return { ok: false, error: "기획을 찾을 수 없습니다." };
+  try {
+    const reels = await recentReelsOf(service, plan.social_account_id);
+    const { data: linkedRows } = reels.length
+      ? await service.from("content_plans").select("posted_media_id").eq("social_account_id", plan.social_account_id).in("posted_media_id", reels.map((r) => r.id))
+      : { data: [] };
+    const linked = new Set((linkedRows ?? []).map((r) => r.posted_media_id));
+    return {
+      ok: true,
+      reels: reels.map((r) => ({
+        id: r.id,
+        caption: r.caption,
+        thumbnailUrl: r.thumbnailUrl,
+        permalink: r.permalink,
+        postedAt: r.timestamp,
+        linked: linked.has(r.id),
+      })),
+    };
+  } catch (e) {
+    console.error("[shoot] 최근 릴스 불러오기 실패:", e);
+    return { ok: false, error: `인스타에서 릴스를 불러오지 못했어요: ${e instanceof Error ? e.message : "알 수 없는 오류"}` };
+  }
+}
+
+const postedSchema = z.object({ planId: z.string().uuid(), mediaId: z.string().min(1).max(100) });
+
+/** 고른 릴스를 기획에 연결하고 끝낸다. 인스타에 실제로 있는 이 계정 릴스인지 서버가 다시 확인한다. */
+export async function markPostedAction(input: z.infer<typeof postedSchema>): Promise<ShootResult> {
+  const parsed = postedSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data: plan } = await service
+    .from("content_plans")
+    .select("id, status, social_account_id, shoot_requests(status)")
+    .eq("id", parsed.data.planId)
+    .eq("organization_id", auth.orgId)
+    .eq("track", "A")
+    .maybeSingle();
+  if (!plan) return { ok: false, error: "기획을 찾을 수 없습니다." };
+  const fromStatus = plan.status;
+  if (fromStatus !== "RENDERED" && !(fromStatus === "SHOT" && plan.shoot_requests?.status === "FAILED")) return { ok: false, error: "편집이 끝난 기획만 연결할 수 있어요." };
+
+  let reel;
+  try {
+    reel = (await recentReelsOf(service, plan.social_account_id)).find((r) => r.id === parsed.data.mediaId);
+  } catch (e) {
+    return { ok: false, error: `인스타에서 릴스를 확인하지 못했어요: ${e instanceof Error ? e.message : "알 수 없는 오류"}` };
+  }
+  if (!reel) return { ok: false, error: "이 계정에 올라간 최근 릴스에서 찾지 못했어요. 목록을 다시 불러와 주세요." };
+
+  const { data: moved, error } = await service
+    .from("content_plans")
+    .update({
+      status: "PUBLISHED",
+      posted_media_id: reel.id,
+      posted_permalink: reel.permalink,
+      posted_at: reel.timestamp ?? new Date().toISOString(),
+      posted_by: auth.userId,
+    })
+    .eq("id", plan.id)
+    .eq("status", fromStatus)
+    .select("id");
+  if (error) return { ok: false, error: error.code === "23505" ? "이미 다른 기획에 연결된 릴스예요." : error.message };
+  if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
+  revalidateShoot();
+  revalidatePath("/");
+  return { ok: true };
+}
+
+/** 잘못 연결했을 때 — 연결을 풀고 받기 단계로 되돌린다. */
+export async function unlinkPostedAction(input: z.infer<typeof filesSchema>): Promise<ShootResult> {
+  const parsed = filesSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data: plan } = await service
+    .from("content_plans")
+    .select("id, status, shoot_requests(status)")
+    .eq("id", parsed.data.planId)
+    .eq("organization_id", auth.orgId)
+    .eq("track", "A")
+    .maybeSingle();
+  if (!plan || plan.status !== "PUBLISHED") return { ok: false, error: "연결된 릴스가 없어요." };
+  const { error } = await service
+    .from("content_plans")
+    .update({
+      status: plan.shoot_requests?.status === "FAILED" ? "SHOT" : "RENDERED",
+      posted_media_id: null,
+      posted_permalink: null,
+      posted_at: null,
+      posted_by: null,
+    })
+    .eq("id", plan.id)
+    .eq("status", "PUBLISHED");
+  if (error) return { ok: false, error: error.message };
+  revalidateShoot();
   return { ok: true };
 }

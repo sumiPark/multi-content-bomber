@@ -1,29 +1,28 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { CaptionResult } from "@/components/ai/caption-result";
 import { CollectionHealthBar } from "@/components/dashboard/collection-health";
-import { AtRiskAlert, BlockedAlert, DayBoardTable, TaskTiles, YesterdayStrip } from "@/components/dashboard/today-board";
+import { AtRiskAlert, BlockedAlert, TodayPostsCard, UploadScheduleCard, YesterdayStrip } from "@/components/dashboard/today-board";
 import {
   type AccountSummary,
   type DashboardData,
   type Platform,
   type PublishStatus,
-  type UpcomingJob,
   DashboardHeader,
   FailureAlertBar,
   LinkedAccounts,
   QuickActions,
   StatTiles,
-  UpcomingUploads,
 } from "@/components/dashboard/dashboard-hub";
 import { captionsSchema } from "@/lib/ai/caption-generator";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { addDays, kstDate } from "@/lib/automation/time";
 import { loadCollectionHealth, type HealthWarning } from "@/lib/collection-health";
-import { loadDayBoard, loadYesterday, type DayBoard, type YesterdayLine } from "@/lib/schedule/day-board";
+import { loadTodayPosts } from "@/lib/dashboard/today-posts";
+import { loadDashboardAlerts, loadUploadSchedule, loadYesterday, type DashboardAlerts, type UploadSchedule, type YesterdayLine } from "@/lib/schedule/day-board";
 
 const THUMBNAIL_TTL_SECONDS = 3600;
-const UPCOMING_LIMIT = 5;
 const FAILED_WINDOW_DAYS = 90; // 배포 관리 목록 기간과 같다
 const STATS_WINDOW_DAYS = 14; // ② 통계용 슬림 윈도우 — 이번 주/지난 주 비교 + 실패 카운트 커버
 
@@ -35,7 +34,7 @@ interface DashboardPageProps {
 }
 
 export default async function DashboardPage({ searchParams }: DashboardPageProps) {
-  const { content: targetContentId, day } = await searchParams;
+  const { content: targetContentId } = await searchParams;
 
   const user = await getSessionUser();
   // 비로그인 사용자에겐 redirect 대신 server-rendered landing을 반환. 이유:
@@ -57,10 +56,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   // ── 액션 허브 데이터 수집 ────────────────────────────────────────────────────
   const today = kstDate(0);
   const tomorrow = addDays(today, 1);
-  const [data, healthWarnings, board, yesterday] = await Promise.all([
+  const [data, healthWarnings, alerts, schedule, yesterday] = await Promise.all([
     loadDashboardData(supabase),
     safeCollectionHealth(supabase),
-    safeDayBoard(supabase, day === "tomorrow" ? tomorrow : today),
+    safeAlerts(supabase),
+    safeUploadSchedule(supabase),
     safeYesterday(supabase),
   ]);
 
@@ -72,18 +72,20 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
         topFailureSummary={data.topFailureSummary}
       />
       <CollectionHealthBar warnings={healthWarnings} />
-      {/* 오늘 할 일(5-2) — 편성 칸이 있을 때만. 읽다 실패하면 이 묶음만 빠진다 */}
-      {board && board.total > 0 && (
+      {/* 놓치면 안 되는 경고만. 읽다 실패하면 이 묶음만 빠진다 */}
+      {alerts && (
         <>
-          <BlockedAlert items={board.blocked} />
-          <AtRiskAlert items={board.atRisk} />
-          <TaskTiles board={board} />
-          <DayBoardTable board={board} today={today} tomorrow={tomorrow} />
+          <BlockedAlert items={alerts.blocked} />
+          <AtRiskAlert items={alerts.atRisk} />
         </>
       )}
+      {/* 인스타를 읽느라 시간이 걸릴 수 있어 나머지 화면을 먼저 보여 준다 */}
+      <Suspense fallback={<TodayPostsSkeleton />}>
+        <TodayPostsSection orgId={profile.organization_id} />
+      </Suspense>
+      {schedule && <UploadScheduleCard data={schedule} today={today} tomorrow={tomorrow} />}
       <YesterdayStrip lines={yesterday} />
       <StatTiles data={data} />
-      <UpcomingUploads items={data.upcoming} />
       <LinkedAccounts summaries={data.accounts} />
       <QuickActions />
     </main>
@@ -103,17 +105,40 @@ async function safeCollectionHealth(
   }
 }
 
-// 오늘 할 일(콘텐츠 자동화 5-2). 수집 경고와 같은 이유로 실패를 삼킨다 — 기존 대시보드는 그대로.
-async function safeDayBoard(
-  supabase: Awaited<ReturnType<typeof getServerSupabase>>,
-  date: string,
-): Promise<DayBoard | null> {
+// 경고 · 업로드 예정 — 수집 경고와 같은 이유로 실패를 삼킨다. 기존 대시보드는 그대로.
+async function safeAlerts(supabase: Awaited<ReturnType<typeof getServerSupabase>>): Promise<DashboardAlerts | null> {
   try {
-    return await loadDayBoard(supabase, date);
+    return await loadDashboardAlerts(supabase);
   } catch (err) {
-    console.error("[dashboard] 오늘 할 일 불러오기 실패:", err);
+    console.error("[dashboard] 경고 불러오기 실패:", err);
     return null;
   }
+}
+
+async function safeUploadSchedule(supabase: Awaited<ReturnType<typeof getServerSupabase>>): Promise<UploadSchedule | null> {
+  try {
+    return await loadUploadSchedule(supabase);
+  } catch (err) {
+    console.error("[dashboard] 업로드 예정 불러오기 실패:", err);
+    return null;
+  }
+}
+
+async function TodayPostsSection({ orgId }: { orgId: string }) {
+  const data = await loadTodayPosts(orgId).catch((err) => {
+    console.error("[dashboard] 오늘 올린 게시물 불러오기 실패:", err);
+    return null;
+  });
+  return data ? <TodayPostsCard data={data} /> : null;
+}
+
+function TodayPostsSkeleton() {
+  return (
+    <div className="rounded-lg border bg-card p-6" aria-busy="true">
+      <p className="text-[15px] font-semibold">오늘 올린 게시물</p>
+      <p className="mt-2 text-sm text-muted-foreground">인스타에서 읽는 중…</p>
+    </div>
+  );
 }
 
 async function safeYesterday(
@@ -343,8 +368,6 @@ function computeJobStats(
   let thisWeekCompleted = 0;
   let lastWeekCompleted = 0;
 
-  const upcomingPool: JobRow[] = [];
-
   for (const j of jobs) {
     const sched = j.scheduled_for ? new Date(j.scheduled_for).getTime() : null;
 
@@ -384,35 +407,7 @@ function computeJobStats(
       if (completedMs >= thisWeekStart) thisWeekCompleted += 1;
       else if (completedMs >= lastWeekStart) lastWeekCompleted += 1;
     }
-
-    // 업커밍 후보: 처리중 / 예약 / 대기 / 실패.
-    if (
-      j.status === "PENDING" ||
-      j.status === "PROCESSING" ||
-      j.status === "RETRYING" ||
-      j.status === "FAILED"
-    ) {
-      upcomingPool.push(j);
-    }
   }
-
-  // 가장 가까운 시간순 정렬: scheduled_for(있으면) > created_at desc 보조.
-  const upcoming = upcomingPool
-    .slice()
-    .sort((a, b) => {
-      const aMs = a.scheduled_for
-        ? new Date(a.scheduled_for).getTime()
-        : Number.POSITIVE_INFINITY;
-      const bMs = b.scheduled_for
-        ? new Date(b.scheduled_for).getTime()
-        : Number.POSITIVE_INFINITY;
-      if (aMs !== bMs) return aMs - bMs;
-      return (
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-    })
-    .slice(0, UPCOMING_LIMIT)
-    .map(toUpcomingJob);
 
   const topFailureSummary = failedJobs.length
     ? buildFailureSummary(failedJobs[0])
@@ -432,21 +427,6 @@ function computeJobStats(
     topFailureSummary,
     thisWeekCompleted,
     weekDelta: thisWeekCompleted - lastWeekCompleted,
-    upcoming,
-  };
-}
-
-function toUpcomingJob(j: JobRow): UpcomingJob {
-  return {
-    id: j.id,
-    contentId: j.content_id,
-    status: j.status,
-    scheduledFor: j.scheduled_for,
-    lastError: j.last_error,
-    contentLabel: labelForJob(j) ?? "(제목 없음)",
-    mediaType: j.contents?.media_type ?? "IMAGE",
-    mediaCount: j.contents?.media_urls?.length ?? 0,
-    platform: j.social_accounts?.platform ?? "YOUTUBE",
   };
 }
 

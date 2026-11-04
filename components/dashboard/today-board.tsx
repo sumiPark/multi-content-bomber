@@ -1,38 +1,30 @@
 import Link from "next/link";
-import { CalendarRange, CheckCircle2, OctagonAlert, TriangleAlert } from "lucide-react";
+import { CircleAlert, OctagonAlert, TriangleAlert } from "lucide-react";
 import { TrackBadge } from "@/components/schedule/slot-rule-cell";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { CellTask, CellTone } from "@/lib/schedule/cell-status";
-import type { DayBoard, YesterdayLine } from "@/lib/schedule/day-board";
+import type { CellTone } from "@/lib/schedule/cell-status";
+import type { BlockedItem, UploadSchedule, YesterdayLine } from "@/lib/schedule/day-board";
+import type { TodayPosts } from "@/lib/dashboard/today-posts";
 import { cn } from "@/lib/utils";
 
-// 대시보드 "오늘 할 일"(5-2, 시안 7): 멈춘 칸 → 할 일 칸 → 하루 발행 칸 판 → 어제 성과 한 줄.
-// 칸 상태 · 링크는 편성표와 같은 계산(lib/schedule/cell-status.ts)이다.
+// 대시보드(2026-11-04 사용자 결정 — 할 일 칸 · 하루 칸 표를 뺌): 놓치면 안 되는 경고 → 계정별 오늘 올린 개수 → 업로드 예정 → 어제 성과.
+// 칸 상태 말은 자동 업로드 일정과 같은 계산(lib/schedule/cell-status.ts)이다.
 
 const TONE_CLASS: Record<CellTone, string> = {
   todo: "bg-brand-soft text-primary",
   wait: "bg-surface-2 text-ink-2",
   ok: "bg-ok-soft text-ok",
   risk: "bg-risk-soft text-risk",
-  idle: "text-faint",
+  idle: "bg-surface-2 text-muted-foreground",
 };
 
-const TASKS: { key: CellTask; label: string; due: string }[] = [
-  { key: "confirm", label: "상품 확인", due: "올리는 날 07시까지" },
-  { key: "plans", label: "촬영 기획 고르기", due: "일찍 고를수록 찍을 시간이 많아요" },
-  { key: "shoot", label: "촬영 · 올리기", due: "올리기 3시간 전까지 (안내)" },
-  { key: "review", label: "완성본 확인", due: "올릴 시각 전까지" },
-];
-
-const ACTION: Record<CellTask, string> = { confirm: "확인", plans: "고르기", shoot: "올리기", review: "보기" };
-
-export function BlockedAlert({ items }: { items: DayBoard["blocked"] }) {
+export function BlockedAlert({ items }: { items: BlockedItem[] }) {
   if (items.length === 0) return null;
   return (
     <div className="rounded-lg border border-risk/30 bg-risk-soft px-4 py-3">
       <p className="flex items-center gap-2 text-sm font-semibold text-risk">
-        <OctagonAlert className="size-4 shrink-0" /> 멈춘 칸 {items.length}개 — 고치지 않으면 그 시각에 올라가지 않아요
+        <OctagonAlert className="size-4 shrink-0" /> 멈춘 것 {items.length}개 — 고치지 않으면 진행되지 않아요
       </p>
       <ul className="mt-2 space-y-1.5">
         {items.slice(0, 4).map((b) => (
@@ -71,13 +63,13 @@ export function BlockedAlert({ items }: { items: DayBoard["blocked"] }) {
   );
 }
 
-// 곧 비는 칸(5-4) — 마감까지 준비가 안 될 것 같은 오늘 · 내일 칸
-export function AtRiskAlert({ items }: { items: DayBoard["atRisk"] }) {
+// 곧 놓치는 것 — 상품 확인 마감 임박, 계정 연결 끊김
+export function AtRiskAlert({ items }: { items: BlockedItem[] }) {
   if (items.length === 0) return null;
   return (
     <div className="rounded-lg border border-warn/40 bg-warn-soft px-4 py-3">
       <p className="flex items-center gap-2 text-sm font-semibold text-warn">
-        <TriangleAlert className="size-4 shrink-0" /> 곧 비는 칸 — 마감 전에 준비가 안 될 것 같아요
+        <TriangleAlert className="size-4 shrink-0" /> 곧 놓치는 것 — 지금 확인해 주세요
       </p>
       <ul className="mt-2 space-y-1.5">
         {items.slice(0, 5).map((b) => (
@@ -116,91 +108,83 @@ export function AtRiskAlert({ items }: { items: DayBoard["atRisk"] }) {
   );
 }
 
-export function TaskTiles({ board }: { board: DayBoard }) {
-  const totalTodo = TASKS.reduce((n, t) => n + board.tasks[t.key].count, 0);
-  const tile = "flex flex-col rounded-lg border bg-card p-4 transition-colors hover:bg-surface-2";
+function kstTimeLabel(iso: string, today: string, tomorrow: string): string {
+  const kst = new Date(Date.parse(iso) + 9 * 3_600_000).toISOString();
+  const date = kst.slice(0, 10);
+  const time = kst.slice(11, 16);
+  if (date === today) return `오늘 ${time}`;
+  if (date === tomorrow) return `내일 ${time}`;
+  return `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))} ${time}`;
+}
+
+export function TodayPostsCard({ data }: { data: TodayPosts }) {
+  const total = data.rows.reduce((n, r) => n + (r.count ?? 0), 0);
   return (
-    <section className="space-y-2" aria-label="오늘 할 일">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <Link href={board.blocked[0]?.href ?? "/schedule"} className={cn(tile, board.blocked.length > 0 && "border-risk/40 bg-risk-soft hover:bg-risk-soft")}>
-          <span className="text-xs font-medium text-muted-foreground">멈춤</span>
-          <span className={cn("mt-1 text-2xl font-bold tabular-nums", board.blocked.length > 0 && "text-risk")}>
-            {board.blocked.length}
-            <small className="ml-0.5 text-sm font-medium text-muted-foreground">칸</small>
-          </span>
-          <span className={cn("mt-auto pt-1 text-xs", board.blocked.length > 0 ? "font-semibold text-risk" : "text-faint")}>
-            {board.blocked.length > 0 ? "지금 고치기" : "멈춘 칸 없음"}
-          </span>
-        </Link>
-        {TASKS.map((t) => {
-          const { count, href } = board.tasks[t.key];
-          return (
-            <Link key={t.key} href={href} className={tile}>
-              <span className="text-xs font-medium text-muted-foreground">{t.label}</span>
-              <span className={cn("mt-1 text-2xl font-bold tabular-nums", count > 0 && "text-primary")}>
-                {count}
-                <small className="ml-0.5 text-sm font-medium text-muted-foreground">칸</small>
-              </span>
-              <span className="mt-auto pt-1 text-xs text-muted-foreground">{count > 0 ? t.due : "남은 일 없음"}</span>
-            </Link>
-          );
-        })}
-        <Link href="/postings?status=scheduled" className={tile}>
-          <span className="text-xs font-medium text-muted-foreground">예약 끝</span>
-          <span className="mt-1 text-2xl font-bold tabular-nums">
-            {board.done}
-            <small className="ml-0.5 text-sm font-medium text-muted-foreground">/ {board.total}</small>
-          </span>
-          <span className="mt-auto pt-1 text-xs text-muted-foreground">이날 칸 기준 · 진행 중 {board.aiWorking}칸</span>
-        </Link>
-      </div>
-      {totalTodo === 0 && board.blocked.length === 0 && (
-        <p className="flex items-center gap-1.5 text-[13px] text-ok">
-          <CheckCircle2 className="size-4" /> 지금 사람이 할 일은 없어요.
-        </p>
-      )}
-    </section>
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          오늘 올린 게시물 <span className="font-normal text-muted-foreground tabular-nums">· {total}개</span>
+        </CardTitle>
+        <CardDescription className="mt-1">인스타에서 바로 읽은 계정별 개수예요. MCB로 올린 것과 앱에서 올린 것을 모두 세요. 스토리는 빠져요.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {data.rows.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">연결된 인스타그램 계정이 없어요.</p>
+        ) : (
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {data.rows.map((r) => (
+              <li key={r.account} className="rounded-md border px-3.5 py-3">
+                <p className="truncate text-[13px] font-semibold">@{r.account}</p>
+                {r.count == null ? (
+                  <p className="mt-1 flex items-center gap-1 text-xs text-warn">
+                    <CircleAlert className="size-3.5 shrink-0" /> 못 읽음
+                  </p>
+                ) : (
+                  <>
+                    <p className={cn("mt-1 text-2xl font-bold tabular-nums", r.count === 0 && "text-muted-foreground")}>
+                      {r.count}
+                      <small className="ml-0.5 text-sm font-medium text-muted-foreground">개</small>
+                    </p>
+                    {r.count > 0 && <p className="text-xs text-muted-foreground tabular-nums">릴스 {r.reels}개</p>}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
-export function DayBoardTable({ board, today, tomorrow }: { board: DayBoard; today: string; tomorrow: string }) {
-  const isToday = board.date === today;
-  const label = `${Number(board.date.slice(5, 7))}월 ${Number(board.date.slice(8, 10))}일`;
+export function UploadScheduleCard({ data, today, tomorrow }: { data: UploadSchedule; today: string; tomorrow: string }) {
   return (
     <Card>
       <CardHeader className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <CardTitle>
-            {isToday ? "오늘" : "내일"} 발행 칸 <span className="font-normal text-muted-foreground tabular-nums">· {label}</span>
+            업로드 예정 <span className="font-normal text-muted-foreground tabular-nums">· {data.total}건</span>
           </CardTitle>
-          <CardDescription className="mt-1">
-            {board.total}칸 · AI 자동 {board.rows.filter((r) => r.track === "B").length}칸 · 직접 촬영 {board.rows.filter((r) => r.track === "A").length}칸
-            {board.empty > 0 && <span className="text-risk"> · 기획 없는 빈 칸 {board.empty}개</span>}
-          </CardDescription>
+          <CardDescription className="mt-1">앞으로 7일의 AI 자동 업로드와 콘텐츠 생성에서 예약한 건이에요.</CardDescription>
         </div>
-        <div className="flex items-center gap-1.5">
-          <nav className="flex items-center gap-1.5" aria-label="날짜">
-            <Link href="/" className={buttonVariants({ variant: isToday ? "default" : "outline", size: "sm" })} aria-current={isToday ? "page" : undefined}>
-              오늘
-            </Link>
-            <Link href="/?day=tomorrow" className={buttonVariants({ variant: !isToday ? "default" : "outline", size: "sm" })} aria-current={!isToday ? "page" : undefined}>
-              내일
-            </Link>
-          </nav>
-          <Link href={isToday ? "/schedule" : `/schedule?week=${tomorrow}`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            <CalendarRange className="size-4" /> 편성표로 보기
+        <div className="flex gap-1.5">
+          <Link href="/schedule" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+            자동 업로드 일정
+          </Link>
+          <Link href="/postings?status=scheduled" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+            배포 관리
           </Link>
         </div>
       </CardHeader>
       <CardContent>
-        {board.rows.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">편성된 칸이 없어요.</p>
+        {data.items.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">예정된 업로드가 없어요.</p>
         ) : (
           <div className="overflow-x-auto rounded-lg border">
-            <table className="w-full min-w-[720px] border-collapse text-[13px]">
+            <table className="w-full min-w-[640px] border-collapse text-[13px]">
               <thead className="bg-surface-2 text-xs text-muted-foreground">
                 <tr className="h-11">
-                  <th scope="col" className="w-20 px-3.5 text-left font-medium">
+                  <th scope="col" className="w-28 px-3.5 text-left font-medium">
                     시각
                   </th>
                   <th scope="col" className="w-36 px-3.5 text-left font-medium">
@@ -210,41 +194,29 @@ export function DayBoardTable({ board, today, tomorrow }: { board: DayBoard; tod
                     방식
                   </th>
                   <th scope="col" className="px-3.5 text-left font-medium">
-                    상품 · 기획
+                    내용
                   </th>
-                  <th scope="col" className="w-36 px-3.5 text-left font-medium">
+                  <th scope="col" className="w-48 px-3.5 text-left font-medium">
                     상태
-                  </th>
-                  <th scope="col" className="w-24 px-3.5 text-right font-medium">
-                    <span className="sr-only">할 일</span>
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {board.rows.map((r) => (
-                  <tr key={r.key} className="h-[52px] border-t">
-                    <td className="px-3.5 font-semibold tabular-nums">{r.time}</td>
-                    <td className="px-3.5">@{r.account}</td>
+                {data.items.map((u) => (
+                  <tr key={u.key} className="h-[52px] border-t">
+                    <td className="px-3.5 font-semibold tabular-nums">{kstTimeLabel(u.at, today, tomorrow)}</td>
+                    <td className="max-w-0 truncate px-3.5">@{u.account}</td>
                     <td className="px-3.5">
-                      <TrackBadge track={r.track} />
+                      {u.auto ? <TrackBadge track="B" /> : <span className="inline-flex h-6 items-center rounded-full bg-surface-2 px-2 text-xs font-semibold text-ink-2">직접 예약</span>}
                     </td>
-                    <td className="max-w-0 truncate px-3.5">{r.subject ?? <span className="text-faint">—</span>}</td>
+                    <td className="max-w-0 truncate px-3.5">{u.subject ?? <span className="text-faint">—</span>}</td>
                     <td className="px-3.5">
-                      <span
-                        className={cn(
-                          "inline-flex h-6 items-center rounded-full px-2 text-xs font-semibold whitespace-nowrap",
-                          TONE_CLASS[r.status.tone],
-                          r.status.tone === "idle" && "px-0 font-medium",
-                        )}
-                      >
-                        {r.status.label}
-                      </span>
-                    </td>
-                    <td className="px-3.5 text-right">
-                      {r.status.href && (r.status.task || r.status.tone === "risk") && (
-                        <Link href={r.status.href} className={buttonVariants({ variant: r.status.task ? "outline" : "destructive", size: "sm" })}>
-                          {r.status.task ? ACTION[r.status.task] : "고치기"}
+                      {u.href ? (
+                        <Link href={u.href} className={cn("inline-flex h-6 items-center rounded-full px-2 text-xs font-semibold whitespace-nowrap hover:underline", TONE_CLASS[u.tone])}>
+                          {u.label}
                         </Link>
+                      ) : (
+                        <span className={cn("inline-flex h-6 items-center rounded-full px-2 text-xs font-semibold whitespace-nowrap", TONE_CLASS[u.tone])}>{u.label}</span>
                       )}
                     </td>
                   </tr>
@@ -253,6 +225,7 @@ export function DayBoardTable({ board, today, tomorrow }: { board: DayBoard; tod
             </table>
           </div>
         )}
+        {data.total > data.items.length && <p className="mt-2 text-xs text-muted-foreground tabular-nums">가까운 {data.items.length}건만 보여요. 전체는 위 화면에서 볼 수 있어요.</p>}
       </CardContent>
     </Card>
   );

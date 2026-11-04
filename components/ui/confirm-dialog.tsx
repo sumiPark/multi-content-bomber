@@ -13,6 +13,7 @@ export function ConfirmDialog({
   confirmLabel,
   danger,
   pending,
+  confirmDisabled,
   onConfirm,
   onClose,
 }: {
@@ -22,6 +23,8 @@ export function ConfirmDialog({
   confirmLabel: string;
   danger?: boolean;
   pending?: boolean;
+  // 아직 고르지 않았을 때처럼 확인 버튼만 막을 때
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -50,7 +53,7 @@ export function ConfirmDialog({
           <Button variant="ghost" onClick={onClose} disabled={pending}>
             그만두기
           </Button>
-          <Button variant={danger ? "destructive" : "default"} onClick={onConfirm} disabled={pending}>
+          <Button variant={danger ? "destructive" : "default"} onClick={onConfirm} disabled={pending || confirmDisabled}>
             {confirmLabel}
           </Button>
         </div>

@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { Textarea } from "@/components/ui/textarea";
 
-// 편성표 "계정 컨셉" 탭 — 계정마다 완전 자동(AI 자동 업로드) · 혼합(직접 촬영 + AI 편집) 각각의
-// 후킹 문구 · 마지막 문구 · 말투 · 스타일 · 자유 메모를 저장한다(0038 · 0039).
+// 계정 컨셉 — 계정마다 AI 자동 업로드(자동 업로드 일정 탭)와 직접 촬영(촬영 설정 화면)의
+// 후킹 문구 · 마지막 문구 · 말투 · 스타일 · 자유 메모를 각각의 화면에서 저장한다(0038 · 0039). 값은 한 행에 함께 저장된다.
 // 문구는 {상품}처럼 중괄호 안만 AI가 채우고 나머지 글자는 고정된다. 편집 스타일은 저장할 때 AI가 편집 값으로 옮기고 결과를 여기 보여 준다.
 
 export interface ConceptCardData {
@@ -18,7 +18,6 @@ export interface ConceptCardData {
   name: string;
   role: string | null;
   autoSlots: number;
-  shootSlots: number;
   autoConcept: string;
   autoHooks: string;
   autoEndings: string;
@@ -71,9 +70,9 @@ function Field({
   );
 }
 
-const PHRASE_HELP = "한 줄에 문구 하나, 10개까지. {상품}처럼 중괄호 안은 칸마다 AI가 채우고 나머지 글자는 그대로 나가요. 말과 화면 문구에 똑같이 들어가요.";
+const PHRASE_HELP = "한 줄에 문구 하나, 10개까지. {상품}처럼 중괄호 안은 AI가 채우고 나머지 글자는 그대로 나가요. 말과 화면 문구에 똑같이 들어가요.";
 
-export function AccountConceptCard({ data, canManage }: { data: ConceptCardData; canManage: boolean }) {
+export function AccountConceptCard({ data, canManage, mode, top }: { data: ConceptCardData; canManage: boolean; mode: "auto" | "shoot"; top?: React.ReactNode }) {
   const { isPending, error, run } = useScheduleRun();
   const [form, setForm] = useState<Record<FormKey, string>>(() => Object.fromEntries(FORM_KEYS.map((k) => [k, data[k]])) as Record<FormKey, string>);
   const bind = (key: FormKey) => ({ value: form[key], onChange: (v: string) => setForm((f) => ({ ...f, [key]: v })), disabled: !canManage || isPending });
@@ -91,12 +90,12 @@ export function AccountConceptCard({ data, canManage }: { data: ConceptCardData;
           </Link>
         </span>
       </header>
+      {top}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-3 rounded-md bg-surface-2 p-3">
-          <p className="flex items-center gap-2">
+      {mode === "auto" ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <p className="flex items-center gap-2 lg:col-span-2">
             <TrackBadge track="B" />
-            <span className="text-[13px] font-semibold">완전 자동</span>
             <span className="text-xs text-muted-foreground">{data.autoSlots > 0 ? `하루 ${data.autoSlots}칸` : "지금 칸 없음"}</span>
           </p>
           <Field {...bind("autoHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 고를 때 이것만 보세요\n이거 모르고 사면 손해예요"} />
@@ -110,13 +109,8 @@ export function AccountConceptCard({ data, canManage }: { data: ConceptCardData;
           />
           <Field {...bind("autoConcept")} label="컨셉 · 자유 메모" help="상품을 고르고 대본을 쓸 때 AI가 읽어요." placeholder={"20대 후반 직장인이 보는 계정. 가격보다 맛 표현 위주로."} />
         </div>
-
-        <div className="space-y-3 rounded-md bg-surface-2 p-3">
-          <p className="flex items-center gap-2">
-            <TrackBadge track="A" />
-            <span className="text-[13px] font-semibold">혼합 · 촬영 + AI 편집</span>
-            <span className="text-xs text-muted-foreground">{data.shootSlots > 0 ? `하루 ${data.shootSlots}칸` : "지금 칸 없음"}</span>
-          </p>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
           <Field {...bind("shootHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP + " 말하지 않는 계정은 화면 문구에만 들어가요."} placeholder={"{상품} 잘라 보면 이래요\n사장이 직접 고른 {상품}"} />
           <Field {...bind("shootEndings")} label="마지막 문구" rows={2} max={2000} help="마지막 컷에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"궁금한 거 댓글로 물어보세요"} />
           <Field {...bind("shootTone")} label="말투 · 분위기" help="대사 · 화면 문구 · 캡션에 반영돼요." placeholder={"사장이 직접 말하듯 담백하게."} />
@@ -140,9 +134,9 @@ export function AccountConceptCard({ data, canManage }: { data: ConceptCardData;
               )}
             </div>
           )}
-          <Field {...bind("shootConcept")} label="컨셉 · 자유 메모" help="기획안 후보와 컷 리스트를 쓸 때 AI가 읽어요." placeholder={"사장이 직접 과일을 잘라 보여 주는 계정. 손과 단면 위주로."} />
+          <Field {...bind("shootConcept")} label="컨셉 · 자유 메모" help="기획 목록과 컷 리스트를 쓸 때 AI가 읽어요." placeholder={"사장이 직접 과일을 잘라 보여 주는 계정. 손과 단면 위주로."} />
         </div>
-      </div>
+      )}
 
       <footer className="flex flex-wrap items-center gap-3">
         {canManage && (

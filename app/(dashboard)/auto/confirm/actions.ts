@@ -45,7 +45,8 @@ async function loadPlan(service: Service, planId: string, orgId: string) {
     .maybeSingle();
   if (!data) return null;
   const d = await deadlines(service, [data.social_account_id]);
-  return { ...data, deadline: d.get(data.social_account_id) ?? "07:00" };
+  // AI 자동 칸은 날짜 · 시각이 반드시 있다(0042 제약)
+  return { ...data, slot_date: data.slot_date as string, slot_time: data.slot_time as string, deadline: d.get(data.social_account_id) ?? "07:00" };
 }
 
 const confirmSchema = z.object({
@@ -159,7 +160,7 @@ export async function confirmAllAction(input: z.infer<typeof dateSchema>): Promi
     .not("product_id", "is", null);
   if (error) return { ok: false, error: error.message };
   const d = await deadlines(service, [...new Set((plans ?? []).map((p) => p.social_account_id))]);
-  const open = (plans ?? []).filter((p) => !isPastDeadline(p.slot_date, d.get(p.social_account_id) ?? "07:00"));
+  const open = (plans ?? []).filter((p) => !isPastDeadline(p.slot_date as string, d.get(p.social_account_id) ?? "07:00"));
   const ids = open.filter((p) => p.products?.stock_status === "available").map((p) => p.id);
   const soldOut = open.length - ids.length;
   if (ids.length === 0) return { ok: true, count: 0, soldOut };

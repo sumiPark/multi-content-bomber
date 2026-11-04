@@ -9,19 +9,18 @@ import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { PlanAIdea } from "@/lib/agents/plan-a";
 import { shotlistAsScript, writeShotlist, type ShotlistOutput } from "@/lib/agents/shotlist";
 import { kstDate } from "@/lib/automation/time";
-import { shootDueIso } from "@/lib/schedule/slot-admin";
 import type { ContentRule } from "@/lib/rules/check";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 직접 촬영 컷 리스트 워커 — 사람이 기획을 고르거나 상품을 직접 지정한(CONFIRMED) A 칸마다
+// 직접 촬영 컷 리스트 워커 — 사람이 기획을 고르거나 상품을 직접 추가한(CONFIRMED) 기획마다
 //   기획 · 글 에이전트(2)가 컷 리스트 · 화면 문구 · 대사 · 캡션을 쓰고 → 점검 에이전트(4)가 검사한다.
 //   걸리면 한 번 다시 쓴다. 그래도 걸린 항목은 막지 않고 촬영 화면에 "고칠 것"으로 보여 준다
-//   (사람이 찍고 완성본을 확인하는 칸이라 — 완성본 확인 때 다시 검사해 걸리면 확인이 잠긴다).
+//   (사람이 찍고 완성본을 받는 기획이라 — 받기 전에 다시 검사해 걸린 내용을 사람이 확인한다).
 //   끝나면 SCRIPTED + shoot_requests(촬영 요청) 생성.
 //
-// 옵션: --dry-run (DB에 안 씀) · --plan <id> (그 칸만, dry-run이면 상태 무관)
+// 옵션: --dry-run (DB에 안 씀) · --plan <id> (그 기획만, dry-run이면 상태 무관)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MAX_REWRITES = 1;
@@ -30,12 +29,6 @@ function arg(argv: string[], flag: string): string | undefined {
   const i = argv.indexOf(flag);
   const v = i >= 0 ? argv[i + 1] : undefined;
   return v && !v.startsWith("--") ? v : undefined;
-}
-
-/** 촬영 마감(안내용) — 올리기 3시간 전(편성표에서 시각을 바꿀 수 있어 칸 시각 기준). 이미 지났으면 없음. */
-function shootDue(slotDate: string, slotTime: string): string | null {
-  const due = shootDueIso(slotDate, slotTime);
-  return Date.parse(due) > Date.now() ? due : null;
 }
 
 async function main() {
@@ -60,22 +53,21 @@ async function main() {
 
   let q = service
     .from("content_plans")
-    .select("id, organization_id, social_account_id, slot_date, slot_time, status, product_id, proposal, human_brief, social_accounts(display_name, role_focus, role_note)")
+    .select("id, organization_id, social_account_id, status, product_id, proposal, human_brief, social_accounts(display_name, role_focus, role_note)")
     .eq("track", "A")
-    .order("slot_date")
-    .order("slot_time");
-  q = onlyPlan ? q.eq("id", onlyPlan) : q.eq("status", "CONFIRMED").gte("slot_date", kstDate(0));
+    .order("confirmed_at");
+  q = onlyPlan ? q.eq("id", onlyPlan) : q.eq("status", "CONFIRMED");
   const { data: plans, error } = await q;
   if (error) throw new Error(error.message);
   if (!plans?.length) {
-    console.log("[a-shotlist] 컷 리스트를 쓸 칸 없음");
+    console.log("[a-shotlist] 컷 리스트를 쓸 기획 없음");
     return;
   }
 
   for (const plan of plans) {
     if (!plan.product_id) continue;
     const acc = plan.social_accounts;
-    const label = `@${acc?.display_name} ${plan.slot_date} ${plan.slot_time}`;
+    const label = `@${acc?.display_name} ${plan.id.slice(0, 8)}`;
     try {
       const facts = await loadProductFacts(service, plan.product_id);
       if (facts.stockStatus !== "available") {
@@ -86,7 +78,7 @@ async function main() {
             .update({
               status: "BLOCKED",
               check_result: { passed: false, issues: [{ kind: "stock", detail: "지금 판매 중이 아닌 상품이에요" }] } as unknown as Json,
-              note: "고른 뒤 판매 중이 아니게 돼서 촬영 목록을 만들지 않았어요. 다른 기획을 고르거나 건너뛰세요.",
+              note: "고른 뒤 판매 중이 아니게 돼서 촬영 목록을 만들지 않았어요. 이 기획을 빼고 다른 기획을 골라 주세요.",
             })
             .eq("id", plan.id)
             .eq("status", "CONFIRMED")
@@ -121,7 +113,6 @@ async function main() {
             accountName: acc?.display_name ?? "",
             roleFocus: acc?.role_focus ?? null,
             roleNote: acc?.role_note ?? null,
-            slotTime: plan.slot_time,
             facts,
             rules,
             idea,
@@ -189,7 +180,7 @@ async function main() {
             status: "OPEN",
             cuts: shotlist.cuts.map((c, i) => ({ no: i + 1, ...c, done: false })) as unknown as Json,
             clips: [] as unknown as Json,
-            due_at: shootDue(plan.slot_date, plan.slot_time),
+            due_at: null,
             edit: null,
             rendered_path: null,
             error: null,

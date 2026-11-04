@@ -108,7 +108,7 @@ async function main() {
             accountName: acc?.display_name ?? "",
             roleFocus: acc?.role_focus ?? null,
             roleNote: acc?.role_note ?? null,
-            slotTime: plan.slot_time,
+            slotTime: plan.slot_time as string,
             facts,
             rules,
             concept: concept.autoConcept,

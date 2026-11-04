@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
-// 편성표 칸 하나 — 시각 · 방식 · 주제 고치기, 켜기/끄기, 지우기(앞으로의 기획 · 예약이 있으면 경고 뒤 취소).
+// 자동 업로드 일정 칸 하나 — 시각 · 주제 고치기, 켜기/끄기, 지우기(앞으로의 기획 · 예약이 있으면 경고 뒤 취소).
 
 export interface SlotRuleCellData {
   id: string;
@@ -57,14 +57,12 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
   const { isPending, error, run, setError } = useScheduleRun();
   const [editing, setEditing] = useState(false);
   const [time, setTime] = useState(rule.time);
-  const [track, setTrack] = useState(rule.track);
   const [topic, setTopic] = useState(rule.topic ?? "");
   const [confirm, setConfirm] = useState<{ plans: number; scheduled: number } | null>(null);
   const [checking, startChecking] = useTransition();
 
   const reset = () => {
     setTime(rule.time);
-    setTrack(rule.track);
     setTopic(rule.topic ?? "");
     setEditing(false);
   };
@@ -90,26 +88,14 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
                   ruleId: rule.id,
                   topic: topic.trim() || null,
                   ...(time !== rule.time ? { time } : {}),
-                  ...(track !== rule.track ? { track: track as "A" | "B" } : {}),
                 }),
               () => setEditing(false),
             );
           }}
         >
-          <div className="flex flex-wrap gap-1.5">
-            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="올릴 시각" className={cn(selectClass, "tabular-nums")} required />
-            <select value={track} onChange={(e) => setTrack(e.target.value)} aria-label="방식" className={selectClass}>
-              <option value="B">AI 자동</option>
-              <option value="A">직접 촬영</option>
-            </select>
-          </div>
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="올릴 시각" className={cn(selectClass, "tabular-nums")} required />
           <Input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={60} placeholder="칸 주제 (예: 성분 비교)" aria-label="칸 주제" className="h-8" />
-          {(time !== rule.time || track !== rule.track) && (
-            <p className="text-xs text-muted-foreground">
-              {time !== rule.time && "앞으로의 기획도 새 시각으로 옮겨요(예약된 발행은 예약 시각도). "}
-              {track !== rule.track && "이미 기획이 있는 날은 예전 방식 그대로예요."}
-            </p>
-          )}
+          {time !== rule.time && <p className="text-xs text-muted-foreground">앞으로의 기획도 새 시각으로 옮겨요(예약된 발행은 예약 시각도).</p>}
           <div className="flex gap-1.5">
             <Button type="submit" size="sm" disabled={isPending}>
               저장
@@ -122,10 +108,7 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
       ) : (
         <>
           <div className="flex items-center justify-between gap-2">
-            <span className="flex items-center gap-2">
-              <b className="text-[15px] tabular-nums">{rule.time}</b>
-              <TrackBadge track={rule.track} />
-            </span>
+            <b className="text-[15px] tabular-nums">{rule.time}</b>
             {canManage ? (
               <button
                 type="button"

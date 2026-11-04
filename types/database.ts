@@ -712,6 +712,10 @@ export type Database = {
       }
       content_plans: {
         Row: {
+          posted_at: string | null
+          posted_by: string | null
+          posted_media_id: string | null
+          posted_permalink: string | null
           check_result: Json | null
           confirmed_at: string | null
           confirmed_by: string | null
@@ -727,14 +731,21 @@ export type Database = {
           proposal: Json
           publish_job_id: string | null
           script: Json | null
-          slot_date: string
-          slot_time: string
+          slot_date: string | null
+          slot_time: string | null
           social_account_id: string
           status: string
           track: string
           updated_at: string
+          warnings_ack: Json
+          warnings_ack_at: string | null
+          warnings_ack_by: string | null
         }
         Insert: {
+          posted_at?: string | null
+          posted_by?: string | null
+          posted_media_id?: string | null
+          posted_permalink?: string | null
           check_result?: Json | null
           confirmed_at?: string | null
           confirmed_by?: string | null
@@ -750,14 +761,21 @@ export type Database = {
           proposal?: Json
           publish_job_id?: string | null
           script?: Json | null
-          slot_date: string
-          slot_time: string
+          slot_date?: string | null
+          slot_time?: string | null
           social_account_id: string
           status?: string
           track: string
           updated_at?: string
+          warnings_ack?: Json
+          warnings_ack_at?: string | null
+          warnings_ack_by?: string | null
         }
         Update: {
+          posted_at?: string | null
+          posted_by?: string | null
+          posted_media_id?: string | null
+          posted_permalink?: string | null
           check_result?: Json | null
           confirmed_at?: string | null
           confirmed_by?: string | null
@@ -773,12 +791,15 @@ export type Database = {
           proposal?: Json
           publish_job_id?: string | null
           script?: Json | null
-          slot_date?: string
-          slot_time?: string
+          slot_date?: string | null
+          slot_time?: string | null
           social_account_id?: string
           status?: string
           track?: string
           updated_at?: string
+          warnings_ack?: Json
+          warnings_ack_at?: string | null
+          warnings_ack_by?: string | null
         }
         Relationships: [
           {
@@ -2257,6 +2278,7 @@ export type Database = {
           organization_id: string
           product_scopes: Json
           repeat_gap_days: number
+          shoot_enabled: boolean
           social_account_id: string
           updated_at: string
         }
@@ -2267,6 +2289,7 @@ export type Database = {
           organization_id: string
           product_scopes?: Json
           repeat_gap_days?: number
+          shoot_enabled?: boolean
           social_account_id: string
           updated_at?: string
         }
@@ -2277,6 +2300,7 @@ export type Database = {
           organization_id?: string
           product_scopes?: Json
           repeat_gap_days?: number
+          shoot_enabled?: boolean
           social_account_id?: string
           updated_at?: string
         }

@@ -5,11 +5,9 @@ import { ShootRequestCard, type ShootRequestCardData } from "@/components/shoot/
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
-import { kstDate } from "@/lib/automation/time";
 import { AutoRefresh } from "@/components/ui/auto-refresh";
-import { isPastSlot } from "@/lib/automation/deadline";
 
-// 촬영 · 올리기 — 기획을 고른 칸마다 AI가 쓴 컷 목록대로 찍고, 컷마다 휴대폰에서 바로 올린다.
+// 촬영 · 올리기 — 고른 기획마다 AI가 쓴 컷 목록대로 찍고, 컷마다 휴대폰에서 바로 올린다.
 // 큰 파일은 끊겨도 이어서 올라간다(tus). 다 올리면 자동 편집으로 넘어간다.
 
 type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; done?: boolean; skipped?: boolean };
@@ -21,10 +19,7 @@ type SavedShotlist = {
   fixed?: { hook?: unknown; notes?: string[] };
 };
 
-// 렌더 함수 밖에서 현재 시각을 읽는다(react-hooks/purity)
-function isPastIso(iso: string): boolean {
-  return Date.parse(iso) < Date.now();
-}
+export const metadata = { title: "촬영 · 올리기 | MCB" };
 
 export default async function ShootUploadsPage() {
   const user = await getSessionUser();
@@ -36,11 +31,12 @@ export default async function ShootUploadsPage() {
   const { data: requests } = await supabase
     .from("shoot_requests")
     .select(
-      "id, status, cuts, clips, due_at, error, content_plans!inner(id, slot_date, slot_time, status, human_brief, script, check_result, social_accounts(display_name), products(name, url, represent_image_url))",
+      "id, status, cuts, clips, created_at, error, content_plans!inner(id, status, human_brief, script, check_result, social_accounts(display_name), products(name, url, represent_image_url))",
     )
     .in("status", ["OPEN", "UPLOADED", "EDITING", "EDITED", "FAILED"])
-    .gte("content_plans.slot_date", kstDate(0))
-    .order("due_at", { ascending: true, nullsFirst: false });
+    // 받거나 올린 뒤의 기획은 완성본 받기에서 본다
+    .in("content_plans.status", ["SCRIPTED", "SHOT", "RENDERED"])
+    .order("created_at", { ascending: true });
 
   const cards: ShootRequestCardData[] = (requests ?? [])
     .map((r) => {
@@ -51,9 +47,6 @@ export default async function ShootUploadsPage() {
         id: r.id,
         status: r.status,
         account: plan.social_accounts?.display_name ?? "",
-        slotDate: plan.slot_date,
-        slotTime: plan.slot_time,
-        dueIso: r.due_at,
         product: plan.products ? { name: plan.products.name, url: plan.products.url, image: plan.products.represent_image_url } : null,
         brief: plan.human_brief,
         hook: hook ? { spoken: hook.spoken, onScreen: hook.on_screen, score: hook.score ?? null } : null,
@@ -76,11 +69,8 @@ export default async function ShootUploadsPage() {
           .filter((i) => i.kind !== "caption" && i.kind !== "tone" && i.kind !== "hook")
           .map((i) => i.detail),
         error: r.error,
-        pastSlot: isPastSlot(plan.slot_date, plan.slot_time),
-        pastDue: !!r.due_at && isPastIso(r.due_at),
       };
-    })
-    .sort((a, b) => (a.slotDate + a.slotTime).localeCompare(b.slotDate + b.slotTime));
+    });
 
   const open = cards.filter((c) => c.status === "OPEN").length;
   const working = cards.some((c) => c.status === "UPLOADED" || c.status === "EDITING");
@@ -108,7 +98,7 @@ export default async function ShootUploadsPage() {
               <Link href="/shoot/plans" className="underline">
                 촬영 기획 고르기
               </Link>
-              에서 칸마다 찍을 거리를 고르면 1~2분 뒤 여기에 컷 목록이 생겨요.
+              에서 찍을 거리를 고르면 몇 분 뒤 여기에 컷 목록이 생겨요.
             </p>
           </CardContent>
         </Card>

@@ -29,7 +29,14 @@ export interface SelectContext {
   concept?: string | null;
   // 이번 실행에서 앞 계정이 이미 고른 상품 (아직 DB에 없을 수 있어 따로 넘긴다)
   alsoBlocked: Set<string>;
+  // 직접 촬영 기획 목록을 채울 때 — 다른 계정 목록에 있거나 이 계정에서 방금 지운 상품도 뺀다
+  shootPlanning?: boolean;
 }
+
+// 직접 촬영에서 진행 중인 상태 — 날짜가 없어 "같은 날" 대신 이 상태로 중복을 본다
+const SHOOT_COMMITTED = ["CONFIRMED", "SCRIPTED", "SHOT", "RENDERED", "BLOCKED"];
+// 사람이 지우거나 새로 고침한 기획의 상품은 한동안 다시 내지 않는다(새로 고침이 같은 기획을 내지 않게)
+const DISMISSED_KEEP_DAYS = 7;
 
 const pickSchema = z.object({
   picks: z.array(
@@ -48,10 +55,12 @@ export type SelectOutput = z.infer<typeof pickSchema>;
 type AnalysisSummary = { oneLine?: string };
 
 // 직접 촬영 기획(plan-a.ts)도 같은 후보 규칙을 쓴다.
-export async function candidateRows(ctx: Pick<SelectContext, "service" | "accountId" | "scopes" | "repeatGapDays" | "slotDate" | "alsoBlocked">) {
+export async function candidateRows(ctx: Pick<SelectContext, "service" | "accountId" | "scopes" | "repeatGapDays" | "slotDate" | "alsoBlocked" | "shootPlanning">) {
   const s = ctx.service;
   const since = addDays(ctx.slotDate, -ctx.repeatGapDays);
-  const [{ data: usedHere }, { data: usedToday }] = await Promise.all([
+  const sinceMs = Date.now() - ctx.repeatGapDays * 86_400_000;
+  const dismissedSinceMs = Date.now() - DISMISSED_KEEP_DAYS * 86_400_000;
+  const [{ data: usedHere }, { data: usedToday }, { data: shootRows }] = await Promise.all([
     s
       .from("content_plans")
       .select("product_id, slot_date")
@@ -66,9 +75,26 @@ export async function candidateRows(ctx: Pick<SelectContext, "service" | "accoun
       .neq("social_account_id", ctx.accountId)
       .not("status", "in", "(SKIPPED,FAILED)")
       .not("product_id", "is", null),
+    // 직접 촬영 기획은 날짜가 없어 위 두 조건에 안 잡힌다
+    s
+      .from("content_plans")
+      .select("product_id, social_account_id, status, created_at, updated_at, posted_at")
+      .eq("track", "A")
+      .neq("status", "FAILED")
+      .not("product_id", "is", null),
   ]);
   const blocked = new Set([...(usedHere ?? []), ...(usedToday ?? [])].map((r) => r.product_id as string));
   for (const id of ctx.alsoBlocked) blocked.add(id);
+  for (const p of shootRows ?? []) {
+    const mine = p.social_account_id === ctx.accountId;
+    const block =
+      p.status === "SKIPPED"
+        ? !!ctx.shootPlanning && mine && Date.parse(p.updated_at) >= dismissedSinceMs
+        : mine
+          ? Date.parse(p.posted_at ?? p.created_at) >= sinceMs
+          : SHOOT_COMMITTED.includes(p.status) || (!!ctx.shootPlanning && p.status === "PROPOSED");
+    if (block) blocked.add(p.product_id as string);
+  }
 
   const rows = [];
   for (const scope of ctx.scopes) {
@@ -119,7 +145,7 @@ export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: { 
   const listCandidates: AgentSkill = {
     name: "list_candidates",
     description:
-      "이 계정이 쓸 수 있는 상품 후보 (판매 중 · 분석 완료 · 최근 사용 안 함 · 같은 날 다른 계정 미사용만). 판매량 · 후기 수 많은 순.",
+      "이 계정이 쓸 수 있는 상품 후보 (판매 중 · 분석 완료 · 최근 사용 안 함 · 다른 계정과 겹치지 않는 것만). 판매량 · 후기 수 많은 순.",
     input: z.object({
       kind: z.enum(["FRUIT", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]).nullable().describe("종류로 좁히기, 전체면 null"),
       limit: z.number().int().min(5).max(60).describe("최대 개수 (보통 30)"),
