@@ -222,10 +222,12 @@ export function PostPerformance({ data, now }: { data: PostPerformanceData; now:
 
   return (
     <div className="space-y-4">
-      {data.pending > 0 && (
+      {(!data.listed || data.pending > 0) && (
         <p className="flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-2 text-xs text-ink-2">
           <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
-          지난 릴스 {num(total)}개 중 {num(read)}개를 읽었어요. 나머지는 다음 수집에 이어서 읽어요. 지금 숫자는 일부 기준이에요.
+          {data.listed
+            ? `지난 릴스 ${num(total)}개 중 ${num(read)}개를 읽었어요. 나머지는 다음 수집에 이어서 읽어요. 지금 숫자는 일부 기준이에요.`
+            : `지난 릴스 목록을 아직 읽지 않았어요. 지금은 최근 ${num(read)}개 기준이라 평소 조회수와 배수가 달라질 수 있어요.`}
         </p>
       )}
 
