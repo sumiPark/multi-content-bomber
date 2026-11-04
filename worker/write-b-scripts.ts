@@ -54,7 +54,8 @@ async function main() {
     .eq("track", "B")
     .order("slot_date")
     .order("slot_time");
-  q = onlyPlan ? q.eq("id", onlyPlan) : q.eq("status", "CONFIRMED").gte("slot_date", kstDate(0));
+  q = onlyPlan ? q.eq("id", onlyPlan) : // 확인한 칸은 시각이 지나도 건너뛰지 않는다(늦으면 끝나는 즉시 올린다) — 자정을 넘긴 칸도 집는다
+    q.eq("status", "CONFIRMED").gte("slot_date", kstDate(-1));
   const { data: plans, error } = await q;
   if (error) throw new Error(error.message);
   if (!plans?.length) {

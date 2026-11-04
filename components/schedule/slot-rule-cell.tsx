@@ -125,24 +125,24 @@ export function SlotRuleCell({ rule, canManage }: { rule: SlotRuleCellData; canM
               <span className="text-xs text-muted-foreground">{rule.active ? "켜짐" : "꺼짐"}</span>
             )}
           </div>
-          <div className="flex items-start justify-between gap-1">
-            <p className={cn("min-w-0 text-[13px]", rule.topic ? "text-foreground" : "text-faint")}>{rule.topic ?? "주제 없음"}</p>
-            {canManage && (
-              <span className="flex shrink-0">
-                <Button size="icon" variant="ghost" className="size-7" aria-label={`${rule.time} 칸 고치기`}
-                  onClick={() => {
-                    reset();
-                    setEditing(true);
-                  }}
-                >
-                  <Pencil className="size-3.5" />
-                </Button>
-                <Button size="icon" variant="ghost" className="size-7 text-muted-foreground hover:text-risk" aria-label={`${rule.time} 칸 지우기`} disabled={checking || isPending} onClick={askDelete}>
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </span>
-            )}
-          </div>
+          <p className={cn("min-w-0 text-[13px]", rule.topic ? "text-foreground" : "text-faint")}>{rule.topic ?? "주제 없음"}</p>
+          {canManage && (
+            <div className="flex items-center justify-between gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  reset();
+                  setEditing(true);
+                }}
+              >
+                <Pencil className="size-3.5" /> 시각 · 주제 바꾸기
+              </Button>
+              <Button size="icon" variant="ghost" className="size-8 shrink-0 text-muted-foreground hover:text-risk" aria-label={`${rule.time} 칸 지우기`} disabled={checking || isPending} onClick={askDelete}>
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          )}
           {!rule.active && <p className="text-xs text-muted-foreground">꺼짐 — 새로 기획하지 않아요 (이미 만든 기획은 그대로)</p>}
         </>
       )}

@@ -5,10 +5,9 @@ import { ConfirmAllButton, PlanCard, type PlanCardData } from "@/components/auto
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { RelativeTime } from "@/components/ui/relative-time";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { loadTrackTimes } from "@/lib/schedule/track-times";
-import { confirmDeadlineIso, isPastSlot, isPastDeadline } from "@/lib/automation/deadline";
+import { CONFIRM_NOTICE_HOURS, isPastSlot } from "@/lib/automation/deadline";
 import { kstDate } from "@/lib/automation/time";
 import { cn } from "@/lib/utils";
 
@@ -48,7 +47,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const tomorrow = kstDate(1);
   const slotDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : tomorrow;
   const supabase = await getServerSupabase();
-  // 안내 문구의 칸 시각 — 편성표에서 바뀐다
+  // 안내 문구의 칸 시각 — 자동 콘텐츠 설정에서 바뀐다
   const times = await loadTrackTimes(supabase);
 
   const { data: plans } = await supabase
@@ -63,23 +62,18 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     if (p.product_id) productIds.add(p.product_id);
     for (const a of (p.proposal as Proposal)?.alternatives ?? []) productIds.add(a.product_id);
   }
-  const accountIds = [...new Set((plans ?? []).map((p) => p.social_account_id))];
-  const [{ data: products }, { data: settings }, { data: sameDay }] = await Promise.all([
+  const [{ data: products }, { data: sameDay }] = await Promise.all([
     productIds.size
       ? supabase
           .from("products")
           .select("id, name, price, url, represent_image_url, stock_status, kind, product_analyses(summary)")
           .in("id", [...productIds])
       : Promise.resolve({ data: [] }),
-    accountIds.length
-      ? supabase.from("track_settings").select("social_account_id, b_confirm_deadline").in("social_account_id", accountIds)
-      : Promise.resolve({ data: [] }),
     // 같은 날 다른 칸(직접 촬영 포함)이 쓰는 상품 — 다른 후보 목록에서 뺀다
     supabase.from("content_plans").select("id, product_id").eq("slot_date", slotDate).not("status", "in", "(SKIPPED,FAILED)").not("product_id", "is", null),
   ]);
   type ProductRow = NonNullable<typeof products>[number];
   const productById = new Map<string, ProductRow>((products ?? []).map((p) => [p.id, p]));
-  const deadlineBy = new Map((settings ?? []).map((s) => [s.social_account_id, s.b_confirm_deadline]));
 
   const brief = (id: string | null) => {
     const p = id ? productById.get(id) : undefined;
@@ -96,12 +90,10 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   };
 
   // 계정별로 묶는다
-  const byAccount = new Map<string, { name: string; deadlineIso: string; plans: PlanCardData[] }>();
+  const byAccount = new Map<string, { name: string; plans: PlanCardData[] }>();
   for (const p of plans ?? []) {
     const name = p.social_accounts?.display_name ?? "(이름 없음)";
-    const deadline = deadlineBy.get(p.social_account_id) ?? "07:00";
-    const deadlineIso = confirmDeadlineIso(slotDate, deadline);
-    const group = byAccount.get(p.social_account_id) ?? { name, deadlineIso, plans: [] };
+    const group = byAccount.get(p.social_account_id) ?? { name, plans: [] };
     const proposal = (p.proposal ?? {}) as Proposal;
     group.plans.push({
       id: p.id,
@@ -116,7 +108,6 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         .filter((a) => a.product_id !== p.product_id && !(sameDay ?? []).some((x) => x.id !== p.id && x.product_id === a.product_id))
         .map((a) => ({ reason: a.reason, product: brief(a.product_id) }))
         .filter((a): a is { reason: string; product: NonNullable<ReturnType<typeof brief>> } => !!a.product && a.product.stock === "available"),
-      pastDeadline: isPastDeadline(slotDate, deadline),
       pastSlot: isPastSlot(slotDate, p.slot_time as string),
       error: p.error,
       script: summarizeScript(p.script),
@@ -125,9 +116,9 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     byAccount.set(p.social_account_id, group);
   }
 
-  // 마감 전인 제안만 — 마감이 지나면 하나씩도, 모두도 컨펌할 수 없다
+  // 올릴 시각 전인 제안만 — 시각이 지나면 하나씩도, 모두도 확인할 수 없다
   const proposed = (plans ?? []).filter(
-    (p) => p.status === "PROPOSED" && !isPastDeadline(slotDate, deadlineBy.get(p.social_account_id) ?? "07:00"),
+    (p) => p.status === "PROPOSED" && !isPastSlot(slotDate, p.slot_time as string),
   ).length;
   // 상품 제안은 내일 칸까지만 만든다 — 모레 탭은 늘 비어 있어 뺐다(주소로 다른 날짜를 열면 그 날짜도 탭에 보인다)
   const dates = [kstDate(0), tomorrow, ...(slotDate > tomorrow || slotDate < kstDate(0) ? [slotDate] : [])];
@@ -141,7 +132,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
             {times.B !== "칸 없음" && <Badge variant="outline">매일 {times.B}</Badge>}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            AI 자동 업로드 칸({times.B})의 <b>상품을 확인</b>하면 AI가 대본 · 캡션을 쓰고 점검해요. 올리는 날 오전 7시까지 확인하지 않은 칸은 건너뜁니다.{" "}
+            AI 자동 업로드 칸({times.B})의 <b>상품을 확인</b>하면 AI가 대본 · 캡션을 쓰고 점검해요. 올리기 {CONFIRM_NOTICE_HOURS}시간 전에 알려 드리고, 올릴 시각까지 확인하지 않은 칸은 건너뛰어요. 확인한 칸은 영상 만들기가 늦어져도 끝나는 즉시 올라가요.{" "}
             <b>지금은 대본까지만 자동이에요.</b> 영상 만들기 · 자동 게시는 준비 중이라 아직 올라가지 않아요.
           </p>
         </div>
@@ -173,12 +164,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       ) : (
         [...byAccount.values()].map((g) => (
           <section key={g.name} className="space-y-3">
-            <div className="flex items-baseline gap-2">
-              <h2 className="text-base font-semibold">@{g.name}</h2>
-              <span className="text-xs text-muted-foreground">
-                확인 마감 <RelativeTime iso={g.deadlineIso} />
-              </span>
-            </div>
+            <h2 className="text-base font-semibold">@{g.name}</h2>
             <div className="grid gap-3 md:grid-cols-2">
               {g.plans.map((p) => (
                 <PlanCard key={p.id} plan={p} canManage={canManage} />

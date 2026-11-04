@@ -1,10 +1,10 @@
-import { confirmDeadlineIso, isPastDeadline, isPastSlot } from "@/lib/automation/deadline";
+import { isConfirmDue, isPastSlot } from "@/lib/automation/deadline";
 import { addDays, kstDate, kstToIso } from "@/lib/automation/time";
 import { cellStatus, type CellTone } from "@/lib/schedule/cell-status";
 import type { getServerSupabase } from "@/lib/auth";
 
 // 대시보드 — 놓치면 안 되는 경고 + 업로드 예정(2026-11-04 사용자 결정으로 할 일 칸 · 하루 칸 표는 뺐다).
-//   경고: 멈춤(AI 자동 칸, 직접 촬영 편집 실패), 상품 확인 마감 임박, 계정 연결 끊김. 발행 실패는 위쪽 실패 줄이 따로 알린다.
+//   경고: 멈춤(AI 자동 칸, 직접 촬영 편집 실패), 올리기 2시간 전 상품 확인, 계정 연결 끊김. 발행 실패는 위쪽 실패 줄이 따로 알린다.
 //   예정: 앞으로 7일의 AI 자동 칸 + 콘텐츠 생성에서 예약한 건.
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>;
@@ -23,8 +23,6 @@ export interface DashboardAlerts {
 
 const HORIZON_DAYS = 7;
 const HOUR = 3_600_000;
-// 상품 확인 마감(올리는 날 07시)이 이 시간 안으로 오면 경고
-const RISK_CONFIRM_MS = 12 * HOUR;
 
 function hoursLeft(ms: number): string {
   const h = Math.floor(ms / HOUR);
@@ -49,12 +47,11 @@ export async function loadDashboardAlerts(supabase: Supabase, now = Date.now()):
       .eq("track", "B")
       .gte("slot_date", today)
       .lte("slot_date", horizon),
-    supabase.from("track_settings").select("social_account_id, b_confirm_deadline, shoot_enabled, social_accounts(display_name, is_active, disconnected_at)"),
+    supabase.from("track_settings").select("social_account_id, shoot_enabled, social_accounts(display_name, is_active, disconnected_at)"),
     supabase.from("slot_rules").select("social_account_id").eq("track", "B").eq("active", true),
     supabase.from("shoot_requests").select("id, error, content_plans!inner(status, social_accounts(display_name))").eq("status", "FAILED").eq("content_plans.status", "SHOT"),
   ]);
 
-  const deadlineOf = new Map((settings ?? []).map((s) => [s.social_account_id, s.b_confirm_deadline ?? "07:00"]));
   const blocked: BlockedItem[] = [];
   const atRisk: BlockedItem[] = [];
 
@@ -65,10 +62,8 @@ export async function loadDashboardAlerts(supabase: Supabase, now = Date.now()):
     const st = cellStatus({ status: p.status, jobStatus: p.publish_jobs?.status ?? null }, { date, time, active: true }, now);
     const name = `@${p.social_accounts?.display_name ?? ""} ${dayName(date, today)} ${time}`;
     if (st.task === "confirm") {
-      const deadline = deadlineOf.get(p.social_account_id) ?? "07:00";
-      if (isPastDeadline(date, deadline, now)) continue;
-      const toDeadline = Date.parse(confirmDeadlineIso(date, deadline)) - now;
-      if (toDeadline > 0 && toDeadline <= RISK_CONFIRM_MS) atRisk.push({ key: p.id, label: `${name} — 상품 확인 전`, reason: `확인 마감까지 ${hoursLeft(toDeadline)}, 안 하면 이 칸은 건너뛰어요`, href: st.href });
+      // 올리기 2시간 전부터 알린다. 올릴 시각까지 확인이 없으면 그 칸은 건너뛴다
+      if (isConfirmDue(date, time, now)) atRisk.push({ key: p.id, label: `${name} — 상품 확인 전`, reason: `올릴 시각까지 ${hoursLeft(Date.parse(kstToIso(date, time)) - now)}, 안 하면 이 칸은 건너뛰어요`, href: st.href });
     } else if (st.tone === "risk" && st.label !== "발행 실패") {
       blocked.push({ key: p.id, label: `${name} — ${st.label}`, reason: p.error ?? p.note ?? null, href: st.href });
     }

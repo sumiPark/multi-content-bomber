@@ -8,7 +8,7 @@ import { SlotRuleCell, useScheduleRun, type SlotRuleCellData } from "@/component
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-// 자동 콘텐츠 설정 — 계정마다 쓸 상품 · 하루 칸, 계정 넣기 · 빼기. 규칙(하루 최대 칸 · 칸 사이 간격 · 08시 이후)은
+// 자동 콘텐츠 설정 — 계정마다 쓸 상품 · 하루 칸, 계정 넣기 · 빼기. 규칙(하루 최대 칸 · 칸 사이 간격)은
 // 서버(lib/schedule/slot-admin.ts)가 다시 확인하고, 여기서는 미리 알려 주기만 한다.
 
 export interface ScopeOptionData {
@@ -19,7 +19,6 @@ export interface ScopeOptionData {
 export interface LimitsData {
   maxSlots: number;
   minGapHours: number;
-  autoEarliest: string;
 }
 
 const selectClass = "h-9 rounded-md border border-input bg-card px-2.5 text-[13px] focus-visible:outline-2 focus-visible:outline-primary";
@@ -184,7 +183,10 @@ export function AccountScheduleCard({
             </button>
           ))}
       </div>
-      {full && canManage && <p className="text-xs text-muted-foreground">하루 {limits.maxSlots}칸이 다 찼어요. 칸을 지우면 새로 추가할 수 있어요.</p>}
+      <p className="text-xs text-muted-foreground">
+        이 계정이 올리는 시각이에요. 계정마다 따로 정해요. 하루 {limits.maxSlots}칸까지, 칸 사이는 {limits.minGapHours}시간 이상이고, 올리기 2시간 전에 상품 확인을 알려 드려요.
+        {full && canManage && " 칸이 다 찼어요. 칸을 지우면 새로 추가할 수 있어요."}
+      </p>
       {error && <p className="text-xs text-risk">{error}</p>}
 
       <ConfirmDialog
@@ -298,7 +300,7 @@ export function AddAccountPanel({
           </Button>
         )}
         <p className="text-xs text-muted-foreground">
-          하루 {limits.maxSlots}칸까지, 같은 계정 칸 사이는 {limits.minGapHours}시간 이상. {limits.autoEarliest} 이후만 고를 수 있어요.
+          하루 {limits.maxSlots}칸까지, 같은 계정 칸 사이는 {limits.minGapHours}시간 이상. 올리기 2시간 전에 상품 확인을 알려 드려요.
         </p>
       </div>
       {error && <p className="text-xs text-risk">{error}</p>}

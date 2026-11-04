@@ -1,5 +1,7 @@
 import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { isConfirmDue } from "@/lib/automation/deadline";
+import { kstDate } from "@/lib/automation/time";
 
 export default async function DashboardLayout({
   children,
@@ -11,8 +13,9 @@ export default async function DashboardLayout({
   // No user yet (e.g. mid-redirect from a protected page) — render bare.
   if (!user) return <>{children}</>;
 
-  const [failedJobCount, org, profileScoredAt] = await Promise.all([
+  const [failedJobCount, confirmDueCount, org, profileScoredAt] = await Promise.all([
     loadFailedJobCount(),
+    loadConfirmDueCount(),
     loadOrganization(),
     loadProfileScoredAt(),
   ]);
@@ -21,6 +24,7 @@ export default async function DashboardLayout({
     <SidebarShell
       userEmail={user.email ?? null}
       failedJobCount={failedJobCount}
+      confirmDueCount={confirmDueCount}
       orgName={org?.name ?? null}
       role={org?.role ?? null}
       analyticsUpdatedAt={profileScoredAt}
@@ -28,6 +32,20 @@ export default async function DashboardLayout({
       {children}
     </SidebarShell>
   );
+}
+
+// 사이드바 "AI 자동 업로드" 뱃지 — 올리기 2시간 안인데 아직 상품 확인을 안 한 칸. 읽다 실패해도 화면은 그대로.
+async function loadConfirmDueCount(): Promise<number> {
+  const profile = await getCurrentProfile();
+  if (!profile?.organization_id) return 0;
+  const supabase = await getServerSupabase();
+  const { data } = await supabase
+    .from("content_plans")
+    .select("slot_date, slot_time")
+    .eq("track", "B")
+    .eq("status", "PROPOSED")
+    .in("slot_date", [kstDate(0), kstDate(1)]);
+  return (data ?? []).filter((p) => isConfirmDue(p.slot_date as string, p.slot_time as string)).length;
 }
 
 // 사이드바 "배포 관리" 빨간 뱃지에 표시할 미처리 실패 건수.

@@ -3,14 +3,14 @@ import "./load-env";
 
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { selectProducts, type ProductScope } from "@/lib/agents/select";
-import { isPastDeadline } from "@/lib/automation/deadline";
+import { isPastSlot } from "@/lib/automation/deadline";
 import { kstDate } from "@/lib/automation/time";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // B 트랙 기획 워커 — 내일(KST) B 칸마다 상품 선정 에이전트(1)가 상품을 제안해 content_plans에 남긴다.
-// 사람은 AI 자동 업로드 화면에서 올리는 날 오전 7시(기본)까지 확인만 하면 된다. 계정이 B 완전 자동이면
+// 사람은 AI 자동 업로드 화면에서 올릴 시각까지 확인만 하면 된다(2시간 전에 알림). 계정이 B 완전 자동이면
 // 제안을 곧바로 CONFIRMED로 둔다(처음엔 모든 계정 꺼짐).
 //
 // 계정은 하나씩 차례로 — 앞 계정이 고른 상품을 다음 계정 후보에서 빼서 같은 날 겹치지 않게.
@@ -32,24 +32,23 @@ async function main() {
 
   const { data: settings, error } = await service
     .from("track_settings")
-    .select("social_account_id, organization_id, product_scopes, b_full_auto, b_confirm_deadline, repeat_gap_days, social_accounts!inner(display_name, role_focus, role_note, is_active, disconnected_at)");
+    .select("social_account_id, organization_id, product_scopes, b_full_auto, repeat_gap_days, social_accounts!inner(display_name, role_focus, role_note, is_active, disconnected_at)");
   if (error) throw new Error(`track_settings 조회 실패: ${error.message}`);
 
-  // 컨펌 마감이 지난 제안은 건너뜀으로 (사람이 안 봤으면 B 영상을 만들지 않는다)
+  // 올릴 시각까지 확인이 없던 제안은 건너뜀으로 (사람이 안 봤으면 B 영상을 만들지 않는다)
   if (!dryRun) {
     const { data: open } = await service
       .from("content_plans")
-      .select("id, slot_date, social_account_id")
+      .select("id, slot_date, slot_time")
       .eq("track", "B")
       .eq("status", "PROPOSED");
-    const deadlineOf = new Map((settings ?? []).map((s) => [s.social_account_id, s.b_confirm_deadline ?? "07:00"]));
-    const expired = (open ?? []).filter((p) => isPastDeadline(p.slot_date as string, deadlineOf.get(p.social_account_id) ?? "07:00"));
+    const expired = (open ?? []).filter((p) => isPastSlot(p.slot_date as string, p.slot_time as string));
     if (expired.length) {
       await service
         .from("content_plans")
-        .update({ status: "SKIPPED", note: "확인 마감이 지나 건너뛰었어요" })
+        .update({ status: "SKIPPED", note: "올릴 시각까지 확인이 없어 건너뛰었어요" })
         .in("id", expired.map((p) => p.id));
-      console.log(`[plan-b] 마감 지난 제안 ${expired.length}개 건너뜀`);
+      console.log(`[plan-b] 올릴 시각 지난 제안 ${expired.length}개 건너뜀`);
     }
   }
 

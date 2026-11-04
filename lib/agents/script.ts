@@ -134,7 +134,9 @@ export function writerSkills(ctx: Pick<ScriptContext, "facts" | "rules" | "accou
 function systemPrompt(ctx: ScriptContext): string {
   const f = ctx.facts;
   const focus = ctx.roleFocus === "PERSON" ? "사람 중심(친근한 말투)" : ctx.roleFocus === "PRODUCT" ? "상품 중심(성분 · 제형 · 구성 · 가격)" : "미정";
-  const slot = ctx.slotTime < "12:00" ? "아침" : "저녁";
+  // 계정마다 올리는 시각이 달라 시간대를 시각에서 구한다
+  const t = ctx.slotTime;
+  const slot = t < "05:00" ? "새벽" : t < "11:00" ? "아침" : t < "14:00" ? "점심" : t < "18:00" ? "오후" : t < "22:00" ? "저녁" : "밤";
   return `너는 인스타그램 @${ctx.accountName}의 릴스 대본 작가다. 이 영상은 AI가 상품 이미지로 만들어 사람 확인 없이 ${ctx.slotTime}(${slot})에 자동으로 올라간다.
 계정 역할: ${focus}${ctx.roleNote ? ` — ${ctx.roleNote}` : ""}
 상품: ${f.shop} ${f.kindLabel} "${f.name}"

@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
-import { isPastDeadline, isPastSlot } from "@/lib/automation/deadline";
+import { isPastSlot } from "@/lib/automation/deadline";
 import { triggerAutoScriptRun } from "@/lib/github-dispatch";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // AI 자동 업로드 상품 확인 (0028 content_plans). 사람은 상품만 확인하고, 이후 대본 · 점검은 자동(영상 · 게시는 준비 중).
-// 확인 마감(올리는 날 track_settings.b_confirm_deadline, 기본 07:00)이 지나면 고칠 수 없다.
+// 올릴 시각까지 확인할 수 있다. 그 2시간 전에 화면에서 알리고, 시각이 지나도록 확인이 없으면 건너뛴다(lib/automation/deadline.ts).
 // 점검에 걸려 멈춘 칸(BLOCKED)은 마감이 지나도 올릴 시각 전까지 다시 쓰기 · 다른 상품으로 바꾸기 · 건너뛰기를 할 수 있다.
 
 export type ConfirmResult = { ok: true; count?: number; soldOut?: number } | { ok: false; error: string };
@@ -26,15 +26,6 @@ async function authorize(): Promise<{ ok: true; userId: string; orgId: string } 
 
 type Service = ReturnType<typeof createServiceClient>;
 
-/** 계정별 확인 마감 (track_settings, 기본 07:00 — 올리는 날). */
-async function deadlines(service: Service, accountIds: string[]): Promise<Map<string, string>> {
-  const { data } = await service
-    .from("track_settings")
-    .select("social_account_id, b_confirm_deadline")
-    .in("social_account_id", accountIds);
-  return new Map((data ?? []).map((r) => [r.social_account_id, r.b_confirm_deadline]));
-}
-
 async function loadPlan(service: Service, planId: string, orgId: string) {
   const { data } = await service
     .from("content_plans")
@@ -44,9 +35,8 @@ async function loadPlan(service: Service, planId: string, orgId: string) {
     .eq("track", "B")
     .maybeSingle();
   if (!data) return null;
-  const d = await deadlines(service, [data.social_account_id]);
   // AI 자동 칸은 날짜 · 시각이 반드시 있다(0042 제약)
-  return { ...data, slot_date: data.slot_date as string, slot_time: data.slot_time as string, deadline: d.get(data.social_account_id) ?? "07:00" };
+  return { ...data, slot_date: data.slot_date as string, slot_time: data.slot_time as string };
 }
 
 const confirmSchema = z.object({
@@ -68,9 +58,7 @@ export async function confirmPlanAction(input: z.infer<typeof confirmSchema>): P
   if (plan.status !== "PROPOSED" && plan.status !== "CONFIRMED" && !fixing) {
     return { ok: false, error: "이미 다음 단계로 넘어간 칸이라 바꿀 수 없어요." };
   }
-  if (fixing ? isPastSlot(plan.slot_date, plan.slot_time) : isPastDeadline(plan.slot_date, plan.deadline)) {
-    return { ok: false, error: fixing ? "올릴 시각이 지난 칸이에요." : "확인 마감이 지났어요. 이 칸은 건너뜁니다." };
-  }
+  if (isPastSlot(plan.slot_date, plan.slot_time)) return { ok: false, error: "올릴 시각이 지난 칸이에요." };
 
   const nextProduct = parsed.data.productId ?? plan.product_id;
   if (!nextProduct) return { ok: false, error: "상품이 없는 칸입니다." };
@@ -152,15 +140,14 @@ export async function confirmAllAction(input: z.infer<typeof dateSchema>): Promi
   const service = createServiceClient();
   const { data: plans, error } = await service
     .from("content_plans")
-    .select("id, slot_date, social_account_id, products(stock_status)")
+    .select("id, slot_date, slot_time, products(stock_status)")
     .eq("organization_id", auth.orgId)
     .eq("slot_date", parsed.data.slotDate)
     .eq("track", "B")
     .eq("status", "PROPOSED")
     .not("product_id", "is", null);
   if (error) return { ok: false, error: error.message };
-  const d = await deadlines(service, [...new Set((plans ?? []).map((p) => p.social_account_id))]);
-  const open = (plans ?? []).filter((p) => !isPastDeadline(p.slot_date as string, d.get(p.social_account_id) ?? "07:00"));
+  const open = (plans ?? []).filter((p) => !isPastSlot(p.slot_date as string, p.slot_time as string));
   const ids = open.filter((p) => p.products?.stock_status === "available").map((p) => p.id);
   const soldOut = open.length - ids.length;
   if (ids.length === 0) return { ok: true, count: 0, soldOut };

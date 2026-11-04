@@ -90,6 +90,11 @@ export async function triggerAutoScriptRun(reason: string): Promise<void> {
   await dispatch(AUTO_PLAN_DISPATCH_EVENT, reason);
 }
 
+/** AI 자동 상품 제안 — 칸 · 계정을 새로 넣은 직후. 내일 칸 중 비어 있는 칸만 채운다(같은 워크플로). */
+export async function triggerAutoPlanRun(reason: string): Promise<void> {
+  await dispatch(AUTO_PLAN_DISPATCH_EVENT, reason);
+}
+
 export async function triggerShootEditRun(reason: string): Promise<void> {
   await dispatch(SHOOT_EDIT_DISPATCH_EVENT, reason);
 }

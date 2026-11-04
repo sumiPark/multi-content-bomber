@@ -4,7 +4,7 @@ import { SettingsList } from "@/components/shoot/settings-list";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { CONCEPT_SELECT, roleLabel, savedConceptItems, type ConceptRow } from "@/lib/schedule/concept-data";
-import { AUTO_EARLIEST, MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, scopeLabel } from "@/lib/schedule/slot-admin";
+import { MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, scopeLabel } from "@/lib/schedule/slot-admin";
 
 // 자동 콘텐츠 설정 목록 — AI가 영상까지 자동으로 만드는 계정. 줄을 누르면 상세(/auto/settings/[accountId])에서 고친다.
 // 직접 촬영(촬영 설정)과 영상 참고 내용이 섞이지 않는다. 쓸 상품만 함께 쓴다(2026-11-04 사용자 결정).
@@ -48,7 +48,7 @@ export default async function AutoSettingsPage() {
     .sort((a, b) => a.name.localeCompare(b.name));
   const inList = new Set(rows.map((r) => r.accountId));
   const candidates = (igAccounts ?? []).filter((a) => !inList.has(a.id)).map((a) => ({ id: a.id, name: a.display_name ?? "" }));
-  const limits = { maxSlots: MAX_SLOTS_PER_DAY, minGapHours: MIN_GAP_MINUTES / 60, autoEarliest: AUTO_EARLIEST };
+  const limits = { maxSlots: MAX_SLOTS_PER_DAY, minGapHours: MIN_GAP_MINUTES / 60 };
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
@@ -56,7 +56,7 @@ export default async function AutoSettingsPage() {
         <div>
           <h1 className="text-xl font-bold tracking-[-0.01em]">자동 콘텐츠 설정</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            AI가 영상까지 자동으로 만드는 계정이에요. 계정을 눌러 하루 칸과 후킹 문구 · 말투 · 영상 스타일을 정하면 상품 제안과 대본에 계속 씁니다. 직접 촬영 설정과는 따로 저장되고, 쓸 상품만 함께 써요.
+            AI가 영상까지 자동으로 만드는 계정이에요. 계정을 눌러 올릴 시각과 후킹 문구 · 말투 · 영상 스타일을 정하면 상품 제안과 대본에 계속 씁니다. 직접 촬영 설정과는 따로 저장되고, 쓸 상품만 함께 써요.
             {!canManage && " 관리자 · 매니저만 바꿀 수 있어요."}
           </p>
         </div>

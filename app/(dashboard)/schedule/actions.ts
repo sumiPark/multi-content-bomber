@@ -5,7 +5,7 @@ import { z } from "zod";
 import { interpretEditStyle } from "@/lib/agents/concept";
 import { templateProblem } from "@/lib/agents/fixed-phrases";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
-import { triggerShootPlanRun } from "@/lib/github-dispatch";
+import { triggerAutoPlanRun, triggerShootPlanRun } from "@/lib/github-dispatch";
 import {
   cancelPlans,
   clearScheduleCancelled,
@@ -139,7 +139,9 @@ export async function addSlotAction(input: { accountId: string; time: string; tr
   });
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
   await clearScheduleCancelled(service, parsed.data.accountId, parsed.data.time);
-  return done("칸을 추가했어요. 다음 상품 제안(매일 오전 9시)부터 채워요.");
+  // 상품 제안은 매일 오전 9시에 내일 칸만 만든다 — 그 뒤에 넣은 칸이 내일 비지 않게 바로 돌린다
+  await triggerAutoPlanRun(`slot added ${parsed.data.time}`).catch((e) => console.error("[schedule] 상품 제안 트리거 실패:", e));
+  return done("칸을 추가했어요. 몇 분 뒤 내일 칸 상품 제안이 나와요.");
 }
 
 /** 빼기 전 경고용 — 앞으로의 기획 · 예약 건 수. ruleId를 주면 그 칸만. */
@@ -230,7 +232,8 @@ export async function addAccountAction(input: { accountId: string; scopes: strin
     return { ok: false, error: `칸을 만들지 못했어요: ${rErr.message}` };
   }
   for (const slot of parsed.data.slots) await clearScheduleCancelled(service, acc.id, slot.time);
-  return done(`@${acc.display_name ?? ""} 계정을 넣었어요. 다음 상품 제안(매일 오전 9시)부터 칸이 채워져요.`);
+  await triggerAutoPlanRun(`account added ${acc.id}`).catch((e) => console.error("[schedule] 상품 제안 트리거 실패:", e));
+  return done(`@${acc.display_name ?? ""} 계정을 넣었어요. 몇 분 뒤 내일 칸 상품 제안이 나와요.`);
 }
 
 export async function updateScopesAction(input: { accountId: string; scopes: string[] }): Promise<ScheduleResult> {

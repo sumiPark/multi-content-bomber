@@ -38,7 +38,6 @@ export interface PlanCardData {
   product: ProductBrief | null;
   alternatives: { reason: string; product: ProductBrief }[];
   // 서버에서 계산 — 렌더 중 시계를 읽으면 서버 · 클라이언트 결과가 갈린다
-  pastDeadline: boolean;
   pastSlot: boolean;
   // 대본 워커 오류(OpenAI 한도 등)
   error: string | null;
@@ -78,8 +77,8 @@ function useRun() {
 export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: boolean }) {
   const { isPending, error, run } = useRun();
   const blocked = plan.status === "BLOCKED";
-  // 점검에 걸려 멈춘 칸은 확인 마감과 상관없이 올릴 시각 전까지 고칠 수 있다
-  const editable = canManage && (blocked ? !plan.pastSlot : (plan.status === "PROPOSED" || plan.status === "CONFIRMED") && !plan.pastDeadline);
+  // 올릴 시각 전까지 확인하고 고칠 수 있다
+  const editable = canManage && !plan.pastSlot && (blocked || plan.status === "PROPOSED" || plan.status === "CONFIRMED");
   const soldOut = !!plan.product && plan.product.stock !== "available";
   const [askSkip, setAskSkip] = useState(false);
   const s = STATUS[plan.status] ?? { label: plan.status, variant: "outline" as const };
@@ -141,10 +140,10 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
         </details>
       )}
 
-      {canManage && plan.pastDeadline && (plan.status === "PROPOSED" || plan.status === "CONFIRMED") && (
+      {canManage && plan.pastSlot && (plan.status === "PROPOSED" || plan.status === "CONFIRMED") && (
         <p className="rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">
-          확인 마감(올리는 날 오전 7시)이 지나 바꿀 수 없어요.{" "}
-          {plan.status === "PROPOSED" ? "확인하지 않은 이 칸은 건너뜁니다." : "확인한 상품으로 대본을 씁니다."}
+          올릴 시각이 지나 바꿀 수 없어요.{" "}
+          {plan.status === "PROPOSED" ? "확인하지 않은 이 칸은 건너뛰어요." : "확인한 상품으로 만들어 끝나는 즉시 올려요."}
         </p>
       )}
 

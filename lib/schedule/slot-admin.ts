@@ -5,7 +5,7 @@ import type { createServiceClient } from "@/lib/supabase/service";
 
 // 편성 관리(계정 넣기 · 빼기, 칸 시각 · 방식 바꾸기) — 2026-11-03 사용자 결정:
 //   · 인스타 계정만. 계정당 하루 최대 4칸, 같은 계정 칸 사이 2시간 이상(숫자만 바꾸면 늘릴 수 있게 여기 둔다)
-//   · AI 자동 칸은 08시 이후만 — 상품 확인 마감이 아직 "올리는 날 07시" 고정이라(영상 만들기 시간을 잰 뒤 다시 정함)
+//   · 칸 시각은 계정마다 따로. 상품 확인은 올리기 2시간 전에 알리고 올릴 시각까지 받는다(lib/automation/deadline.ts)
 //   · 직접 촬영은 날짜 · 시각 칸이 아니다(0042) — 칸은 AI 자동 칸만
 //   · 칸 시각을 바꾸면 앞으로의 기획도 새 시각으로 옮긴다(예약된 발행은 예약 시각도)
 //   · 계정 · 칸을 빼면 앞으로의 기획 · 예약 발행을 모두 취소(화면에서 예약 건 경고 뒤). 지난 기록은 남긴다
@@ -14,7 +14,6 @@ type Service = ReturnType<typeof createServiceClient>;
 
 export const MAX_SLOTS_PER_DAY = 4;
 export const MIN_GAP_MINUTES = 120;
-export const AUTO_EARLIEST = "08:00";
 
 export interface ScopeOption {
   key: string;
@@ -58,8 +57,6 @@ export function validateSlots(slots: { time: string; track: string }[]): string 
   for (const s of slots) {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(s.time)) return `시각 형식이 올바르지 않아요 (${s.time}).`;
     if (s.track !== "B") return "방식이 올바르지 않아요.";
-    if (s.time < AUTO_EARLIEST)
-      return `AI 자동 칸은 ${AUTO_EARLIEST} 이후만 고를 수 있어요 (상품 확인 마감이 올리는 날 07시라서).`;
   }
   const sorted = [...slots].sort((a, b) => a.time.localeCompare(b.time));
   for (let i = 0; sorted.length >= 2 && i < sorted.length; i++) {

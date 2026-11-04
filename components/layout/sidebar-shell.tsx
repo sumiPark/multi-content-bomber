@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
 // 60px 상단바(화면 이름 · 상태). 1024px 미만은 사이드바를 왼쪽에서 여는 260px 패널로.
 
 // count = 배포 관리 실패 건수, soon = 준비 중, new = 마지막으로 본 뒤 새 결과(파란 점)
-type BadgeKind = "count" | "soon" | "new";
+type BadgeKind = "count" | "soon" | "new" | "confirm";
 
 // "새 결과" 점 — 그 화면을 마지막으로 연 시각을 이 브라우저에 기억한다(사람마다 · 기기마다).
 const SEEN_KEY = "mcb:analytics-seen-at";
@@ -98,7 +98,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       // 자동으로 생성 · 업로드되는 일정만(2026-11-04 편성표에서 이름을 바꾸고 이 묶음으로 옮김). 계정별 하루 칸 · 주제 · 주간 진행
       { href: "/schedule", label: "자동 업로드 일정", icon: CalendarClock },
-      { href: "/auto/confirm", label: "AI 자동 업로드", icon: CalendarCheck },
+      { href: "/auto/confirm", label: "AI 자동 업로드", icon: CalendarCheck, badgeKind: "confirm" },
       { href: "/auto/settings", label: "자동 콘텐츠 설정", icon: SlidersHorizontal },
       { href: "/products", label: "상품 분석", icon: Package },
       { href: "/rules", label: "광고 문구 규칙", icon: ShieldCheck },
@@ -160,6 +160,8 @@ function titleOf(pathname: string): string {
 interface SidebarShellProps {
   userEmail: string | null;
   failedJobCount: number;
+  // 올리기 2시간 안인데 아직 상품 확인을 안 한 칸
+  confirmDueCount?: number;
   orgName: string | null;
   role: string | null;
   // 가장 최근 프로필 채점이 끝난 시각 — 분석 메뉴 "새 결과" 점
@@ -170,6 +172,7 @@ interface SidebarShellProps {
 export function SidebarShell({
   userEmail,
   failedJobCount,
+  confirmDueCount = 0,
   orgName,
   role,
   analyticsUpdatedAt = null,
@@ -205,6 +208,14 @@ export function SidebarShell({
           className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-risk px-1.5 text-[11px] leading-5 font-bold text-white tabular-nums"
         >
           {display}
+        </span>
+      );
+    }
+    if (item.badgeKind === "confirm") {
+      if (confirmDueCount <= 0) return null;
+      return (
+        <span aria-label={`상품 확인할 칸 ${confirmDueCount}개`} className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-warn px-1.5 text-[11px] leading-5 font-semibold text-white tabular-nums">
+          {confirmDueCount > 99 ? "99+" : confirmDueCount}
         </span>
       );
     }

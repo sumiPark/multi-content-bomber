@@ -85,6 +85,18 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   const accountList = [...accounts.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name));
   const activeRules = (ruleRows ?? []).filter((r) => r.active && accounts.has(r.social_account_id));
 
+  // 시각을 바꾸면 지난 기록은 옛 시각에 남는다 — 지금 칸이 아니어도 이번 주 기록이 있으면 줄을 보여 준다
+  for (const [accountId, acc] of accounts) {
+    const times = new Set(acc.rules.map((r) => r.slot_time));
+    for (const p of planRows ?? []) {
+      const time = p.slot_time as string;
+      if (p.social_account_id !== accountId || times.has(time)) continue;
+      times.add(time);
+      acc.rules.push({ id: `past-${accountId}-${time}`, social_account_id: accountId, slot_time: time, track: "B", active: false, topic: null, social_accounts: { display_name: acc.name, is_active: true, disconnected_at: null } });
+    }
+    acc.rules.sort((a, b) => a.slot_time.localeCompare(b.slot_time));
+  }
+
   const planOf = new Map((planRows ?? []).map((p) => [`${p.social_account_id}|${p.slot_date}|${p.slot_time}`, p]));
 
   const counts: Record<CellTone, number> = { todo: 0, wait: 0, ok: 0, risk: 0, idle: 0 };
@@ -95,7 +107,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
       rule,
       cells: days.map((date) => {
         const p = planOf.get(`${accountId}|${date}|${rule.slot_time}`);
-        const status = cellStatus(
+        const status: CellStatus = !p && rule.id.startsWith("past-") ? { label: "—", tone: "idle", href: null } : cellStatus(
           p ? { status: p.status, jobStatus: p.publish_jobs?.status ?? null } : null,
           { date, time: rule.slot_time, active: rule.active, accountOff: rule.social_accounts?.is_active === false },
         );
@@ -196,6 +208,7 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                               )}
                               <th scope="row" className="px-3.5 py-2.5 text-left font-normal">
                                 <div className="font-semibold tabular-nums">{rule.slot_time}</div>
+                                {rule.id.startsWith("past-") && <div className="mt-0.5 text-xs text-muted-foreground">지난 시각</div>}
                               </th>
                               {cells.map((c) => {
                                 const body = (
