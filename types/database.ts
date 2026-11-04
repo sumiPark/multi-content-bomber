@@ -1083,6 +1083,7 @@ export type Database = {
       }
       post_history_sync: {
         Row: {
+          all_listed_at: string | null
           listed_at: string | null
           media_listed: number | null
           organization_id: string
@@ -1091,6 +1092,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          all_listed_at?: string | null
           listed_at?: string | null
           media_listed?: number | null
           organization_id: string
@@ -1099,6 +1101,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          all_listed_at?: string | null
           listed_at?: string | null
           media_listed?: number | null
           organization_id?: string
@@ -2370,6 +2373,30 @@ export type Database = {
       }
     }
     Views: {
+      account_post_stats: {
+        Row: {
+          avg_watch_time_ms: number | null
+          caption: string | null
+          comments: number | null
+          insights_checked_at: string | null
+          likes: number | null
+          media_product_type: string | null
+          media_type: string | null
+          organization_id: string | null
+          permalink: string | null
+          platform_media_id: string | null
+          post_id: string | null
+          posted_at: string | null
+          reach: number | null
+          saved: number | null
+          shares: number | null
+          social_account_id: string | null
+          thumb_path: string | null
+          thumbnail_url: string | null
+          views: number | null
+        }
+        Relationships: []
+      }
       account_reel_stats: {
         Row: {
           avg_watch_time_ms: number | null

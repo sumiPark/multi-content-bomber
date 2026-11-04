@@ -26,8 +26,8 @@ import { loadPostPerformance } from "@/lib/post-analysis/load";
 import { parsePostPeriod, periodStart } from "@/lib/post-analysis/stats";
 import { cn } from "@/lib/utils";
 
-// 분석 — 탭 셋: 프로필 점수(매일 04:30 자동 채점, 0034) · 게시물 성과(계정별 지난 릴스 전체 + 기준선, 0040) · 다른 계정 비교(0037).
-// 게시물 성과 데이터는 성과 수집 워커(worker/collect-metrics.ts, 매일 04시)와 지난 릴스 워커(worker/sync-post-history.ts, 05:10)가 쌓는다.
+// 분석 — 탭 셋: 프로필 점수(매일 04:30 자동 채점, 0034) · 게시물 성과(계정별 지난 게시물 + 기준선, 0040 · 0045) · 다른 계정 비교(0037).
+// 게시물 성과 데이터는 성과 수집 워커(worker/collect-metrics.ts, 매일 04시)와 지난 게시물 워커(worker/sync-post-history.ts, 05:10)가 쌓는다.
 // 트랙(A 혼합 / B 자동)별 비교는 운영 시작 뒤(7 첫 리포트)에 붙인다.
 
 const BASELINE_POSTS = 30;
@@ -205,7 +205,7 @@ export default async function AnalyticsPage({
               ? "프로필을 12개 기준으로 매일 04:30에 자동 채점하고, 점수를 가장 많이 깎는 곳부터 고칠 문구를 드려요. 인스타에는 아무것도 바꾸지 않아요. 마음에 드는 문구를 직접 붙여 넣으세요."
               : tab === "compare"
                 ? "우리 계정마다 참고할 계정을 두고, 그 계정 릴스가 평소보다 몇 배 잘됐는지 매일 읽어요. 고른 이유와 숫자 근거를 함께 보여 드려요."
-                : "계정의 지난 릴스 전체를 평소 조회수와 견줘 봐요. 어떤 릴스가 평소보다 몇 배 잘됐는지, 무엇을 더 만들지 숫자로 보여 드려요. 매일 새벽에 자동으로 수집해요."}
+                : "릴스 · 사진 · 캐러셀을 유형별 평소 조회수와 견줘 봐요. 어떤 게시물이 평소보다 몇 배 잘됐는지, 무엇을 더 만들지 숫자로 보여 드려요. 매일 새벽에 자동으로 수집해요."}
           </p>
         </div>
         {tab === "posts" && accounts.length > 0 && (

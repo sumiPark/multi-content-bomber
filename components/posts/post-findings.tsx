@@ -14,13 +14,13 @@ export function PostFindings({ analysis }: { analysis: PostAnalysis | null }) {
         <h2 className="text-[15px] font-semibold">데이터가 말하는 것</h2>
         {analysis && (
           <p className="shrink-0 text-xs text-muted-foreground">
-            <RelativeTime iso={analysis.createdAt} format="date" /> · 릴스 {analysis.reels.toLocaleString("ko-KR")}개 전체 기준
+            <RelativeTime iso={analysis.createdAt} format="date" /> · 게시물 {analysis.reels.toLocaleString("ko-KR")}개 전체 기준
           </p>
         )}
       </div>
 
       {!analysis ? (
-        <p className="text-[13px] text-muted-foreground">지난 릴스를 다 읽으면 해석을 써 드려요. 일주일에 한 번 새로 써요.</p>
+        <p className="text-[13px] text-muted-foreground">지난 게시물을 다 읽으면 해석을 써 드려요. 일주일에 한 번 새로 써요.</p>
       ) : (
         <>
           {analysis.headline && <p className="rounded-md bg-brand-soft px-3 py-2.5 text-[15px] font-semibold text-foreground">{analysis.headline}</p>}

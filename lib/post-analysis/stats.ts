@@ -1,12 +1,28 @@
 // 게시물 성과 분석 — 숫자 계산. 화면과 워커가 같이 쓰는 순수 함수(ig-audit-ko 기준).
 //
+// 평소 조회수는 유형별로 따로 잡는다. 사진 · 캐러셀과 릴스는 조회수 크기가 달라 한 줄로 세우면 한쪽이 늘 작게 나온다
+// (2026-11-04 joongdi 올해 표본: 릴스 1만 회 안팎, 사진 4.7만 회 안팎).
+//
 // 조회수는 계정 인사이트 views로 본다. 공개 조회수(view_count)는 광고 조회가 합쳐진 것으로 보이는
 // 릴스가 있어서 순위에 쓰지 않는다(2026-11-04 jjoongb 최대 445만 대 46.6만).
 // 도달이 조회수의 10% 미만이면 옛 데이터가 깨진 것으로 보고 공유 · 저장 비율을 내지 않는다
 // (joongdi 2024-11-25 이전 304개). 댓글 수는 댓글 요청 글에서 크게 늘어 인기 지표로 쓰지 않는다.
 
+export type PostFormat = "REELS" | "IMAGE" | "CAROUSEL" | "VIDEO";
+
+export const ALL_FORMATS: PostFormat[] = ["REELS", "IMAGE", "CAROUSEL", "VIDEO"];
+
+export const FORMAT_LABEL: Record<PostFormat, string> = { REELS: "릴스", IMAGE: "사진", CAROUSEL: "캐러셀", VIDEO: "피드 영상" };
+
+export function formatOf(productType: string | null, mediaType: string | null): PostFormat {
+  if (productType === "REELS") return "REELS";
+  if (mediaType === "CAROUSEL_ALBUM") return "CAROUSEL";
+  return mediaType === "VIDEO" ? "VIDEO" : "IMAGE";
+}
+
 export interface ReelRow {
   id: string;
+  format: PostFormat;
   mediaId: string;
   postedAt: string | null;
   url: string | null;
@@ -26,6 +42,7 @@ const DAY_MS = 86_400_000;
 const YOUNG_DAYS = 3;
 const REACH_VALID_RATIO = 0.1;
 const AD_RATIO = 1.1;
+const MIN_HALF_POSTS = 5;
 
 export const TIERS = [10, 3, 2] as const;
 
@@ -81,6 +98,11 @@ export function baseViews(rows: ReelRow[], now: number): number | null {
 /** 한국 날짜 (YYYY-MM-DD). */
 export const kstDay = (iso: string) => new Date(Date.parse(iso) + 9 * 3600_000).toISOString().slice(0, 10);
 
+/** 유형별 평소 조회수. */
+export function baseByFormat(rows: ReelRow[], now: number): Map<PostFormat, number | null> {
+  return new Map(ALL_FORMATS.map((f) => [f, baseViews(rows.filter((r) => r.format === f), now)]));
+}
+
 function halfOf(iso: string): string {
   const d = new Date(Date.parse(iso) + 9 * 3600_000);
   return `${d.getUTCFullYear()}${d.getUTCMonth() < 6 ? "상" : "하"}`;
@@ -98,16 +120,25 @@ export interface TopicLift {
   rate: number;
 }
 
-export interface ReelStats {
-  reels: number;
-  withViews: number;
+export interface FormatStats {
+  format: PostFormat;
+  label: string;
+  n: number;
   base: number | null;
+  x3: number;
+  x10: number;
+  recent90: { n: number; base: number | null; x3: number; top: number | null; save: number | null; share: number | null };
+}
+
+export interface ReelStats {
+  posts: number;
+  withViews: number;
   x3: number;
   x10: number;
   firstDate: string | null;
   lastDate: string | null;
-  recent90: { n: number; base: number | null; x3: number; top: number | null };
-  halves: { half: string; n: number; base: number | null; watchSec: number | null; perMonth: number }[];
+  formats: FormatStats[];
+  halves: { format: string; half: string; n: number; base: number | null; watchSec: number | null; perMonth: number }[];
   x3ByHalf: { half: string; n: number }[];
   eventLike: { n: number; x3: number };
   ctaCommentRate: { cta: number | null; other: number | null; ctaN: number; otherN: number };
@@ -116,56 +147,88 @@ export interface ReelStats {
   adEstimated: { n: number; checked: number; biggest: { publicViews: number; views: number } | null };
   overall2xRate: number;
   topics: TopicLift[];
-  top: { title: string; views: number; x: number; date: string | null; share: number | null; save: number | null; watch: number | null; event: boolean; ad: boolean }[];
-  bottom: { title: string; views: number; x: number; date: string | null }[];
+  top: { format: string; title: string; views: number; x: number; date: string | null; share: number | null; save: number | null; watch: number | null; event: boolean; ad: boolean }[];
+  bottom: { format: string; title: string; views: number; x: number; date: string | null }[];
 }
 
-/** 주제 키워드(AI가 제안)별로 같은 반기 평소의 2배를 넘은 비율을 코드가 센다. */
+/** 유형별 평소를 기준으로 센다. 주제 키워드(AI가 제안)별로 같은 유형 · 같은 반기 평소의 2배를 넘은 비율도 코드가 센다. */
 export function computeStats(rows: ReelRow[], captions: Map<string, string>, now: number, topics: { name: string; keywords: string[] }[] = []): ReelStats {
   const withViews = rows.filter((r) => r.views != null);
   const mature = withViews.filter((r) => !isYoung(r, now));
-  const base = median(mature.map((r) => r.views as number));
-  const x = (r: ReelRow) => (base && r.views != null ? (r.views as number) / base : 0);
+  const bases = baseByFormat(mature, now);
+  const x = (r: ReelRow) => {
+    const b = bases.get(r.format);
+    return b && r.views != null ? (r.views as number) / b : 0;
+  };
   const caption = (r: ReelRow) => captions.get(r.id) ?? r.title;
-
   const dates = withViews.map((r) => r.postedAt).filter((d): d is string => !!d).sort();
-
   const since90 = now - 90 * DAY_MS;
-  const recent = mature.filter((r) => r.postedAt && Date.parse(r.postedAt) >= since90);
-  const recentBase = median(recent.map((r) => r.views as number));
 
+  const medianRate = (list: ReelRow[], pick: (r: ReelRow) => number | null) =>
+    round(median(list.map((r) => perThousand(pick(r), r)).filter((n): n is number => n != null)), 2);
+
+  const formats: FormatStats[] = ALL_FORMATS.flatMap((format) => {
+    const list = mature.filter((r) => r.format === format);
+    if (!list.length) return [];
+    const recent = list.filter((r) => r.postedAt && Date.parse(r.postedAt) >= since90);
+    return [{
+      format,
+      label: FORMAT_LABEL[format],
+      n: list.length,
+      base: bases.get(format) ?? null,
+      x3: list.filter((r) => x(r) >= 3).length,
+      x10: list.filter((r) => x(r) >= 10).length,
+      recent90: {
+        n: recent.length,
+        base: median(recent.map((r) => r.views as number)),
+        x3: recent.filter((r) => x(r) >= 3).length,
+        top: recent.length ? Math.max(...recent.map((r) => r.views as number)) : null,
+        save: medianRate(recent, (r) => r.saved),
+        share: medianRate(recent, (r) => r.shares),
+      },
+    }];
+  });
+
+  // 반기 평소도 유형별로 — 사진과 릴스는 조회수 크기가 다르다
+  const groupKey = (r: ReelRow) => `${r.format}|${halfOf(r.postedAt as string)}`;
   const byHalf = new Map<string, ReelRow[]>();
   for (const r of mature) {
     if (!r.postedAt) continue;
-    const k = halfOf(r.postedAt);
-    byHalf.set(k, [...(byHalf.get(k) ?? []), r]);
+    byHalf.set(groupKey(r), [...(byHalf.get(groupKey(r)) ?? []), r]);
   }
-  const halfKeys = [...byHalf.keys()].sort();
-  const halves = halfKeys.map((half) => {
-    const list = byHalf.get(half) as ReelRow[];
-    return {
-      half,
-      n: list.length,
-      base: median(list.map((r) => r.views as number)),
-      watchSec: round(median(list.map((r) => r.watchSec).filter((w): w is number => w != null))),
-      perMonth: round(list.length / 6) as number,
-    };
-  });
-  const halfBase = new Map(halves.map((h) => [h.half, h.base]));
+  const halfBase = new Map([...byHalf].map(([k, list]) => [k, median(list.map((r) => r.views as number))]));
+  const halves = [...byHalf.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .filter(([, list]) => list.length >= MIN_HALF_POSTS)
+    .map(([k, list]) => {
+      const [format, half] = k.split("|");
+      return {
+        format: FORMAT_LABEL[format as PostFormat],
+        half,
+        n: list.length,
+        base: halfBase.get(k) ?? null,
+        watchSec: round(median(list.map((r) => r.watchSec).filter((w): w is number => w != null))),
+        perMonth: round(list.length / 6) as number,
+      };
+    });
   const over2xOfHalf = (r: ReelRow) => {
-    const b = r.postedAt ? halfBase.get(halfOf(r.postedAt)) : null;
+    const b = r.postedAt ? halfBase.get(groupKey(r)) : null;
     return !!b && (r.views as number) >= b * 2;
   };
 
   const x3Rows = mature.filter((r) => x(r) >= 3);
-  const x3ByHalf = halfKeys.map((half) => ({ half, n: x3Rows.filter((r) => r.postedAt && halfOf(r.postedAt) === half).length })).filter((h) => h.n > 0);
+  const x3Halves = new Map<string, number>();
+  for (const r of x3Rows) {
+    if (r.postedAt) x3Halves.set(halfOf(r.postedAt), (x3Halves.get(halfOf(r.postedAt)) ?? 0) + 1);
+  }
+  const x3ByHalf = [...x3Halves.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([half, n]) => ({ half, n }));
 
   // 댓글 비율 (댓글 ÷ 조회) — 댓글 요청 글과 나머지
   const commentRate = (list: ReelRow[]) => round(median(list.filter((r) => r.views && r.comments != null).map((r) => ((r.comments as number) / (r.views as number)) * 100)), 2);
   const ctaRows = mature.filter((r) => isCtaLike(caption(r)));
   const otherRows = mature.filter((r) => !isCtaLike(caption(r)));
 
-  // 잘된 릴스(같은 반기 평소의 2배)와 나머지 — 도달 값이 정상인 릴스만, 경품 글 제외
+  // 잘된 게시물(같은 유형 · 같은 반기 평소의 2배)과 나머지 — 도달 값이 정상인 것만, 경품 글 제외
   const valid = mature.filter((r) => reachValid(r) && !isEventLike(caption(r)));
   const hits = valid.filter(over2xOfHalf);
   const rest = valid.filter((r) => !over2xOfHalf(r));
@@ -191,17 +254,16 @@ export function computeStats(rows: ReelRow[], captions: Map<string, string>, now
     return [{ name: t.name, n: list.length, over2x, rate: Math.round((over2x / list.length) * 100) }];
   });
 
-  const rankBy = [...mature].sort((a, b) => (b.views as number) - (a.views as number));
+  const rankBy = [...mature].sort((a, b) => x(b) - x(a));
 
   return {
-    reels: rows.length,
+    posts: rows.length,
     withViews: withViews.length,
-    base,
     x3: x3Rows.length,
     x10: mature.filter((r) => x(r) >= 10).length,
     firstDate: dates[0] ? kstDay(dates[0]) : null,
     lastDate: dates.length ? kstDay(dates[dates.length - 1]) : null,
-    recent90: { n: recent.length, base: recentBase, x3: recent.filter((r) => x(r) >= 3).length, top: recent.length ? Math.max(...recent.map((r) => r.views as number)) : null },
+    formats,
     halves,
     x3ByHalf,
     eventLike: { n: mature.filter((r) => isEventLike(caption(r))).length, x3: x3Rows.filter((r) => isEventLike(caption(r))).length },
@@ -224,6 +286,7 @@ export function computeStats(rows: ReelRow[], captions: Map<string, string>, now
     overall2xRate: valid.length ? Math.round((valid.filter(over2xOfHalf).length / valid.length) * 100) : 0,
     topics: topicLifts,
     top: rankBy.slice(0, 12).map((r) => ({
+      format: FORMAT_LABEL[r.format],
       title: clip(r.title, 60),
       views: r.views as number,
       x: round(x(r)) as number,
@@ -234,6 +297,6 @@ export function computeStats(rows: ReelRow[], captions: Map<string, string>, now
       event: isEventLike(caption(r)),
       ad: isAdEstimated(r),
     })),
-    bottom: rankBy.slice(-8).map((r) => ({ title: clip(r.title, 60), views: r.views as number, x: round(x(r), 2) as number, date: r.postedAt ? kstDay(r.postedAt) : null })),
+    bottom: rankBy.slice(-8).map((r) => ({ format: FORMAT_LABEL[r.format], title: clip(r.title, 60), views: r.views as number, x: round(x(r), 2) as number, date: r.postedAt ? kstDay(r.postedAt) : null })),
   };
 }

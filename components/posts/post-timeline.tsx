@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { kstDay } from "@/lib/post-analysis/stats";
+import { FORMAT_LABEL, kstDay, type PostFormat } from "@/lib/post-analysis/stats";
 
-// 언제 터졌나 — 릴스 하나가 점 하나. 세로축은 로그(한 칸 10배). 색은 한 가지만 쓰고 크기로 3배 · 10배를 가른다.
+// 언제 터졌나 — 게시물 하나가 점 하나. 세로축은 로그(한 칸 10배). 색은 한 가지만 쓰고 크기로 3배 · 10배를 가른다.
 // 점이 수백 개라 점마다 링크를 달지 않고, 포인터에서 가장 가까운 점을 찾는다. 키보드로는 아래 목록을 쓴다.
 
 export interface TimelineRow {
   id: string;
+  format: PostFormat;
   title: string;
   url: string | null;
   postedAt: string | null;
@@ -101,14 +102,14 @@ export function PostTimeline({ rows, base, from, now }: { rows: TimelineRow[]; b
   return (
     <div ref={box} className="relative">
       {!chart ? (
-        <p className="py-8 text-center text-[13px] text-muted-foreground">이 기간에는 릴스가 적어 그래프를 그리지 않았어요.</p>
+        <p className="py-8 text-center text-[13px] text-muted-foreground">이 기간에는 게시물이 적어 그래프를 그리지 않았어요.</p>
       ) : (
         <>
           <svg
             viewBox={`0 0 ${W} ${H}`}
             className={hovered ? "block w-full cursor-pointer" : "block w-full"}
             role="img"
-            aria-label={`릴스 ${chart.points.length}개의 조회수 흐름. 아래 목록과 표에서 같은 값을 볼 수 있어요.`}
+            aria-label={`게시물 ${chart.points.length}개의 조회수 흐름. 아래 목록과 표에서 같은 값을 볼 수 있어요.`}
             onPointerMove={(e) => setHoverId(nearest(e)?.r.id ?? null)}
             onPointerLeave={() => setHoverId(null)}
             onClick={(e) => {
@@ -139,7 +140,7 @@ export function PostTimeline({ rows, base, from, now }: { rows: TimelineRow[]; b
             <div className="pointer-events-none absolute top-1 right-1 max-w-[280px] rounded-md border bg-card px-3 py-2 text-xs shadow-[0_8px_24px_rgb(16_24_40/.12),0_2px_6px_rgb(16_24_40/.08)]">
               <p className="line-clamp-2 font-medium">{hovered.r.title}</p>
               <p className="mt-0.5 text-muted-foreground tabular-nums">
-                조회 {(hovered.r.views as number).toLocaleString("ko-KR")}
+                {FORMAT_LABEL[hovered.r.format]} · 조회 {(hovered.r.views as number).toLocaleString("ko-KR")}
                 {hovered.r.x != null && ` · 평소의 ${hovered.r.x.toFixed(1)}배`} · {kstDay(hovered.r.postedAt as string)}
               </p>
             </div>

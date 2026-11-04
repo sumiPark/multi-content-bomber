@@ -10,9 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Segmented } from "@/components/ui/segmented";
 import type { PerfRow, PostPerformanceData } from "@/lib/post-analysis/load";
-import { baseViews, isAdEstimated, isYoung, kstDay, periodStart, perThousand, type PostPeriod } from "@/lib/post-analysis/stats";
+import { ALL_FORMATS, baseByFormat, FORMAT_LABEL, isAdEstimated, isYoung, kstDay, periodStart, perThousand, type PostFormat, type PostPeriod } from "@/lib/post-analysis/stats";
 
-// 분석 · 게시물 성과 — 계정의 모든 릴스를 평소 대비 배수로 본다(ig-audit-ko).
+// 분석 · 게시물 성과 — 계정의 릴스 · 사진 · 캐러셀을 같은 유형 평소 대비 배수로 본다(ig-audit-ko).
 // 배수는 고른 기간의 평소 조회수로 다시 계산한다. 전체 기간 하나로 보면 예전 이벤트가 터진 계정은
 // 최근 릴스가 전부 작게 나온다(2026-11-04 joongdi: 3배 넘은 81개 중 55개가 2024년 3~4월, 최근 90일 0개).
 
@@ -55,6 +55,7 @@ interface Computed extends PerfRow {
 function Flags({ r }: { r: Computed }) {
   return (
     <>
+      <Badge variant="secondary">{FORMAT_LABEL[r.format]}</Badge>
       {r.young && <Badge variant="secondary">아직 크는 중</Badge>}
       {r.shareTop && <Badge variant="default">공유 많음</Badge>}
       {r.ad && <Badge variant="warn">광고 포함 추정</Badge>}
@@ -109,10 +110,11 @@ function ReelCard({ r, rank }: { r: Computed; rank: number }) {
 function ReelTable({ rows }: { rows: Computed[] }) {
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
-      <table className="w-full min-w-[920px] text-[13px]">
+      <table className="w-full min-w-[980px] text-[13px]">
         <thead className="bg-surface-2 text-xs text-muted-foreground">
           <tr className="h-11 text-left">
-            <th scope="col" className="px-3.5 font-medium">릴스</th>
+            <th scope="col" className="px-3.5 font-medium">게시물</th>
+            <th scope="col" className="px-3 font-medium">유형</th>
             <th scope="col" className="px-3 font-medium">올린 날</th>
             {["조회", "배수", "좋아요", "댓글", "공유", "저장", "공유(1,000명당)", "저장(1,000명당)", "평균 시청"].map((h) => (
               <th key={h} scope="col" className="px-3 text-right font-medium">
@@ -133,6 +135,7 @@ function ReelTable({ rows }: { rows: Computed[] }) {
                   r.title
                 )}
               </td>
+              <td className="px-3 whitespace-nowrap">{FORMAT_LABEL[r.format]}</td>
               <td className="px-3 whitespace-nowrap tabular-nums">{r.postedAt && kstDay(r.postedAt)}</td>
               <td className="px-3 text-right font-semibold tabular-nums">{num(r.views)}</td>
               <td className="px-3 text-right tabular-nums">{r.x == null ? "-" : `${r.x.toFixed(1)}배`}</td>
@@ -156,28 +159,30 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
   const [changing, startChange] = useTransition();
   // 고르기 전에는 3배부터, 이 기간에 3배 넘은 릴스가 없으면 전체
   const [tierPick, setTier] = useState<Tier | null>(null);
+  const [formatPick, setFormatPick] = useState<PostFormat | "all">("all");
   const [sort, setSort] = useState<SortKey>("views");
   const [view, setView] = useState<View>("card");
   const [hideEvents, setHideEvents] = useState(false);
   const [limit, setLimit] = useState(PAGE_SIZE);
 
-  // 기간을 바꾸면 그 기간 릴스만 서버에서 다시 읽는다
+  // 기간을 바꾸면 그 기간 게시물만 서버에서 다시 읽는다
   const from = periodStart(period, now);
   const pickPeriod = (next: PostPeriod) => {
     setLimit(PAGE_SIZE);
     startChange(() => router.push(`/analytics?tab=posts&account=${accountId}&period=${next}`, { scroll: false }));
   };
 
-  const { rows, base } = useMemo(() => {
+  const { allRows, bases } = useMemo(() => {
     const inPeriod = data.rows.filter((r) => r.views != null && (!hideEvents || !r.eventLike));
-    const b = baseViews(inPeriod, now);
+    const b = baseByFormat(inPeriod, now);
     const shareRates = inPeriod.map((r) => perThousand(r.shares, r)).filter((n): n is number => n != null).sort((x, y) => y - x);
     const cut = shareRates[Math.floor(shareRates.length * SHARE_TOP)] ?? Infinity;
     const computed: Computed[] = inPeriod.map((r) => {
       const shareRate = perThousand(r.shares, r);
+      const own = b.get(r.format);
       return {
         ...r,
-        x: b ? (r.views as number) / b : null,
+        x: own ? (r.views as number) / own : null,
         shareRate,
         saveRate: perThousand(r.saved, r),
         young: isYoung(r, now),
@@ -185,8 +190,11 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
         shareTop: shareRate != null && shareRate > 0 && shareRate >= cut,
       };
     });
-    return { rows: computed, base: b };
+    return { allRows: computed, bases: b };
   }, [data.rows, hideEvents, now]);
+
+  const formats = ALL_FORMATS.filter((f) => allRows.some((r) => r.format === f));
+  const rows = useMemo(() => (formatPick === "all" ? allRows : allRows.filter((r) => r.format === formatPick)), [allRows, formatPick]);
 
   const counts = useMemo(() => {
     const n = (min: number) => rows.filter((r) => (r.x ?? 0) >= min).length;
@@ -218,8 +226,8 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
           <History className="size-8 text-muted-foreground" aria-hidden />
-          <h2 className="text-lg font-semibold">지난 릴스를 아직 읽지 않았어요</h2>
-          <p className="max-w-md text-sm text-muted-foreground">매일 05:10에 지난 릴스를 차례로 읽어요. 첫 수집이 끝나면 여기에 나와요.</p>
+          <h2 className="text-lg font-semibold">지난 게시물을 아직 읽지 않았어요</h2>
+          <p className="max-w-md text-sm text-muted-foreground">매일 05:10에 지난 게시물을 차례로 읽어요. 첫 수집이 끝나면 여기에 나와요.</p>
         </CardContent>
       </Card>
     );
@@ -231,8 +239,8 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
         <p className="flex items-center gap-1.5 rounded-md bg-brand-soft px-3 py-2 text-xs text-ink-2">
           <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
           {data.listed
-            ? `지난 릴스 ${num(data.total)}개 중 ${num(data.read)}개를 읽었어요. 나머지는 다음 수집에 이어서 읽어요. 지금 숫자는 일부 기준이에요.`
-            : `지난 릴스 목록을 아직 읽지 않았어요. 지금은 최근 ${num(data.read)}개 기준이라 평소 조회수와 배수가 달라질 수 있어요.`}
+            ? `지난 게시물 ${num(data.total)}개 중 ${num(data.read)}개를 읽었어요. 나머지는 다음 수집에 이어서 읽어요. 지금 숫자는 일부 기준이에요.`
+            : `지난 게시물 목록을 아직 읽지 않았어요. 지금은 최근 ${num(data.read)}개 기준이라 평소 조회수와 배수가 달라질 수 있어요.`}
         </p>
       )}
 
@@ -250,6 +258,18 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
           ]}
         />
         {changing && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="불러오는 중" />}
+        <Segmented<PostFormat | "all">
+          ariaLabel="게시물 유형"
+          value={formatPick}
+          onChange={(v) => {
+            setFormatPick(v);
+            setLimit(PAGE_SIZE);
+          }}
+          options={[
+            { value: "all", label: `전체 ${allRows.length}` },
+            ...formats.map((f) => ({ value: f, label: `${FORMAT_LABEL[f]} ${allRows.filter((r) => r.format === f).length}` })),
+          ]}
+        />
         <label className="flex items-center gap-1.5 text-[13px] text-ink-2">
           <input type="checkbox" checked={hideEvents} onChange={(e) => setHideEvents(e.target.checked)} className="size-4 accent-primary" />
           경품 · 이벤트 말 든 글 빼기
@@ -258,10 +278,9 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
 
       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
-          { label: "릴스", value: `${num(rows.length)}개`, sub: period === "all" ? "성과를 읽은 전체" : "고른 기간" },
-          { label: "평소 조회수", value: short(base), sub: "올린 지 3일 지난 릴스의 중앙값" },
-          { label: "3배 넘은 릴스", value: `${counts.x3}개`, sub: "고른 기간의 평소 기준" },
-          { label: "10배 넘은 릴스", value: `${counts.x10}개`, sub: "고른 기간의 평소 기준" },
+          { label: "게시물", value: `${num(rows.length)}개`, sub: period === "all" ? "조회수를 읽은 전체" : "고른 기간" },
+          { label: "3배 넘은 게시물", value: `${counts.x3}개`, sub: "같은 유형 평소 기준" },
+          { label: "10배 넘은 게시물", value: `${counts.x10}개`, sub: "같은 유형 평소 기준" },
         ].map((t) => (
           <div key={t.label} className="rounded-lg border bg-card p-4">
             <dt className="text-xs font-medium text-muted-foreground">{t.label}</dt>
@@ -269,14 +288,25 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
             <dd className="mt-0.5 text-xs text-muted-foreground">{t.sub}</dd>
           </div>
         ))}
+        <div className="rounded-lg border bg-card p-4">
+          <dt className="text-xs font-medium text-muted-foreground">유형별 평소 조회수</dt>
+          <dd className="mt-1.5 space-y-0.5 text-sm">
+            {formats.map((f) => (
+              <p key={f} className="flex items-baseline justify-between gap-2">
+                <span className="text-muted-foreground">{FORMAT_LABEL[f]}</span>
+                <b className="font-semibold tabular-nums">{short(bases.get(f))}</b>
+              </p>
+            ))}
+          </dd>
+        </div>
       </dl>
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <section aria-label="언제 터졌나" className="rounded-lg border bg-card p-4">
           <h2 className="text-[15px] font-semibold">언제 터졌나</h2>
-          <p className="text-[13px] text-muted-foreground">점 하나가 릴스 하나예요. 점선이 평소 조회수, 파란 점이 3배를 넘은 릴스예요. 세로축은 한 칸에 10배씩 커져요.</p>
+          <p className="text-[13px] text-muted-foreground">점 하나가 게시물 하나예요. 파란 점은 같은 유형 평소의 3배를 넘은 게시물이에요. 유형을 고르면 평소 조회수가 점선으로 나와요. 세로축은 한 칸에 10배씩 커져요.</p>
           <div className="mt-3">
-            <PostTimeline rows={rows} base={base} from={from} now={now} />
+            <PostTimeline rows={rows} base={formatPick === "all" ? null : bases.get(formatPick) ?? null} from={from} now={now} />
           </div>
         </section>
 
@@ -326,7 +356,7 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
       </div>
 
       {shown.length === 0 ? (
-        <p className="rounded-md bg-surface-2 px-3 py-6 text-center text-[13px] text-muted-foreground">이 기간에 해당하는 릴스가 없어요. 기간이나 터진 정도를 바꿔 보세요.</p>
+        <p className="rounded-md bg-surface-2 px-3 py-6 text-center text-[13px] text-muted-foreground">이 기간에 해당하는 게시물이 없어요. 기간이나 터진 정도를 바꿔 보세요.</p>
       ) : view === "card" ? (
         <ul className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {shown.slice(0, limit).map((r, i) => (
@@ -347,13 +377,13 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
       <details className="rounded-lg border bg-card px-4 py-3 text-xs text-muted-foreground">
         <summary className="cursor-pointer text-[13px] font-medium text-ink-2">이 숫자를 읽는 법</summary>
         <ul className="mt-2 list-disc space-y-1 pl-4">
-          <li>조회수는 계정 인사이트 값이에요. 공개 조회수가 10% 넘게 크면 &quot;광고 포함 추정&quot;으로 표시해요. 공개 조회수는 최근 릴스만 읽어서 옛 릴스는 판단하지 않아요.</li>
-          <li>배수는 조회수 ÷ 고른 기간의 평소 조회수예요. 기간을 바꾸면 배수도 바뀌어요.</li>
-          <li>공유 · 저장 비율은 도달 1,000명당 몇 명인지예요. 도달이 조회수의 10%도 안 되는 옛 릴스는 도달 값이 깨진 것으로 보고 비율을 빼요.</li>
+          <li>조회수는 계정 인사이트 값이에요. 공개 조회수가 10% 넘게 크면 &quot;광고 포함 추정&quot;으로 표시해요. 공개 조회수는 최근 릴스만 읽어서 옛 릴스와 사진 · 캐러셀은 판단하지 않아요.</li>
+          <li>배수는 조회수 ÷ 고른 기간의 같은 유형 평소 조회수예요. 사진 · 캐러셀과 릴스는 조회수 크기가 달라 따로 잡아요. 기간을 바꾸면 배수도 바뀌어요.</li>
+          <li>공유 · 저장 비율은 도달 1,000명당 몇 명인지예요. 도달이 조회수의 10%도 안 되는 옛 게시물은 도달 값이 깨진 것으로 보고 비율을 빼요.</li>
           <li>&quot;경품 · 이벤트 말&quot; · &quot;댓글 요청 글&quot;은 캡션 단어로 나눠 할인 글도 섞일 수 있어요. 댓글 요청 글은 댓글이 많이 늘어서 댓글 수를 인기로 읽으면 안 돼요.</li>
           <li>제목은 캡션 앞부분이에요. 영상 첫 마디 · 3초 유지율 · 게시물별 팔로우는 인스타가 주지 않아요.</li>
-          <li>표지는 3배 넘은 릴스와 최근 릴스 위주로 보관해요. 나머지는 표지 없이 나올 수 있어요.</li>
-          <li>피드 사진 · 캐러셀은 빠져 있어요. 릴스만 비교해요.</li>
+          <li>표지는 잘된 게시물과 최근 게시물 위주로 보관해요. 나머지는 표지 없이 나올 수 있어요.</li>
+          <li>2024년 이전 사진 · 캐러셀은 인스타가 조회수를 주지 않아 뺐어요{data.skipped > 0 && ` (${num(data.skipped)}개)`}. 조회수가 없는 게시물도 함께 빠져요. 스토리는 인스타 게시물 목록에 나오지 않아요.</li>
         </ul>
       </details>
     </div>

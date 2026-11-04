@@ -1,9 +1,9 @@
 name: post-history
 
-# 게시물 성과 워커(worker/sync-post-history.ts) — 지난 릴스 전체 성과 · 표지 보관 · 통계와 AI 해석.
+# 게시물 성과 워커(worker/sync-post-history.ts) — 지난 게시물 성과 · 표지 보관 · 통계와 AI 해석.
 #   · schedule 매일 05:10 KST — 성과 수집(04:00) · 비교 수집(04:50) 뒤
 #   · workflow_dispatch — 수동 실행 (force_ai: 7일 안 지났어도 해석 새로)
-# 인스타는 읽기만 한다. 지난 릴스가 많으면 시간 예산(40분)을 넘긴 부분은 다음 실행이 이어 읽는다.
+# 인스타는 읽기만 한다. 지난 게시물이 많으면 시간 예산(40분)을 넘긴 부분은 다음 실행이 이어 읽는다.
 on:
   schedule:
     - cron: "10 20 * * *"
