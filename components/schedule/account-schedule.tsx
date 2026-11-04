@@ -8,7 +8,7 @@ import { SlotRuleCell, useScheduleRun, type SlotRuleCellData } from "@/component
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-// 자동 업로드 일정 "편성 관리" 탭 — 계정마다 쓸 상품 · 하루 칸, 계정 넣기 · 빼기. 규칙(하루 최대 칸 · 칸 사이 간격 · 08시 이후)은
+// 자동 콘텐츠 설정 — 계정마다 쓸 상품 · 하루 칸, 계정 넣기 · 빼기. 규칙(하루 최대 칸 · 칸 사이 간격 · 08시 이후)은
 // 서버(lib/schedule/slot-admin.ts)가 다시 확인하고, 여기서는 미리 알려 주기만 한다.
 
 export interface ScopeOptionData {
@@ -55,6 +55,7 @@ export function AccountScheduleCard({
   options,
   limits,
   canManage,
+  hideName,
 }: {
   accountId: string;
   name: string;
@@ -63,6 +64,7 @@ export function AccountScheduleCard({
   options: ScopeOptionData[];
   limits: LimitsData;
   canManage: boolean;
+  hideName?: boolean;
 }) {
   const { isPending, error, run, setError } = useScheduleRun();
   const [editScopes, setEditScopes] = useState(false);
@@ -74,10 +76,10 @@ export function AccountScheduleCard({
   const full = rules.length >= limits.maxSlots;
 
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label={`@${name} 편성`}>
+    <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={`@${name} 쓸 상품과 하루 칸`}>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1.5">
-          <h3 className="text-[15px] font-semibold">@{name}</h3>
+          {!hideName && <h3 className="text-[15px] font-semibold">@{name}</h3>}
           {editScopes ? (
             <div className="space-y-2">
               <ScopeChecks options={options} value={scopeValue} onChange={setScopeValue} />
@@ -140,7 +142,7 @@ export function AccountScheduleCard({
               })
             }
           >
-            <UserMinus className="size-4" /> 편성에서 빼기
+            <UserMinus className="size-4" /> 계정 빼기
           </Button>
         )}
       </header>
@@ -187,7 +189,7 @@ export function AccountScheduleCard({
 
       <ConfirmDialog
         open={confirm !== null}
-        title={`@${name} 계정을 편성에서 뺄까요?`}
+        title={`@${name} 계정을 자동 콘텐츠에서 뺄까요?`}
         danger={(confirm?.plans ?? 0) > 0}
         confirmLabel={confirm && confirm.plans > 0 ? "그래도 빼고 모두 취소" : "빼기"}
         pending={isPending}
@@ -198,7 +200,7 @@ export function AccountScheduleCard({
           <p className="rounded-md bg-risk-soft px-3 py-2 font-semibold text-risk">예약된 발행이 {confirm.scheduled}건 있어요. 빼면 예약이 취소돼 올라가지 않아요.</p>
         )}
         <p>
-          {confirm && confirm.plans > 0 ? `앞으로의 기획 ${confirm.plans}개를 모두 취소하고, ` : ""}이 계정의 칸 {rules.length}개와 쓸 상품 설정을 지워요. 지난 기획 · 발행 기록은
+          {confirm && confirm.plans > 0 ? `앞으로의 기획 ${confirm.plans}개를 모두 취소하고, ` : ""}이 계정의 칸 {rules.length}개를 지워요. 지난 기획 · 발행 기록은
           남고, 계정 연결도 그대로예요.
         </p>
       </ConfirmDialog>
@@ -232,7 +234,7 @@ export function AddAccountPanel({
         <Button variant="outline" onClick={() => setOpen(true)} disabled={candidates.length === 0}>
           <UserPlus className="size-4" /> 계정 넣기
         </Button>
-        {candidates.length === 0 && <p className="text-xs text-muted-foreground">연결된 인스타그램 계정이 모두 편성에 있어요.</p>}
+        {candidates.length === 0 && <p className="text-xs text-muted-foreground">연결된 인스타그램 계정을 모두 넣었어요.</p>}
       </div>
     );
 
@@ -251,7 +253,7 @@ export function AddAccountPanel({
       }}
     >
       <div className="flex items-center justify-between">
-        <h3 className="text-[15px] font-semibold">편성에 계정 넣기</h3>
+        <h3 className="text-[15px] font-semibold">자동 콘텐츠에 계정 넣기</h3>
         <Button type="button" size="icon" variant="ghost" className="size-8" aria-label="닫기" onClick={() => setOpen(false)}>
           <X className="size-4" />
         </Button>
@@ -302,7 +304,7 @@ export function AddAccountPanel({
       {error && <p className="text-xs text-risk">{error}</p>}
       <div className="flex gap-2">
         <Button type="submit" disabled={isPending || scopes.length === 0}>
-          편성에 넣기
+          넣기
         </Button>
         <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
           취소

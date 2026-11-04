@@ -234,8 +234,10 @@ async function main() {
       const cuts = ((req.cuts ?? []) as Cut[]).filter((c) => !c.skipped).sort((a, b) => a.no - b.no);
       if (!cuts.length) throw new Error("편집할 컷이 없어요");
       const clips = (req.clips ?? []) as Clip[];
-      const speaks = acc?.role_focus === "PERSON" || cuts.some((c) => c.voice?.trim());
       const concept = await loadAccountConcept(service, plan.social_account_id);
+      // 영상 방향은 직접 촬영 값만 읽는다(0043). 사람 중심이면 촬영본의 말을 쓰고, 아니면 AI 음성을 쓴다
+      const shootRole = concept.shootRole;
+      const speaks = shootRole === "PERSON" || cuts.some((c) => c.voice?.trim());
       const style = concept.editStyle;
 
       const fileOf = new Map<number, string>();
@@ -277,7 +279,7 @@ async function main() {
               narration: cut.narration,
             });
             // 사람이 나오는 계정만 원본의 말을 받아 적는다
-            if (acc?.role_focus === "PERSON" && k.hasAudio) k.transcript = (await transcribeWords(file, workDir, cut.voice)).segments;
+            if (shootRole === "PERSON" && k.hasAudio) k.transcript = (await transcribeWords(file, workDir, cut.voice)).segments;
             kitClips.push(k);
           }
           const hook = script.hooks?.[script.chosen_hook ?? 0];
@@ -287,7 +289,7 @@ async function main() {
             readService: service,
             planId: plan.id,
             accountName: acc?.display_name ?? "",
-            roleFocus: acc?.role_focus ?? null,
+            roleFocus: shootRole,
             facts,
             rules,
             clips: kitClips,

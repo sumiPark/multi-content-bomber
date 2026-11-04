@@ -19,6 +19,7 @@ export type Database = {
           auto_concept: string
           auto_endings: string[]
           auto_hooks: string[]
+          auto_role_focus: string | null
           auto_tone: string
           auto_video_style: string
           organization_id: string
@@ -27,6 +28,7 @@ export type Database = {
           shoot_edit_style: string
           shoot_endings: string[]
           shoot_hooks: string[]
+          shoot_role_focus: string | null
           shoot_tone: string
           social_account_id: string
           updated_at: string
@@ -36,6 +38,7 @@ export type Database = {
           auto_concept?: string
           auto_endings?: string[]
           auto_hooks?: string[]
+          auto_role_focus?: string | null
           auto_tone?: string
           auto_video_style?: string
           organization_id: string
@@ -44,6 +47,7 @@ export type Database = {
           shoot_edit_style?: string
           shoot_endings?: string[]
           shoot_hooks?: string[]
+          shoot_role_focus?: string | null
           shoot_tone?: string
           social_account_id: string
           updated_at?: string
@@ -53,6 +57,7 @@ export type Database = {
           auto_concept?: string
           auto_endings?: string[]
           auto_hooks?: string[]
+          auto_role_focus?: string | null
           auto_tone?: string
           auto_video_style?: string
           organization_id?: string
@@ -61,6 +66,7 @@ export type Database = {
           shoot_edit_style?: string
           shoot_endings?: string[]
           shoot_hooks?: string[]
+          shoot_role_focus?: string | null
           shoot_tone?: string
           social_account_id?: string
           updated_at?: string

@@ -18,8 +18,8 @@ import {
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
-// 자동 업로드 일정 "편성 관리" (slot_rules 0031, track_settings 0028) — ADMIN · MANAGER. 칸은 AI 자동 칸만(직접 촬영은 0042부터 칸이 아니다).
-//   촬영 설정의 계정 켜기 · 끄기(track_settings.shoot_enabled)와 계정 컨셉 저장도 여기서 한다.
+// 자동 콘텐츠 설정 · 촬영 설정의 서버 액션 (slot_rules 0031, track_settings 0028) — ADMIN · MANAGER. 칸은 AI 자동 칸만(직접 촬영은 0042부터 칸이 아니다).
+//   영상 참고 내용은 방식별로 따로 저장한다(saveAutoConceptAction · saveShootConceptAction). 쓸 상품만 함께 쓴다.
 //   · 칸: 주제 · 켜기/끄기 · 시각 · 방식 바꾸기, 칸 추가 · 삭제
 //   · 계정: 편성에 넣기(쓸 상품 + 기본 칸) · 쓸 상품 바꾸기 · 빼기
 // 시각을 바꾸면 앞으로의 기획도 새 시각으로 옮기고, 칸 · 계정을 빼면 앞으로의 기획 · 예약 발행을 취소한다
@@ -33,7 +33,7 @@ async function authorize(): Promise<{ ok: true; orgId: string; userId: string } 
   if (!user) return { ok: false, error: "로그인이 필요합니다." };
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) return { ok: false, error: "소속된 조직이 없습니다." };
-  if (profile.role !== "ADMIN" && profile.role !== "MANAGER") return { ok: false, error: "자동 업로드 일정을 바꿀 권한이 없습니다." };
+  if (profile.role !== "ADMIN" && profile.role !== "MANAGER") return { ok: false, error: "이 설정을 바꿀 권한이 없습니다." };
   return { ok: true, orgId: profile.organization_id, userId: user.id };
 }
 
@@ -59,6 +59,7 @@ function cancelMessage(c: { plans: number; jobs: number; uploading: number }): s
 
 function done(message?: string): ScheduleResult {
   revalidatePath("/schedule");
+  revalidatePath("/auto/settings");
   revalidatePath("/shoot/settings");
   revalidatePath("/shoot/plans");
   revalidatePath("/");
@@ -126,7 +127,7 @@ export async function addSlotAction(input: { accountId: string; time: string; tr
     .eq("social_account_id", parsed.data.accountId)
     .eq("organization_id", auth.orgId)
     .maybeSingle();
-  if (!ts) return { ok: false, error: "편성에 없는 계정이에요." };
+  if (!ts) return { ok: false, error: "자동 콘텐츠에 없는 계정이에요." };
   const rules = await accountRules(service, parsed.data.accountId);
   const invalid = validateSlots([...rules.map((r) => ({ time: r.slot_time, track: r.track })), { time: parsed.data.time, track: parsed.data.track }]);
   if (invalid) return { ok: false, error: invalid };
@@ -160,7 +161,7 @@ export async function removalImpactAction(input: { accountId?: string; ruleId?: 
   }
   if (!input.accountId) return { ok: false, error: "입력값이 올바르지 않아요." };
   const { data: ts } = await service.from("track_settings").select("social_account_id").eq("social_account_id", input.accountId).eq("organization_id", auth.orgId).maybeSingle();
-  if (!ts) return { ok: false, error: "편성에 없는 계정이에요." };
+  if (!ts) return { ok: false, error: "자동 콘텐츠에 없는 계정이에요." };
   return { ok: true, ...(await futureCounts(service, input.accountId)) };
 }
 
@@ -208,10 +209,10 @@ export async function addAccountAction(input: { accountId: string; scopes: strin
     .eq("organization_id", auth.orgId)
     .maybeSingle();
   if (!acc || acc.disconnected_at) return { ok: false, error: "연결된 계정을 찾지 못했어요." };
-  if (acc.platform !== "INSTAGRAM") return { ok: false, error: "지금은 인스타그램 계정만 편성에 넣을 수 있어요." };
+  if (acc.platform !== "INSTAGRAM") return { ok: false, error: "지금은 인스타그램 계정만 넣을 수 있어요." };
   const { data: exists } = await service.from("track_settings").select("social_account_id, product_scopes").eq("social_account_id", acc.id).maybeSingle();
   // 직접 촬영만 쓰던 계정은 설정이 이미 있다 — 칸이 있어야 이미 편성에 있는 계정이다
-  if (exists && (await accountRules(service, acc.id)).length > 0) return { ok: false, error: "이미 편성에 있는 계정이에요." };
+  if (exists && (await accountRules(service, acc.id)).length > 0) return { ok: false, error: "이미 자동 콘텐츠에 있는 계정이에요." };
 
   const { error } = exists
     ? await service.from("track_settings").update({ product_scopes: scopesJson(parsed.data.scopes) }).eq("social_account_id", acc.id)
@@ -229,7 +230,7 @@ export async function addAccountAction(input: { accountId: string; scopes: strin
     return { ok: false, error: `칸을 만들지 못했어요: ${rErr.message}` };
   }
   for (const slot of parsed.data.slots) await clearScheduleCancelled(service, acc.id, slot.time);
-  return done(`@${acc.display_name ?? ""} 계정을 편성에 넣었어요. 다음 상품 제안(매일 오전 9시)부터 칸이 채워져요.`);
+  return done(`@${acc.display_name ?? ""} 계정을 넣었어요. 다음 상품 제안(매일 오전 9시)부터 칸이 채워져요.`);
 }
 
 export async function updateScopesAction(input: { accountId: string; scopes: string[] }): Promise<ScheduleResult> {
@@ -244,7 +245,7 @@ export async function updateScopesAction(input: { accountId: string; scopes: str
     .eq("organization_id", auth.orgId)
     .select("social_account_id");
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
-  if (!data?.length) return { ok: false, error: "편성에 없는 계정이에요." };
+  if (!data?.length) return { ok: false, error: "자동 콘텐츠에 없는 계정이에요." };
   return done("다음 기획부터 이 상품들에서 골라요.");
 }
 
@@ -260,7 +261,7 @@ export async function removeAccountAction(input: { accountId: string }): Promise
     .eq("social_account_id", parsed.data.accountId)
     .eq("organization_id", auth.orgId)
     .maybeSingle();
-  if (!ts) return { ok: false, error: "편성에 없는 계정이에요." };
+  if (!ts) return { ok: false, error: "자동 콘텐츠에 없는 계정이에요." };
   // 계정 설정 · 칸을 먼저 지운다(기획 워커가 더는 이 계정을 돌지 않는다) → 앞으로의 기획 · 예약 발행 취소(지난 기록은 남긴다)
   // 직접 촬영을 쓰는 계정은 설정(쓸 상품)을 함께 쓰므로 칸만 지운다
   if (!ts.shoot_enabled) {
@@ -270,7 +271,7 @@ export async function removeAccountAction(input: { accountId: string }): Promise
   await service.from("slot_rules").delete().eq("social_account_id", ts.social_account_id);
   const cancelled = await cancelPlans(service, await futurePlans(service, ts.social_account_id), "편성에서 계정을 빼 취소");
   const tail = cancelMessage(cancelled);
-  return done(`@${ts.social_accounts?.display_name ?? ""} 계정을 편성에서 뺐어요.${tail ? ` ${tail}` : ""}`);
+  return done(`@${ts.social_accounts?.display_name ?? ""} 계정을 자동 콘텐츠에서 뺐어요.${tail ? ` ${tail}` : ""}`);
 }
 
 // ── 촬영 설정: 직접 촬영 기획을 만들 계정 ─────────────────────────────────────
@@ -337,13 +338,23 @@ const phraseLines = z
     const problem = l.map(templateProblem).find(Boolean);
     if (problem) ctx.addIssue({ code: "custom", message: problem });
   });
-const conceptSchema = z.object({
+const roleSchema = z
+  .enum(["", "PRODUCT", "PERSON"])
+  .transform((v) => (v === "" ? null : v));
+
+const autoConceptSchema = z.object({
   accountId: z.string().uuid(),
+  autoRole: roleSchema,
   autoConcept: conceptText,
   autoHooks: phraseLines,
   autoEndings: phraseLines,
   autoTone: conceptText,
   autoVideoStyle: conceptText,
+});
+
+const shootConceptSchema = z.object({
+  accountId: z.string().uuid(),
+  shootRole: roleSchema,
   shootConcept: conceptText,
   shootHooks: phraseLines,
   shootEndings: phraseLines,
@@ -351,27 +362,55 @@ const conceptSchema = z.object({
   shootEditStyle: conceptText,
 });
 
-/**
- * 계정 컨셉 저장(0038) — 다음 기획부터 AI가 읽는다. 편집 스타일 글이 바뀌었을 때만 AI가 편집 값으로 다시 옮긴다.
- * 옮기기가 실패해도 글은 저장하고, 옛 글의 값이 남지 않게 편집 값은 비운다(기본 편집).
- */
-export async function saveConceptAction(input: z.input<typeof conceptSchema>): Promise<ScheduleResult> {
-  const parsed = conceptSchema.safeParse(input);
+async function ownedAccount(service: Service, accountId: string, orgId: string): Promise<boolean> {
+  const { data } = await service.from("social_accounts").select("id").eq("id", accountId).eq("organization_id", orgId).maybeSingle();
+  return !!data;
+}
+
+/** 자동 콘텐츠 설정 저장 — AI 자동 값만 쓴다. 직접 촬영 값은 건드리지 않는다. 다음 상품 제안 · 대본부터 AI가 읽는다. */
+export async function saveAutoConceptAction(input: z.input<typeof autoConceptSchema>): Promise<ScheduleResult> {
+  const parsed = autoConceptSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
   const auth = await authorize();
   if (!auth.ok) return auth;
   const service = createServiceClient();
-  const { accountId, autoConcept, autoHooks, autoEndings, autoTone, autoVideoStyle, shootConcept, shootHooks, shootEndings, shootTone, shootEditStyle } = parsed.data;
-  const { data: account } = await service.from("social_accounts").select("id").eq("id", accountId).eq("organization_id", auth.orgId).maybeSingle();
-  if (!account) return { ok: false, error: "계정을 찾을 수 없어요." };
-  const { data: prev } = await service.from("account_concepts").select("shoot_edit_style, shoot_edit_params").eq("social_account_id", accountId).maybeSingle();
+  const d = parsed.data;
+  if (!(await ownedAccount(service, d.accountId, auth.orgId))) return { ok: false, error: "계정을 찾을 수 없어요." };
+  const { error } = await service.from("account_concepts").upsert({
+    social_account_id: d.accountId,
+    organization_id: auth.orgId,
+    auto_role_focus: d.autoRole,
+    auto_concept: d.autoConcept,
+    auto_hooks: d.autoHooks,
+    auto_endings: d.autoEndings,
+    auto_tone: d.autoTone,
+    auto_video_style: d.autoVideoStyle,
+    updated_by: auth.userId,
+  });
+  if (error) return { ok: false, error: error.message };
+  return done("저장했어요. 다음에 쓰는 대본부터 AI가 읽어요.");
+}
+
+/**
+ * 촬영 설정 저장 — 직접 촬영 값만 쓴다. 다음 기획부터 AI가 읽는다. 편집 스타일 글이 바뀌었을 때만 AI가 편집 값으로 다시 옮긴다.
+ * 옮기기가 실패해도 글은 저장하고, 옛 글의 값이 남지 않게 편집 값은 비운다(기본 편집).
+ */
+export async function saveShootConceptAction(input: z.input<typeof shootConceptSchema>): Promise<ScheduleResult> {
+  const parsed = shootConceptSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const d = parsed.data;
+  if (!(await ownedAccount(service, d.accountId, auth.orgId))) return { ok: false, error: "계정을 찾을 수 없어요." };
+  const { data: prev } = await service.from("account_concepts").select("shoot_edit_style, shoot_edit_params").eq("social_account_id", d.accountId).maybeSingle();
 
   let params: Json | null = prev?.shoot_edit_params ?? null;
   let message: string | undefined;
-  if (!shootEditStyle) params = null;
-  else if (shootEditStyle !== prev?.shoot_edit_style || params == null) {
+  if (!d.shootEditStyle) params = null;
+  else if (d.shootEditStyle !== prev?.shoot_edit_style || params == null) {
     try {
-      params = (await interpretEditStyle(shootEditStyle)) as unknown as Json;
+      params = (await interpretEditStyle(d.shootEditStyle)) as unknown as Json;
     } catch (e) {
       console.error("[schedule] 편집 스타일 읽기 실패:", e);
       params = null;
@@ -380,21 +419,17 @@ export async function saveConceptAction(input: z.input<typeof conceptSchema>): P
   }
 
   const { error } = await service.from("account_concepts").upsert({
-    social_account_id: accountId,
+    social_account_id: d.accountId,
     organization_id: auth.orgId,
-    auto_concept: autoConcept,
-    auto_hooks: autoHooks,
-    auto_endings: autoEndings,
-    auto_tone: autoTone,
-    auto_video_style: autoVideoStyle,
-    shoot_concept: shootConcept,
-    shoot_hooks: shootHooks,
-    shoot_endings: shootEndings,
-    shoot_tone: shootTone,
-    shoot_edit_style: shootEditStyle,
+    shoot_role_focus: d.shootRole,
+    shoot_concept: d.shootConcept,
+    shoot_hooks: d.shootHooks,
+    shoot_endings: d.shootEndings,
+    shoot_tone: d.shootTone,
+    shoot_edit_style: d.shootEditStyle,
     shoot_edit_params: params,
     updated_by: auth.userId,
   });
   if (error) return { ok: false, error: error.message };
-  return done(message ?? "저장했어요. 다음에 쓰는 대본부터 AI가 읽어요.");
+  return done(message ?? "저장했어요. 다음 기획과 대본부터 AI가 읽어요.");
 }

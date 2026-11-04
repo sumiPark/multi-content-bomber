@@ -108,10 +108,17 @@ async function main() {
       const result = await planShootIdeas(
         {
           service,
-          concept: [concept.shootConcept, concept.shootTone && `말투 · 분위기: ${concept.shootTone}`].filter(Boolean).join("\n"),
+          concept: [
+            concept.shootConcept,
+            concept.shootTone && `말투 · 분위기: ${concept.shootTone}`,
+            // 사람이 저장한 후킹 문구 — 초안 첫 문장도 이 틀을 따라야 고른 뒤 컷 리스트와 어긋나지 않는다
+            concept.shootHooks.length > 0 && `저장한 후킹 문구(draft.hook은 이 중 하나의 틀을 쓰고 중괄호만 채운다): ${concept.shootHooks.join(" / ")}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
           accountId: st.social_account_id,
           accountName: acc.display_name ?? "",
-          roleFocus: acc.role_focus,
+          roleFocus: concept.shootRole,
           roleNote: acc.role_note,
           scopes,
           repeatGapDays: st.repeat_gap_days,

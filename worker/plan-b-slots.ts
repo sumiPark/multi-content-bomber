@@ -82,7 +82,7 @@ async function main() {
           concept: [concept.autoConcept, concept.autoTone && `말투 · 분위기: ${concept.autoTone}`].filter(Boolean).join("\n"),
           accountId: st.social_account_id,
           accountName: acc.display_name ?? "",
-          roleFocus: acc.role_focus,
+          roleFocus: concept.autoRole,
           roleNote: acc.role_note,
           scopes,
           repeatGapDays: st.repeat_gap_days,

@@ -99,6 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
       // 자동으로 생성 · 업로드되는 일정만(2026-11-04 편성표에서 이름을 바꾸고 이 묶음으로 옮김). 계정별 하루 칸 · 주제 · 주간 진행
       { href: "/schedule", label: "자동 업로드 일정", icon: CalendarClock },
       { href: "/auto/confirm", label: "AI 자동 업로드", icon: CalendarCheck },
+      { href: "/auto/settings", label: "자동 콘텐츠 설정", icon: SlidersHorizontal },
       { href: "/products", label: "상품 분석", icon: Package },
       { href: "/rules", label: "광고 문구 규칙", icon: ShieldCheck },
     ],

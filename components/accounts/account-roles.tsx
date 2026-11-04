@@ -73,7 +73,7 @@ export function AccountRolesCard({
       <CardHeader className="pb-3">
         <CardTitle className="text-base">인스타 계정 역할 · 성과 권한</CardTitle>
         <CardDescription>
-          역할은 AI가 계정마다 영상 방향을 정할 때 씁니다. 성과 권한이 있어야
+          역할은 프로필 점수와 계정 분석에서 계정 성격을 볼 때 씁니다. 영상 방향은 자동 콘텐츠 설정 · 촬영 설정에서 방식별로 따로 정해요. 성과 권한이 있어야
           조회 · 도달 · 저장 · 공유를 분석할 수 있어요.
           {missing > 0 && (
             <>

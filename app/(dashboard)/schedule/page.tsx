@@ -1,22 +1,16 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { AccountConceptCard } from "@/components/schedule/account-concept";
-import { AccountScheduleCard, AddAccountPanel } from "@/components/schedule/account-schedule";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { addDays, kstDate } from "@/lib/automation/time";
 import { cellStatus, TONE_LABEL, type CellStatus, type CellTone } from "@/lib/schedule/cell-status";
-import { conceptCardData } from "@/lib/schedule/concept-data";
-import { AUTO_EARLIEST, MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, trackTimesLabel } from "@/lib/schedule/slot-admin";
+import { trackTimesLabel } from "@/lib/schedule/slot-admin";
 import { cn } from "@/lib/utils";
 
 // 자동 업로드 일정(주소는 예전 편성표 그대로 /schedule) — 자동으로 생성 · 업로드되는 칸만 본다. 직접 촬영은 직접 촬영 메뉴에서.
-// 탭 세 개(주소 ?tab=으로 구분 — 새로 고침 · 링크 공유해도 그 탭):
-//   주간 현황  계정 × 하루 칸이 한 주 동안 어디까지 왔는지
-//   편성 관리  계정 넣기 · 빼기, 쓸 상품, 칸 시각 · 주제 · 켜기/끄기. AI 자동 업로드의 상품 선정이 이 표를 보고 만들어진다.
-//   계정 컨셉  계정마다 AI 자동 업로드의 방향과 스타일(0038). 상품 선정 · 대본이 읽는다.
+// 계정 × 하루 칸이 한 주 동안 어디까지 왔는지만 본다. 계정 · 칸 · 참고 내용은 자동 콘텐츠 설정(/auto/settings)에서 고친다.
 
 export const metadata = { title: "자동 업로드 일정 | MCB" };
 
@@ -53,18 +47,18 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   if (!user) redirect("/login");
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) redirect("/onboarding");
-  const canManage = profile.role === "ADMIN" || profile.role === "MANAGER";
   const supabase = await getServerSupabase();
 
-  const { week, tab: tabParam } = await searchParams;
-  const tab = tabParam === "manage" ? "manage" : tabParam === "concept" ? "concept" : "board";
+  const { week, tab } = await searchParams;
+  // 예전 탭 주소(편성 관리 · 계정 컨셉)는 자동 콘텐츠 설정으로 옮겨 갔다
+  if (tab === "manage" || tab === "concept") redirect("/auto/settings");
   const today = kstDate(0);
   const start = mondayOf(week && /^\d{4}-\d{2}-\d{2}$/.test(week) && !Number.isNaN(Date.parse(week)) ? week : today);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const end = days[6];
   const thisWeek = mondayOf(today);
 
-  const [{ data: ruleRows }, { data: planRows }, { data: settingRows }, { data: igAccounts }, { data: conceptRows }] = await Promise.all([
+  const [{ data: ruleRows }, { data: planRows }, { data: settingRows }] = await Promise.all([
     supabase
       .from("slot_rules")
       .select("id, social_account_id, slot_time, track, active, topic, social_accounts(display_name, is_active, disconnected_at)")
@@ -76,27 +70,20 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
       .eq("track", "B")
       .gte("slot_date", start)
       .lte("slot_date", end),
-    supabase.from("track_settings").select("social_account_id, product_scopes, shoot_enabled, social_accounts(display_name, disconnected_at, role_focus)"),
-    supabase.from("social_accounts").select("id, display_name").eq("platform", "INSTAGRAM").is("disconnected_at", null).order("display_name"),
-    supabase.from("account_concepts").select("social_account_id, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at"),
+    supabase.from("track_settings").select("social_account_id, shoot_enabled, social_accounts(display_name, disconnected_at)"),
   ]);
 
-  // 편성 계정(track_settings) — 칸이 아직 없는 계정도 편성 관리에 보인다. 연결 끊긴 계정은 뺀다.
-  // 직접 촬영만 쓰는 계정(칸 없음 + shoot_enabled)은 이 화면 소속이 아니다
+  // 직접 촬영만 쓰는 계정(칸 없음 + shoot_enabled)은 이 화면 소속이 아니다. 연결 끊긴 계정은 뺀다
   const rulesByAccount = new Set((ruleRows ?? []).map((r) => r.social_account_id));
-  const accounts = new Map<string, { name: string; role: string | null; scopes: string[]; rules: NonNullable<typeof ruleRows> }>();
+  const accounts = new Map<string, { name: string; rules: NonNullable<typeof ruleRows> }>();
   for (const t of settingRows ?? []) {
     if (!t.social_accounts || t.social_accounts.disconnected_at) continue;
     if (t.shoot_enabled && !rulesByAccount.has(t.social_account_id)) continue;
-    const scopes = ((t.product_scopes ?? []) as { shop: string; kind: string }[]).map((x) => `${x.shop}:${x.kind}`);
-    const role = t.social_accounts.role_focus === "PERSON" ? "사람 중심" : t.social_accounts.role_focus === "PRODUCT" ? "상품 중심" : null;
-    accounts.set(t.social_account_id, { name: t.social_accounts.display_name ?? "", role, scopes, rules: [] });
+    accounts.set(t.social_account_id, { name: t.social_accounts.display_name ?? "", rules: [] });
   }
   for (const r of ruleRows ?? []) accounts.get(r.social_account_id)?.rules.push(r);
   const accountList = [...accounts.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name));
-  const candidates = (igAccounts ?? []).filter((a) => !accounts.has(a.id)).map((a) => ({ id: a.id, name: a.display_name ?? "" }));
   const activeRules = (ruleRows ?? []).filter((r) => r.active && accounts.has(r.social_account_id));
-  const limits = { maxSlots: MAX_SLOTS_PER_DAY, minGapHours: MIN_GAP_MINUTES / 60, autoEarliest: AUTO_EARLIEST };
 
   const planOf = new Map((planRows ?? []).map((p) => [`${p.social_account_id}|${p.slot_date}|${p.slot_time}`, p]));
 
@@ -119,17 +106,16 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
   }));
   const total = counts.todo + counts.wait + counts.ok + counts.risk + counts.idle;
 
-  const conceptOf = new Map((conceptRows ?? []).map((c) => [c.social_account_id, c]));
-  const conceptCards = accountList.map(([accountId, acc]) =>
-    conceptCardData({ accountId, name: acc.name, role: acc.role, autoSlots: acc.rules.filter((r) => r.active).length, row: conceptOf.get(accountId) }),
-  );
-
   return (
     <main className="space-y-6 p-4 sm:p-6">
       <header>
         <h1 className="text-xl font-bold tracking-[-0.01em]">자동 업로드 일정</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          AI가 자동으로 만들어 올리는 일정이에요. 지금 {trackTimesLabel(activeRules, "B")}. 칸마다 주제를 적어 두면 AI가 상품을 고를 때 참고해요. 직접 찍어 올리는 영상은{" "}
+          AI가 자동으로 만들어 올리는 일정이에요. 지금 {trackTimesLabel(activeRules, "B")}. 계정 · 칸 · 참고 내용은{" "}
+          <Link href="/auto/settings" className="underline underline-offset-2">
+            자동 콘텐츠 설정
+          </Link>
+          에서 바꿔요. 직접 찍어 올리는 영상은{" "}
           <Link href="/shoot/plans" className="underline underline-offset-2">
             촬영 기획 고르기
           </Link>
@@ -137,36 +123,12 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
         </p>
       </header>
 
-      <nav className="inline-flex rounded-lg border bg-surface-2 p-1" aria-label="자동 업로드 일정 보기">
-        {(
-          [
-            { key: "board", label: "주간 현황", href: "/schedule", count: null },
-            { key: "manage", label: "편성 관리", href: "/schedule?tab=manage", count: accountList.length },
-            { key: "concept", label: "계정 컨셉", href: "/schedule?tab=concept", count: null },
-          ] as const
-        ).map((t) => (
-          <Link
-            key={t.key}
-            href={t.href}
-            aria-current={tab === t.key ? "page" : undefined}
-            className={cn(
-              "inline-flex h-9 items-center gap-1.5 rounded-md px-4 text-[13px] transition-colors",
-              tab === t.key ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t.label}
-            {t.count != null && <span className="text-xs font-medium tabular-nums text-muted-foreground">계정 {t.count}</span>}
-          </Link>
-        ))}
-      </nav>
-
-      {tab === "board" ? (
-        accountList.length === 0 ? (
+      {accountList.length === 0 ? (
           <Card>
             <CardContent className="space-y-3 py-10 text-center text-sm text-muted-foreground">
-              <p>편성된 계정이 없어요.</p>
-              <Link href="/schedule?tab=manage" className={buttonVariants({ variant: "outline", size: "sm" })}>
-                편성 관리에서 계정 넣기
+              <p>자동 콘텐츠를 만들 계정이 없어요.</p>
+              <Link href="/auto/settings" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+                자동 콘텐츠 설정에서 계정 넣기
               </Link>
             </CardContent>
           </Card>
@@ -265,58 +227,6 @@ export default async function SchedulePage({ searchParams }: { searchParams: Pro
                   </p>
                 </CardContent>
               </Card>
-        )
-      ) : tab === "concept" ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>계정 컨셉</CardTitle>
-                <CardDescription className="mt-1">
-                  계정마다 AI 자동 업로드의 후킹 문구 · 말투 · 스타일을 저장해 두면, AI가 상품 선정 · 대본에 계속 씁니다. 다음에 쓰는 대본부터 적용되고, 이미 쓴 대본은 그대로예요. 광고 문구 규칙과 상품 사실이 항상 먼저예요. 직접 촬영의 컨셉은 촬영 설정에서 따로 저장해요.
-                  {!canManage && " 관리자 · 매니저만 바꿀 수 있어요."}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {conceptCards.length === 0 ? (
-                  <p className="rounded-md border border-dashed px-4 py-6 text-center text-[13px] text-muted-foreground">
-                    편성에 넣은 계정이 없어요.{" "}
-                    <Link href="/schedule?tab=manage" className="underline underline-offset-2">
-                      편성 관리
-                    </Link>
-                    에서 먼저 계정을 넣어 주세요.
-                  </p>
-                ) : (
-                  conceptCards.map((c) => <AccountConceptCard key={c.accountId} data={c} canManage={canManage} mode="auto" />)
-                )}
-              </CardContent>
-            </Card>
-      ) : (
-            <Card>
-              <CardHeader className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <CardTitle>편성 관리</CardTitle>
-                  <CardDescription className="mt-1">
-                    계정마다 쓸 상품과 하루 칸(시각 · 주제)을 정해요. 시각을 바꾸면 앞으로의 기획도 새 시각으로 옮겨요. 끈 칸은 기획하지 않아요. 하루{" "}
-                    {MAX_SLOTS_PER_DAY}칸까지, 같은 계정 칸 사이 {MIN_GAP_MINUTES / 60}시간 이상, {AUTO_EARLIEST} 이후. 쓸 상품은 직접 촬영과 함께 써요.
-                    {!canManage && " 관리자 · 매니저만 바꿀 수 있어요."}
-                  </CardDescription>
-                </div>
-                {canManage && <AddAccountPanel candidates={candidates} options={SCOPE_OPTIONS} limits={limits} />}
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {accountList.map(([accountId, acc]) => (
-                  <AccountScheduleCard
-                    key={accountId}
-                    accountId={accountId}
-                    name={acc.name}
-                    scopes={acc.scopes}
-                    rules={acc.rules.map((r) => ({ id: r.id, time: r.slot_time, track: r.track, topic: r.topic, active: r.active }))}
-                    options={SCOPE_OPTIONS}
-                    limits={limits}
-                    canManage={canManage}
-                  />
-                ))}
-              </CardContent>
-            </Card>
       )}
     </main>
   );

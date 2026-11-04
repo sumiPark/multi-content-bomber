@@ -1,28 +1,27 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { Save } from "lucide-react";
-import { saveConceptAction } from "@/app/(dashboard)/schedule/actions";
-import { TrackBadge, useScheduleRun } from "@/components/schedule/slot-rule-cell";
+import { saveAutoConceptAction, saveShootConceptAction } from "@/app/(dashboard)/schedule/actions";
+import { useScheduleRun } from "@/components/schedule/slot-rule-cell";
 import { Button } from "@/components/ui/button";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { Textarea } from "@/components/ui/textarea";
 
-// 계정 컨셉 — 계정마다 AI 자동 업로드(자동 업로드 일정 탭)와 직접 촬영(촬영 설정 화면)의
-// 후킹 문구 · 마지막 문구 · 말투 · 스타일 · 자유 메모를 각각의 화면에서 저장한다(0038 · 0039). 값은 한 행에 함께 저장된다.
+// 영상 만들 때 참고할 내용 — AI 자동(자동 콘텐츠 설정)과 직접 촬영(촬영 설정)은 서로 섞이지 않는다.
+// 각 화면은 자기 값만 읽고 저장하고, 각 생성 과정도 자기 값만 읽는다(0038 · 0039 · 0043). 쓸 상품만 함께 쓴다.
 // 문구는 {상품}처럼 중괄호 안만 AI가 채우고 나머지 글자는 고정된다. 편집 스타일은 저장할 때 AI가 편집 값으로 옮기고 결과를 여기 보여 준다.
 
 export interface ConceptCardData {
   accountId: string;
   name: string;
-  role: string | null;
-  autoSlots: number;
+  autoRole: string;
   autoConcept: string;
   autoHooks: string;
   autoEndings: string;
   autoTone: string;
   autoVideoStyle: string;
+  shootRole: string;
   shootConcept: string;
   shootHooks: string;
   shootEndings: string;
@@ -34,8 +33,11 @@ export interface ConceptCardData {
   updatedAt: string | null;
 }
 
-type FormKey = "autoConcept" | "autoHooks" | "autoEndings" | "autoTone" | "autoVideoStyle" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
-const FORM_KEYS: FormKey[] = ["autoConcept", "autoHooks", "autoEndings", "autoTone", "autoVideoStyle", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
+type Role = "" | "PRODUCT" | "PERSON";
+type AutoKey = "autoRole" | "autoConcept" | "autoHooks" | "autoEndings" | "autoTone" | "autoVideoStyle";
+type ShootKey = "shootRole" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
+const AUTO_KEYS: AutoKey[] = ["autoRole", "autoConcept", "autoHooks", "autoEndings", "autoTone", "autoVideoStyle"];
+const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
 
 function Field({
   label,
@@ -70,77 +72,116 @@ function Field({
   );
 }
 
+function RoleField({ value, help, onChange, disabled }: { value: string; help: string; onChange: (v: string) => void; disabled: boolean }) {
+  return (
+    <label className="block max-w-xs space-y-1">
+      <span className="text-[13px] font-semibold text-ink-2">영상 방향</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-[13px] focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+      >
+        <option value="">정하지 않음</option>
+        <option value="PRODUCT">상품 중심</option>
+        <option value="PERSON">사람 중심</option>
+      </select>
+      <span className="block text-xs text-muted-foreground">{help}</span>
+    </label>
+  );
+}
+
 const PHRASE_HELP = "한 줄에 문구 하나, 10개까지. {상품}처럼 중괄호 안은 AI가 채우고 나머지 글자는 그대로 나가요. 말과 화면 문구에 똑같이 들어가요.";
 
 export function AccountConceptCard({ data, canManage, mode, top, hideName }: { data: ConceptCardData; canManage: boolean; mode: "auto" | "shoot"; top?: React.ReactNode; hideName?: boolean }) {
   const { isPending, error, run } = useScheduleRun();
-  const [form, setForm] = useState<Record<FormKey, string>>(() => Object.fromEntries(FORM_KEYS.map((k) => [k, data[k]])) as Record<FormKey, string>);
-  const bind = (key: FormKey) => ({ value: form[key], onChange: (v: string) => setForm((f) => ({ ...f, [key]: v })), disabled: !canManage || isPending });
-  const dirty = FORM_KEYS.some((k) => form[k] !== data[k]);
-  const editDirty = form.shootEditStyle !== data.shootEditStyle;
+  const keys: (AutoKey | ShootKey)[] = mode === "auto" ? AUTO_KEYS : SHOOT_KEYS;
+  const [form, setForm] = useState<Record<string, string>>(() => Object.fromEntries(keys.map((k) => [k, data[k]])));
+  const bind = (key: AutoKey | ShootKey) => ({ value: form[key], onChange: (v: string) => setForm((f) => ({ ...f, [key]: v })), disabled: !canManage || isPending });
+  const dirty = keys.some((k) => form[k] !== data[k]);
+  const editDirty = mode === "shoot" && form.shootEditStyle !== data.shootEditStyle;
+
+  const save = () =>
+    run(() =>
+      mode === "auto"
+        ? saveAutoConceptAction({
+            accountId: data.accountId,
+            autoRole: form.autoRole as Role,
+            autoConcept: form.autoConcept,
+            autoHooks: form.autoHooks,
+            autoEndings: form.autoEndings,
+            autoTone: form.autoTone,
+            autoVideoStyle: form.autoVideoStyle,
+          })
+        : saveShootConceptAction({
+            accountId: data.accountId,
+            shootRole: form.shootRole as Role,
+            shootConcept: form.shootConcept,
+            shootHooks: form.shootHooks,
+            shootEndings: form.shootEndings,
+            shootTone: form.shootTone,
+            shootEditStyle: form.shootEditStyle,
+          }),
+    );
 
   return (
-    <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={`@${data.name} 컨셉`}>
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {!hideName && <h3 className="text-[15px] font-semibold">@{data.name}</h3>}
-        <span className="text-xs text-muted-foreground">
-          계정 역할 {data.role ?? "미정"} ·{" "}
-          <Link href="/accounts" className="underline underline-offset-2">
-            계정 연동에서 바꾸기
-          </Link>
-        </span>
-      </header>
+    <section className="space-y-4 rounded-lg border bg-card p-4" aria-label={`@${data.name} ${mode === "auto" ? "자동 콘텐츠" : "직접 촬영"} 설정`}>
+      {!hideName && <h3 className="text-[15px] font-semibold">@{data.name}</h3>}
       {top}
 
       {mode === "auto" ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <p className="flex items-center gap-2 lg:col-span-2">
-            <TrackBadge track="B" />
-            <span className="text-xs text-muted-foreground">{data.autoSlots > 0 ? `하루 ${data.autoSlots}칸` : "지금 칸 없음"}</span>
-          </p>
-          <Field {...bind("autoHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 고를 때 이것만 보세요\n이거 모르고 사면 손해예요"} />
-          <Field {...bind("autoEndings")} label="마지막 문구" rows={2} max={2000} help="영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"저장해 두고 살 때 꺼내 보세요"} />
-          <Field {...bind("autoTone")} label="말투 · 분위기" help="내레이션과 캡션에 반영돼요." placeholder={"친구에게 알려 주듯 편한 존댓말, 짧게 끊어서."} />
-          <Field
-            {...bind("autoVideoStyle")}
-            label="영상 생성 스타일"
-            help="지금은 대본의 장면 설명에 반영돼요. 영상 자동 생성을 붙이면 모든 영상을 이 지시대로 만들어요."
-            placeholder={"밝은 자연광, 나무 식탁 위 클로즈업, 카메라는 천천히. 사람 얼굴은 나오지 않게."}
-          />
-          <Field {...bind("autoConcept")} label="컨셉 · 자유 메모" help="상품을 고르고 대본을 쓸 때 AI가 읽어요." placeholder={"20대 후반 직장인이 보는 계정. 가격보다 맛 표현 위주로."} />
-        </div>
+        <>
+          <RoleField {...bind("autoRole")} help="AI가 만드는 영상의 장면과 말투 방향이에요. 직접 촬영과는 따로 정해요." />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Field {...bind("autoHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 고를 때 이것만 보세요\n이거 모르고 사면 손해예요"} />
+            <Field {...bind("autoEndings")} label="마지막 문구" rows={3} max={2000} help="영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"저장해 두고 살 때 꺼내 보세요"} />
+            <Field {...bind("autoTone")} label="말투 · 분위기" help="내레이션과 캡션에 반영돼요." placeholder={"친구에게 알려 주듯 편한 존댓말, 짧게 끊어서."} />
+            <Field
+              {...bind("autoVideoStyle")}
+              label="영상 생성 스타일"
+              help="지금은 대본의 장면 설명에 반영돼요. 영상 자동 생성을 붙이면 모든 영상을 이 지시대로 만들어요."
+              placeholder={"밝은 자연광, 나무 식탁 위 클로즈업, 카메라는 천천히. 사람 얼굴은 나오지 않게."}
+            />
+            <Field {...bind("autoConcept")} label="컨셉 · 자유 메모" help="상품을 고르고 대본을 쓸 때 AI가 읽어요." placeholder={"20대 후반 직장인이 보는 계정. 가격보다 맛 표현 위주로."} />
+          </div>
+        </>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Field {...bind("shootHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP + " 말하지 않는 계정은 화면 문구에만 들어가요."} placeholder={"{상품} 잘라 보면 이래요\n사장이 직접 고른 {상품}"} />
-          <Field {...bind("shootEndings")} label="마지막 문구" rows={2} max={2000} help="마지막 컷에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"궁금한 거 댓글로 물어보세요"} />
-          <Field {...bind("shootTone")} label="말투 · 분위기" help="대사 · 화면 문구 · 캡션에 반영돼요." placeholder={"사장이 직접 말하듯 담백하게."} />
-          <Field
-            {...bind("shootEditStyle")}
-            label="편집 스타일"
-            help="컷 리스트에 반영하고, 저장할 때 AI가 편집 값으로 옮겨요. 컷 길이 · 화면 문구 위치 · 크기 · 색 · 띠 · 말 자막 · 영상 색을 바꿀 수 있어요."
-            placeholder={"컷은 빠르게, 화면 문구는 가운데에 크고 노랗게, 색은 따뜻하게."}
-          />
-          {!editDirty && data.shootEditStyle.trim() && (
-            <div className="space-y-1 rounded-md border bg-card px-3 py-2 text-xs">
-              <p>
-                <span className="font-semibold">지금 편집에 들어가는 값: </span>
-                {data.editApplied.length ? data.editApplied.join(" · ") : "기본 편집과 같아요"}
-              </p>
-              {data.editUnsupported.length > 0 && (
-                <p className="text-warn">
-                  <span className="font-semibold">아직 따르지 못하는 것: </span>
-                  {data.editUnsupported.join(" · ")}
-                </p>
+        <>
+          <RoleField {...bind("shootRole")} help="사람 중심은 찍을 때 말한 소리를 쓰고 사람이 나오는 컷으로 기획해요. 상품 중심이나 정하지 않음은 손 · 제품 위주에 AI 음성을 입혀요." />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Field {...bind("shootHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP + " 말하지 않는 계정은 화면 문구에만 들어가요."} placeholder={"{상품} 잘라 보면 이래요\n사장이 직접 고른 {상품}"} />
+            <Field {...bind("shootEndings")} label="마지막 문구" rows={3} max={2000} help="마지막 컷에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"궁금한 거 댓글로 물어보세요"} />
+            <Field {...bind("shootTone")} label="말투 · 분위기" help="기획 초안 · 대사 · 화면 문구 · 캡션에 반영돼요." placeholder={"사장이 직접 말하듯 담백하게."} />
+            <div className="space-y-2">
+              <Field
+                {...bind("shootEditStyle")}
+                label="편집 스타일"
+                help="컷 리스트에 반영하고, 저장할 때 AI가 편집 값으로 옮겨요. 컷 길이 · 화면 문구 위치 · 크기 · 색 · 띠 · 말 자막 · 영상 색을 바꿀 수 있어요."
+                placeholder={"컷은 빠르게, 화면 문구는 가운데에 크고 노랗게, 색은 따뜻하게."}
+              />
+              {!editDirty && data.shootEditStyle.trim() && (
+                <div className="space-y-1 rounded-md border px-3 py-2 text-xs">
+                  <p>
+                    <span className="font-semibold">지금 편집에 들어가는 값: </span>
+                    {data.editApplied.length ? data.editApplied.join(" · ") : "기본 편집과 같아요"}
+                  </p>
+                  {data.editUnsupported.length > 0 && (
+                    <p className="text-warn">
+                      <span className="font-semibold">아직 따르지 못하는 것: </span>
+                      {data.editUnsupported.join(" · ")}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
-          )}
-          <Field {...bind("shootConcept")} label="컨셉 · 자유 메모" help="기획 목록과 컷 리스트를 쓸 때 AI가 읽어요." placeholder={"사장이 직접 과일을 잘라 보여 주는 계정. 손과 단면 위주로."} />
-        </div>
+            <Field {...bind("shootConcept")} label="컨셉 · 자유 메모" help="기획 목록과 컷 리스트를 쓸 때 AI가 읽어요." placeholder={"사장이 직접 과일을 잘라 보여 주는 계정. 손과 단면 위주로."} />
+          </div>
+        </>
       )}
 
       <footer className="flex flex-wrap items-center gap-3">
         {canManage && (
-          <Button size="sm" disabled={isPending || !dirty} onClick={() => run(() => saveConceptAction({ accountId: data.accountId, ...form }))}>
+          <Button size="sm" disabled={isPending || !dirty} onClick={save}>
             <Save className="size-4" /> {isPending && editDirty ? "편집 스타일 읽는 중…" : "저장"}
           </Button>
         )}

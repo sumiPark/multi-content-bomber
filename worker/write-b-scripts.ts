@@ -106,7 +106,7 @@ async function main() {
             service,
             planId: plan.id,
             accountName: acc?.display_name ?? "",
-            roleFocus: acc?.role_focus ?? null,
+            roleFocus: concept.autoRole,
             roleNote: acc?.role_note ?? null,
             slotTime: plan.slot_time as string,
             facts,

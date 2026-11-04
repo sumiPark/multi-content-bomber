@@ -115,7 +115,7 @@ async function main() {
             service,
             planId: plan.id,
             accountName: acc?.display_name ?? "",
-            roleFocus: acc?.role_focus ?? null,
+            roleFocus: concept.shootRole,
             roleNote: acc?.role_note ?? null,
             facts,
             rules,
@@ -129,7 +129,7 @@ async function main() {
           },
           { log: !dryRun },
         );
-        shotlist = applyToShotlist(res.output, phrases, acc?.role_focus === "PERSON");
+        shotlist = applyToShotlist(res.output, phrases, concept.shootRole === "PERSON");
         tokens += res.tokens.input + res.tokens.output;
         const seconds = shotlist.cuts.reduce((sum, c) => sum + c.seconds, 0);
         check = await checkScript(shotlistAsScript(shotlist), facts, rules, acc?.display_name ?? "", { track: "A", seconds, fixedHook: phrases.hooks.length > 0, fixedTexts: [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t) });
