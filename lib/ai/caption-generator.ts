@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { getOpenAI } from "@/lib/openai";
+import { getOpenAI, OPENAI_TEXT_MODEL } from "@/lib/openai";
 import type { Platform } from "@/lib/platforms";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
@@ -110,7 +110,6 @@ const ALL_PLATFORMS: Platform[] = ["YOUTUBE", "INSTAGRAM", "TIKTOK"];
 
 // 2026-11-04 비교(같은 상품 · 같은 프롬프트 각 4회): gpt-4o는 4회 모두 설명에 없는 효과 · 사용법을 지어냈고,
 // gpt-6.1-terra는 한 번도 지어내지 않았다. 추론 모델이라 temperature를 받지 않아 callOptions를 쓴다.
-const CAPTION_MODEL = "gpt-6.1-terra";
 
 // 재작성은 첫 응답이 이 시간 안에 끝났을 때만 한다 — Vercel 함수 제한(60초) 안에서 두 번째 호출까지 마치려고.
 const CAPTION_FIX_BUDGET_MS = 25_000;
@@ -209,8 +208,8 @@ export async function generateCaptions(
     conversation: typeof messages,
   ): Promise<{ captions: Captions; raw: string }> => {
     const completion = await getOpenAI().chat.completions.create({
-      model: CAPTION_MODEL,
-      ...callOptions(CAPTION_MODEL, 4000),
+      model: OPENAI_TEXT_MODEL,
+      ...callOptions(OPENAI_TEXT_MODEL, 4000),
       messages: conversation,
       response_format: {
         type: "json_schema",

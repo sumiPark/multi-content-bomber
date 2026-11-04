@@ -1,6 +1,6 @@
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import { getOpenAI } from "@/lib/openai";
+import { getOpenAI, OPENAI_TEXT_MODEL } from "@/lib/openai";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ImagePart } from "./images";
 
@@ -13,7 +13,7 @@ import type { ImagePart } from "./images";
 // 2026-11-03 비교(같은 상품 3개): gpt-4.1-mini는 일반 식품(홍삼음료)의 안내 문구를 기능성으로
 // 잘못 뽑았고, gpt-6.1-terra · gpt-5.6-terra는 둘 다 "건기식 아님"으로 맞게 판정 · 근거 구절도 더 정확.
 // 둘 중 6.1-terra가 값이 절반($1/$5 per 1M)이라 기본값. 상품당 약 50~90원.
-export const DEFAULT_ANALYSIS_MODEL = "gpt-6.1-terra";
+export const DEFAULT_ANALYSIS_MODEL = OPENAI_TEXT_MODEL;
 
 export function analysisModel(): string {
   return process.env.PRODUCT_ANALYSIS_MODEL || DEFAULT_ANALYSIS_MODEL;

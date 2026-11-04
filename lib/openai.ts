@@ -6,6 +6,9 @@ if (typeof window !== "undefined") {
   throw new Error("lib/openai는 서버(Server Action / API route / 워커)에서만 import해야 합니다.");
 }
 
+// 글 · 분석에 쓰는 모델은 여기 한 곳에서 정한다. 음성 받아쓰기(whisper-1)만 따로다.
+export const OPENAI_TEXT_MODEL = "gpt-6.1-terra";
+
 let cached: OpenAI | null = null;
 
 /**

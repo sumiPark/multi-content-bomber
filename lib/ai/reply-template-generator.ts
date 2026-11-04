@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { getOpenAI } from "@/lib/openai";
+import { getOpenAI, OPENAI_TEXT_MODEL } from "@/lib/openai";
 import { TEMPLATE_MAX_LENGTH, validateTemplates } from "@/lib/episode-alerts/templates";
+import { callOptions } from "@/lib/products/analysis/analyze";
 
 // server-only는 쓰지 않는다 — 새 화가 발행 워커(tsx + plain Node)에서 추가될 때도 문구를 새로
 // 쓰는데, 워커에서 import하면 throw한다. 브라우저 번들에 끌려가면 여기서 바로 막는다.
@@ -251,10 +252,8 @@ export async function generateReplyTemplates(args: {
   voiceSamples?: string[];
 }): Promise<string[]> {
   const completion = await getOpenAI().chat.completions.create({
-    model: "gpt-4o",
-    // 매번 다른 문구가 나오도록 높게.
-    temperature: 1,
-    max_tokens: 800,
+    model: OPENAI_TEXT_MODEL,
+    ...callOptions(OPENAI_TEXT_MODEL, 800),
     messages: [
       {
         role: "system",

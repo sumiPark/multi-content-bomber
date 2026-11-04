@@ -2,7 +2,7 @@ import type OpenAI from "openai";
 import { zodFunction, zodResponseFormat } from "openai/helpers/zod";
 import type { z } from "zod";
 import { loadActivePlaybook, playbookBlock, resolveOrgId } from "@/lib/agents/playbook";
-import { getOpenAI } from "@/lib/openai";
+import { getOpenAI, OPENAI_TEXT_MODEL } from "@/lib/openai";
 import { callOptions, isReasoningModel } from "@/lib/products/analysis/analyze";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
@@ -40,7 +40,7 @@ export interface AgentResult<T> {
 }
 
 export function agentModel(): string {
-  return process.env.AGENT_MODEL || "gpt-6.1-terra";
+  return process.env.AGENT_MODEL || OPENAI_TEXT_MODEL;
 }
 
 const MAX_RESULT_CHARS = 12_000;

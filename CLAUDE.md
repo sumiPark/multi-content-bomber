@@ -13,7 +13,7 @@ OpenAI(`gpt-6.1-terra`)로 플랫폼별 캡션을 자동 생성하고, 최적 �
 - **상태관리:** React useState/useReducer 기본 — 글로벌 상태가 필요해지면 Zustand 도입 검토
 - **UI:** Tailwind CSS v4 (config-less) + shadcn/ui (base-nova) + framer-motion
 - **디자인 규칙:** `DESIGN.md` (Marketing Hub와 같은 토큰 · 컴포넌트 규칙). 화면 작업 전에 읽고, 규칙을 바꾸면 DESIGN.md부터 고친다
-- **AI:** OpenAI API (Vision + JSON Schema strict mode). 캡션 · 에이전트는 `gpt-6.1-terra`, `lib/ai/reply-template-generator.ts`만 `gpt-4o`
+- **AI:** OpenAI API (Vision + JSON Schema strict mode). 글 · 분석 모델은 `gpt-6.1-terra`로 통일(`lib/openai.ts`의 `OPENAI_TEXT_MODEL` 한 곳), 음성 받아쓰기만 `whisper-1`
 - **큐:** Postgres(publish_jobs 테이블) + `claim_due_publish_jobs` RPC(FOR UPDATE SKIP LOCKED) — BullMQ/Redis 제거
 - **배포:** Vercel (프론트, 서버리스) + GitHub Actions (워커 — cron 30분 sweep + repository_dispatch 즉시)
 
