@@ -128,11 +128,11 @@ async function listHistory(service: Service, account: { id: string; organization
 }
 
 /** 2. 성과를 아직 안 읽은 게시물 (최신순, 동시에 몇 개씩). 시간 예산을 넘으면 false (다음 실행에 이어서). */
-async function fillInsights(service: Service, accountToken: string, systemToken: string | null, rows: StatRow[], deadline: number): Promise<{ read: number; finished: boolean }> {
+async function fillInsights(service: Service, accountToken: string, systemToken: string | null, inSystemList: boolean, rows: StatRow[], deadline: number): Promise<{ read: number; finished: boolean }> {
   const todo = rows.filter((r) => r.views == null && !r.insights_checked_at);
   const today = kstDate();
   let read = 0;
-  let useAccount = !systemToken;
+  let useAccount = !systemToken || !inSystemList;
 
   /** false면 이 계정은 여기서 멈춘다 (호출 한도 · 권한). */
   const readOne = async (r: StatRow): Promise<boolean> => {
@@ -147,7 +147,16 @@ async function fillInsights(service: Service, accountToken: string, systemToken:
         useAccount = true;
         return true;
       }
-      if (isPermissionError(err) || (err instanceof InstagramApiError && err.kind === "TOKEN")) return false;
+      if (useAccount && systemToken && isPermissionError(err)) {
+        // 시스템 키 계정 목록에 없어도 읽히는 계정이 있다 (cuma.note). 그래도 안 되면 권한이 없는 계정으로 보고 멈춘다.
+        try {
+          v = await getMediaInsightsBySystem(systemToken, media);
+        } catch {
+          return false;
+        }
+      } else if (isPermissionError(err) || (err instanceof InstagramApiError && err.kind === "TOKEN")) {
+        return false;
+      }
       // 삭제된 게시물 등은 표시만 하고 넘어간다
     }
     if (Object.keys(v).length) {
@@ -338,8 +347,8 @@ async function main() {
       const profile = await getProfile(token);
       await listHistory(service, account, token);
       let rows = await loadRows(service, account.id);
-      const useSystem = systemToken && system?.has(profile.username.toLowerCase()) ? systemToken : null;
-      const { read, finished } = await fillInsights(service, token, useSystem, rows, deadline);
+      const inSystemList = !!system?.has(profile.username.toLowerCase());
+      const { read, finished } = await fillInsights(service, token, systemToken, inSystemList, rows, deadline);
       if (read) rows = await loadRows(service, account.id);
       const thumbs = await keepThumbs(service, account.organization_id, account.id, token, rows);
 

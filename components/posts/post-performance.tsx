@@ -222,6 +222,19 @@ export function PostPerformance({ data, now, period, accountId }: { data: PostPe
   }, [rows, tier, sort]);
 
   if (data.read === 0) {
+    if (data.listed && data.pending > 0) {
+      return (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
+            <History className="size-8 text-muted-foreground" aria-hidden />
+            <h2 className="text-lg font-semibold">이 계정의 성과를 읽지 못했어요</h2>
+            <p className="max-w-md text-sm text-muted-foreground">
+              게시물 {num(data.total)}개의 목록은 받았지만 인스타에서 성과를 읽을 권한이 없어요. Meta 비즈니스 설정에서 이 계정을 mcb 시스템 사용자에 추가하면 다음 수집부터 읽을 수 있어요.
+            </p>
+          </CardContent>
+        </Card>
+      );
+    }
     return (
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
