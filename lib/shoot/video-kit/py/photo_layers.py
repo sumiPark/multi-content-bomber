@@ -1,5 +1,6 @@
 # 제품 사진 한 장을 움직일 레이어로 나눈다. 포장 글자가 휘지 않게 레이어는 통째로만 움직이고, 깊이맵으로 픽셀을 밀지 않는다.
 # 배경 제거: rembg isnet-general-use. 깊이: Depth Anything V2 Small(Apache-2.0)의 ONNX. 다른 크기는 비상업 라이선스라 쓰지 않는다.
+# 세로로 채우면 사진이 많이 잘리는 경우 fit(흐린 배경 위에 사진 전체)으로 둔다.
 # 출력 모드 float(제품을 띄움) / aligned(제품과 배경 분리) / depth(먼 쪽 · 가까운 쪽) / push(사진 전체).
 import json
 import os
@@ -100,6 +101,8 @@ def main():
     layers = []
     mode = "push"
     soft = False
+    fill = max(W / im.width, H / im.height)
+    need_fit = min(W / (im.width * fill), H / (im.height * fill)) < 0.62
     if fg_ok:
         # 작은 오검출 점은 빼고 범위를 잰다
         solid = alpha > 0.5
@@ -120,7 +123,7 @@ def main():
             soft = s > 2.4
             shot = with_shadow(cut.resize((round(cut.width * s), round(cut.height * s)), Image.LANCZOS))
             layers.append(layer("fg", out_dir, shot, (W - shot.width) / 2, (H - shot.height) / 2 - 40, "fg"))
-        else:
+        elif not need_fit:
             mode = "aligned"
             cx = (box[0] + box[2]) / 2 / im.width
             bg, l, t, s = cover(plate, fx=min(1, max(0, cx * 1.2 - 0.1)))
@@ -128,7 +131,7 @@ def main():
             layers.append(layer("bg", out_dir, bg.filter(ImageFilter.GaussianBlur(4)), l, t, "bg"))
             front, _, _, _ = cover(fg, fx=min(1, max(0, cx * 1.2 - 0.1)))
             layers.append(layer("fg", out_dir, front, l, t, "fg"))
-    elif depth is not None and float(depth.std()) > 0.14:
+    elif not need_fit and depth is not None and float(depth.std()) > 0.14:
         # 먼 쪽과 가까운 쪽이 뚜렷하면 나눈다
         soft_d = cv2.GaussianBlur(depth, (0, 0), 3)
         thr = cv2.threshold((soft_d * 255).astype("uint8"), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0] / 255.0
@@ -142,9 +145,17 @@ def main():
             front, _, _, _ = cover(near_im, fy=0.6)
             layers.append(layer("far", out_dir, far, l, t, "far"))
             layers.append(layer("near", out_dir, front, l, t, "near"))
+    if not layers and need_fit:
+        mode = "fit"
+        bg, l, t, _ = cover(im, extra=1.12)
+        layers.append(layer("bg", out_dir, bg.filter(ImageFilter.GaussianBlur(26)), l, t, "bg"))
+        s = min(W / im.width, 1500 / im.height)
+        soft = s > 2.4
+        shot = with_shadow(im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS).convert("RGBA"))
+        layers.append(layer("photo", out_dir, shot, (W - shot.width) / 2, (H - shot.height) / 2 - 40, "far"))
     if not layers:
-        whole, l, t, s = cover(im, extra=1.2)
-        soft = s > 2.8
+        whole, l, t, s = cover(im, extra=1.1)
+        soft = s > 2.4
         layers.append(layer("whole", out_dir, whole, l, t, "whole"))
     print(json.dumps({"mode": mode, "soft": soft, "ratio": round(ratio, 3), "layers": layers}, ensure_ascii=False))
 

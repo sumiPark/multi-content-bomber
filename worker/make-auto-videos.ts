@@ -4,12 +4,9 @@ import "./load-env";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { blockingIssues, checkScript } from "@/lib/agents/check";
 import { markArchiveUsed } from "@/lib/auto-video/archive";
 import { loadAccountConcept } from "@/lib/agents/concept";
-import { loadProductFacts } from "@/lib/agents/product-facts";
-import { writeScript } from "@/lib/agents/script";
-import { makeAutoVideo, StopError, type SavedScript } from "@/lib/auto-video/make";
+import { makeAutoVideo, StopError } from "@/lib/auto-video/make";
 import { scheduleAutoVideo, type AutoVideo } from "@/lib/auto-video/publish";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
@@ -72,30 +69,8 @@ async function main() {
     const concept = await loadAccountConcept(service, plan.social_account_id);
     // 시험(--dry-run)에서만 말투를 바꿔 설정 반영을 본다. 저장하지 않는다
     if (dryRun && process.env.TEST_AUTO_TONE?.trim()) concept.autoTone = process.env.TEST_AUTO_TONE.trim();
-    // 시험(--dry-run --plan): 대본 없는 칸은 임시 대본을 써서 돌린다. 저장하지 않는다
-    if (!plan.script && dryRun && onlyPlan) {
-      try {
-        // 실제 대본 워커처럼 점검에 걸리면 한 번 다시 쓴다
-        const facts = await loadProductFacts(service, plan.product_id);
-        let fixRequests: string[] | undefined;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const res = await writeScript(
-            { service, planId: plan.id, accountName: acc, roleFocus: concept.autoRole, roleNote: null, slotTime: plan.slot_time as string, facts, rules, concept: concept.autoConcept, tone: concept.autoTone, videoStyle: concept.autoVideoStyle, fixRequests },
-            { log: false },
-          );
-          plan.script = res.output as unknown as Json;
-          const check = await checkScript(res.output, facts, rules, acc);
-          console.log(`  임시 대본 ${attempt + 1}번째: ${check.passed ? "통과" : `걸림 ${check.issues.map((i) => i.detail).join(" / ").slice(0, 200)}`}`);
-          if (check.passed) break;
-          fixRequests = blockingIssues(check.issues).map((i) => i.detail);
-        }
-      } catch (e) {
-        process.exitCode = 1;
-        console.error(`[auto-video] ${label} 임시 대본 실패: ${e instanceof Error ? e.message : e}`);
-        continue;
-      }
-    }
-    if (!plan.script) continue;
+    // 시험(--dry-run)에서만 설정 초안을 넣어 본다. 저장하지 않는다
+    if (dryRun && process.env.TEST_AUTO_SETTINGS?.trim()) Object.assign(concept, JSON.parse(process.env.TEST_AUTO_SETTINGS) as Partial<typeof concept>);
     const prev = (plan.video ?? {}) as AutoVideo;
     // 확인한 칸은 시각이 지나도 만든다(끝나는 즉시 올라간다). 그제 이전 칸은 사람이 다시 만들라고 했을 때만 만든다
     if (!onlyPlan && !prev.remake && (plan.slot_date as string) < kstDate(-1)) {
@@ -126,10 +101,10 @@ async function main() {
         service,
         planId: plan.id,
         organizationId: plan.organization_id,
+        accountId: plan.social_account_id,
         account: acc,
         productId: plan.product_id,
         concept,
-        script: plan.script as unknown as SavedScript,
         rules,
         dryRun,
         workDir,
@@ -149,7 +124,7 @@ async function main() {
           mkdirSync(out, { recursive: true });
           copyFileSync(kit.final, join(out, `${plan.id}.mp4`));
           copyFileSync(kit.cover, join(out, `${plan.id}.jpg`));
-          writeFileSync(join(out, `${plan.id}.json`), JSON.stringify({ plan: kit.plan, sources: made.sources, warnings: made.warnings, check, blocking }, null, 1));
+          writeFileSync(join(out, `${plan.id}.json`), JSON.stringify({ board: made.board, plan: kit.plan, sources: made.sources, warnings: made.warnings, check, blocking }, null, 1));
           console.log(`  (dry-run) 결과: ${out}`);
         }
         continue;
@@ -183,9 +158,10 @@ async function main() {
         .update({
           status: passed ? "RENDERED" : "BLOCKED",
           video: video as unknown as Json,
+          script: made.script as unknown as Json,
           check_result: { ...check, issues, passed, checkedAt: new Date().toISOString() } as unknown as Json,
           error: null,
-          note: passed ? null : `완성본 점검에 걸림: ${blockingIssues(check.issues)[0]?.detail ?? blocking[0] ?? ""}`.slice(0, 300),
+          note: passed ? null : `완성본 점검에 걸림: ${check.issues.find((i) => i.kind !== "tone")?.detail ?? blocking[0] ?? ""}`.slice(0, 300),
         })
         .eq("id", plan.id)
         .eq("status", "SCRIPTED")

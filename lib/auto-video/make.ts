@@ -1,25 +1,70 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { checkScript } from "@/lib/agents/check";
+import { blockingIssues, checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
-import type { EditGraphic } from "@/lib/agents/edit-plan";
-import { loadProductFacts, type ProductFacts } from "@/lib/agents/product-facts";
+import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
+import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
+import { timeScript } from "@/lib/agents/ko-skills";
+import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
-import { sourcePlanProblems, writeSourcePlan, type MotionSpec, type SourcePlan } from "@/lib/agents/source-plan";
+import { reviewFinalFrames, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
-import { motionClip, photoClip } from "@/lib/auto-video/clips";
-import { stockClip } from "@/lib/auto-video/stock";
-import { checkText, type ContentRule } from "@/lib/rules/check";
+import { photoClip } from "@/lib/auto-video/clips";
+import { kstDate } from "@/lib/automation/time";
+import type { ContentRule } from "@/lib/rules/check";
 import { finalBlocking } from "@/lib/shoot/final-check";
 import { readClip, renderKitEdit, type KitClip } from "@/lib/shoot/video-kit/pipeline";
 import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
 import type { createServiceClient } from "@/lib/supabase/service";
 
-// AI 자동 콘텐츠 한 편 만들기. 상세페이지 사진 찾기 → 소재 에이전트 → 사진 · 도식 · 스톡 · 자사 촬영 컷 → 편집 키트 → 최종 점검.
+// AI 자동 콘텐츠 한 편 만들기. 재료 판단 → 장면표(말 · 이미지 · 글자를 함께) → 음성 → 낱말 시각에 맞춘 조립 → 완성본 점검.
 // 참고 내용은 호출하는 쪽이 넘긴 계정 컨셉의 auto_* 값만 읽는다. 저장 · 발행은 워커가 맡는다.
 
-export type SavedScript = ScriptOutput & { fixed?: { hook?: { text?: string } | null; ending?: { text?: string } | null } };
+const MIN_NATIVE = 500;
+const MIN_MATERIALS = 3;
+const MAX_BOARD_TRIES = 3;
+const CAPTION_CHARS = 16;
+
+const squash = (t: string) => t.replace(/\s+/g, "");
+const graphicTexts = (g: EditGraphic) => [g.text, g.small, g.sub, g.note, g.chip, g.number, g.unit, g.left, g.right, g.from, ...g.items].filter(Boolean);
+
+/** 낱말을 자르지 않고 자막 길이로 나눈다. */
+function splitCaption(text: string): string[] {
+  const out: string[] = [];
+  let line = "";
+  for (const word of text.trim().split(/\s+/)) {
+    if (line && (line + " " + word).length > CAPTION_CHARS) {
+      out.push(line);
+      line = word;
+    } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+/** 저장해 둔 후킹 · 마지막 문구는 글자를 바꾸지 않고 말과 화면에 그대로 넣는다. */
+function applyFixedPhrases(board: Storyboard, phrases: PhraseState): Storyboard {
+  const scenes = [...board.scenes];
+  const hook = phrases.hooks[0]?.text;
+  const ending = phrases.endings[0]?.text;
+  if (hook && scenes[0]) scenes[0] = { ...scenes[0], say: hook, tts: hook };
+  if (ending && scenes.length > 1) {
+    const last = scenes[scenes.length - 1];
+    scenes[scenes.length - 1] = { ...last, say: ending, tts: ending, captions: splitCaption(ending) };
+  }
+  return { ...board, scenes, hook: hook ? { ...board.hook, spoken: hook, on_screen: hook } : { ...board.hook, spoken: scenes[0]?.say ?? board.hook.spoken } };
+}
+
+function boardAsScript(board: Storyboard): ScriptOutput {
+  return {
+    hooks: [{ formula_id: 0, spoken: board.hook.spoken, on_screen: board.hook.on_screen }],
+    chosen_hook: 0,
+    beats: board.scenes.map((s, i) => ({ spoken: s.say, on_screen: i === 0 ? board.hook.on_screen : s.graphics.flatMap(graphicTexts).join(" "), visual: s.shows })),
+    loop_word: "",
+    caption: board.caption,
+  };
+}
 
 async function detailImages(urls: string[], dir: string): Promise<string[]> {
   mkdirSync(dir, { recursive: true });
@@ -44,6 +89,8 @@ interface Candidate {
   file: string;
   w: number;
   h: number;
+  native_w?: number;
+  native_h?: number;
 }
 
 function trimPhoto(c: Candidate, top: number, bottom: number, workDir: string): string {
@@ -57,33 +104,19 @@ function trimPhoto(c: Candidate, top: number, bottom: number, workDir: string): 
   return out;
 }
 
-function motionTexts(m: MotionSpec): string[] {
-  return [m.title, m.left_label, m.right_label, m.left_value, ...m.right_values, m.number_to ? `${m.number_to}${m.unit}` : "", m.end_text, ...m.items, m.big ? `${m.big}${m.unit}` : ""].filter(Boolean);
-}
-
-/** 도식은 렌더 뒤 최종 점검에서야 글이 보여, 몇 분을 쓰고 멈췄다. 렌더 전에 금지 표현을 잡아 소재 에이전트가 고치게 한다. */
-export function motionRuleProblems(plan: SourcePlan, facts: ProductFacts, rules: ContentRule[]): string[] {
-  return plan.beats.flatMap((b) => {
-    if (b.use !== "motion" || !b.motion) return [];
-    return checkText(motionTexts(b.motion).join("\n"), facts.kind, rules, facts.approvedClaims, { healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions })
-      .filter((h) => h.rule.ruleType === "BANNED")
-      .map((h) => `${b.beat}번 비트 도식에 금지 표현 "${h.matched}"이 있다. 다른 말로 바꾼다`);
-  });
-}
-
 export async function makeAutoVideo(input: {
   service: ReturnType<typeof createServiceClient>;
   planId: string;
   organizationId: string;
+  accountId: string;
   account: string;
   productId: string;
   concept: AccountConcept;
-  script: SavedScript;
   rules: ContentRule[];
   dryRun: boolean;
   workDir: string;
 }) {
-  const { service, planId, account, productId, script, rules, workDir } = input;
+  const { service, planId, account, productId, rules, workDir } = input;
   const facts = await loadProductFacts(service, productId);
   if (facts.stockStatus !== "available") throw new StopError(`지금 판매 중이 아닌 상품이에요 (${facts.stockStatus})`);
   const concept = input.concept;
@@ -105,95 +138,128 @@ export async function makeAutoVideo(input: {
   if (archive.length) console.log(`  자사 촬영 컷 ${archive.length}개`);
   const archiveIds = archive.map((a) => a.id);
 
-  // 2. 소재 에이전트
-  const beats = script.beats.map((b) => ({ spoken: b.spoken, on_screen: b.on_screen, visual: b.visual }));
-  const ask = (retry: { problems: string[] } | null) =>
-    writeSourcePlan({
+  // 재료 판단: 원본 해상도가 낮으면 후보에서 뺀다. 세로 영상에서 흐려진다
+  const sharp = candidates.filter((c) => Math.min(c.native_w ?? c.w, (c.native_h ?? c.h) * 1.4) >= MIN_NATIVE);
+  console.log(`  화질 통과 사진 ${sharp.length}개 / ${candidates.length}개`);
+  if (sharp.length + archive.length < MIN_MATERIALS) throw new StopError(`쓸 수 있는 이미지가 ${sharp.length + archive.length}개뿐이에요. 제품이 잘 보이는 사진이 더 필요해요.`);
+  const sharpIds = new Set(sharp.map((c) => c.id));
+  const sheets = (blocks?.sheets ?? []).map((f) => imageDataUrl(f));
+
+  // 저장한 후킹 · 마지막 문구는 장면표에 그대로 쓴다
+  const hasPhrases = concept.autoHooks.length > 0 || concept.autoEndings.length > 0;
+  const phrases = await preparePhrases({
+    facts,
+    rules,
+    hooks: concept.autoHooks,
+    endings: concept.autoEndings,
+    recent: hasPhrases ? await recentTemplates(service, input.accountId, "B", kstDate(-14)) : [],
+  });
+  let tokens = { input: phrases.tokens.input, output: phrases.tokens.output };
+  const add = (t: { input: number; output: number }) => {
+    tokens = { input: tokens.input + t.input, output: tokens.output + t.output };
+  };
+
+  // 2. 장면표: 쓰고, 코드 · 시청자 눈 · 광고 규칙으로 보고, 걸리면 고쳐 쓴다
+  let board: Storyboard | null = null;
+  let retry: { board: Storyboard; problems: string[] } | null = null;
+  let left: string[] = [];
+  const fixedTexts = () => [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t);
+  for (let attempt = 0; attempt < MAX_BOARD_TRIES; attempt++) {
+    const res = await writeStoryboard({
       service: input.dryRun ? null : service,
       readService: service,
       planId,
       accountName: account,
+      roleFocus: concept.autoRole,
       facts,
       rules,
-      beats,
-      candidates,
-      sheets: (blocks?.sheets ?? []).map((s) => imageDataUrl(s)),
+      candidates: sharp.map((c) => ({ id: c.id, w: c.w, h: c.h })),
+      sheets,
       archive: archive.map((a) => ({ id: a.id, what: a.what, seconds: a.seconds })),
       archiveSheets: archive.map((a) => imageDataUrl(a.sheet)),
+      concept: concept.autoConcept,
       tone: concept.autoTone,
       videoStyle: concept.autoVideoStyle,
+      phraseBlock: fixedPhraseBlock(phrases),
       retry,
     });
-  let tokens = { input: 0, output: 0 };
-  let res = await ask(null);
-  tokens = { input: tokens.input + res.tokens.input, output: tokens.output + res.tokens.output };
-  let plan: SourcePlan = res.output;
-  const problems = [...sourcePlanProblems(plan, beats.length, archiveIds), ...motionRuleProblems(plan, facts, rules)];
-  if (problems.length) {
-    console.log(`  소재 계획 다시 쓰기: ${problems.join(" / ")}`);
-    res = await ask({ problems });
-    tokens = { input: tokens.input + res.tokens.input, output: tokens.output + res.tokens.output };
-    plan = res.output;
+    add(res.tokens);
+    board = applyFixedPhrases(res.output, phrases);
+    board = { ...board, photos: board.photos.map((p) => (sharpIds.has(p.id) ? p : { ...p, usable: false })) };
+    const code = storyboardProblems(board, archiveIds, phrases.hooks.length > 0);
+    const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts() });
+    add(check.tokens);
+    const review = await reviewStoryboard({ board, facts, sheets, fixedTexts: fixedTexts() });
+    add(review.tokens);
+    const blockingNow = blockingIssues(check.issues).map((i) => i.detail);
+    left = [...code, ...blockingNow, ...review.problems];
+    console.log(`  장면표 ${attempt + 1}번째: 코드 ${code.length} · 규칙/근거 ${blockingNow.length} · 시청자 ${review.problems.length}`);
+    for (const p of left) console.log(`    - ${p.slice(0, 160)}`);
+    if (!left.length) break;
+    dropFailedPhrases(phrases, blockingIssues(check.issues));
+    retry = { board, problems: left };
   }
-  const left = sourcePlanProblems(plan, beats.length, archiveIds).filter((p) => p.includes("소재가 없다") || p.includes("쓸 수 있는 후보가 아니다"));
-  if (left.length) throw new Error(`소재를 정하지 못했어요: ${left.join(" / ")}`);
+  if (!board) throw new Error("장면표를 만들지 못했어요");
+  const fatal = storyboardProblems(board, archiveIds, phrases.hooks.length > 0).filter((p) => p.includes("후보가 아니다") || p.includes("없는 자사") || p.includes("말이 없다"));
+  if (fatal.length) throw new Error(`장면표 오류: ${fatal.join(" / ")}`);
 
-  // 3. 소재 → 컷. 같은 사진은 한 번만 만들고, 스톡이 탈락하면 그 비트는 사진이나 다른 컷을 쓴다
+  // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
   const clips: KitClip[] = [];
   const sources: unknown[] = [];
-  const warnings = [...plan.warnings];
-  const photoFile = new Map<string, number>();
-  const usedStock = new Set<number>();
-  const usable = plan.photos.filter((p) => p.usable);
-  const addPhoto = (id: string): number | null => {
-    if (photoFile.has(id)) return photoFile.get(id)!;
-    const cand = candidates.find((c) => c.id === id);
-    const meta = usable.find((p) => p.id === id);
-    if (!cand || !meta) return null;
-    const src = trimPhoto(cand, meta.trim_top, meta.trim_bottom, workDir);
-    const made = photoClip(src, workDir, `photo-${id}`);
-    if (made.soft) warnings.push(`${id} 사진(${meta.what})은 해상도가 낮아 영상에서 흐릴 수 있어요.`);
+  const warnings: string[] = left.map((p) => `장면표 확인: ${p}`.slice(0, 200));
+  const clipNo = new Map<string, number>();
+  const used = new Map<string, number>();
+  const clipOf = (id: string, kind: "photo" | "archive"): number | null => {
+    if (clipNo.has(id)) return clipNo.get(id)!;
     const no = clips.length + 1;
-    clips.push(readClip(no, made.file, { shot: `[제품컷] ${meta.what}. 카메라가 8초 동안 천천히 움직인다.` }));
-    sources.push({ no, kind: "photo", id, what: meta.what, mode: made.mode });
-    photoFile.set(id, no);
+    if (kind === "archive") {
+      const a = archive.find((x) => x.id === id);
+      if (!a) return null;
+      clips.push(readClip(no, a.file, { shot: `[자사 촬영] ${a.what}` }));
+      sources.push({ no, kind: "archive", id: a.rowId, what: a.what });
+    } else {
+      const cand = candidates.find((c) => c.id === id);
+      const meta = board!.photos.find((p) => p.id === id);
+      if (!cand || !meta) return null;
+      const made = photoClip(trimPhoto(cand, meta.trim_top, meta.trim_bottom, workDir), workDir, `photo-${id}`);
+      if (made.soft) warnings.push(`${id} 사진(${meta.what})은 해상도가 낮아 영상에서 흐릴 수 있어요.`);
+      clips.push(readClip(no, made.file, { shot: `[제품컷] ${meta.what}` }));
+      sources.push({ no, kind: "photo", id, what: meta.what, mode: made.mode });
+    }
+    clipNo.set(id, no);
     return no;
   };
-  for (const b of plan.beats) {
-    const line = beats[b.beat]?.spoken ?? "";
-    if (b.use === "photo") addPhoto(b.photo_id);
-    else if (b.use === "archive") {
-      const a = archive.find((x) => x.id === b.archive_id);
-      if (!a) continue;
-      const no = clips.length + 1;
-      clips.push(readClip(no, a.file, { shot: `[자사 촬영] ${a.what}`, narration: line }));
-      sources.push({ no, kind: "archive", id: a.rowId, what: a.what });
-    } else if (b.use === "motion" && b.motion) {
-      const made = motionClip(b.motion, workDir, `motion-${b.beat}`);
-      const no = clips.length + 1;
-      clips.push(readClip(no, made.file, { shot: `[코드 모션] ${made.shot}`, narration: line }));
-      sources.push({ no, kind: "motion", spec: b.motion });
-    } else if (b.use === "stock") {
-      let done = false;
-      try {
-        const pick = await stockClip(service, b.stock_query, b.stock_intent, workDir, `stock-${b.beat}`, usedStock);
-        if (pick) {
-          tokens = { input: tokens.input + pick.tokens.input, output: tokens.output + pick.tokens.output };
-          const no = clips.length + 1;
-          done = true;
-          clips.push(readClip(no, pick.file, { shot: `[스톡] ${pick.shot}`, narration: line }));
-          sources.push({ no, kind: "stock", ...pick.source });
-        } else console.log(`  스톡 "${b.stock_query}" 통과 후보 없음 — 사진으로 대체`);
-      } catch (e) {
-        console.warn(`  스톡 실패(${e instanceof Error ? e.message : e}) — 사진으로 대체`);
-      }
-      if (!done && usable[0]) addPhoto(usable[0].id);
-    }
-  }
-  if (!clips.length) throw new StopError("쓸 수 있는 소재가 없어요. 상세페이지에 제품만 찍힌 사진이 있는지 확인해 주세요.");
+  const timing = timeScript(board.scenes.map((s) => s.tts), 20).beats;
+  const beats: EditPlan["beats"] = [];
+  board.scenes.forEach((s, i) => {
+    const no = clipOf(s.source_id, s.source);
+    if (!no) throw new Error(`${s.source_id} 이미지를 만들지 못했어요`);
+    const seconds = clips[no - 1].duration;
+    const want = Math.max(1.2, (timing[i]?.dur ?? 2.5) + 0.25);
+    const from = Math.min(used.get(s.source_id) ?? 0, Math.max(0, seconds - want));
+    const to = Math.min(seconds, from + want);
+    used.set(s.source_id, to);
+    beats.push({
+      mode: "tts",
+      tts: s.tts,
+      captions: i === 0 ? [] : s.captions.length && squash(s.captions.join("")) === squash(s.say) ? s.captions : splitCaption(s.say),
+      emphasis: s.emphasis,
+      cuts: [{ clip: no, in: from, out: to, what: s.shows }],
+      graphics: i === 0 ? [] : s.graphics,
+      sfx: [],
+    });
+  });
+  const coverScene = beats[Math.min(Math.max(0, board.thumbnail.scene), beats.length - 1)]?.cuts[0];
+  const plan: EditPlan = {
+    look: board.look,
+    analysis: [],
+    hook: board.hook,
+    thumbnail: { title: board.thumbnail.title, highlight: board.thumbnail.highlight, position: board.thumbnail.position, sub: board.thumbnail.sub, clip: coverScene?.clip ?? 1, at: coverScene ? (coverScene.in + coverScene.out) / 2 : 1 },
+    beats,
+    warnings: [],
+  };
 
-  // 4. 편집 키트 — 직접 촬영과 같은 코드. 자동 콘텐츠 설정만 넘긴다
-  const chosen = script.hooks?.[script.chosen_hook] ?? script.hooks?.[0];
+  // 4. 음성 → 시간표 → 렌더. 컷 · 그래픽 · 자막이 낱말 시각에 맞춰진다. 자동 콘텐츠 설정만 넘긴다
   const kit = await renderKitEdit({
     workDir: join(workDir, "kit"),
     service: input.dryRun ? null : service,
@@ -205,44 +271,40 @@ export async function makeAutoVideo(input: {
     rules,
     clips,
     source: "auto",
-    scriptLines: beats.map((b) => b.spoken),
-    shotlistHook: chosen ? { spoken: chosen.spoken, on_screen: chosen.on_screen } : null,
-    fixedHook: script.fixed?.hook?.text ?? null,
-    fixedEnding: script.fixed?.ending?.text ?? null,
+    reusePlan: plan,
     tone: concept.autoTone,
     editStyleText: concept.autoVideoStyle,
     voiceId: concept.autoVoiceId,
   });
-  tokens = { input: tokens.input + kit.tokens.input, output: tokens.output + kit.tokens.output };
+  add(kit.tokens);
 
-  // 5. 실제로 들어간 글로 다시 점검. 도식 · 그래픽 · 표지까지 영상에 박히는 글은 모두 본다
-  const graphicTexts = (g: EditGraphic) => [g.text, g.small, g.sub, g.note, g.chip, g.number, g.unit, g.left, g.right, ...g.items].filter(Boolean);
-  const motionWords = sources.flatMap((s) => {
-    const m = (s as { spec?: MotionSpec }).spec;
-    return m ? motionTexts(m) : [];
-  });
+  // 5. 완성본 프레임과 실제로 들어간 글로 다시 점검한다
+  const sheetFile = join(workDir, "final-frames.jpg");
+  const every = Math.max(1, kit.seconds / 24);
+  ffmpeg(["-y", "-v", "error", "-i", kit.final, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
+  const finalReview = await reviewFinalFrames({ sheet: imageDataUrl(sheetFile), everySeconds: every, lines: kit.timeline.lines.map((l, i) => ({ at: l.start, say: board!.scenes[i]?.say ?? l.tts })) });
+  add(finalReview.tokens);
+  warnings.push(...finalReview.issues.map((i) => `완성본 확인: ${i}`.slice(0, 200)));
+
   const coverTexts = [kit.plan.thumbnail.title.replace(/\n+/g, " "), kit.plan.thumbnail.sub].filter(Boolean);
   const lastBeat = kit.plan.beats.length - 1;
+  const script: ScriptOutput & { fixed?: unknown } = { ...boardAsScript(board), ...(hasPhrases ? { fixed: fixedRecord(phrases) } : {}) };
   const check = await checkScript(
     {
-      hooks: [{ formula_id: 0, spoken: kit.plan.hook.spoken, on_screen: kit.plan.hook.on_screen }],
-      chosen_hook: 0,
-      // 근거 점검은 화면에 보이는 표기로 한다. 읽기용 원고(에이치에이)는 원문(AHA)과 맞지 않아 근거 없음으로 잘못 걸렸다
-      beats: kit.plan.beats.map((b, i) => ({ spoken: b.captions.join(" ") || b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(i === lastBeat ? [...motionWords, ...coverTexts] : [])].join(" "), visual: "" })),
-      loop_word: script.loop_word ?? "",
-      caption: script.caption,
+      ...script,
+      // 근거 점검은 화면에 보이는 표기로 한다
+      beats: kit.plan.beats.map((b, i) => ({ spoken: board!.scenes[i]?.say ?? b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(i === lastBeat ? coverTexts : [])].join(" "), visual: "" })),
     },
     facts,
     rules,
     account,
-    // 훅 점수는 대본 단계에서 이미 통과했다. 여기 글은 읽기용(삼십칠 도)이라 다시 재면 낮게 나와 잘못 멈춘다
-    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: [script.fixed?.hook?.text, script.fixed?.ending?.text].filter((t): t is string => !!t) },
+    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts() },
   );
   const blocking = finalBlocking(
-    { caption: script.caption?.text ?? "", onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...motionWords, ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
+    { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
     { kind: facts.kind, rules, approvedClaims: facts.approvedClaims, stockStatus: facts.stockStatus, healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions },
   );
-  return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts };
+  return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts, script, board };
 }
 
 export class StopError extends Error {}

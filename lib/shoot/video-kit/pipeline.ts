@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
@@ -536,6 +537,15 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     writeProject(project, tl, { look, zones, behind });
   }
 
+  // 자막 시작과 말 시작의 차이를 잰다. 받아쓰기가 없으면 재지 않는다
+  if (words.length && tl.captions.length) {
+    const gaps = tl.captions.map((c) => Math.min(...words.map((w) => Math.abs(w.start - c.start))));
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const worst = sorted[sorted.length - 1];
+    console.log(`[video-kit] 싱크: 자막 시작과 말 시작 차이 중앙값 ${sorted[Math.floor(sorted.length / 2)].toFixed(2)}초 · 최대 ${worst.toFixed(2)}초`);
+    if (worst > 0.5) warnings.push(`자막과 말의 시각이 최대 ${worst.toFixed(1)}초 어긋나요.`);
+  }
+
   // 6. 렌더 · 표지
   // 자막 모션 스킬을 쓸 수 있으면 자막 없이 렌더한 뒤 얹는다. 안 되면 지금까지의 자막으로 렌더한다
   const skillDir = captionSkillDir();
@@ -589,6 +599,15 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       writeProject(project, tl, { look, zones, behind: null });
       hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
     }
+  }
+  // 컷마다 가운데 프레임이 거의 한 색이면 빈 화면으로 본다
+  for (const cut of tl.cuts) {
+    const res = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-ss", ((cut.start + cut.end) / 2).toFixed(3), "-i", final, "-frames:v", "1", "-vf", "scale=64:64,format=gray", "-f", "rawvideo", "-"], { maxBuffer: 1024 * 1024 });
+    if (res.status !== 0 || !res.stdout?.length) continue;
+    const px = [...res.stdout];
+    const mean = px.reduce((a, b) => a + b, 0) / px.length;
+    const spread = Math.sqrt(px.reduce((a, b) => a + (b - mean) ** 2, 0) / px.length);
+    if (spread < 12) warnings.push(`${cut.start.toFixed(1)}~${cut.end.toFixed(1)}초 화면이 거의 한 색이에요. 빈 화면처럼 보일 수 있어요.`);
   }
   const coverClip = clips.find((c) => c.no === plan.thumbnail.clip) ?? clips[0];
   const cover = makeCover(version, workDir, coverClip, plan.thumbnail, look);

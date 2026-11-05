@@ -17,7 +17,7 @@ type Service = ReturnType<typeof createServiceClient>;
 const graphicTypes = ["badge", "title", "chip", "notice", "stat", "split", "steps", "ring", "arrow", "end_card"] as const;
 const sfxNames = ["pop", "click", "rustle", "whoosh", "plug", "tick", "ding"] as const;
 
-const graphicSchema = z.object({
+export const graphicSchema = z.object({
   type: z.enum(graphicTypes),
   at_word: z.string().describe("이 낱말을 말할 때 나온다. 없으면 빈 문자열"),
   at: z.number().describe("at_word가 없을 때 비트 안의 위치 0~1"),

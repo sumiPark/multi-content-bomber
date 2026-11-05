@@ -23,6 +23,9 @@ on:
       test_tone:
         description: "시험에서만 쓸 말투 · 분위기 (dry_run 전용, 저장 안 됨)"
         required: false
+      test_settings:
+        description: "시험에서만 쓸 자동 콘텐츠 설정 JSON (dry_run 전용, 저장 안 됨)"
+        required: false
 
 concurrency:
   group: auto-video-worker
@@ -84,6 +87,7 @@ jobs:
           AUTO_VIDEO_PUBLISH: ${{ vars.AUTO_VIDEO_PUBLISH }}
           VIDEO_PYTHON: python
           TEST_AUTO_TONE: ${{ inputs.test_tone }}
+          TEST_AUTO_SETTINGS: ${{ inputs.test_settings }}
       - name: Keep dry-run result
         if: ${{ inputs.dry_run && !cancelled() }}
         uses: actions/upload-artifact@v4

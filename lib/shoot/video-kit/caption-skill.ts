@@ -18,7 +18,8 @@ import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 // 스킬의 디자인 자막처럼 큰 강조어 줄과 작은 줄을 쌓는다. AI는 모션 · 글꼴 · 줄 나누기만 고르고, 글자와 시각은 코드가 편집 결과와 대조해 그대로 넣는다.
 
 // 글자 자체가 움직이는 효과만 영상 자막에 쓸 수 있다(스킬 안내). 사물이 나오는 장면 번호는 쓰지 않는다
-const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "29", "32", "33", "36", "37", "38", "39", "41", "42"];
+// 천천히 드러나는 효과(29 · 33 · 37)는 글자가 말보다 늦게 읽혀 쓰지 않는다
+const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "32", "36", "38", "39", "41", "42"];
 const EMOTION_FX = ["sway", "shiver", "heartbeat", "tilt", "hop", "droop", "impact"];
 const ALLOWED_FX = new Set(["cut", ...MOTION_FX, ...EMOTION_FX]);
 const DEFAULT_FONT = "프리텐다드";
@@ -139,7 +140,6 @@ function fx(value: string): string {
 function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, look: Look) {
   const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
   const rows = usable ? line.rows : [{ text: c.text, role: "key" as const }];
-  const seconds = c.end - c.start;
   return rows.map((r, i) => ({
     text: r.text.trim(),
     fx: r.role === "key" ? (line?.fx && ALLOWED_FX.has(line.fx) ? line.fx : fx(last ? design.finish_fx : design.key_fx)) : fx(design.small_fx),
@@ -148,8 +148,6 @@ function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefine
     // 밝은 배경에서는 흰 글자와 연한 강조색이 안 읽혀 어두운 글자와 밝은 그림자로 바꾼다
     ...(bright ? { color: r.role === "key" && contrast(look.accent_color, "#FFFFFF") >= 4.5 ? look.accent_color : DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
     ...(i > 0 ? { gapPx: ROW_GAP } : {}),
-    // 둘째 줄은 말이 그 낱말에 닿을 즈음 나온다
-    ...(i > 0 ? { delay: Number((seconds * (rows[0].text.length / Math.max(squash(c.text).length, 1))).toFixed(2)) } : {}),
   }));
 }
 
@@ -159,6 +157,8 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
   return {
     video,
     size: "9:16",
+    // 등장이 끝나기 전에 말이 지나가지 않게 효과를 빠르게 돌린다
+    speed: 1.6,
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
     style: { font: design.small_font, keyFont: design.key_font, weight: 800, size: SMALL_SIZE, color: look.text_color, accent: look.accent_color, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 960 },
     lines: captions.map((c, i) => {
