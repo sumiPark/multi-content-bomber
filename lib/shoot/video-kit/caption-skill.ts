@@ -111,11 +111,13 @@ function markEmphasis(text: string, words: string[]): string {
 /** 편집 결과의 시각 · 글자를 그대로 쓰는 자막 파일 내용. 효과를 못 고른 줄은 바로 바뀐다. */
 export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, look: Look) {
   const byNo = new Map(design.lines.map((l) => [l.no, l]));
+  const size = Math.min(110, Math.max(60, design.size));
   return {
     video,
     size: "9:16",
     pace: "fast",
-    style: { font: design.font, weight: 800, size: Math.min(110, Math.max(60, design.size)), color: look.text_color, accent: look.accent_color },
+    // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
+    style: { font: design.font, weight: 800, size, color: look.text_color, accent: look.accent_color, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6 },
     lines: captions.map((c, i) => {
       const l = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
@@ -124,7 +126,8 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
         t1: Number(c.end.toFixed(3)),
         text: markEmphasis(c.text, [l?.emphasis ?? "", ...c.emphasis]),
         fx: l && ALLOWED_FX.has(l.fx) ? l.fx : "cut",
-        cy: box.top + Math.round(box.height / 2),
+        // 그래픽 · 제품을 피한 자리의 가운데. 한 줄 자막의 위치는 스킬에서 윗선(y)으로 받는다
+        y: box.top + Math.round((box.height - size) / 2),
         ...(l?.scale === "big" ? { big: true } : {}),
         ...(l?.scale === "small" ? { small: true } : {}),
       };

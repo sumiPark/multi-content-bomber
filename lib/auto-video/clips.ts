@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editKit, editKitAsset } from "@/lib/agents/ko-skills";
 import type { MotionSpec } from "@/lib/agents/source-plan";
+import { contrast } from "@/lib/shoot/video-kit/caption-style";
 import { hyperframes } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
 
@@ -10,6 +11,7 @@ import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
 
 const GSAP = "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js";
 const D = 8;
+const MOTION_BG = "#17181A";
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -182,10 +184,22 @@ tl.to("#big", { scale: 1.06, duration: 7, ease: "none" }, .6);`;
 }
 
 /** 코드 모션 → 컷. 값은 소재 에이전트가 상품 정보에서 낸 것만 들어온다. */
+function readableAccent(color: string): string {
+  const n = Number.parseInt(color.slice(1), 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  for (let mix = 0; mix <= 1; mix += 0.05) {
+    const out = rgb.map((v) => Math.round(v + (255 - v) * mix));
+    const next = `#${out.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+    if (contrast(next, MOTION_BG) >= 3.2) return next;
+  }
+  return "#FFFFFF";
+}
+
 export function motionClip(input: MotionSpec, workDir: string, name: string): { file: string; shot: string } {
   // 차오르는 숫자는 자연수만 쓴다. 1.5g 같은 값을 반올림하면 사실이 바뀌니 그대로 크게 보여 준다
   const m: MotionSpec = input.kind === "count" && !(Number.isInteger(input.number_to) && input.number_to > 0) ? { ...input, kind: "big_fact", big: String(input.number_to) } : input;
-  const accent = hex(m.accent, "#E04E08");
+  // 도식 바탕이 어두워서 어두운 강조색은 읽히지 않는다. 색 계열은 두고 밝힌다
+  const accent = readableAccent(hex(m.accent, "#E04E08"));
   const built = m.kind === "compare" ? compareHtml(m, accent) : m.kind === "count" ? countHtml(m, accent) : m.kind === "steps" ? stepsHtml(m, accent) : bigHtml(m, accent);
   const dir = join(workDir, name);
   mkdirSync(dir, { recursive: true });
