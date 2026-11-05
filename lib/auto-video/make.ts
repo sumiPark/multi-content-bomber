@@ -194,6 +194,8 @@ export async function makeAutoVideo(input: {
   let board: Storyboard | null = null;
   let retry: { board: Storyboard; problems: string[] } | null = null;
   let left: string[] = [];
+  // 못 쓰는 사진 때문에 다시 쓰는 횟수는 따로 센다. 말을 점검하기 전에 걸러 토큰을 아낀다
+  let photoRetries = 3;
   const fixedTexts = () => [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t);
   for (let attempt = 0; attempt < MAX_BOARD_TRIES; attempt++) {
     const res = await writeStoryboard({
@@ -227,16 +229,25 @@ export async function makeAutoVideo(input: {
     // 설명 화면은 후보 번호가 없어 장면 순서로 번호를 붙이고, AI 이미지를 얹지 않는다
     const scenes = board.scenes.map((s, i) => (s.source === "motion" ? { ...s, source_id: `m${i}` } : s));
     board = { ...board, scenes, visuals: board.visuals.filter((v) => scenes[v.beat]?.source !== "motion") };
-    // 세로 화면에서 제품이 잘리는 사진은 쓰지 않는다. 후보에서 빼고 다시 쓰게 한다
+    // 세로 화면에서 제품이 많이 잘리는 사진과, 제품이 아닌데 오려야 하는 사진(손 · 사용 장면)은 쓰지 않는다. 후보에서 빼고 다시 쓰게 한다
+    const dropped: string[] = [];
     for (const s of board.scenes) {
       if (s.source !== "photo" || !sharpIds.has(s.source_id)) continue;
       const meta = board.photos.find((p) => p.id === s.source_id);
-      if (meta && trimmedLayers(meta.id, meta.trim_top, meta.trim_bottom)?.mode === "unfit") {
-        console.log(`  ${meta.id} 사진은 세로 화면에서 제품이 잘려 후보에서 뺌`);
+      const mode = meta && trimmedLayers(meta.id, meta.trim_top, meta.trim_bottom)?.mode;
+      if (meta && (mode === "unfit" || (mode === "float" && meta.kind !== "product"))) {
+        console.log(`  ${meta.id} 사진은 세로 화면에 맞지 않아 후보에서 뺌 (${mode}, ${meta.kind})`);
         sharpIds.delete(meta.id);
+        dropped.push(meta.id);
       }
     }
     board = { ...board, photos: board.photos.map((p) => (sharpIds.has(p.id) ? p : { ...p, usable: false })) };
+    if (dropped.length && photoRetries > 0) {
+      photoRetries--;
+      attempt--;
+      retry = { board, problems: [...left, `${dropped.join(", ")} 사진은 세로 화면에 맞지 않아 쓸 수 없다. 다른 후보나 설명 화면(motion)으로 바꾼다`] };
+      continue;
+    }
     const code = storyboardProblems(board, archiveIds, phrases.hooks.length > 0);
     const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts() });
     add(check.tokens);

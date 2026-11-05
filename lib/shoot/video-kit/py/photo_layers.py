@@ -1,6 +1,6 @@
 # 제품 사진 한 장을 움직일 레이어로 나눈다. 포장 글자가 휘지 않게 레이어는 통째로만 움직이고, 깊이맵으로 픽셀을 밀지 않는다.
 # 배경 제거: rembg isnet-general-use. 깊이: Depth Anything V2 Small(Apache-2.0)의 ONNX. 다른 크기는 비상업 라이선스라 쓰지 않는다.
-# 흐린 복제 배경은 쓰지 않는다(2026-11-05 사용자 결정). 제품을 오려 띄우거나, 제품이 잘리지 않는 만큼 세로로 채운다.
+# 흐린 복제 배경은 쓰지 않는다(2026-11-05 사용자 결정). 제품을 오려 코드로 만든 깨끗한 배경에 띄우거나, 제품이 많이 잘리지 않는 만큼 세로로 채운다.
 # 출력 모드 float(제품을 띄움) / aligned(제품과 배경 분리) / depth(먼 쪽 · 가까운 쪽) / push(사진 전체) / unfit(제품이 잘려 쓰지 않음, 레이어 없음).
 import json
 import os
@@ -14,7 +14,9 @@ from PIL import Image, ImageFilter
 from rembg import new_session, remove
 
 W, H = 1080, 1920
-KEEP = 0.96
+# 세로로 채웠을 때 제품 범위가 화면의 몇 배까지면 쓰는지. 배경 제거가 거품 · 물방울까지 제품으로 잡아 범위가 크게 재진다.
+# 실측(2026-11-05): 제품 한 병이 거품 배경과 함께 1.58로 재진 사진은 깔끔했고, 두 병이 2.02인 사진은 병이 잘렸다
+KEEP = 1.6
 DEPTH_URL = "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx"
 _depth = None
 
@@ -78,6 +80,21 @@ def frame_on(im, box, extra):
     return fx, fy, fits
 
 
+def clean_backdrop(rgb, alpha):
+    """오린 제품 뒤에 까는 코드 배경. 사진의 배경색으로 위아래 그라데이션과 가운데 빛을 만든다. 움직임 여유만큼 크게 만든다."""
+    rest = rgb[alpha <= 0.1]
+    base = np.median(rest, axis=0) if len(rest) else np.array([235.0, 232.0, 226.0])
+    w, h = round(W * 1.12), round(H * 1.12)
+    y = np.linspace(0, 1, h)[:, None, None]
+    grad = base * 1.1 * (1 - y) + base * 0.8 * y
+    xx, yy = np.meshgrid(np.linspace(-1, 1, w), np.linspace(-1, 1, h))
+    glow = np.exp(-(xx ** 2 / 0.5 + (yy + 0.05) ** 2 / 0.22))[..., None]
+    img = grad + (255 - grad) * glow * 0.28
+    # 띠가 보이지 않게 아주 약한 무늬를 얹는다. 같은 사진은 늘 같은 결과가 나오게 시드를 고정한다
+    img = img + np.random.default_rng(7).normal(0, 1.2, img.shape)
+    return Image.fromarray(np.clip(img, 0, 255).astype("uint8"))
+
+
 def with_shadow(fg, blur=26, dy=26):
     alpha = fg.getchannel("A").filter(ImageFilter.GaussianBlur(blur)).point(lambda v: int(v * 0.55))
     pad = 80
@@ -127,8 +144,8 @@ def main():
         if not touches and ((box[2] - box[0]) / im.width > 0.45 or not fits):
             # 제품 전체가 사진 안에 있고 넓거나 세로로 채우면 잘린다: 잘리지 않게 띄운다
             mode = "float"
-            bg, l, t, _ = cover(plate, extra=1.12)
-            layers.append(layer("bg", out_dir, bg.filter(ImageFilter.GaussianBlur(14)), l, t, "bg"))
+            bg = clean_backdrop(rgb, alpha)
+            layers.append(layer("bg", out_dir, bg, (W - bg.width) / 2, (H - bg.height) / 2, "bg"))
             cut = fg.crop(box)
             # 희미하게 남은 배경까지 그림자가 생기면 사각형 테두리가 보인다
             cut.putalpha(cut.getchannel("A").point(lambda v: 0 if v < 48 else v))
@@ -163,7 +180,12 @@ def main():
         layers.append(layer("whole", out_dir, whole, l, t, "whole"))
     if not layers:
         mode = "unfit"
-    print(json.dumps({"mode": mode, "soft": soft, "ratio": round(ratio, 3), "layers": layers}, ensure_ascii=False))
+    # fit: 세로로 채웠을 때 제품이 화면보다 얼마나 큰지(1보다 크면 잘린다). 기준을 맞출 때 본다
+    over = 0.0
+    if box:
+        s = max(W / im.width, H / im.height) * 1.16
+        over = max((box[2] - box[0]) * s / W, (box[3] - box[1]) * s / H)
+    print(json.dumps({"mode": mode, "soft": soft, "ratio": round(ratio, 3), "fit": round(over, 2), "layers": layers}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
