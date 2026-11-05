@@ -134,7 +134,7 @@ export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
   });
 }
 
-// noCaptions: 자막 모션 스킬이 렌더 뒤에 자막을 얹을 때 쓴다
+// noCaptions: 자막 모션 스킬이 렌더 뒤에 자막 · 후킹 글자 · 끝 화면을 얹을 때 쓴다
 export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null; noCaptions?: boolean } = {}): void {
   const look = opts.look ?? DEFAULT_LOOK;
   const zones = opts.zones ?? null;
@@ -174,6 +174,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   );
 
   const lines = hookLines(tl.hook.onScreen);
+  const shown = opts.noCaptions ? tl.graphics.filter((g) => g.type !== "end_card") : tl.graphics;
   writeFileSync(
     join(dir, "compositions", "graphics.html"),
     `<template>
@@ -212,15 +213,15 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
     .ecard em { display: block; margin-top: 18px; font-style: normal; font-size: 33px; font-weight: 400; color: #ccc; letter-spacing: -.5px; }
   </style>
   <div id="root" data-composition-id="graphics" data-width="1080" data-height="1920">
-    <div id="hook" class="lk clip" data-start="0" data-duration="${tl.hook.end}" style="top:${ZONE_BOX[hookAt].top}px;height:${ZONE_BOX[hookAt].height}px">${bigText(lines, tl.hook.highlight, look, Math.max(112, Math.min(150, look.size * 1.7)), 950)}</div>
-    ${tl.graphics.map(graphicHtml).join("\n    ")}
+    ${opts.noCaptions ? "" : `<div id="hook" class="lk clip" data-start="0" data-duration="${tl.hook.end}" style="top:${ZONE_BOX[hookAt].top}px;height:${ZONE_BOX[hookAt].height}px">${bigText(lines, tl.hook.highlight, look, Math.max(112, Math.min(150, look.size * 1.7)), 950)}</div>`}
+    ${shown.map(graphicHtml).join("\n    ")}
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
     // 후킹은 첫 프레임부터 보인다 — 살짝 커지기만 하고, 말이 끝나면 사라진다
-    tl.fromTo("#hook", { scale: 1 }, { scale: 1.035, duration: ${Math.max(0.4, tl.hook.end - 0.1).toFixed(3)}, ease: "none" }, 0);
-    tl.to("#hook", { opacity: 0, duration: 0.1, ease: "power2.in" }, ${(tl.hook.end - 0.1).toFixed(3)});
-    ${tl.graphics.map(graphicMotion).join("\n    ")}
+    ${opts.noCaptions ? "" : `tl.fromTo("#hook", { scale: 1 }, { scale: 1.035, duration: ${Math.max(0.4, tl.hook.end - 0.1).toFixed(3)}, ease: "none" }, 0);
+    tl.to("#hook", { opacity: 0, duration: 0.1, ease: "power2.in" }, ${(tl.hook.end - 0.1).toFixed(3)});`}
+    ${shown.map(graphicMotion).join("\n    ")}
     window.__timelines["graphics"] = tl;
   </script>
 </template>

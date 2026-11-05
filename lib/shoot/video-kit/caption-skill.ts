@@ -136,8 +136,54 @@ function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefine
   }));
 }
 
+/** 후킹 글자 · 끝 화면 · 표지처럼 말 자막이 아닌 글자. 글자를 바꾸지 않고 줄만 나눈다. */
+export interface SkillBlock {
+  start: number;
+  end: number;
+  zone: Zone;
+  rows: { text: string; role: "key" | "small" }[];
+  fx: string;
+  highlight?: string;
+}
+
+/** 긴 문구를 글자 수에 맞춰 줄로 나눈다. 줄바꿈이 있으면 그대로 따른다. */
+export function blockRows(text: string, role: "key" | "small" = "key", chars = 13): SkillBlock["rows"] {
+  const out: string[] = [];
+  for (const part of text.split(/\n+/).map((p) => p.trim()).filter(Boolean)) {
+    let line = "";
+    for (const word of part.split(/\s+/)) {
+      if (line && squash(line + word).length > chars) {
+        out.push(line);
+        line = word;
+      } else line = line ? `${line} ${word}` : word;
+    }
+    if (line) out.push(line);
+  }
+  return out.map((t) => ({ text: t, role }));
+}
+
+function blockLine(b: SkillBlock, bright: boolean) {
+  const box = ZONE_BOX[b.zone];
+  return {
+    t0: Number(b.start.toFixed(3)),
+    t1: Number(b.end.toFixed(3)),
+    cy: box.top + Math.round(box.height / 2),
+    rows: b.rows.map((r, i) => {
+      const marked = b.highlight && r.text.includes(b.highlight) && !r.text.includes("*") ? r.text.replace(b.highlight, `*${b.highlight}*`) : r.text;
+      return {
+        text: marked,
+        fx: r.role === "key" ? fx(b.fx) : "cut",
+        size: r.role === "key" ? keySize(r.text) : SMALL_SIZE,
+        ...(r.role === "key" ? { key: true } : {}),
+        ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
+        ...(i > 0 ? { gapPx: ROW_GAP } : {}),
+      };
+    }),
+  };
+}
+
 /** 편집 결과의 시각 · 글자를 그대로 쓰는 자막 파일 내용. */
-export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, look: Look, brightness: (number | null)[] = []) {
+export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, look: Look, brightness: (number | null)[] = [], blocks: SkillBlock[] = [], blockBrightness: (number | null)[] = []) {
   const byNo = new Map(design.lines.map((l) => [l.no, l]));
   return {
     video,
@@ -146,7 +192,7 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
     speed: 1.6,
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
     style: { size: SMALL_SIZE, color: look.text_color, accent: look.accent_color, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 960 },
-    lines: captions.map((c, i) => {
+    lines: [...blocks.map((b, i) => blockLine(b, (blockBrightness[i] ?? 0) > BRIGHT)), ...captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
       const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT, look);
@@ -158,7 +204,7 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
         rows,
         ...(line?.spark && keyRow >= 0 ? { deco: [{ type: "spark", items: [{ row: keyRow, corner: "tr", s: 44 }] }] } : {}),
       };
-    }),
+    })].sort((a, b) => a.t0 - b.t0),
   };
 }
 
@@ -172,13 +218,15 @@ function zoneBrightness(video: string, captions: TimedCaption[], zones: Zone[]):
 }
 
 /** 소리까지 있는 영상 위에 자막을 얹는다. 길이가 달라지거나 실패하면 예외를 던져 호출하는 쪽이 기본 자막으로 돌아간다. */
-export function overlayCaptions(input: { dir: string; video: string; captions: TimedCaption[]; zones: Zone[]; design: CaptionDesign; look: Look; workDir: string }): string {
+export function overlayCaptions(input: { dir: string; video: string; captions: TimedCaption[]; zones: Zone[]; design: CaptionDesign; look: Look; workDir: string; blocks?: SkillBlock[]; name?: string }): string {
   const work = join(input.workDir, "caption-skill");
   mkdirSync(work, { recursive: true });
-  const file = join(work, "subs.json");
+  const file = join(work, `${input.name ?? "subs"}.json`);
+  const blocks = input.blocks ?? [];
+  const blockBrightness = zoneBrightness(input.video, blocks.map((b) => ({ id: "", text: "", emphasis: [], beat: 0, start: b.start, end: Math.min(b.end, b.start + 1) })), blocks.map((b) => b.zone));
   const brightness = zoneBrightness(input.video, input.captions, input.zones);
-  writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, input.look, brightness)));
-  const out = join(input.workDir, "final-captioned.mp4");
+  writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, input.look, brightness, blocks, blockBrightness)));
+  const out = join(input.workDir, `${input.name ?? "final"}-captioned.mp4`);
   const res = spawnSync(process.execPath, [join(input.dir, "scripts", "subs.cjs"), file, "--out", out], {
     encoding: "utf8",
     timeout: 20 * 60_000,

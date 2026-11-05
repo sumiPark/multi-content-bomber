@@ -11,8 +11,8 @@ import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
-import { normalizeLook, type Look } from "@/lib/shoot/video-kit/caption-style";
-import { captionSkillDir, designCaptions, overlayCaptions, type CaptionDesign } from "@/lib/shoot/video-kit/caption-skill";
+import { hookZone, normalizeLook, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { blockRows, captionSkillDir, designCaptions, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
 import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse, type PickedMusic } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
@@ -387,6 +387,22 @@ function makeBehindWord(look: Look, tl: Timeline, clips: KitClip[], baseVideo: s
   return { word, start: Number(Math.max(cut.start, cap.start).toFixed(3)), cutStart: Number(cut.start.toFixed(3)), end: Number(cut.end.toFixed(3)), file };
 }
 
+/** 표지도 영상과 같은 글꼴로 만든다. 프레임을 잠깐 영상으로 만들어 글자를 얹고 한 장을 뽑는다. */
+function makeSkillCover(dir: string, design: CaptionDesign, look: Look, workDir: string, clip: KitClip, thumb: EditPlan["thumbnail"]): string {
+  const frame = join(workDir, "cover-frame.jpg");
+  const at = Math.min(Math.max(0, thumb.at), Math.max(0, clip.duration - 0.1));
+  ffmpeg(["-y", "-v", "error", "-ss", at.toFixed(3), "-i", clip.file, "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920", "-q:v", "2", frame]);
+  const still = join(workDir, "cover-still.mp4");
+  ffmpeg(["-y", "-v", "error", "-loop", "1", "-t", "2", "-i", frame, "-f", "lavfi", "-t", "2", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000", "-vf", "fps=30,format=yuv420p", "-c:v", "libx264", "-preset", "fast", "-crf", "16", "-c:a", "aac", "-shortest", still]);
+  const cover0 = frameZones([frame], workDir)?.[0];
+  const zone = cover0 ? (cover0.top <= cover0.lower ? "top" : "lower") : thumb.position === "lower" ? "lower" : "top";
+  const blocks: SkillBlock[] = [{ start: 0, end: 2, zone, fx: "cut", highlight: thumb.highlight, rows: [...blockRows(thumb.title), ...(thumb.sub ? blockRows(thumb.sub, "small", 18) : [])] }];
+  const made = overlayCaptions({ dir, video: still, captions: [], zones: [], design, look, workDir, blocks, name: "cover" });
+  const cover = join(workDir, "cover.jpg");
+  ffmpeg(["-y", "-v", "error", "-ss", "1.6", "-i", made, "-frames:v", "1", "-q:v", "2", cover]);
+  return cover;
+}
+
 function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditPlan["thumbnail"], look: Look): string {
   const frame = join(workDir, "cover-frame.jpg");
   const at = Math.min(Math.max(0, thumb.at), Math.max(0, clip.duration - 0.1));
@@ -591,7 +607,15 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   if (!existsSync(final) || mediaSeconds(final) < 1) throw new Error("렌더 결과가 없어요");
   if (design && skillDir) {
     try {
-      final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, look, workDir });
+      // 후킹 글자와 끝 화면도 자막과 같은 스킬로 얹는다
+      const blocks: SkillBlock[] = [{ start: 0, end: tl.hook.end, zone: hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position), fx: design.key_fx, highlight: tl.hook.highlight, rows: blockRows(tl.hook.onScreen) }];
+      const endCard = tl.graphics.find((g) => g.type === "end_card");
+      if (endCard) {
+        const p = endCard.g;
+        const rows = [...(p.chip ? blockRows(p.chip, "small", 18) : []), ...blockRows(p.text), ...(p.sub ? blockRows(p.sub, "small", 18) : []), ...(p.note ? blockRows(p.note, "small", 18) : [])];
+        if (rows.length) blocks.push({ start: endCard.start, end: tl.duration, zone: "top", fx: design.finish_fx, rows });
+      }
+      final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, look, workDir, blocks });
     } catch (e) {
       console.warn("[video-kit] 자막 모션 실패, 기본 자막으로 다시 렌더:", e instanceof Error ? e.message : e);
       warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
@@ -610,7 +634,15 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     if (spread < 12) warnings.push(`${cut.start.toFixed(1)}~${cut.end.toFixed(1)}초 화면이 거의 한 색이에요. 빈 화면처럼 보일 수 있어요.`);
   }
   const coverClip = clips.find((c) => c.no === plan.thumbnail.clip) ?? clips[0];
-  const cover = makeCover(version, workDir, coverClip, plan.thumbnail, look);
+  let cover: string | null = null;
+  if (design && skillDir) {
+    try {
+      cover = makeSkillCover(skillDir, design, look, workDir, coverClip, plan.thumbnail);
+    } catch (e) {
+      console.warn("[video-kit] 스킬 표지 실패, 기본 표지로 만든다:", e instanceof Error ? e.message : e);
+    }
+  }
+  cover ??= makeCover(version, workDir, coverClip, plan.thumbnail, look);
 
   const hookText = plan.hook.on_screen.replace(/\n+/g, " ");
   return {
