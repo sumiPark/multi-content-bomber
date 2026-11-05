@@ -543,7 +543,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   let design: CaptionDesign | null = null;
   if (skillDir && tl.captions.length) {
     try {
-      if (priorDesign) design = priorDesign;
+      if (priorDesign?.lines?.[0]?.rows) design = priorDesign;
       else {
         const made = await designCaptions({ dir: skillDir, captions: tl.captions, product: input.facts.name, look, tone: input.tone, styleText: input.editStyleText });
         design = made.design;

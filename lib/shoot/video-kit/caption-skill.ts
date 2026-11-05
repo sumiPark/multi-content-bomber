@@ -14,13 +14,17 @@ import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 
 // 자막 모션 스킬 연결(2026-11-05 사용자 결정). 스킬은 구매한 사용자의 유료 자료라 저장소에 넣지 않는다.
 // 러너는 비공개 저장 공간에서 받고(worker/fetch-caption-skill.ts), 이 PC는 설치된 폴더를 쓴다. 효과 설명 · 글꼴 목록도 실행할 때 스킬 폴더에서 읽는다.
-// AI는 줄마다 효과 · 강조 · 크기와 글꼴만 고른다. 글자 내용과 시각은 코드가 편집 결과 그대로 넣는다.
+// 스킬의 디자인 자막을 쓴다: 자막마다 큰 강조어 줄과 작은 줄을 쌓고 줄마다 효과를 다르게 준다.
+// AI는 줄 나누기 · 효과 · 글꼴만 고른다. 글자와 시각은 코드가 편집 결과와 대조해 그대로 넣는다.
 
 // 글자 자체가 움직이는 효과만 영상 자막에 쓸 수 있다(스킬 안내). 사물이 나오는 장면 번호는 쓰지 않는다
 const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "29", "32", "33", "36", "37", "38", "39", "41", "42"];
 const EMOTION_FX = ["sway", "shiver", "heartbeat", "tilt", "hop", "droop", "impact"];
 const ALLOWED_FX = new Set(["cut", ...MOTION_FX, ...EMOTION_FX]);
 const DEFAULT_FONT = "프리텐다드";
+const SMALL_SIZE = 66;
+const KEY_MAX = 150;
+const KEY_WIDTH = 900;
 
 export function captionSkillDir(): string | null {
   const dir = process.env.CAPTION_SKILL_DIR || join(homedir(), ".claude", "skills", "caption-motion-seqc");
@@ -28,16 +32,17 @@ export function captionSkillDir(): string | null {
 }
 
 const designSchema = z.object({
-  font: z.string().describe("자막 글꼴. 목록의 이름 그대로"),
-  size: z.number().int().describe("기본 글자 크기 px, 60~110"),
+  key_font: z.string().describe("큰 강조어 글꼴. 목록의 이름 그대로, 눈에 띄는 굵은 글꼴"),
+  small_font: z.string().describe("작은 줄 글꼴. 목록의 이름 그대로, 강조어와 성격이 다른 글꼴"),
   reading: z.string().describe("이 설정과 상품을 어떻게 읽어 이렇게 골랐는지 한 줄"),
   lines: z
     .array(
       z.object({
         no: z.number().int().describe("자막 번호(0부터)"),
-        fx: z.string().describe("효과 번호나 이름. 바로 바뀌게 하려면 cut"),
-        emphasis: z.string().describe("강조할 낱말. 그 자막에 그대로 있는 글자만, 없으면 빈 문자열"),
-        scale: z.enum(["normal", "big", "small"]).describe("big은 결론 · 반전, small은 이음말"),
+        rows: z
+          .array(z.object({ text: z.string(), role: z.enum(["key", "small"]), fx: z.string().describe("효과 번호나 이름. 바로 나오게 하려면 cut") }))
+          .describe("자막을 위에서 아래로 나눈 1~2줄. 이어 붙이면 자막과 글자가 같아야 한다. 핵심 낱말이 key"),
+        spark: z.boolean().describe("이 자막의 강조어에 반짝이 장식을 붙일지. 영상 전체에서 2~3번만"),
       }),
     )
     .describe("자막마다 하나"),
@@ -78,10 +83,10 @@ export async function designCaptions(input: {
         role: "system",
         content: `너는 인스타 릴스 자막 디자이너다. 이 영상의 자막마다 움직임을 고른다. 글자는 바꾸지 않는다.
 규칙:
-- 대부분은 cut으로 두고, 강조할 말의 20~35%에만 효과를 넣는다. 한 영상에 효과는 4~6가지, 같은 효과를 연달아 쓰지 않는다.
+- 자막마다 한 컷짜리 포스터처럼 만든다. 곁들이는 말은 작은 줄, 핵심 낱말은 큰 줄로 나눈다. 글자를 바꾸거나 빼거나 더하지 않는다. 짧은 자막은 key 한 줄이어도 된다.
+- key 줄에는 대부분 효과를 주고, small 줄은 cut이나 부드러운 효과를 준다. 한 영상에 효과는 4~6가지, 같은 효과를 연달아 쓰지 않는다.
 - 감정 효과(${EMOTION_FX.join(", ")})는 감정이 있는 말에만 영상당 2~4번 이내로 쓴다.
-- 명조 · 세리프 글꼴을 고르지 않는다. 설정 분위기와 상품에 맞는 한글 글꼴 하나를 고른다.
-- 결론 · 반전만 big, 이음말만 small로 둔다.
+- 명조 · 세리프를 강조어 글꼴로 고르지 않는다. 설정 분위기와 상품에 맞는 한글 글꼴로 강조어 하나, 작은 줄 하나를 짝짓는다.
 쓸 수 있는 효과:
 ${effectNotes(input.dir)}
 감정 효과: ${EMOTION_FX.join(", ")}${conceptBlock("이 계정의 말투 · 분위기", input.tone, "효과 세기와 글꼴에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", input.styleText, "자막 움직임에 맞으면 반영한다.")}`,
@@ -96,40 +101,61 @@ ${effectNotes(input.dir)}
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed) throw new Error("자막 디자인 응답이 비어 있음");
   return {
-    design: { ...parsed, font: fonts.some((f) => f.name === parsed.font) ? parsed.font : DEFAULT_FONT },
+    design: {
+      ...parsed,
+      key_font: fonts.some((f) => f.name === parsed.key_font) ? parsed.key_font : DEFAULT_FONT,
+      small_font: fonts.some((f) => f.name === parsed.small_font) ? parsed.small_font : DEFAULT_FONT,
+    },
     tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },
   };
 }
 
-function markEmphasis(text: string, words: string[]): string {
-  // 스킬 표기(*강조*)와 겹치는 글자는 강조 없이 그대로 둔다
-  if (text.includes("*")) return text;
-  const word = words.find((w) => w && text.includes(w));
-  return word ? text.replace(word, `*${word}*`) : text;
+const squash = (t: string) => t.replace(/\s+/g, "");
+
+/** 글자 폭에 맞춘 강조어 크기. 한 줄이 화면을 넘지 않게 한다. */
+function keySize(text: string): number {
+  const units = [...text].reduce((sum, c) => sum + (c === " " ? 0.3 : /[가-힣]/.test(c) ? 1 : 0.62), 0);
+  return Math.round(Math.min(KEY_MAX, Math.max(SMALL_SIZE, KEY_WIDTH / Math.max(units, 1))));
 }
 
-/** 편집 결과의 시각 · 글자를 그대로 쓰는 자막 파일 내용. 효과를 못 고른 줄은 바로 바뀐다. */
+function fx(value: string): string {
+  return ALLOWED_FX.has(value) ? value : "cut";
+}
+
+/** AI가 나눈 줄이 자막과 글자가 다르면 쓰지 않고 자막 전체를 큰 줄 하나로 둔다. */
+function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined) {
+  const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
+  const rows = usable ? line.rows : [{ text: c.text, role: "key" as const, fx: line?.rows[0]?.fx ?? "cut" }];
+  const seconds = c.end - c.start;
+  return rows.map((r, i) => ({
+    text: r.text.trim(),
+    fx: fx(r.fx),
+    size: r.role === "key" ? keySize(r.text.trim()) : SMALL_SIZE,
+    ...(r.role === "key" ? { key: true, tone: "hi" } : {}),
+    // 둘째 줄은 말이 그 낱말에 닿을 즈음 나온다
+    ...(i > 0 ? { delay: Number((seconds * (rows[0].text.length / Math.max(squash(c.text).length, 1))).toFixed(2)) } : {}),
+  }));
+}
+
+/** 편집 결과의 시각 · 글자를 그대로 쓰는 자막 파일 내용. */
 export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, look: Look) {
   const byNo = new Map(design.lines.map((l) => [l.no, l]));
-  const size = Math.min(110, Math.max(60, design.size));
   return {
     video,
     size: "9:16",
-    pace: "fast",
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
-    style: { font: design.font, weight: 800, size, color: look.text_color, accent: look.accent_color, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6 },
+    style: { font: design.small_font, keyFont: design.key_font, weight: 800, size: SMALL_SIZE, color: look.text_color, accent: look.accent_color, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 960 },
     lines: captions.map((c, i) => {
-      const l = byNo.get(i);
+      const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
+      const rows = rowsOf(c, line);
+      const keyRow = rows.findIndex((r) => "key" in r);
       return {
         t0: Number(c.start.toFixed(3)),
         t1: Number(c.end.toFixed(3)),
-        text: markEmphasis(c.text, [l?.emphasis ?? "", ...c.emphasis]),
-        fx: l && ALLOWED_FX.has(l.fx) ? l.fx : "cut",
-        // 그래픽 · 제품을 피한 자리의 가운데. 한 줄 자막의 위치는 스킬에서 윗선(y)으로 받는다
-        y: box.top + Math.round((box.height - size) / 2),
-        ...(l?.scale === "big" ? { big: true } : {}),
-        ...(l?.scale === "small" ? { small: true } : {}),
+        cy: box.top + Math.round(box.height / 2),
+        rows,
+        ...(line?.spark && keyRow >= 0 ? { deco: [{ type: "spark", items: [{ row: keyRow, corner: "tr", s: 44 }] }] } : {}),
       };
     }),
   };
