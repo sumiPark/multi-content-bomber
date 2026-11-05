@@ -3,7 +3,7 @@ import "./load-env";
 
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { applyToScript, dropFailedPhrases, fixedPhraseBlock, fixedRecord, preparePhrases, recentTemplates } from "@/lib/agents/fixed-phrases";
-import { checkScript, type CheckResult } from "@/lib/agents/check";
+import { blockingIssues, checkScript, type CheckResult } from "@/lib/agents/check";
 import { scoreHooks } from "@/lib/agents/ko-skills";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import { writeScript, type ScriptOutput } from "@/lib/agents/script";
@@ -128,7 +128,7 @@ async function main() {
         if (check.passed) break;
         // 고정 문구가 걸렸으면 글자를 고칠 수 없으니 다음 문구로 한 번 더 쓴다(최대 3번 더)
         if (dropFailedPhrases(phrases, check.issues) && maxAttempts < MAX_REWRITES + 3) maxAttempts++;
-        fixRequests = check.issues.map((i) => i.detail);
+        fixRequests = blockingIssues(check.issues).map((i) => i.detail);
       }
       if (!script || !check) continue;
 
@@ -155,7 +155,7 @@ async function main() {
             script: saved as unknown as Json,
             check_result: { ...check, checkedAt: new Date().toISOString() } as unknown as Json,
             error: null,
-            note: check.passed ? null : `점검에 걸림: ${check.issues[0]?.detail ?? ""}`.slice(0, 300),
+            note: check.passed ? null : `점검에 걸림: ${blockingIssues(check.issues)[0]?.detail ?? ""}`.slice(0, 300),
           })
           .eq("id", plan.id)
           .eq("status", "CONFIRMED")

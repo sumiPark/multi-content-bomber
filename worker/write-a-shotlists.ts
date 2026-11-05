@@ -3,7 +3,7 @@ import "./load-env";
 
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { applyToShotlist, dropFailedPhrases, fixedPhraseBlock, fixedRecord, preparePhrases, recentTemplates } from "@/lib/agents/fixed-phrases";
-import { checkScript, type CheckResult } from "@/lib/agents/check";
+import { blockingIssues, checkScript, type CheckResult } from "@/lib/agents/check";
 import { scoreHooks } from "@/lib/agents/ko-skills";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { PlanAIdea } from "@/lib/agents/plan-a";
@@ -139,7 +139,7 @@ async function main() {
         if (check.passed) break;
         // 고정 문구가 걸렸으면 글자를 고칠 수 없으니 다음 문구로 한 번 더 쓴다(최대 3번 더)
         if (dropFailedPhrases(phrases, check.issues) && maxAttempts < MAX_REWRITES + 3) maxAttempts++;
-        fixRequests = check.issues.map((i) => i.detail);
+        fixRequests = blockingIssues(check.issues).map((i) => i.detail);
       }
       if (!shotlist || !check) continue;
 

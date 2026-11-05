@@ -4,7 +4,7 @@ import "./load-env";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkScript } from "@/lib/agents/check";
+import { blockingIssues, checkScript } from "@/lib/agents/check";
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import { writeScript } from "@/lib/agents/script";
@@ -86,7 +86,7 @@ async function main() {
           const check = await checkScript(res.output, facts, rules, acc);
           console.log(`  임시 대본 ${attempt + 1}번째: ${check.passed ? "통과" : `걸림 ${check.issues.map((i) => i.detail).join(" / ").slice(0, 200)}`}`);
           if (check.passed) break;
-          fixRequests = check.issues.map((i) => i.detail);
+          fixRequests = blockingIssues(check.issues).map((i) => i.detail);
         }
       } catch (e) {
         process.exitCode = 1;
@@ -183,7 +183,7 @@ async function main() {
           video: video as unknown as Json,
           check_result: { ...check, issues, passed, checkedAt: new Date().toISOString() } as unknown as Json,
           error: null,
-          note: passed ? null : `완성본 점검에 걸림: ${issues[0]?.detail ?? ""}`.slice(0, 300),
+          note: passed ? null : `완성본 점검에 걸림: ${blockingIssues(check.issues)[0]?.detail ?? blocking[0] ?? ""}`.slice(0, 300),
         })
         .eq("id", plan.id)
         .eq("status", "SCRIPTED")
@@ -207,7 +207,7 @@ async function main() {
         finished_at: new Date().toISOString(),
       });
       // 사람이 볼 경고가 있으면 자동 발행하지 않고 확인 화면에 남긴다
-      if (passed && autoPublish && made.warnings.length === 0) {
+      if (passed && autoPublish && issues.length === 0) {
         const r = await scheduleAutoVideo(service, plan.id);
         console.log(r.ok ? `  발행 대기열에 넣음 (${r.scheduledFor})` : `  발행 대기열 실패: ${r.error}`);
       }

@@ -6,9 +6,18 @@ import type { createServiceClient } from "@/lib/supabase/service";
 
 type Service = ReturnType<typeof createServiceClient>;
 
+/** 대본 · 영상에 쓰는 상품 이름. 쇼핑몰 표기의 대괄호 표시([70번], [김성중], [무료배송])를 뺀다(2026-11-05 사용자 결정). */
+export function videoProductName(listing: string): string {
+  const name = listing.replace(/\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim();
+  return name || listing.replace(/[[\]]/g, "").trim();
+}
+
 export interface ProductFacts {
   id: string;
+  // 대본 · 영상에 쓰는 이름
   name: string;
+  // 쇼핑몰 표기 그대로. 글에 쓰지 않고 근거 대조에만 쓴다
+  rawName: string;
   shop: string;
   kind: ProductKind;
   kindLabel: string;
@@ -48,7 +57,8 @@ export async function loadProductFacts(service: Service, productId: string): Pro
   const kind = (p.kind ?? "OTHER") as ProductKind;
   return {
     id: p.id,
-    name: p.name,
+    name: videoProductName(p.name),
+    rawName: p.name,
     shop: SHOPS[p.shop_code as ShopCode]?.name ?? p.shop_code,
     kind,
     kindLabel: KIND_LABEL[kind],

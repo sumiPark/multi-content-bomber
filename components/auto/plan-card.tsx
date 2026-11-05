@@ -121,9 +121,9 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
       )}
 
       {plan.issues.length > 0 && (
-        <ul className="space-y-0.5 rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
+        <ul className={cn("space-y-0.5 rounded-md border px-3 py-2 text-xs", plan.status === "BLOCKED" ? "border-risk/30 bg-risk-soft text-risk" : "border-warn/40 bg-warn-soft text-warn")}>
           {plan.issues.map((i) => (
-            <li key={i}>✗ {i}</li>
+            <li key={i}>{plan.status === "BLOCKED" ? "✗" : "!"} {i}</li>
           ))}
         </ul>
       )}

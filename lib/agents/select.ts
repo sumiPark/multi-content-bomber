@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { conceptBlock } from "@/lib/agents/concept";
+import { videoProductName } from "@/lib/agents/product-facts";
 import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner";
 import { addDays } from "@/lib/automation/time";
 import { KIND_LABEL, SHOPS, type ProductKind, type ShopCode } from "@/lib/products/shops";
@@ -129,7 +130,7 @@ export async function candidateRows(ctx: Pick<SelectContext, "service" | "accoun
         id: r.id,
         shop: SHOPS[r.shop_code as ShopCode]?.name ?? r.shop_code,
         kind: KIND_LABEL[(r.kind ?? "OTHER") as ProductKind],
-        name: r.name,
+        name: videoProductName(r.name),
         price: r.price,
         oneLine: (r.product_analyses.summary as AnalysisSummary)?.oneLine ?? null,
         topClaims: claims.slice(0, 3).map((c) => c.claim),
@@ -176,7 +177,7 @@ export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: { 
       if (error) throw new Error(error.message);
       if (!data) throw new Error("상품 없음");
       return {
-        name: data.name,
+        name: videoProductName(data.name),
         price: data.price,
         category: data.category_name,
         detailImages: data.detail_image_urls.length,

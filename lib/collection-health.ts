@@ -1,4 +1,5 @@
 import type { getServerSupabase } from "@/lib/auth";
+import { freeVoiceNotice } from "@/lib/shoot/voices";
 
 // 수집 누락 감지 (콘텐츠 자동화 2-6) — 매일 돌아야 할 수집이 빠졌는지 대시보드가 경고한다.
 //   상품 수집: 매일 03시(KST) · products.yml — 30시간 넘게 성공이 없으면 경고
@@ -24,6 +25,10 @@ function kstDate(ms: number): string {
 
 export async function loadCollectionHealth(supabase: Supabase, now: number): Promise<HealthWarning[]> {
   const warnings: HealthWarning[] = [];
+
+  // 무료 음성 모델 종료 예고 — 수집과 별개로 대시보드 한곳에서 알린다
+  const voiceNotice = freeVoiceNotice(now);
+  if (voiceNotice) warnings.push({ ...voiceNotice, href: "/auto/settings" });
 
   const [{ data: lastProducts }, { data: lastProductRun }, { data: lastDaily }, { count: igCount }, { count: failedCount }] =
     await Promise.all([

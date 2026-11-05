@@ -9,6 +9,7 @@ import { callOptions } from "@/lib/products/analysis/analyze";
 import { checkText, type ContentRule } from "@/lib/rules/check";
 
 // 점검 에이전트(4) — AI 자동 업로드는 사람이 영상을 보지 않고 나가므로, 올리기 전에 여기서 걸러 멈춘다.
+// AI 말투 점수만 멈추지 않고 경고로 남긴다(2026-11-05 사용자 결정). 짧은 문장이 이어지는 릴스 대본을 낮게 재서, 자연스러운 문장도 기준에 못 미쳤다.
 // 점검 기준은 잠긴 항목: 피드백(자동 승인 포함)으로 바뀌지 않는다. 기준값은 이 파일 상수와 광고 문구 규칙(0026).
 //   코드로 재는 것: 훅 점수 · 길이 · 광고 문구 규칙 · AI 말투 · 캡션 형식 · 판매 상태
 //   AI가 판단하는 것: 문장마다 상세페이지 근거가 있는지, 1인칭 체험 · 후기를 지어냈는지
@@ -20,6 +21,11 @@ const LENGTH_RANGE: [number, number] = [12, 40];
 export interface CheckIssue {
   kind: "hook" | "length" | "rules" | "tone" | "caption" | "stock" | "grounding" | "fabrication" | "edit";
   detail: string;
+}
+
+/** 칸을 멈추는 항목만. 말투는 사람이 보고 판단할 경고다. */
+export function blockingIssues<T extends { kind: string }>(issues: T[]): T[] {
+  return issues.filter((i) => i.kind !== "tone");
 }
 
 export interface CheckResult {
@@ -97,7 +103,7 @@ export async function checkScript(
   const human = Math.min(toneSpoken.humanScore, toneCaption.humanScore);
   if (human < MIN_HUMAN_SCORE) {
     const worst = toneSpoken.humanScore <= toneCaption.humanScore ? "내레이션" : "캡션";
-    issues.push({ kind: "tone", detail: `${worst}이 AI가 쓴 말투 같아요 (사람 말투 점수 ${human}점, 기준 ${MIN_HUMAN_SCORE}점)` });
+    issues.push({ kind: "tone", detail: `${worst}이 AI가 쓴 말투 같아요 (사람 말투 점수 ${human}점, 기준 ${MIN_HUMAN_SCORE}점). 들어 보고 판단해 주세요` });
   }
 
   // 5. 캡션 형식
@@ -134,7 +140,7 @@ ${
       },
       {
         role: "user",
-        content: `상품 사실:\n${JSON.stringify({ name: facts.name, shop: facts.shop, price: facts.price, oneLine: facts.oneLine, claims: facts.claims, details: facts.details, usage: facts.usage, cautions: facts.cautions, approvedClaims: facts.approvedClaims })}\n\n상세페이지 원문(일부):\n${facts.sourceText}\n\n점검할 글:\n[내레이션]\n${spoken.join("\n")}\n[화면 문구]\n${onScreen.join("\n")}\n[캡션]\n${script.caption.text}`,
+        content: `상품 사실:\n${JSON.stringify({ name: facts.name, listingName: facts.rawName, shop: facts.shop, price: facts.price, oneLine: facts.oneLine, claims: facts.claims, details: facts.details, usage: facts.usage, cautions: facts.cautions, approvedClaims: facts.approvedClaims })}\n\n상세페이지 원문(일부):\n${facts.sourceText}\n\n점검할 글:\n[내레이션]\n${spoken.join("\n")}\n[화면 문구]\n${onScreen.join("\n")}\n[캡션]\n${script.caption.text}`,
       },
     ],
     response_format: zodResponseFormat(groundingSchema, "grounding"),
@@ -145,7 +151,7 @@ ${
   for (const fb of g.fabricated) issues.push({ kind: "fabrication", detail: `지어낸 체험: "${fb.sentence}" — ${fb.why}` });
 
   return {
-    passed: issues.length === 0,
+    passed: blockingIssues(issues).length === 0,
     issues,
     scores: { hook: hook?.score ?? null, humanScore: human, seconds, caption: cap.verdict },
     tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },

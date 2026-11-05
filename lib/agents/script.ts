@@ -68,8 +68,9 @@ export function writerSkills(ctx: Pick<ScriptContext, "facts" | "rules" | "accou
       description: "상품 사실 — 원문 근거가 확인된 특징, 사용법 · 주의, 세부 항목, 확정 심의 문구, 불확실한 점. 대본의 사실은 여기 있는 것만.",
       input: z.object({}),
       async run() {
-        const { sourceText: _src, ...rest } = ctx.facts;
+        const { sourceText: _src, rawName: _listing, ...rest } = ctx.facts;
         void _src;
+        void _listing;
         return rest;
       },
     },

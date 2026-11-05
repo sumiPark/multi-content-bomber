@@ -32,7 +32,7 @@ const plan: EditPlan = {
   warnings: [],
 };
 
-const facts = { id: "smoke", name: "시험 상품", shop: "시험", kind: "OTHER", kindLabel: "시험", price: null, stockStatus: "available", url: "", detailImages: 0, oneLine: null, usage: null, cautions: null, details: {}, claims: [], uncertainties: [], healthFunctional: false, approvedClaims: [], certifiedFunctions: [], sourceText: "" } as ProductFacts;
+const facts = { id: "smoke", name: "시험 상품", rawName: "시험 상품", shop: "시험", kind: "OTHER", kindLabel: "시험", price: null, stockStatus: "available", url: "", detailImages: 0, oneLine: null, usage: null, cautions: null, details: {}, claims: [], uncertainties: [], healthFunctional: false, approvedClaims: [], certifiedFunctions: [], sourceText: "" } as ProductFacts;
 
 async function main() {
   if (process.env.SMOKE_VOICE !== "1") delete process.env.FISH_API_KEY;
