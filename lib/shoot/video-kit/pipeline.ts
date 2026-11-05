@@ -12,6 +12,7 @@ import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
 import { hookZone, normalizeLook, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
 import { blockRows, captionSkillDir, designCaptions, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
 import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse, type PickedMusic } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
@@ -82,6 +83,7 @@ export interface KitResult {
   loudness: number | null;
   tokens: { input: number; output: number };
   usedVoice: boolean;
+  visuals: UsedVisual[];
 }
 
 const squash = (s: string) => s.replace(/[\s.,!?~·"']+/g, "");
@@ -147,7 +149,7 @@ export function applyHumanText(plan: EditPlan, input: Pick<KitInput, "humanHook"
 export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolean): EditPlan {
   const seconds = new Map(clips.map((c) => [c.no, c.duration]));
   const narrationOf = new Map(clips.map((c) => [c.no, c.narration ?? ""]));
-  const beats = plan.beats
+  const fixed = plan.beats
     .map((b) =>
       liveVoice || b.mode !== "live"
         ? b
@@ -162,11 +164,16 @@ export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolea
           const from = Math.min(Math.max(0, c.in), Math.max(0, max - 0.2));
           return { ...c, in: from, out: Math.max(from + 0.2, Math.min(c.out, max)) };
         }),
-    }))
-    .filter((b) => b.cuts.length > 0 && (b.mode === "live" || b.tts.trim()));
+    }));
+  const keep = (b: EditPlan["beats"][number]) => b.cuts.length > 0 && (b.mode === "live" || !!b.tts.trim());
+  const beats = fixed.filter(keep);
   if (beats.length === 0) throw new Error("편집 계획에 쓸 컷이 없어요");
+  // 비트가 빠지면 AI 이미지의 비트 번호도 당긴다. 예전 계획에는 visuals가 없다
+  const visuals = (plan.visuals ?? [])
+    .filter((v) => fixed[v.beat] && keep(fixed[v.beat]))
+    .map((v) => ({ ...v, beat: fixed.slice(0, v.beat).filter(keep).length }));
   const thumb = seconds.has(plan.thumbnail.clip) ? plan.thumbnail : { ...plan.thumbnail, clip: beats[0].cuts[0].clip, at: beats[0].cuts[0].in };
-  return { ...plan, beats, thumbnail: thumb };
+  return { ...plan, beats, visuals, thumbnail: thumb };
 }
 
 /** 코드로 재는 계획 문제. 걸리면 에이전트가 한 번 다시 쓴다. */
@@ -308,12 +315,13 @@ function lufs(file: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-function buildSegments(plan: EditPlan, tl: Timeline): KitSegment[] {
+function buildSegments(plan: EditPlan, tl: Timeline, realClipOf: Map<number, number>): KitSegment[] {
   return tl.cuts.map((c, i) => {
     const caps = tl.captions.filter((x) => x.start >= c.start - 0.001 && x.start < c.end);
     const texts = tl.graphics.filter((g) => g.start >= c.start && g.start < c.end).map((g) => g.g.text).filter(Boolean);
     return {
-      cut: c.clip,
+      // AI 이미지 컷은 사람이 찾을 수 있게 원래 촬영본 번호로 남긴다
+      cut: realClipOf.get(c.clip) ?? c.clip,
       start: c.in,
       duration: c.duration,
       onScreen: i === 0 ? plan.hook.on_screen.replace(/\n+/g, " ") : texts.join(" · "),
@@ -437,6 +445,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   } else {
     const sheets = clips.map((c) => imageDataUrl(contactSheet(c.file, join(workDir, `sheet${c.no}.jpg`))));
     let closer = 0;
+    const visualLibrary = await loadVisualLibrary(input.service ?? input.readService);
     const ask = (retry: { plan: EditPlan; problems: string[] } | null) => writeEditPlan({
       retry,
       service: input.service,
@@ -458,6 +467,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       editStyle: input.editStyleText,
       source: input.source,
       scriptLines: input.scriptLines,
+      visualLibrary,
       lookCloser: async (no, from, to) => {
         const c = clips.find((x) => x.no === no);
         if (!c) throw new Error(`${no}번 촬영본이 없어요`);
@@ -487,8 +497,23 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   // 2. 음성 → 시각표
   const made = await makeVoices(plan, clips, workDir, input.voiceId);
   warnings.push(...made.warnings);
-  const seconds = new Map(clips.map((c) => [c.no, c.duration]));
-  const base = layoutBeats(plan, made.voices, seconds);
+
+  // AI 이미지 컷 — 말 길이를 안 뒤에 만든다. 원래 컷을 담은 plan은 그대로 저장해 다시 편집에 쓴다
+  const visual = await buildVisualClips({
+    plan,
+    clips,
+    lengths: made.voices.map((v) => v.estimated ?? v.fileOut - v.fileIn),
+    facts: input.facts,
+    service: input.service,
+    readService: input.readService,
+    workDir,
+  });
+  warnings.push(...visual.warnings);
+  tokens.input += visual.tokens.input;
+  tokens.output += visual.tokens.output;
+  const allClips = visual.clips;
+  const seconds = new Map(allClips.map((c) => [c.no, c.duration]));
+  const base = layoutBeats(visual.plan, made.voices, seconds);
 
   const draftTimeline = timeText(plan, base, [], new Map());
   const voice = buildVoiceTrack(draftTimeline, workDir);
@@ -520,9 +545,14 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     live.set(line.beat, shifted);
   }
   let tl = timeText(plan, base, words, live);
+  // 사람이 볼 수 있게 어디에 들어갔는지 남긴다. 경고가 있으면 자동 발행도 멈춘다
+  for (const u of visual.used) {
+    const line = tl.lines[u.beat];
+    if (line) warnings.push(`${line.start.toFixed(1)}~${line.end.toFixed(1)}초에 AI가 만든 그림이 들어갔어요: ${u.subject}`);
+  }
 
   // 4. 컷 → 믹스 → 프로젝트
-  const baseVideo = renderCuts(tl, clips, workDir, input.style ?? DEFAULT_EDIT_STYLE);
+  const baseVideo = renderCuts(tl, allClips, workDir, input.style ?? DEFAULT_EDIT_STYLE);
   const project = join(workDir, "project");
   mkdirSync(join(project, "assets"), { recursive: true });
   copyFileSync(baseVideo, join(project, "assets", "base.mp4"));
@@ -537,10 +567,10 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const sounds = buildMix(tl, voice, mix, music);
   // 장면마다 상품 · 사람이 있는 자리를 읽어 글자가 피하게 한다. 못 읽으면 기본 자리
   const zones = subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
-    const owner = clips.find((c) => c.no === tl.cuts[i]?.clip);
+    const owner = allClips.find((c) => c.no === tl.cuts[i]?.clip);
     return owner?.shot?.startsWith("[코드 모션]") ? { ...z, cover: { ...z.cover, mid: 1 } } : z;
   }) ?? null;
-  const behind = makeBehindWord(look, tl, clips, baseVideo, project, workDir);
+  const behind = makeBehindWord(look, tl, allClips, baseVideo, project, workDir);
   writeProject(project, tl, { look, zones, behind });
 
   // 5. 프레임 검수 — 표적을 벗어난 표시는 빼고, 나머지는 사람에게 넘긴다
@@ -651,13 +681,14 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     seconds: mediaSeconds(final),
     plan: { ...plan, pickedMusic: { name: music.name, in: music.in, gain_db: music.gain_db, source: music.source, query: music.query }, ...(design ? { captionDesign: design } : {}) } as EditPlan,
     timeline: tl,
-    segments: buildSegments(plan, tl),
+    segments: buildSegments(plan, tl, visual.realClipOf),
     hook: { text: hookText, source: input.humanHook?.trim() ? "human" : input.fixedHook?.trim() ? "saved" : "ai" },
     warnings: [...new Set(warnings)],
     sounds,
     loudness: lufs(final),
     tokens,
     usedVoice: made.usedVoice,
+    visuals: visual.used,
   };
 }
 

@@ -8,6 +8,8 @@ if (typeof window !== "undefined") {
 
 // 글 · 분석에 쓰는 모델은 여기 한 곳에서 정한다. 음성 받아쓰기(whisper-1)만 따로다.
 export const OPENAI_TEXT_MODEL = "gpt-6.1-terra";
+// 영상 중간에 넣는 AI 이미지(lib/shoot/video-kit/generated-visual.ts). 다른 곳에는 쓰지 않는다.
+export const OPENAI_IMAGE_MODEL = "gpt-image-2.6-sunburst";
 
 let cached: OpenAI | null = null;
 

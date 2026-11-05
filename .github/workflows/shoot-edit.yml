@@ -22,6 +22,10 @@ on:
         description: "시험 영상으로 음성 · 렌더 점검 (DB · OpenAI 안 씀)"
         type: boolean
         default: false
+      smoke_visual:
+        description: "점검에 AI 이미지 컷 1개를 넣어 결과 파일로 남기기 (smoke와 함께, OpenAI 약간 씀)"
+        type: boolean
+        default: false
 
 concurrency:
   group: shoot-edit-worker
@@ -67,6 +71,18 @@ jobs:
           SMOKE_VOICE: "1"
           FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
           FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
+          SMOKE_VISUAL: ${{ inputs.smoke_visual && '1' || '' }}
+          OPENAI_API_KEY: ${{ inputs.smoke_visual && secrets.OPENAI_API_KEY || '' }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+          VIDEO_PYTHON: python
+      - name: Keep smoke result
+        if: ${{ inputs.smoke_visual && !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: edit-kit-smoke
+          path: smoke-out
+          if-no-files-found: ignore
+          retention-days: 3
       # 구매한 자막 모션 스킬은 저장소에 넣지 않고 비공개 저장 공간에서 받는다. 실패하면 기본 자막으로 만든다
       - name: Prepare caption skill
         continue-on-error: true

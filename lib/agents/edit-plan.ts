@@ -2,6 +2,7 @@ import { z } from "zod";
 import { conceptBlock } from "@/lib/agents/concept";
 import { editKit, ttsReading } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
+import type { ProductKind } from "@/lib/products/shops";
 import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner";
 import { writerSkills } from "@/lib/agents/script";
 import type { ContentRule } from "@/lib/rules/check";
@@ -41,6 +42,35 @@ export const graphicSchema = z.object({
   from: z.string(),
 });
 
+// AI 이미지는 원료를 그림으로 설명할 수 있는 상품에만 쓴다. 과일 · 의류는 그림이 실물처럼 보여 쓰지 않는다
+export const VISUAL_KINDS: ProductKind[] = ["COSMETIC", "HEALTH_FOOD"];
+export const MAX_VISUALS = 2;
+
+export const visualSchema = z.object({
+  beat: z.number().int().describe("이 그림으로 화면을 채울 비트 번호(0부터)"),
+  key: z.string().describe("그림 이름. 영어 소문자와 - 만. 목록에 같은 그림이 있으면 그 key를 그대로"),
+  subject: z.string().describe("무엇을 보여 주는 그림인지 한국어 한 줄"),
+  evidence: z.string().describe("이 그림의 근거. 상품 자료에 있는 문구를 글자 그대로 옮긴다"),
+  prompt: z.string().describe("그림 설명 영어. 보이는 장면만 쓴다"),
+  motion: z.enum(["liquid", "solid"]).describe("liquid 액체 · 물방울이라 일렁임, solid 결정 · 고체라 빛만"),
+});
+export type EditVisual = z.infer<typeof visualSchema>;
+
+/** 편집 계획과 장면표가 함께 쓰는 AI 이미지 규칙. */
+export function visualRules(kind: ProductKind, library: { key: string; subject: string }[]): string {
+  if (!VISUAL_KINDS.includes(kind)) return "\n\nAI 이미지(visuals): 이 상품에는 쓰지 않는다. 빈 배열로 낸다.";
+  return `
+
+AI 이미지(visuals) — 말로 성분 · 원료 · 원리를 설명하는데 보여 줄 실제 화면이 없는 비트에 AI가 만든 그림을 넣는다:
+- 꼭 필요할 때만, 영상당 0~${MAX_VISUALS}개. 실제 화면으로 말이 되면 빈 배열로 낸다.
+- 첫 비트 · 마지막 비트 · 사람이 말하는 비트에는 넣지 않고, 연달아 넣지 않는다.
+- 그 비트의 실제 컷은 그대로 둔다. 그림을 못 만들면 실제 컷이 나간다.
+- 그림이 나오는 동안의 말은 그 그림이 설명하는 내용이어야 한다.
+- 상품처럼 보이는 그림은 만들지 않는다. 제품 · 용기 · 크림과 세럼 같은 제형 질감 · 피부 · 사람 · 손 · 사용 전후 · 몸속 작용 · 글자 · 로고를 넣지 않는다. 유리 · 결정 · 물방울 · 분자 구조 같은 추상으로 그린다.
+- 원료의 출처(연어, 과일 등)는 상품 자료에 있을 때만 그린다.
+- 효과가 나타나는 모습을 그리지 않는다. 무엇이 들어 있는지만 보여 준다.${library.length ? `\n이미 만든 그림(같은 내용이면 이 key를 쓴다):\n${library.map((l) => `${l.key}: ${l.subject}`).join("\n")}` : ""}`;
+}
+
 export const editPlanSchema = z.object({
   look: lookSchema.describe("이 영상의 자막 · 큰 글자 디자인과 음악. 계정 설정을 읽고 영상마다 만든다"),
   analysis: z
@@ -75,6 +105,7 @@ export const editPlanSchema = z.object({
       }),
     )
     .describe("비트 5~12개. 첫 비트 = 후킹"),
+  visuals: z.array(visualSchema).describe("AI 이미지. 없으면 빈 배열"),
   warnings: z
     .array(z.string())
     .describe("사람이 확인할 문제만 시각과 함께: 구성품이 아닌 소품, 주의사항과 부딪히는 장면, 얼굴이 나오는 구간, 근거가 약한 말. 편집 과정이나 지시 사항은 쓰지 않는다. 없으면 빈 배열"),
@@ -120,6 +151,8 @@ export interface EditPlanContext {
   source?: "shoot" | "auto";
   // AI 자동 콘텐츠: 점검을 통과한 대본. 뜻을 바꾸지 않고 쓴다
   scriptLines?: string[];
+  // 저장해 둔 AI 이미지 목록
+  visualLibrary?: { key: string; subject: string }[];
   // 먼저 낸 계획과 코드 점검에서 걸린 것 — 고쳐서 다시 낸다
   retry?: { plan: EditPlan; problems: string[] } | null;
 }
@@ -187,7 +220,7 @@ ${bullets(kit.graphics_rules)}
 
 효과음 (이것만 쓴다):
 ${JSON.stringify(Object.fromEntries(Object.entries(kit.sfx).map(([k, v]) => [k, v.use])))}
-${bullets(kit.sfx_rules)}
+${bullets(kit.sfx_rules)}${visualRules(f.kind, ctx.visualLibrary ?? [])}
 
 절대 규칙:
 - 사실(숫자 · 성분 · 효과 · 구성 · 사용법)은 get_product_facts와 화면에서 읽히는 제품 표기에만 근거한다. 없는 내용은 말하지 않는다. uncertainties에 있는 건 말하지 않는다.

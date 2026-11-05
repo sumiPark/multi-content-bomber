@@ -13,6 +13,7 @@ import { photoClip } from "@/lib/auto-video/clips";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
 import { finalBlocking } from "@/lib/shoot/final-check";
+import { loadVisualLibrary } from "@/lib/shoot/video-kit/generated-visual";
 import { readClip, renderKitEdit, type KitClip } from "@/lib/shoot/video-kit/pipeline";
 import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
@@ -162,6 +163,8 @@ export async function makeAutoVideo(input: {
     tokens = { input: tokens.input + t.input, output: tokens.output + t.output };
   };
 
+  const visualLibrary = await loadVisualLibrary(service);
+
   // 2. 장면표: 쓰고, 코드 · 시청자 눈 · 광고 규칙으로 보고, 걸리면 고쳐 쓴다
   let board: Storyboard | null = null;
   let retry: { board: Storyboard; problems: string[] } | null = null;
@@ -184,6 +187,7 @@ export async function makeAutoVideo(input: {
       tone: concept.autoTone,
       videoStyle: concept.autoVideoStyle,
       phraseBlock: fixedPhraseBlock(phrases),
+      visualLibrary,
       retry,
     });
     add(res.tokens);
@@ -266,6 +270,7 @@ export async function makeAutoVideo(input: {
     hook: board.hook,
     thumbnail: { title: board.thumbnail.title, highlight: board.thumbnail.highlight, position: board.thumbnail.position, sub: board.thumbnail.sub, clip: coverScene?.clip ?? 1, at: coverScene ? (coverScene.in + coverScene.out) / 2 : 1 },
     beats,
+    visuals: board.visuals,
     warnings: [],
   };
 

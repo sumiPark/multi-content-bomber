@@ -973,6 +973,54 @@ export type Database = {
           },
         ]
       }
+      generated_visuals: {
+        Row: {
+          cost_usd: number
+          created_at: string
+          id: string
+          input_tokens: number
+          key: string
+          last_used_at: string | null
+          model: string
+          output_tokens: number
+          path: string
+          prompt: string
+          quality: string | null
+          subject: string
+          use_count: number
+        }
+        Insert: {
+          cost_usd?: number
+          created_at?: string
+          id?: string
+          input_tokens?: number
+          key: string
+          last_used_at?: string | null
+          model: string
+          output_tokens?: number
+          path: string
+          prompt: string
+          quality?: string | null
+          subject: string
+          use_count?: number
+        }
+        Update: {
+          cost_usd?: number
+          created_at?: string
+          id?: string
+          input_tokens?: number
+          key?: string
+          last_used_at?: string | null
+          model?: string
+          output_tokens?: number
+          path?: string
+          prompt?: string
+          quality?: string | null
+          subject?: string
+          use_count?: number
+        }
+        Relationships: []
+      }
       invitations: {
         Row: {
           accepted_at: string | null
