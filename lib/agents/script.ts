@@ -148,7 +148,7 @@ function systemPrompt(ctx: ScriptContext): string {
 3. 1등 훅으로 대본을 쓴다: 훅(0~2초) → 왜 중요한지 한 줄 → 본문(비트마다 한 가지, 장면이 바뀜) → 약속 갚기 + 요청 하나 → 마지막 줄은 훅의 낱말을 되받아 다시 보게.
    목표 15~25초. time_script로 재고 경고를 다 없앤다.
 4. 캡션을 쓰고 check_caption으로 점검한다. 첫 줄 40자 이내, 요청은 하나, 해시태그 정확히 3개.
-5. 내레이션 전체와 캡션을 check_ai_tone, check_rules로 점검하고 걸린 것을 고친다.
+5. 내레이션 전체와 캡션을 check_ai_tone, check_rules로 점검한다. check_rules에 걸린 것은 고친다. check_ai_tone은 한 번만 쓰고, 번역투 · 상투어 · 같은 어미 반복만 고친 뒤 점수가 낮아도 넘어간다.
 
 절대 규칙:
 - 사실(숫자 · 산지 · 성분 · 효과 · 구성)은 get_product_facts에 있는 것만. 없는 숫자를 만들지 않는다. uncertainties에 있는 건 말하지 않는다.
