@@ -3,13 +3,13 @@ import { join } from "node:path";
 import { checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
 import type { EditGraphic } from "@/lib/agents/edit-plan";
-import { loadProductFacts } from "@/lib/agents/product-facts";
+import { loadProductFacts, type ProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
 import { sourcePlanProblems, writeSourcePlan, type MotionSpec, type SourcePlan } from "@/lib/agents/source-plan";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip } from "@/lib/auto-video/clips";
 import { stockClip } from "@/lib/auto-video/stock";
-import type { ContentRule } from "@/lib/rules/check";
+import { checkText, type ContentRule } from "@/lib/rules/check";
 import { finalBlocking } from "@/lib/shoot/final-check";
 import { readClip, renderKitEdit, type KitClip } from "@/lib/shoot/video-kit/pipeline";
 import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
@@ -55,6 +55,20 @@ function trimPhoto(c: Candidate, top: number, bottom: number, workDir: string): 
   const out = join(workDir, `${c.id}-trim.jpg`);
   ffmpeg(["-y", "-v", "error", "-i", c.file, "-vf", `crop=${c.w}:${h}:0:${y}`, "-q:v", "2", out]);
   return out;
+}
+
+function motionTexts(m: MotionSpec): string[] {
+  return [m.title, m.left_label, m.right_label, m.left_value, ...m.right_values, m.number_to ? `${m.number_to}${m.unit}` : "", m.end_text, ...m.items, m.big ? `${m.big}${m.unit}` : ""].filter(Boolean);
+}
+
+/** 도식은 렌더 뒤 최종 점검에서야 글이 보여, 몇 분을 쓰고 멈췄다. 렌더 전에 금지 표현을 잡아 소재 에이전트가 고치게 한다. */
+export function motionRuleProblems(plan: SourcePlan, facts: ProductFacts, rules: ContentRule[]): string[] {
+  return plan.beats.flatMap((b) => {
+    if (b.use !== "motion" || !b.motion) return [];
+    return checkText(motionTexts(b.motion).join("\n"), facts.kind, rules, facts.approvedClaims, { healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions })
+      .filter((h) => h.rule.ruleType === "BANNED")
+      .map((h) => `${b.beat}번 비트 도식에 금지 표현 "${h.matched}"이 있다. 다른 말로 바꾼다`);
+  });
 }
 
 export async function makeAutoVideo(input: {
@@ -114,7 +128,7 @@ export async function makeAutoVideo(input: {
   let res = await ask(null);
   tokens = { input: tokens.input + res.tokens.input, output: tokens.output + res.tokens.output };
   let plan: SourcePlan = res.output;
-  const problems = sourcePlanProblems(plan, beats.length, archiveIds);
+  const problems = [...sourcePlanProblems(plan, beats.length, archiveIds), ...motionRuleProblems(plan, facts, rules)];
   if (problems.length) {
     console.log(`  소재 계획 다시 쓰기: ${problems.join(" / ")}`);
     res = await ask({ problems });
@@ -203,9 +217,9 @@ export async function makeAutoVideo(input: {
 
   // 5. 실제로 들어간 글로 다시 점검. 도식 · 그래픽 · 표지까지 영상에 박히는 글은 모두 본다
   const graphicTexts = (g: EditGraphic) => [g.text, g.small, g.sub, g.note, g.chip, g.number, g.unit, g.left, g.right, ...g.items].filter(Boolean);
-  const motionTexts = sources.flatMap((s) => {
+  const motionWords = sources.flatMap((s) => {
     const m = (s as { spec?: MotionSpec }).spec;
-    return m ? [m.title, m.left_label, m.right_label, m.left_value, ...m.right_values, m.number_to ? `${m.number_to}${m.unit}` : "", m.end_text, ...m.items, m.big ? `${m.big}${m.unit}` : ""].filter(Boolean) : [];
+    return m ? motionTexts(m) : [];
   });
   const coverTexts = [kit.plan.thumbnail.title.replace(/\n+/g, " "), kit.plan.thumbnail.sub].filter(Boolean);
   const lastBeat = kit.plan.beats.length - 1;
@@ -214,7 +228,7 @@ export async function makeAutoVideo(input: {
       hooks: [{ formula_id: 0, spoken: kit.plan.hook.spoken, on_screen: kit.plan.hook.on_screen }],
       chosen_hook: 0,
       // 근거 점검은 화면에 보이는 표기로 한다. 읽기용 원고(에이치에이)는 원문(AHA)과 맞지 않아 근거 없음으로 잘못 걸렸다
-      beats: kit.plan.beats.map((b, i) => ({ spoken: b.captions.join(" ") || b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(i === lastBeat ? [...motionTexts, ...coverTexts] : [])].join(" "), visual: "" })),
+      beats: kit.plan.beats.map((b, i) => ({ spoken: b.captions.join(" ") || b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(i === lastBeat ? [...motionWords, ...coverTexts] : [])].join(" "), visual: "" })),
       loop_word: script.loop_word ?? "",
       caption: script.caption,
     },
@@ -225,7 +239,7 @@ export async function makeAutoVideo(input: {
     { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: [script.fixed?.hook?.text, script.fixed?.ending?.text].filter((t): t is string => !!t) },
   );
   const blocking = finalBlocking(
-    { caption: script.caption?.text ?? "", onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...motionTexts, ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
+    { caption: script.caption?.text ?? "", onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...motionWords, ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
     { kind: facts.kind, rules, approvedClaims: facts.approvedClaims, stockStatus: facts.stockStatus, healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions },
   );
   return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts };
