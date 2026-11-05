@@ -388,7 +388,7 @@ function makeBehindWord(look: Look, tl: Timeline, clips: KitClip[], baseVideo: s
 }
 
 /** 표지도 영상과 같은 글꼴로 만든다. 프레임을 잠깐 영상으로 만들어 글자를 얹고 한 장을 뽑는다. */
-function makeSkillCover(dir: string, design: CaptionDesign, look: Look, workDir: string, clip: KitClip, thumb: EditPlan["thumbnail"]): string {
+function makeSkillCover(dir: string, design: CaptionDesign, workDir: string, clip: KitClip, thumb: EditPlan["thumbnail"]): string {
   const frame = join(workDir, "cover-frame.jpg");
   const at = Math.min(Math.max(0, thumb.at), Math.max(0, clip.duration - 0.1));
   ffmpeg(["-y", "-v", "error", "-ss", at.toFixed(3), "-i", clip.file, "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920", "-q:v", "2", frame]);
@@ -397,7 +397,7 @@ function makeSkillCover(dir: string, design: CaptionDesign, look: Look, workDir:
   const cover0 = frameZones([frame], workDir)?.[0];
   const zone = cover0 ? (cover0.top <= cover0.lower ? "top" : "lower") : thumb.position === "lower" ? "lower" : "top";
   const blocks: SkillBlock[] = [{ start: 0, end: 2, zone, fx: "cut", highlight: thumb.highlight, rows: [...blockRows(thumb.title), ...(thumb.sub ? blockRows(thumb.sub, "small", 18) : [])] }];
-  const made = overlayCaptions({ dir, video: still, captions: [], zones: [], design, look, workDir, blocks, name: "cover" });
+  const made = overlayCaptions({ dir, video: still, captions: [], zones: [], design, workDir, blocks, name: "cover" });
   const cover = join(workDir, "cover.jpg");
   ffmpeg(["-y", "-v", "error", "-ss", "1.6", "-i", made, "-frames:v", "1", "-q:v", "2", cover]);
   return cover;
@@ -615,7 +615,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
         const rows = [...(p.chip ? blockRows(p.chip, "small", 18) : []), ...blockRows(p.text), ...(p.sub ? blockRows(p.sub, "small", 18) : []), ...(p.note ? blockRows(p.note, "small", 18) : [])];
         if (rows.length) blocks.push({ start: endCard.start, end: tl.duration, zone: "top", fx: design.finish_fx, rows });
       }
-      final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, look, workDir, blocks });
+      final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, workDir, blocks });
     } catch (e) {
       console.warn("[video-kit] 자막 모션 실패, 기본 자막으로 다시 렌더:", e instanceof Error ? e.message : e);
       warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
@@ -637,7 +637,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   let cover: string | null = null;
   if (design && skillDir) {
     try {
-      cover = makeSkillCover(skillDir, design, look, workDir, coverClip, plan.thumbnail);
+      cover = makeSkillCover(skillDir, design, workDir, coverClip, plan.thumbnail);
     } catch (e) {
       console.warn("[video-kit] 스킬 표지 실패, 기본 표지로 만든다:", e instanceof Error ? e.message : e);
     }

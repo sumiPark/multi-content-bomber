@@ -125,7 +125,7 @@ ${bullets(kit.tts_rules)}
 
 글자 디자인(look):
 ${bullets(kit.look_rules)}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "무엇을 말할지와 흐름에 반영한다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글자 디자인 · 음악에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "장면 고르기에 반영한다.")}${ctx.phraseBlock ?? ""}`;
-  const user = `쓸 수 있는 사진 후보(가로x세로): ${ctx.candidates.map((c) => `${c.id} ${c.w}x${c.h}`).join(", ")}
+  const user = `상세페이지 원문(사실은 이 안에서만 쓴다. "원료적 특성에 한함" 같은 단서가 붙은 내용은 말로 읽지 않고 표현을 낮춰 쓴다):\n${f.sourceText}\n\n쓸 수 있는 사진 후보(가로x세로): ${ctx.candidates.map((c) => `${c.id} ${c.w}x${c.h}`).join(", ")}
 그림은 후보를 번호와 함께 모은 것이다. 위 목록에 없는 번호는 화질이 낮아 쓰지 않는다.${ctx.archive.length ? `\n\n자사 촬영 컷(소리 없음, 순서대로 마지막 ${ctx.archive.length}장의 그림이 컷마다 프레임 3개):\n${ctx.archive.map((a) => `${a.id} ${a.seconds.toFixed(1)}초 — ${a.what}`).join("\n")}` : ""}${
     ctx.retry
       ? `\n\n먼저 쓴 장면표:\n${JSON.stringify({ hook: ctx.retry.board.hook, scenes: ctx.retry.board.scenes.map((s) => ({ source_id: s.source_id, say: s.say })) })}\n\n이 문제를 고쳐 전체를 다시 내라:\n${bullets(ctx.retry.problems)}`
@@ -203,7 +203,7 @@ ${input.fixedTexts.length ? `사람이 정한 고정 문구라 고칠 수 없다
         content: [
           {
             type: "text",
-            text: `상품: ${input.facts.name} — ${input.facts.oneLine ?? ""}\n상품 근거: ${input.facts.claims.map((c) => c.claim).join(" / ")}\n\n후킹 화면 글자: ${b.hook.on_screen.replace(/\n/g, " ")}\n장면:\n${b.scenes.map((s, i) => `${i}. [${s.source_id}: ${b.photos.find((p) => p.id === s.source_id)?.what ?? s.shows}] ${s.say}`).join("\n")}\n\n그림은 후보 이미지 묶음이다.`,
+            text: `상품: ${input.facts.name} — ${input.facts.oneLine ?? ""}\n상품 근거: ${input.facts.claims.map((c) => c.claim).join(" / ")}\n상세페이지 원문:\n${input.facts.sourceText}\n\n후킹 화면 글자: ${b.hook.on_screen.replace(/\n/g, " ")}\n장면:\n${b.scenes.map((s, i) => `${i}. [${s.source_id}: ${b.photos.find((p) => p.id === s.source_id)?.what ?? s.shows}] ${s.say}`).join("\n")}\n\n그림은 후보 이미지 묶음이다.`,
           },
           ...input.sheets.slice(0, 3).map((url) => ({ type: "image_url" as const, image_url: { url, detail: "low" as const } })),
         ],

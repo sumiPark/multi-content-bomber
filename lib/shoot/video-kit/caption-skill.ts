@@ -8,7 +8,7 @@ import { conceptBlock } from "@/lib/agents/concept";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
-import { contrast, ZONE_BOX, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
+import { ZONE_BOX, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import type { TimedCaption } from "@/lib/shoot/video-kit/timeline";
 import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 
@@ -19,7 +19,7 @@ import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 
 // 글자 자체가 움직이는 효과만 영상 자막에 쓸 수 있다(스킬 안내). 사물이 나오는 장면 번호는 쓰지 않는다
 // 천천히 드러나는 효과(29 · 33 · 37)는 글자가 말보다 늦게 읽혀 쓰지 않는다
-const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "32", "36", "38", "39", "41", "42"];
+const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "32", "36", "38", "39", "41"];
 const EMOTION_FX = ["sway", "shiver", "heartbeat", "tilt", "hop", "droop", "impact"];
 const ALLOWED_FX = new Set(["cut", ...MOTION_FX, ...EMOTION_FX]);
 // 스킬 기본 작은 줄(손글씨)은 글자 몸통이 작아 키운다
@@ -122,7 +122,7 @@ function fx(value: string): string {
 }
 
 /** AI가 나눈 줄이 자막과 글자가 다르면 쓰지 않고 자막 전체를 큰 줄 하나로 둔다. */
-function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, look: Look) {
+function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean) {
   const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
   const rows = usable ? line.rows : [{ text: c.text, role: "key" as const }];
   return rows.map((r, i) => ({
@@ -130,8 +130,8 @@ function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefine
     fx: r.role === "key" ? (line?.fx && ALLOWED_FX.has(line.fx) ? line.fx : fx(last ? design.finish_fx : design.key_fx)) : fx(design.small_fx),
     size: r.role === "key" ? keySize(r.text.trim()) : SMALL_SIZE,
     ...(r.role === "key" ? { key: true, ...(bright ? {} : { tone: "hi" }) } : {}),
-    // 밝은 배경에서는 흰 글자와 연한 강조색이 안 읽혀 어두운 글자와 밝은 그림자로 바꾼다
-    ...(bright ? { color: r.role === "key" && contrast(look.accent_color, "#FFFFFF") >= 4.5 ? look.accent_color : DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
+    // 밝은 배경에서는 흰 글자와 노란 강조색이 안 읽혀 어두운 글자와 밝은 그림자로 바꾼다
+    ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
     ...(i > 0 ? { gapPx: ROW_GAP } : {}),
   }));
 }
@@ -183,7 +183,7 @@ function blockLine(b: SkillBlock, bright: boolean) {
 }
 
 /** 편집 결과의 시각 · 글자를 그대로 쓰는 자막 파일 내용. */
-export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, look: Look, brightness: (number | null)[] = [], blocks: SkillBlock[] = [], blockBrightness: (number | null)[] = []) {
+export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, brightness: (number | null)[] = [], blocks: SkillBlock[] = [], blockBrightness: (number | null)[] = []) {
   const byNo = new Map(design.lines.map((l) => [l.no, l]));
   return {
     video,
@@ -191,11 +191,12 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
     // 등장이 끝나기 전에 말이 지나가지 않게 효과를 빠르게 돌린다
     speed: 1.6,
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
-    style: { size: SMALL_SIZE, color: look.text_color, accent: look.accent_color, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 960 },
+    // 글자 색은 스킬 기본값을 쓴다. look 색은 글자 상자가 있을 때 고른 값이라 그대로 쓰면 빨간 배경에 초록 글자처럼 나온다
+    style: { size: SMALL_SIZE, color: "#FFFFFF", accent: "#FFD23F", glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 960 },
     lines: [...blocks.map((b, i) => blockLine(b, (blockBrightness[i] ?? 0) > BRIGHT)), ...captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
-      const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT, look);
+      const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT);
       const keyRow = rows.findIndex((r) => "key" in r);
       return {
         t0: Number(c.start.toFixed(3)),
@@ -218,14 +219,14 @@ function zoneBrightness(video: string, captions: TimedCaption[], zones: Zone[]):
 }
 
 /** 소리까지 있는 영상 위에 자막을 얹는다. 길이가 달라지거나 실패하면 예외를 던져 호출하는 쪽이 기본 자막으로 돌아간다. */
-export function overlayCaptions(input: { dir: string; video: string; captions: TimedCaption[]; zones: Zone[]; design: CaptionDesign; look: Look; workDir: string; blocks?: SkillBlock[]; name?: string }): string {
+export function overlayCaptions(input: { dir: string; video: string; captions: TimedCaption[]; zones: Zone[]; design: CaptionDesign; workDir: string; blocks?: SkillBlock[]; name?: string }): string {
   const work = join(input.workDir, "caption-skill");
   mkdirSync(work, { recursive: true });
   const file = join(work, `${input.name ?? "subs"}.json`);
   const blocks = input.blocks ?? [];
   const blockBrightness = zoneBrightness(input.video, blocks.map((b) => ({ id: "", text: "", emphasis: [], beat: 0, start: b.start, end: Math.min(b.end, b.start + 1) })), blocks.map((b) => b.zone));
   const brightness = zoneBrightness(input.video, input.captions, input.zones);
-  writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, input.look, brightness, blocks, blockBrightness)));
+  writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, brightness, blocks, blockBrightness)));
   const out = join(input.workDir, `${input.name ?? "final"}-captioned.mp4`);
   const res = spawnSync(process.execPath, [join(input.dir, "scripts", "subs.cjs"), file, "--out", out], {
     encoding: "utf8",
