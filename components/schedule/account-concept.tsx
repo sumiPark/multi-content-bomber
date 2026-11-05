@@ -1,6 +1,6 @@
 "use client";
 
-import { VOICE_CHOICES } from "@/lib/shoot/voices";
+import { DEFAULT_VOICE_TITLE, VOICE_CHOICES } from "@/lib/shoot/voices";
 import { useState } from "react";
 import { Save } from "lucide-react";
 import { saveAutoConceptAction, saveShootConceptAction } from "@/app/(dashboard)/schedule/actions";
@@ -107,7 +107,7 @@ function VoicePickField({ value, help, onChange, disabled }: { value: string; he
         disabled={disabled}
         className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
       >
-        <option value="">기본 목소리</option>
+        <option value="">기본 목소리 ({DEFAULT_VOICE_TITLE})</option>
         {VOICE_CHOICES.map((v) => (
           <option key={v.id} value={v.id}>
             {v.title}

@@ -84,6 +84,6 @@
     {"file": "sims_beat", "mood": "가볍고 귀여운 비트, 친근한 일상 · 수다", "in": 0, "gain_db": -5.5}
   ],
   "music": {"file": "bgm", "in": 4.3, "gain_db": 1.0},
-  "voice": {"id": "46939387dd944a45a399bd92b8de52cb", "title": "20대 여지_내돈내산 쇼츠", "model": "s2.1-pro-free", "speed": 1.08},
+  "voice": {"id": "4e118bfbb83e401c84699c09b5f08257", "title": "20대 여자_나긋나긋 쇼츠", "model": "s2.1-pro-free", "speed": 1.08},
   "render": {"hyperframes": "0.8.210"}
 }
