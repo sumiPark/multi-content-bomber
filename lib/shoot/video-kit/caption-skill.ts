@@ -14,7 +14,7 @@ import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 
 // 자막 모션 스킬 연결(2026-11-05 사용자 결정). 스킬은 구매한 사용자의 유료 자료라 저장소에 넣지 않는다.
 // 러너는 비공개 저장 공간에서 받고(worker/fetch-caption-skill.ts), 이 PC는 설치된 폴더를 쓴다. 효과 설명 · 글꼴 목록도 실행할 때 스킬 폴더에서 읽는다.
-// 영상마다 AI가 제품 화면과 계정 분위기를 보고 자막 모션을 골라 그 모션으로 통일한다(2026-11-05 사용자 결정).
+// 영상마다 AI가 제품 화면과 계정 분위기를 보고 대표 모션을 고르고, 말의 내용에 더 맞는 줄만 다른 모션을 쓴다(2026-11-05 사용자 결정).
 // 스킬의 디자인 자막처럼 큰 강조어 줄과 작은 줄을 쌓는다. AI는 모션 · 글꼴 · 줄 나누기만 고르고, 글자와 시각은 코드가 편집 결과와 대조해 그대로 넣는다.
 
 // 글자 자체가 움직이는 효과만 영상 자막에 쓸 수 있다(스킬 안내). 사물이 나오는 장면 번호는 쓰지 않는다
@@ -32,7 +32,7 @@ export function captionSkillDir(): string | null {
 }
 
 const designSchema = z.object({
-  key_fx: z.string().describe("이 영상의 대표 모션. 큰 강조어 줄에 모두 쓴다. 효과 번호나 감정 효과 이름"),
+  key_fx: z.string().describe("이 영상의 대표 모션. 큰 강조어 줄의 기본이다. 효과 번호나 감정 효과 이름"),
   small_fx: z.string().describe("작은 줄 모션. 대표 모션을 돋보이게 하는 부드러운 효과나 cut"),
   finish_fx: z.string().describe("마지막 자막에만 쓰는 모션. 대표 모션과 같아도 된다"),
   key_font: z.string().describe("큰 강조어 글꼴. 목록의 이름 그대로, 눈에 띄는 굵은 글꼴"),
@@ -45,6 +45,7 @@ const designSchema = z.object({
         rows: z
           .array(z.object({ text: z.string(), role: z.enum(["key", "small"]) }))
           .describe("자막을 위에서 아래로 나눈 1~2줄. 이어 붙이면 자막과 글자가 같아야 한다. 핵심 낱말이 key"),
+        fx: z.string().describe("이 자막의 내용에 대표 모션보다 뚜렷하게 맞는 모션이 있을 때만 번호나 이름. 없으면 빈 문자열"),
         spark: z.boolean().describe("이 자막의 강조어에 반짝이 장식을 붙일지. 영상 전체에서 2~3번만"),
       }),
     )
@@ -89,7 +90,8 @@ export async function designCaptions(input: {
 규칙:
 - 자막마다 한 컷짜리 포스터처럼 만든다. 곁들이는 말은 작은 줄, 핵심 낱말은 큰 줄로 나눈다. 글자를 바꾸거나 빼거나 더하지 않는다. 짧은 자막은 key 한 줄이어도 된다.
 - 먼저 그림의 제품과 장면, 상품 설명, 계정 설정을 보고 이 영상에 어울리는 대표 모션 하나를 고른다. 차분한 고급 제품에 튀는 모션을, 발랄한 먹거리에 무거운 모션을 쓰지 않는다.
-- 자막은 대표 모션으로 통일한다. 줄마다 모션을 바꾸지 않는다.
+- 자막의 기본은 대표 모션이다. 말의 내용과 뚜렷하게 맞는 줄만 fx로 바꾼다: 궁금증 · 숫자 · 성분 이름 · 주의 · 반전처럼 내용이 분명한 줄이다. 바꾸는 줄은 전체의 3분의 1 이내로 두고, 효과 설명의 "어울리는 문구"를 참고한다.
+- 감정 효과의 뜻: sway 여유 · 기분 좋음, shiver 긴장 · 주의, heartbeat 설렘, tilt 궁금함, hop 놀람, droop 아쉬움, impact 강한 한마디. 그 감정이 말에 있을 때만 쓴다.
 - 명조 · 세리프를 강조어 글꼴로 고르지 않는다. 설정 분위기와 상품에 맞는 한글 글꼴로 강조어 하나, 작은 줄 하나를 짝짓는다.
 쓸 수 있는 효과:
 ${effectNotes(input.dir)}
@@ -136,7 +138,7 @@ function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefine
   const seconds = c.end - c.start;
   return rows.map((r, i) => ({
     text: r.text.trim(),
-    fx: r.role === "key" ? fx(last ? design.finish_fx : design.key_fx) : fx(design.small_fx),
+    fx: r.role === "key" ? (line?.fx && ALLOWED_FX.has(line.fx) ? line.fx : fx(last ? design.finish_fx : design.key_fx)) : fx(design.small_fx),
     size: r.role === "key" ? keySize(r.text.trim()) : SMALL_SIZE,
     ...(r.role === "key" ? { key: true, tone: "hi" } : {}),
     // 둘째 줄은 말이 그 낱말에 닿을 즈음 나온다
