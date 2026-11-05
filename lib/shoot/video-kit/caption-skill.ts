@@ -15,15 +15,15 @@ import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 // 자막 모션 스킬 연결(2026-11-05 사용자 결정). 스킬은 구매한 사용자의 유료 자료라 저장소에 넣지 않는다.
 // 러너는 비공개 저장 공간에서 받고(worker/fetch-caption-skill.ts), 이 PC는 설치된 폴더를 쓴다. 효과 설명 · 글꼴 목록도 실행할 때 스킬 폴더에서 읽는다.
 // 영상마다 AI가 제품 화면과 계정 분위기를 보고 대표 모션을 고르고, 말의 내용에 더 맞는 줄만 다른 모션을 쓴다(2026-11-05 사용자 결정).
-// 스킬의 디자인 자막처럼 큰 강조어 줄과 작은 줄을 쌓는다. AI는 모션 · 글꼴 · 줄 나누기만 고르고, 글자와 시각은 코드가 편집 결과와 대조해 그대로 넣는다.
+// 스킬의 디자인 자막처럼 큰 강조어 줄과 작은 줄을 쌓는다. 글꼴은 지정하지 않고 스킬 기본 짝(사용자 결정)을 쓴다. AI는 모션과 줄 나누기만 고르고, 글자와 시각은 코드가 편집 결과와 대조해 그대로 넣는다.
 
 // 글자 자체가 움직이는 효과만 영상 자막에 쓸 수 있다(스킬 안내). 사물이 나오는 장면 번호는 쓰지 않는다
 // 천천히 드러나는 효과(29 · 33 · 37)는 글자가 말보다 늦게 읽혀 쓰지 않는다
 const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "32", "36", "38", "39", "41", "42"];
 const EMOTION_FX = ["sway", "shiver", "heartbeat", "tilt", "hop", "droop", "impact"];
 const ALLOWED_FX = new Set(["cut", ...MOTION_FX, ...EMOTION_FX]);
-const DEFAULT_FONT = "프리텐다드";
-const SMALL_SIZE = 84;
+// 스킬 기본 작은 줄(손글씨)은 글자 몸통이 작아 키운다
+const SMALL_SIZE = 96;
 const KEY_MAX = 132;
 const KEY_WIDTH = 900;
 const ROW_GAP = 18;
@@ -40,8 +40,6 @@ const designSchema = z.object({
   key_fx: z.string().describe("이 영상의 대표 모션. 큰 강조어 줄의 기본이다. 효과 번호나 감정 효과 이름"),
   small_fx: z.string().describe("작은 줄 모션. 대표 모션을 돋보이게 하는 부드러운 효과나 cut"),
   finish_fx: z.string().describe("마지막 자막에만 쓰는 모션. 대표 모션과 같아도 된다"),
-  key_font: z.string().describe("큰 강조어 글꼴. 목록의 이름 그대로, 눈에 띄는 굵은 글꼴"),
-  small_font: z.string().describe("작은 줄 글꼴. 목록의 이름 그대로, 강조어와 성격이 다른 글꼴"),
   reading: z.string().describe("제품과 분위기를 어떻게 보고 이 모션을 골랐는지 한 줄"),
   lines: z
     .array(
@@ -57,13 +55,6 @@ const designSchema = z.object({
     .describe("자막마다 하나"),
 });
 export type CaptionDesign = z.infer<typeof designSchema>;
-
-function fontNames(dir: string): { name: string; role: string; look: string }[] {
-  const raw = JSON.parse(readFileSync(join(dir, "references", "fonts.json"), "utf8")) as { name: string; lang?: string; role?: string; look?: string }[] | { fonts?: { name: string; lang?: string; role?: string; look?: string }[] };
-  const list = Array.isArray(raw) ? raw : (raw.fonts ?? []);
-  // 자막은 한글이라 한글이 있는 글꼴만 고르게 한다
-  return list.filter((f) => !f.lang || f.lang.includes("한") || f.lang.toLowerCase().includes("ko")).map((f) => ({ name: f.name, role: f.role ?? "", look: f.look ?? "" }));
-}
 
 function effectNotes(dir: string): string {
   const text = readFileSync(join(dir, "references", "effects.md"), "utf8");
@@ -83,7 +74,6 @@ export async function designCaptions(input: {
   tone?: string | null;
   styleText?: string | null;
 }): Promise<{ design: CaptionDesign; tokens: { input: number; output: number } }> {
-  const fonts = fontNames(input.dir);
   const model = agentModel();
   const completion = await getOpenAI().chat.completions.parse({
     model,
@@ -97,7 +87,6 @@ export async function designCaptions(input: {
 - 먼저 그림의 제품과 장면, 상품 설명, 계정 설정을 보고 이 영상에 어울리는 대표 모션 하나를 고른다. 차분한 고급 제품에 튀는 모션을, 발랄한 먹거리에 무거운 모션을 쓰지 않는다.
 - 자막의 기본은 대표 모션이다. 말의 내용과 뚜렷하게 맞는 줄만 fx로 바꾼다: 궁금증 · 숫자 · 성분 이름 · 주의 · 반전처럼 내용이 분명한 줄이다. 바꾸는 줄은 전체의 3분의 1 이내로 두고, 효과 설명의 "어울리는 문구"를 참고한다.
 - 감정 효과의 뜻: sway 여유 · 기분 좋음, shiver 긴장 · 주의, heartbeat 설렘, tilt 궁금함, hop 놀람, droop 아쉬움, impact 강한 한마디. 그 감정이 말에 있을 때만 쓴다.
-- 명조 · 세리프를 강조어 글꼴로 고르지 않는다. 설정 분위기와 상품에 맞는 한글 글꼴로 강조어 하나, 작은 줄 하나를 짝짓는다.
 쓸 수 있는 효과:
 ${effectNotes(input.dir)}
 감정 효과: ${EMOTION_FX.join(", ")}${conceptBlock("이 계정의 말투 · 분위기", input.tone, "효과 세기와 글꼴에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", input.styleText, "자막 움직임에 맞으면 반영한다.")}`,
@@ -105,7 +94,7 @@ ${effectNotes(input.dir)}
       {
         role: "user",
         content: [
-          { type: "text", text: `상품: ${input.product.name} (${input.product.kind})${input.product.oneLine ? ` — ${input.product.oneLine}` : ""}\n글꼴 목록:\n${fonts.map((f) => `${f.name} (${f.role}, ${f.look})`).join("\n")}\n\n자막:\n${input.captions.map((c, i) => `${i}. "${c.text}" (${(c.end - c.start).toFixed(1)}초)`).join("\n")}\n\n그림은 이 영상의 장면을 차례로 모은 것이다.` },
+          { type: "text", text: `상품: ${input.product.name} (${input.product.kind})${input.product.oneLine ? ` — ${input.product.oneLine}` : ""}\n\n자막:\n${input.captions.map((c, i) => `${i}. "${c.text}" (${(c.end - c.start).toFixed(1)}초)`).join("\n")}\n\n그림은 이 영상의 장면을 차례로 모은 것이다.` },
           { type: "image_url", image_url: { url: input.frames, detail: "high" } },
         ],
       },
@@ -115,11 +104,7 @@ ${effectNotes(input.dir)}
   const parsed = completion.choices[0]?.message?.parsed;
   if (!parsed) throw new Error("자막 디자인 응답이 비어 있음");
   return {
-    design: {
-      ...parsed,
-      key_font: fonts.some((f) => f.name === parsed.key_font) ? parsed.key_font : DEFAULT_FONT,
-      small_font: fonts.some((f) => f.name === parsed.small_font) ? parsed.small_font : DEFAULT_FONT,
-    },
+    design: parsed,
     tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },
   };
 }
@@ -160,7 +145,7 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
     // 등장이 끝나기 전에 말이 지나가지 않게 효과를 빠르게 돌린다
     speed: 1.6,
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
-    style: { font: design.small_font, keyFont: design.key_font, weight: 800, size: SMALL_SIZE, color: look.text_color, accent: look.accent_color, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 960 },
+    style: { size: SMALL_SIZE, color: look.text_color, accent: look.accent_color, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 960 },
     lines: captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];

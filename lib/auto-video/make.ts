@@ -49,10 +49,12 @@ function applyFixedPhrases(board: Storyboard, phrases: PhraseState): Storyboard 
   const scenes = [...board.scenes];
   const hook = phrases.hooks[0]?.text;
   const ending = phrases.endings[0]?.text;
-  if (hook && scenes[0]) scenes[0] = { ...scenes[0], say: hook, tts: hook };
+  // 같은 문구면 AI가 쓴 읽기용 원고를 살린다. 영문 · 숫자를 읽는 대로 바꾼 값이다
+  const reading = (text: string, scene: Storyboard["scenes"][number]) => (squash(scene.say) === squash(text) ? scene.tts : text);
+  if (hook && scenes[0]) scenes[0] = { ...scenes[0], say: hook, tts: reading(hook, scenes[0]) };
   if (ending && scenes.length > 1) {
     const last = scenes[scenes.length - 1];
-    scenes[scenes.length - 1] = { ...last, say: ending, tts: ending, captions: splitCaption(ending) };
+    scenes[scenes.length - 1] = { ...last, say: ending, tts: reading(ending, last), captions: splitCaption(ending) };
   }
   return { ...board, scenes, hook: hook ? { ...board.hook, spoken: hook, on_screen: hook } : { ...board.hook, spoken: scenes[0]?.say ?? board.hook.spoken } };
 }
@@ -252,7 +254,8 @@ export async function makeAutoVideo(input: {
       captions: i === 0 ? [] : s.captions.length && squash(s.captions.join("")) === squash(s.say) ? s.captions : splitCaption(s.say),
       emphasis: s.emphasis,
       cuts: [{ clip: no, in: from, out: to, what: s.shows }],
-      graphics: i === 0 ? [] : s.graphics,
+      // 글자 없는 그래픽은 빈 막대로 나온다
+      graphics: i === 0 ? [] : s.graphics.filter((g) => graphicTexts(g).length > 0),
       sfx: [],
     });
   });

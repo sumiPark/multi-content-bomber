@@ -567,7 +567,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
           tone: input.tone,
           styleText: input.editStyleText,
         });
-        console.log(`[video-kit] 자막 모션: 대표 ${made.design.key_fx} · 작은 줄 ${made.design.small_fx} · 마지막 ${made.design.finish_fx} · ${made.design.key_font}/${made.design.small_font} — ${made.design.reading}`);
+        console.log(`[video-kit] 자막 모션: 대표 ${made.design.key_fx} · 작은 줄 ${made.design.small_fx} · 마지막 ${made.design.finish_fx} — ${made.design.reading}`);
         design = made.design;
         tokens.input += made.tokens.input;
         tokens.output += made.tokens.output;
