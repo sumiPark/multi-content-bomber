@@ -11,7 +11,7 @@ import { videoProductName } from "@/lib/agents/product-facts";
 import { findArchiveCut, saveArchiveCut, verifyArchiveCut, type ArchiveCandidate } from "@/lib/auto-video/archive";
 import { createServiceClient } from "@/lib/supabase/service";
 
-// 자사 촬영 아카이브 워커 — "올렸어요"를 누른 촬영본에서 재사용할 제품 컷을 남긴다. shoot-edit 워크플로에서 돈다.
+// 자사 촬영 아카이브 워커 — "올렸어요"를 누른 촬영본에서 재사용할 제품 컷을 남긴다(얼굴 제외, 손 · 팔 허용). shoot-edit 워크플로에서 돈다.
 // 사용: npm run worker:archive-shoots -- [--request <id>] [--dry-run]
 
 type Service = ReturnType<typeof createServiceClient>;

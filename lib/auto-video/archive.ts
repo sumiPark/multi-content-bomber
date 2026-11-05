@@ -10,8 +10,8 @@ import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
 import type { createServiceClient } from "@/lib/supabase/service";
 
-// 자사 촬영 아카이브(2026-11-05 사용자 결정) — "올렸어요"를 누른 촬영본에서 사람이 안 나오고 품질이 좋은 제품 컷만 남겨 AI 자동 영상에 다시 쓴다.
-// 사람 판단은 AI가 두 번, 코드(얼굴 검출)가 한 번 본다. 하나라도 걸리거나 도구가 실패하면 남기지 않는다. 손 · 팔도 사람으로 본다.
+// 자사 촬영 아카이브(2026-11-05 사용자 결정) — "올렸어요"를 누른 촬영본에서 얼굴이 안 나오고 품질이 좋은 제품 컷만 남겨 AI 자동 영상에 다시 쓴다.
+// 손 · 팔은 허용하고, 얼굴이나 누구인지 알아볼 수 있는 모습은 AI가 두 번, 코드(얼굴 검출)가 한 번 본다. 하나라도 걸리거나 도구가 실패하면 남기지 않는다.
 // 소리는 남기지 않고, 원본 삭제 기간은 그대로다.
 
 type Service = ReturnType<typeof createServiceClient>;
@@ -82,7 +82,7 @@ export async function findArchiveCut(file: string, info: { productName: string; 
 그림에 프레임이 왼쪽에서 오른쪽, 위에서 아래 순서로 있다. k번째 프레임의 시각은 ${LEAD_SKIP} + (k-1) x ${step.toFixed(2)}초다. 검은 칸은 없는 프레임이다.
 이어지는 구간을 나누어 판단한다(시각은 원본 기준 초):
 - product: 이 상품이 또렷이 보이는가
-- person: 사람의 얼굴이나 몸 일부(손, 팔, 다리 포함)가 보이는가. 거울 · 유리 · 화면에 비친 모습도 포함한다
+- person: 사람의 얼굴이나 머리, 또는 누구인지 알아볼 수 있는 모습(문신 등 뚜렷한 신체 특징, 명찰, 손과 팔이 아닌 몸)이 보이는가. 거울 · 유리 · 화면에 비친 모습도 포함한다. 특징 없는 손과 팔만 보이면 false다
 - other_brand: 이 상품이 아닌 브랜드 로고나 상표가 보이는가
 - text: 자막 · 워터마크 · 메모처럼 제품 인쇄가 아닌 글자가 보이는가
 - stable: 심하게 흔들리지 않는가
@@ -125,7 +125,7 @@ export async function verifyArchiveCut(input: string, cut: ArchiveCandidate, wor
   const sheet = join(workDir, `${name}-check.jpg`);
   frameSheet(file, 0, cut.seconds, step, sheet);
   const prompt = `제품 영상을 다른 광고에 다시 쓰기 전 마지막 점검이다. 프레임을 모두 본다. 한 프레임이라도 해당하면 true로 답한다.
-- person: 사람의 얼굴이나 몸 일부(손, 팔, 손가락, 다리 포함), 거울 · 유리 · 화면에 비친 사람
+- person: 사람의 얼굴이나 머리, 또는 누구인지 알아볼 수 있는 모습(문신 등 뚜렷한 신체 특징, 명찰, 손과 팔이 아닌 몸), 거울 · 유리 · 화면에 비친 사람. 특징 없는 손과 팔만 보이면 false다
 - other_brand: 이 상품이 아닌 브랜드 로고나 상표
 - text: 자막 · 워터마크 · 메모처럼 제품 인쇄가 아닌 글자
 애매하면 true로 답한다. JSON만 답한다: {"person":false,"other_brand":false,"text":false,"reason":""}`;
