@@ -14,8 +14,8 @@ import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 
 // 자막 모션 스킬 연결(2026-11-05 사용자 결정). 스킬은 구매한 사용자의 유료 자료라 저장소에 넣지 않는다.
 // 러너는 비공개 저장 공간에서 받고(worker/fetch-caption-skill.ts), 이 PC는 설치된 폴더를 쓴다. 효과 설명 · 글꼴 목록도 실행할 때 스킬 폴더에서 읽는다.
-// 스킬의 디자인 자막을 쓴다: 자막마다 큰 강조어 줄과 작은 줄을 쌓고 줄마다 효과를 다르게 준다.
-// AI는 줄 나누기 · 효과 · 글꼴만 고른다. 글자와 시각은 코드가 편집 결과와 대조해 그대로 넣는다.
+// 영상마다 AI가 제품 화면과 계정 분위기를 보고 자막 모션을 골라 그 모션으로 통일한다(2026-11-05 사용자 결정).
+// 스킬의 디자인 자막처럼 큰 강조어 줄과 작은 줄을 쌓는다. AI는 모션 · 글꼴 · 줄 나누기만 고르고, 글자와 시각은 코드가 편집 결과와 대조해 그대로 넣는다.
 
 // 글자 자체가 움직이는 효과만 영상 자막에 쓸 수 있다(스킬 안내). 사물이 나오는 장면 번호는 쓰지 않는다
 const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "29", "32", "33", "36", "37", "38", "39", "41", "42"];
@@ -32,15 +32,18 @@ export function captionSkillDir(): string | null {
 }
 
 const designSchema = z.object({
+  key_fx: z.string().describe("이 영상의 대표 모션. 큰 강조어 줄에 모두 쓴다. 효과 번호나 감정 효과 이름"),
+  small_fx: z.string().describe("작은 줄 모션. 대표 모션을 돋보이게 하는 부드러운 효과나 cut"),
+  finish_fx: z.string().describe("마지막 자막에만 쓰는 모션. 대표 모션과 같아도 된다"),
   key_font: z.string().describe("큰 강조어 글꼴. 목록의 이름 그대로, 눈에 띄는 굵은 글꼴"),
   small_font: z.string().describe("작은 줄 글꼴. 목록의 이름 그대로, 강조어와 성격이 다른 글꼴"),
-  reading: z.string().describe("이 설정과 상품을 어떻게 읽어 이렇게 골랐는지 한 줄"),
+  reading: z.string().describe("제품과 분위기를 어떻게 보고 이 모션을 골랐는지 한 줄"),
   lines: z
     .array(
       z.object({
         no: z.number().int().describe("자막 번호(0부터)"),
         rows: z
-          .array(z.object({ text: z.string(), role: z.enum(["key", "small"]), fx: z.string().describe("효과 번호나 이름. 바로 나오게 하려면 cut") }))
+          .array(z.object({ text: z.string(), role: z.enum(["key", "small"]) }))
           .describe("자막을 위에서 아래로 나눈 1~2줄. 이어 붙이면 자막과 글자가 같아야 한다. 핵심 낱말이 key"),
         spark: z.boolean().describe("이 자막의 강조어에 반짝이 장식을 붙일지. 영상 전체에서 2~3번만"),
       }),
@@ -68,7 +71,8 @@ function effectNotes(dir: string): string {
 export async function designCaptions(input: {
   dir: string;
   captions: TimedCaption[];
-  product: string;
+  product: { name: string; kind: string; oneLine: string | null };
+  frames: string;
   look: Look;
   tone?: string | null;
   styleText?: string | null;
@@ -84,8 +88,8 @@ export async function designCaptions(input: {
         content: `너는 인스타 릴스 자막 디자이너다. 이 영상의 자막마다 움직임을 고른다. 글자는 바꾸지 않는다.
 규칙:
 - 자막마다 한 컷짜리 포스터처럼 만든다. 곁들이는 말은 작은 줄, 핵심 낱말은 큰 줄로 나눈다. 글자를 바꾸거나 빼거나 더하지 않는다. 짧은 자막은 key 한 줄이어도 된다.
-- key 줄에는 대부분 효과를 주고, small 줄은 cut이나 부드러운 효과를 준다. 한 영상에 효과는 4~6가지, 같은 효과를 연달아 쓰지 않는다.
-- 감정 효과(${EMOTION_FX.join(", ")})는 감정이 있는 말에만 영상당 2~4번 이내로 쓴다.
+- 먼저 그림의 제품과 장면, 상품 설명, 계정 설정을 보고 이 영상에 어울리는 대표 모션 하나를 고른다. 차분한 고급 제품에 튀는 모션을, 발랄한 먹거리에 무거운 모션을 쓰지 않는다.
+- 자막은 대표 모션으로 통일한다. 줄마다 모션을 바꾸지 않는다.
 - 명조 · 세리프를 강조어 글꼴로 고르지 않는다. 설정 분위기와 상품에 맞는 한글 글꼴로 강조어 하나, 작은 줄 하나를 짝짓는다.
 쓸 수 있는 효과:
 ${effectNotes(input.dir)}
@@ -93,7 +97,10 @@ ${effectNotes(input.dir)}
       },
       {
         role: "user",
-        content: `상품: ${input.product}\n글꼴 목록:\n${fonts.map((f) => `${f.name} (${f.role}, ${f.look})`).join("\n")}\n\n자막:\n${input.captions.map((c, i) => `${i}. "${c.text}" (${(c.end - c.start).toFixed(1)}초)`).join("\n")}`,
+        content: [
+          { type: "text", text: `상품: ${input.product.name} (${input.product.kind})${input.product.oneLine ? ` — ${input.product.oneLine}` : ""}\n글꼴 목록:\n${fonts.map((f) => `${f.name} (${f.role}, ${f.look})`).join("\n")}\n\n자막:\n${input.captions.map((c, i) => `${i}. "${c.text}" (${(c.end - c.start).toFixed(1)}초)`).join("\n")}\n\n그림은 이 영상의 장면을 차례로 모은 것이다.` },
+          { type: "image_url", image_url: { url: input.frames, detail: "high" } },
+        ],
       },
     ],
     response_format: zodResponseFormat(designSchema, "caption_design"),
@@ -123,13 +130,13 @@ function fx(value: string): string {
 }
 
 /** AI가 나눈 줄이 자막과 글자가 다르면 쓰지 않고 자막 전체를 큰 줄 하나로 둔다. */
-function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined) {
+function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean) {
   const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
-  const rows = usable ? line.rows : [{ text: c.text, role: "key" as const, fx: line?.rows[0]?.fx ?? "cut" }];
+  const rows = usable ? line.rows : [{ text: c.text, role: "key" as const }];
   const seconds = c.end - c.start;
   return rows.map((r, i) => ({
     text: r.text.trim(),
-    fx: fx(r.fx),
+    fx: r.role === "key" ? fx(last ? design.finish_fx : design.key_fx) : fx(design.small_fx),
     size: r.role === "key" ? keySize(r.text.trim()) : SMALL_SIZE,
     ...(r.role === "key" ? { key: true, tone: "hi" } : {}),
     // 둘째 줄은 말이 그 낱말에 닿을 즈음 나온다
@@ -148,7 +155,7 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
     lines: captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
-      const rows = rowsOf(c, line);
+      const rows = rowsOf(c, line, design, i === captions.length - 1);
       const keyRow = rows.findIndex((r) => "key" in r);
       return {
         t0: Number(c.start.toFixed(3)),

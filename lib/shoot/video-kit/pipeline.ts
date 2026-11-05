@@ -543,9 +543,21 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   let design: CaptionDesign | null = null;
   if (skillDir && tl.captions.length) {
     try {
-      if (priorDesign?.lines?.[0]?.rows) design = priorDesign;
+      if (priorDesign?.key_fx) design = priorDesign;
       else {
-        const made = await designCaptions({ dir: skillDir, captions: tl.captions, product: input.facts.name, look, tone: input.tone, styleText: input.editStyleText });
+        // 제품과 장면을 보고 고르게 영상 전체에서 여섯 장면을 모아 보여 준다
+        const framesFile = join(workDir, "caption-frames.jpg");
+        ffmpeg(["-y", "-v", "error", "-i", baseVideo, "-an", "-vf", `fps=6/${tl.duration.toFixed(3)},scale=300:-2,tile=6x1`, "-frames:v", "1", "-q:v", "4", framesFile]);
+        const made = await designCaptions({
+          dir: skillDir,
+          captions: tl.captions,
+          product: { name: input.facts.name, kind: input.facts.kindLabel, oneLine: input.facts.oneLine },
+          frames: imageDataUrl(framesFile),
+          look,
+          tone: input.tone,
+          styleText: input.editStyleText,
+        });
+        console.log(`[video-kit] 자막 모션: 대표 ${made.design.key_fx} · 작은 줄 ${made.design.small_fx} · 마지막 ${made.design.finish_fx} · ${made.design.key_font}/${made.design.small_font} — ${made.design.reading}`);
         design = made.design;
         tokens.input += made.tokens.input;
         tokens.output += made.tokens.output;
