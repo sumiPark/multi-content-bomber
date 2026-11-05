@@ -123,16 +123,24 @@ export interface BehindWord {
   file: string;
 }
 
-export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null } = {}): void {
-  const look = opts.look ?? DEFAULT_LOOK;
-  const zones = opts.zones ?? null;
+/** 자막마다 놓을 자리. 후킹 글자와 위쪽 그래픽을 피한다. */
+export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
   const hookAt: Zone = hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
-  const blocks = tl.captions.map((c) => {
+  return tl.captions.map((c) => {
     const busy: Zone[] = [];
     if (c.start < tl.hook.end) busy.push(hookAt);
     if (tl.graphics.some((g) => TOP_GRAPHICS.has(g.type) && g.start < c.end && g.end > c.start)) busy.push("top");
-    return captionBlock(c, look, captionZone(zones, c.start, c.end, busy));
+    return captionZone(zones, c.start, c.end, busy);
   });
+}
+
+// noCaptions: 자막 모션 스킬이 렌더 뒤에 자막을 얹을 때 쓴다
+export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null; noCaptions?: boolean } = {}): void {
+  const look = opts.look ?? DEFAULT_LOOK;
+  const zones = opts.zones ?? null;
+  const hookAt: Zone = hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
+  const places = captionZones(tl, zones);
+  const blocks = opts.noCaptions ? [] : tl.captions.map((c, i) => captionBlock(c, look, places[i]));
   const behind = opts.behind ?? null;
   // 제품 뒤 글자 구간에서 화면을 당기면 제품 레이어와 어긋난다
   const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.cutStart - 0.4 && t < behind.end)) : [];

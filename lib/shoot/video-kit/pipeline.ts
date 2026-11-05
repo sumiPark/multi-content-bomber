@@ -11,10 +11,11 @@ import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
 import { normalizeLook, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { captionSkillDir, designCaptions, overlayCaptions, type CaptionDesign } from "@/lib/shoot/video-kit/caption-skill";
 import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse, type PickedMusic } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
-import { writeCoverProject, writeProject, type BehindWord } from "@/lib/shoot/video-kit/compose";
+import { captionZones, writeCoverProject, writeProject, type BehindWord } from "@/lib/shoot/video-kit/compose";
 import { layoutBeats, timeText, type TimedCut, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -536,17 +537,47 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   }
 
   // 6. 렌더 · 표지
-  const final = join(workDir, "final.mp4");
+  // 자막 모션 스킬을 쓸 수 있으면 자막 없이 렌더한 뒤 얹는다. 안 되면 지금까지의 자막으로 렌더한다
+  const skillDir = captionSkillDir();
+  const priorDesign = (input.reusePlan as (EditPlan & { captionDesign?: CaptionDesign }) | null | undefined)?.captionDesign;
+  let design: CaptionDesign | null = null;
+  if (skillDir && tl.captions.length) {
+    try {
+      if (priorDesign) design = priorDesign;
+      else {
+        const made = await designCaptions({ dir: skillDir, captions: tl.captions, product: input.facts.name, look, tone: input.tone, styleText: input.editStyleText });
+        design = made.design;
+        tokens.input += made.tokens.input;
+        tokens.output += made.tokens.output;
+      }
+      writeProject(project, tl, { look, zones, behind, noCaptions: true });
+    } catch (e) {
+      design = null;
+      warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+    }
+  }
+  let final = join(workDir, "final.mp4");
   try {
     hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
   } catch (e) {
     // 제품 뒤 글자가 렌더를 막으면 그 효과만 빼고 다시 만든다
     if (!behind) throw e;
     console.warn("[video-kit] 제품 뒤 글자를 빼고 다시 렌더:", e instanceof Error ? e.message : e);
-    writeProject(project, tl, { look, zones, behind: null });
+    writeProject(project, tl, { look, zones, behind: null, noCaptions: !!design });
     hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
   }
   if (!existsSync(final) || mediaSeconds(final) < 1) throw new Error("렌더 결과가 없어요");
+  if (design && skillDir) {
+    try {
+      final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, look, workDir });
+    } catch (e) {
+      console.warn("[video-kit] 자막 모션 실패, 기본 자막으로 다시 렌더:", e instanceof Error ? e.message : e);
+      warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+      design = null;
+      writeProject(project, tl, { look, zones, behind: null });
+      hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
+    }
+  }
   const coverClip = clips.find((c) => c.no === plan.thumbnail.clip) ?? clips[0];
   const cover = makeCover(version, workDir, coverClip, plan.thumbnail, look);
 
@@ -555,7 +586,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     final,
     cover,
     seconds: mediaSeconds(final),
-    plan: { ...plan, pickedMusic: { name: music.name, in: music.in, gain_db: music.gain_db, source: music.source, query: music.query } } as EditPlan,
+    plan: { ...plan, pickedMusic: { name: music.name, in: music.in, gain_db: music.gain_db, source: music.source, query: music.query }, ...(design ? { captionDesign: design } : {}) } as EditPlan,
     timeline: tl,
     segments: buildSegments(plan, tl),
     hook: { text: hookText, source: input.humanHook?.trim() ? "human" : input.fixedHook?.trim() ? "saved" : "ai" },

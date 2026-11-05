@@ -59,6 +59,18 @@ jobs:
           key: video-models-v1
       - name: Prepare HyperFrames browser
         run: npx --yes hyperframes@0.8.210 browser ensure
+      # 구매한 자막 모션 스킬은 저장소에 넣지 않고 비공개 저장 공간에서 받는다. 실패하면 기본 자막으로 만든다
+      - name: Prepare caption skill
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          npx tsx worker/fetch-caption-skill.ts "$RUNNER_TEMP/caption-skill"
+          cd "$RUNNER_TEMP/caption-skill/caption-motion-seqc"
+          npm ci --no-audit --no-fund --silent
+          sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+          echo "CAPTION_SKILL_DIR=$PWD" >> "$GITHUB_ENV"
       - name: Make videos
         run: npm run worker:auto-video -- ${{ inputs.plan && format('--plan {0}', inputs.plan) || '' }} ${{ inputs.dry_run && '--dry-run --out dry-out' || '' }}
         env:
