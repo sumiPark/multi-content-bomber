@@ -21,7 +21,8 @@ import type { createServiceClient } from "@/lib/supabase/service";
 // AI 자동 콘텐츠 한 편 만들기. 재료 판단 → 장면표(말 · 이미지 · 글자를 함께) → 음성 → 낱말 시각에 맞춘 조립 → 완성본 점검.
 // 참고 내용은 호출하는 쪽이 넘긴 계정 컨셉의 auto_* 값만 읽는다. 저장 · 발행은 워커가 맡는다.
 
-const MIN_NATIVE = 500;
+// 제품을 띄우는 컷은 가로 약 2.4배까지 키워도 볼 만하다. 그보다 작으면 흐리다
+const MIN_NATIVE = 400;
 const MIN_MATERIALS = 3;
 const MAX_BOARD_TRIES = 3;
 const CAPTION_CHARS = 16;
@@ -184,6 +185,12 @@ export async function makeAutoVideo(input: {
       retry,
     });
     add(res.tokens);
+    // 다시 쓴 답이 비어 있으면 앞서 쓴 장면표를 버리지 않는다
+    if (!res.output.scenes.length || res.output.scenes.some((s) => !s.say.trim() || !s.tts.trim())) {
+      console.log(`  장면표 ${attempt + 1}번째: 말이 빈 장면이 있어 다시 쓴다`);
+      if (board) retry = { board, problems: [...left, "모든 장면에 say와 tts를 쓴다"] };
+      continue;
+    }
     board = applyFixedPhrases(res.output, phrases);
     board = { ...board, photos: board.photos.map((p) => (sharpIds.has(p.id) ? p : { ...p, usable: false })) };
     const code = storyboardProblems(board, archiveIds, phrases.hooks.length > 0);
