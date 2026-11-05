@@ -10,9 +10,30 @@ import type { TimedGraphic, Timeline } from "@/lib/shoot/video-kit/timeline";
 
 const GSAP = "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js";
 
-const FONT = `@font-face { font-family: "Pretendard"; font-weight: 400; src: url("assets/fonts/Pretendard-Regular.woff2") format("woff2"); }
-    @font-face { font-family: "Pretendard"; font-weight: 600; src: url("assets/fonts/Pretendard-SemiBold.woff2") format("woff2"); }
-    @font-face { font-family: "Pretendard"; font-weight: 800; src: url("assets/fonts/Pretendard-ExtraBold.woff2") format("woff2"); }`;
+// 영상 글자에 쓸 글꼴. 영상마다 스킬 글꼴에서 고른 값을 넘기고, 못 구했으면 아래 대체 글꼴을 쓴다
+export interface VideoFonts {
+  css: string;
+  family: string;
+  files: { from: string; name: string }[];
+}
+
+export function fallbackFonts(): VideoFonts {
+  const faces = [
+    ["Regular", 400],
+    ["SemiBold", 600],
+    ["ExtraBold", 800],
+  ] as const;
+  return {
+    css: faces.map(([f, w]) => `@font-face { font-family: "Pretendard"; font-weight: ${w}; src: url("assets/fonts/Pretendard-${f}.woff2") format("woff2"); }`).join("\n    "),
+    family: `"Pretendard", sans-serif`,
+    files: faces.map(([f]) => ({ from: editKitAsset("fonts", `Pretendard-${f}.woff2`), name: `Pretendard-${f}.woff2` })),
+  };
+}
+
+export function installFonts(dir: string, fonts: VideoFonts): void {
+  mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
+  for (const f of fonts.files) copyFileSync(f.from, join(dir, "assets", "fonts", f.name));
+}
 
 export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -135,7 +156,8 @@ export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
 }
 
 // noCaptions: 자막 모션 스킬이 렌더 뒤에 자막 · 후킹 글자 · 끝 화면을 얹을 때 쓴다
-export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null; noCaptions?: boolean } = {}): void {
+export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null; noCaptions?: boolean; fonts?: VideoFonts } = {}): void {
+  const fonts = opts.fonts ?? fallbackFonts();
   const look = opts.look ?? DEFAULT_LOOK;
   const zones = opts.zones ?? null;
   const hookAt: Zone = hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
@@ -145,9 +167,8 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   // 제품 뒤 글자 구간에서 화면을 당기면 제품 레이어와 어긋난다
   const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.cutStart - 0.4 && t < behind.end)) : [];
   const behindSize = behind ? Math.min(470, Math.floor(980 / Math.max(1, [...behind.word].length))) : 0;
-  mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
   mkdirSync(join(dir, "compositions"), { recursive: true });
-  for (const f of ["Regular", "SemiBold", "ExtraBold"]) copyFileSync(editKitAsset("fonts", `Pretendard-${f}.woff2`), join(dir, "assets", "fonts", `Pretendard-${f}.woff2`));
+  installFonts(dir, fonts);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "shoot-edit", private: true }));
   writeFileSync(join(dir, "hyperframes.json"), JSON.stringify({ paths: { blocks: "compositions", components: "compositions/components", assets: "assets" }, media: { autoProxy: false } }));
 
@@ -157,8 +178,8 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
     join(dir, "compositions", "captions.html"),
     `<template>
   <style>
-    ${FONT}
-    #root { position: absolute; inset: 0; font-family: "Pretendard", sans-serif; pointer-events: none; }
+    ${fonts.css}
+    #root { position: absolute; inset: 0; font-family: ${fonts.family}; pointer-events: none; }
     ${lookCss(look)}
   </style>
   <div id="root" data-composition-id="captions" data-width="1080" data-height="1920">
@@ -179,8 +200,8 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
     join(dir, "compositions", "graphics.html"),
     `<template>
   <style>
-    ${FONT}
-    #root { position: absolute; inset: 0; font-family: "Pretendard", sans-serif; pointer-events: none; color: #fff; }
+    ${fonts.css}
+    #root { position: absolute; inset: 0; font-family: ${fonts.family}; pointer-events: none; color: #fff; }
     .g { position: absolute; opacity: 0; }
     ${lookCss(look)}
     .card { background: rgba(20,20,20,.86); border-radius: 30px; }
@@ -243,7 +264,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
       #root { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; }
       #stage { position: absolute; inset: 0; }
       #base { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-      ${FONT}
+      ${fonts.css}
     </style>
   </head>
   <body>
@@ -251,7 +272,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
       <div id="stage"><video id="base" class="clip" src="assets/base.mp4" muted data-start="0" data-duration="${D}" data-track-index="0"></video></div>
       ${
         behind
-          ? `<div id="bwrap" class="clip" data-start="${behind.start}" data-duration="${(behind.end - behind.start).toFixed(3)}" data-track-index="5" style="position:absolute;inset:0"><div id="bword" style="position:absolute;left:0;right:0;top:430px;text-align:center;font-family:Pretendard,sans-serif;font-weight:800;font-size:${behindSize}px;line-height:1;letter-spacing:-.05em;color:${look.accent_color}">${esc(behind.word)}</div></div>
+          ? `<div id="bwrap" class="clip" data-start="${behind.start}" data-duration="${(behind.end - behind.start).toFixed(3)}" data-track-index="5" style="position:absolute;inset:0"><div id="bword" style="position:absolute;left:0;right:0;top:430px;text-align:center;font-family:${esc(fonts.family)};font-weight:800;font-size:${behindSize}px;line-height:1;letter-spacing:-.05em;color:${look.accent_color}">${esc(behind.word)}</div></div>
       <video id="bcut" class="clip" src="assets/${behind.file}" muted data-start="${behind.cutStart}" data-duration="${(behind.end - behind.cutStart).toFixed(3)}" data-track-index="6" data-layout-allow-occlusion style="position:absolute;inset:0;width:1080px;height:1920px"></video>`
           : ""
       }
@@ -274,10 +295,9 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
 }
 
 /** 표지 프로젝트 — 프레임 위에 후킹보다 큰 글자. 피드에서 잘리지 않게 가운데 4:5 안에 둔다. */
-export function writeCoverProject(dir: string, frame: string, plan: EditPlan["thumbnail"], look: Look = DEFAULT_LOOK): void {
-  mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
-  copyFileSync(editKitAsset("fonts", "Pretendard-ExtraBold.woff2"), join(dir, "assets", "fonts", "Pretendard-ExtraBold.woff2"));
-  copyFileSync(editKitAsset("fonts", "Pretendard-SemiBold.woff2"), join(dir, "assets", "fonts", "Pretendard-SemiBold.woff2"));
+export function writeCoverProject(dir: string, frame: string, plan: EditPlan["thumbnail"], look: Look = DEFAULT_LOOK, videoFonts?: VideoFonts): void {
+  const fonts = videoFonts ?? fallbackFonts();
+  installFonts(dir, fonts);
   copyFileSync(frame, join(dir, "assets", "frame.jpg"));
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "shoot-cover", private: true }));
   writeFileSync(join(dir, "hyperframes.json"), JSON.stringify({ paths: { assets: "assets" } }));
@@ -288,11 +308,10 @@ export function writeCoverProject(dir: string, frame: string, plan: EditPlan["th
 <html lang="ko"><head><meta charset="UTF-8" /><meta name="viewport" content="width=1080, height=1920" />
 <script src="${GSAP}"></script>
 <style>
-  @font-face { font-family: "Pretendard"; font-weight: 800; src: url("assets/fonts/Pretendard-ExtraBold.woff2") format("woff2"); }
-  @font-face { font-family: "Pretendard"; font-weight: 600; src: url("assets/fonts/Pretendard-SemiBold.woff2") format("woff2"); }
+  ${fonts.css}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; }
-  #root { position: relative; width: 100%; height: 100%; font-family: "Pretendard", sans-serif; overflow: hidden; }
+  #root { position: relative; width: 100%; height: 100%; font-family: ${fonts.family}; overflow: hidden; }
   #bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   #shade { position: absolute; left: 0; right: 0; ${plan.position === "lower" ? "bottom: 0; height: 1100px; background: linear-gradient(0deg, rgba(0,0,0,.55), rgba(0,0,0,0));" : "top: 0; height: 1000px; background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0));"} }
   ${lookCss(look)}

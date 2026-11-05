@@ -7,14 +7,17 @@ import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, preparePhrases, recen
 import { timeScript } from "@/lib/agents/ko-skills";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
-import { reviewFinalFrames, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
+import { motionTexts, reviewFinalFrames, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
-import { photoClip } from "@/lib/auto-video/clips";
+import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
 import { finalBlocking } from "@/lib/shoot/final-check";
+import { captionSkillDir } from "@/lib/shoot/video-kit/caption-skill";
+import type { VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { loadVisualLibrary } from "@/lib/shoot/video-kit/generated-visual";
 import { readClip, renderKitEdit, type KitClip } from "@/lib/shoot/video-kit/pipeline";
+import { chosenFonts, downloadVideoFonts, loadSkillFonts, type SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
 import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -64,7 +67,7 @@ function boardAsScript(board: Storyboard): ScriptOutput {
   return {
     hooks: [{ formula_id: 0, spoken: board.hook.spoken, on_screen: board.hook.on_screen }],
     chosen_hook: 0,
-    beats: board.scenes.map((s, i) => ({ spoken: s.say, on_screen: i === 0 ? board.hook.on_screen : s.graphics.flatMap(graphicTexts).join(" "), visual: s.shows })),
+    beats: board.scenes.map((s, i) => ({ spoken: s.say, on_screen: i === 0 ? board.hook.on_screen : [...s.graphics.flatMap(graphicTexts), ...(s.motion ? motionTexts(s.motion) : [])].join(" "), visual: s.shows })),
     loop_word: "",
     caption: board.caption,
   };
@@ -165,6 +168,28 @@ export async function makeAutoVideo(input: {
 
   const visualLibrary = await loadVisualLibrary(service);
 
+  // 글꼴 후보. 스킬을 못 읽으면 후보 없이 쓰고, 영상은 대체 글꼴로 만든다
+  const skillDir = captionSkillDir();
+  let fontChoices: SkillFont[] = [];
+  try {
+    if (skillDir) fontChoices = loadSkillFonts(skillDir);
+  } catch (e) {
+    console.warn("  스킬 글꼴 목록을 읽지 못했어요:", e instanceof Error ? e.message : e);
+  }
+
+  // 사진 나누기는 시간이 걸려 같은 사진 · 같은 잘라 내기면 다시 하지 않는다
+  const layerCache = new Map<string, PhotoLayers>();
+  const trimmedLayers = (id: string, top: number, bottom: number): PhotoLayers | null => {
+    const key = `${id}:${top}:${bottom}`;
+    const hit = layerCache.get(key);
+    if (hit) return hit;
+    const cand = candidates.find((c) => c.id === id);
+    if (!cand) return null;
+    const made = photoLayers(trimPhoto(cand, top, bottom, workDir), workDir, `photo-${id}-${layerCache.size}`);
+    layerCache.set(key, made);
+    return made;
+  };
+
   // 2. 장면표: 쓰고, 코드 · 시청자 눈 · 광고 규칙으로 보고, 걸리면 고쳐 쓴다
   let board: Storyboard | null = null;
   let retry: { board: Storyboard; problems: string[] } | null = null;
@@ -179,7 +204,7 @@ export async function makeAutoVideo(input: {
       roleFocus: concept.autoRole,
       facts,
       rules,
-      candidates: sharp.map((c) => ({ id: c.id, w: c.w, h: c.h })),
+      candidates: sharp.filter((c) => sharpIds.has(c.id)).map((c) => ({ id: c.id, w: c.w, h: c.h })),
       sheets,
       archive: archive.map((a) => ({ id: a.id, what: a.what, seconds: a.seconds })),
       archiveSheets: archive.map((a) => imageDataUrl(a.sheet)),
@@ -188,6 +213,7 @@ export async function makeAutoVideo(input: {
       videoStyle: concept.autoVideoStyle,
       phraseBlock: fixedPhraseBlock(phrases),
       visualLibrary,
+      fontChoices,
       retry,
     });
     add(res.tokens);
@@ -198,6 +224,18 @@ export async function makeAutoVideo(input: {
       continue;
     }
     board = applyFixedPhrases(res.output, phrases);
+    // 설명 화면은 후보 번호가 없어 장면 순서로 번호를 붙이고, AI 이미지를 얹지 않는다
+    const scenes = board.scenes.map((s, i) => (s.source === "motion" ? { ...s, source_id: `m${i}` } : s));
+    board = { ...board, scenes, visuals: board.visuals.filter((v) => scenes[v.beat]?.source !== "motion") };
+    // 세로 화면에서 제품이 잘리는 사진은 쓰지 않는다. 후보에서 빼고 다시 쓰게 한다
+    for (const s of board.scenes) {
+      if (s.source !== "photo" || !sharpIds.has(s.source_id)) continue;
+      const meta = board.photos.find((p) => p.id === s.source_id);
+      if (meta && trimmedLayers(meta.id, meta.trim_top, meta.trim_bottom)?.mode === "unfit") {
+        console.log(`  ${meta.id} 사진은 세로 화면에서 제품이 잘려 후보에서 뺌`);
+        sharpIds.delete(meta.id);
+      }
+    }
     board = { ...board, photos: board.photos.map((p) => (sharpIds.has(p.id) ? p : { ...p, usable: false })) };
     const code = storyboardProblems(board, archiveIds, phrases.hooks.length > 0);
     const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts() });
@@ -213,13 +251,25 @@ export async function makeAutoVideo(input: {
     retry = { board, problems: left };
   }
   if (!board) throw new Error("장면표를 만들지 못했어요");
-  const fatal = storyboardProblems(board, archiveIds, phrases.hooks.length > 0).filter((p) => p.includes("후보가 아니다") || p.includes("없는 자사") || p.includes("말이 없다"));
+  const fatal = storyboardProblems(board, archiveIds, phrases.hooks.length > 0).filter((p) => p.includes("후보가 아니다") || p.includes("없는 자사") || p.includes("말이 없다") || p.includes("도식 값이 없다"));
   if (fatal.length) throw new Error(`장면표 오류: ${fatal.join(" / ")}`);
 
   // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
+  // AI가 고른 글꼴을 자막 · 설명 화면이 함께 쓴다. 못 받으면 설명 화면만 대체 글꼴로 만든다
+  const finalBoard = board;
+  const pickedFonts = fontChoices.length ? chosenFonts(fontChoices, { key_font: finalBoard.key_font, small_font: finalBoard.small_font }) : null;
+  if (pickedFonts) console.log(`  글꼴: ${pickedFonts.key.name} + ${pickedFonts.small.name}`);
+  let motionFonts: VideoFonts | undefined;
   const clips: KitClip[] = [];
   const sources: unknown[] = [];
   const warnings: string[] = left.map((p) => `장면표 확인: ${p}`.slice(0, 200));
+  if (pickedFonts && finalBoard.scenes.some((s) => s.source === "motion")) {
+    try {
+      motionFonts = await downloadVideoFonts(pickedFonts, workDir);
+    } catch (e) {
+      warnings.push(`고른 글꼴을 받지 못해 설명 화면은 대체 글꼴로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+    }
+  }
   const clipNo = new Map<string, number>();
   const used = new Map<string, number>();
   const clipOf = (id: string, kind: "photo" | "archive"): number | null => {
@@ -231,10 +281,10 @@ export async function makeAutoVideo(input: {
       clips.push(readClip(no, a.file, { shot: `[자사 촬영] ${a.what}` }));
       sources.push({ no, kind: "archive", id: a.rowId, what: a.what });
     } else {
-      const cand = candidates.find((c) => c.id === id);
-      const meta = board!.photos.find((p) => p.id === id);
-      if (!cand || !meta) return null;
-      const made = photoClip(trimPhoto(cand, meta.trim_top, meta.trim_bottom, workDir), workDir, `photo-${id}`);
+      const meta = finalBoard.photos.find((p) => p.id === id);
+      const layers = meta && trimmedLayers(id, meta.trim_top, meta.trim_bottom);
+      if (!meta || !layers) return null;
+      const made = photoClip(layers, workDir, `photo-${id}`);
       if (made.soft) warnings.push(`${id} 사진(${meta.what})은 해상도가 낮아 영상에서 흐릴 수 있어요.`);
       clips.push(readClip(no, made.file, { shot: `[제품컷] ${meta.what}` }));
       sources.push({ no, kind: "photo", id, what: meta.what, mode: made.mode });
@@ -242,13 +292,20 @@ export async function makeAutoVideo(input: {
     clipNo.set(id, no);
     return no;
   };
+  const motionClipOf = (spec: NonNullable<Storyboard["scenes"][number]["motion"]>, i: number, seconds: number): number => {
+    const made = motionClip(spec, workDir, `motion-${i}`, { seconds, fonts: motionFonts });
+    const no = clips.length + 1;
+    clips.push(readClip(no, made.file, { shot: `[코드 모션] ${made.shot}` }));
+    sources.push({ no, kind: "motion", spec });
+    return no;
+  };
   const timing = timeScript(board.scenes.map((s) => s.tts), 20).beats;
   const beats: EditPlan["beats"] = [];
   board.scenes.forEach((s, i) => {
-    const no = clipOf(s.source_id, s.source);
+    const want = Math.max(1.2, (timing[i]?.dur ?? 2.5) + 0.25);
+    const no = s.source === "motion" ? (s.motion ? motionClipOf(s.motion, i, want) : null) : clipOf(s.source_id, s.source);
     if (!no) throw new Error(`${s.source_id} 이미지를 만들지 못했어요`);
     const seconds = clips[no - 1].duration;
-    const want = Math.max(1.2, (timing[i]?.dur ?? 2.5) + 0.25);
     const from = Math.min(used.get(s.source_id) ?? 0, Math.max(0, seconds - want));
     const to = Math.min(seconds, from + want);
     used.set(s.source_id, to);
@@ -263,7 +320,9 @@ export async function makeAutoVideo(input: {
       sfx: [],
     });
   });
-  const coverScene = beats[Math.min(Math.max(0, board.thumbnail.scene), beats.length - 1)]?.cuts[0];
+  // 표지는 제품이 보이는 장면으로. 설명 화면을 골랐으면 첫 장면을 쓴다
+  const coverAt = Math.min(Math.max(0, board.thumbnail.scene), beats.length - 1);
+  const coverScene = beats[board.scenes[coverAt]?.source === "motion" ? 0 : coverAt]?.cuts[0];
   const plan: EditPlan = {
     look: board.look,
     analysis: [],
@@ -290,6 +349,7 @@ export async function makeAutoVideo(input: {
     tone: concept.autoTone,
     editStyleText: concept.autoVideoStyle,
     voiceId: concept.autoVoiceId,
+    fonts: pickedFonts ? { key_font: pickedFonts.key.name, small_font: pickedFonts.small.name } : undefined,
   });
   add(kit.tokens);
 
@@ -308,7 +368,7 @@ export async function makeAutoVideo(input: {
     {
       ...script,
       // 근거 점검은 화면에 보이는 표기로 한다
-      beats: kit.plan.beats.map((b, i) => ({ spoken: board!.scenes[i]?.say ?? b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(i === lastBeat ? coverTexts : [])].join(" "), visual: "" })),
+      beats: kit.plan.beats.map((b, i) => ({ spoken: board!.scenes[i]?.say ?? b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(board!.scenes[i]?.motion ? motionTexts(board!.scenes[i].motion!) : []), ...(i === lastBeat ? coverTexts : [])].join(" "), visual: "" })),
     },
     facts,
     rules,
@@ -316,7 +376,7 @@ export async function makeAutoVideo(input: {
     { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts() },
   );
   const blocking = finalBlocking(
-    { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
+    { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...board.scenes.flatMap((s) => (s.motion ? motionTexts(s.motion) : [])), ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
     { kind: facts.kind, rules, approvedClaims: facts.approvedClaims, stockStatus: facts.stockStatus, healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions },
   );
   return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts, script, board };

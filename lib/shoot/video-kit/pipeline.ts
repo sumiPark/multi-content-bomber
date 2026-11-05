@@ -17,7 +17,8 @@ import { blockRows, captionSkillDir, designCaptions, overlayCaptions, type Capti
 import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse, type PickedMusic } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
-import { captionZones, writeCoverProject, writeProject, type BehindWord } from "@/lib/shoot/video-kit/compose";
+import { captionZones, writeCoverProject, writeProject, type BehindWord, type VideoFonts } from "@/lib/shoot/video-kit/compose";
+import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import { layoutBeats, timeText, type TimedCut, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -48,6 +49,8 @@ export interface KitInput {
   scriptLines?: string[];
   // 계정 설정의 목소리. 없으면 기본 목소리. 모델은 kit.json의 무료 모델 고정
   voiceId?: string | null;
+  // 글꼴을 미리 고른 흐름만 넘긴다. 없으면 자막 디자인 AI가 고른다
+  fonts?: { key_font: string; small_font: string };
   humanHook?: string | null;
   humanThumbnail?: string | null;
   shotlistHook?: { spoken: string; on_screen: string } | null;
@@ -411,7 +414,7 @@ function makeSkillCover(dir: string, design: CaptionDesign, workDir: string, cli
   return cover;
 }
 
-function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditPlan["thumbnail"], look: Look): string {
+function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditPlan["thumbnail"], look: Look, fonts?: VideoFonts): string {
   const frame = join(workDir, "cover-frame.jpg");
   const at = Math.min(Math.max(0, thumb.at), Math.max(0, clip.duration - 0.1));
   ffmpeg(["-y", "-v", "error", "-ss", at.toFixed(3), "-i", clip.file, "-frames:v", "1", "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920", "-q:v", "2", frame]);
@@ -420,7 +423,7 @@ function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditP
   // 표지 글자도 상품을 피한다. 자리를 못 읽으면 AI가 정한 자리
   const cover0 = frameZones([frame], workDir)?.[0];
   const plan = cover0 ? { ...thumb, position: cover0.top <= cover0.lower ? ("top" as const) : ("lower" as const) } : thumb;
-  writeCoverProject(dir, frame, plan, look);
+  writeCoverProject(dir, frame, plan, look, fonts);
   const outDir = join(workDir, "cover-out");
   hyperframes(version, dir, ["snapshot", "--at", "0.5", "--no-end", "-o", outDir], 5 * 60_000);
   const png = readdirSync(outDir).find((f) => f.endsWith(".png"));
@@ -597,6 +600,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const skillDir = captionSkillDir();
   const priorDesign = (input.reusePlan as (EditPlan & { captionDesign?: CaptionDesign }) | null | undefined)?.captionDesign;
   let design: CaptionDesign | null = null;
+  let videoFonts: VideoFonts | undefined;
   if (skillDir && tl.captions.length) {
     try {
       if (priorDesign?.key_fx) design = priorDesign;
@@ -613,12 +617,20 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
           tone: input.tone,
           styleText: input.editStyleText,
         });
-        console.log(`[video-kit] 자막 모션: 대표 ${made.design.key_fx} · 작은 줄 ${made.design.small_fx} · 마지막 ${made.design.finish_fx} — ${made.design.reading}`);
+        console.log(`[video-kit] 자막 모션: 대표 ${made.design.key_fx} · 작은 줄 ${made.design.small_fx} · 마지막 ${made.design.finish_fx} · 글꼴 ${made.design.key_font} + ${made.design.small_font} — ${made.design.reading}`);
         design = made.design;
         tokens.input += made.tokens.input;
         tokens.output += made.tokens.output;
       }
-      writeProject(project, tl, { look, zones, behind, noCaptions: true });
+      // 글꼴을 미리 고른 흐름(AI 자동)은 그 값을 쓴다. 설명 화면과 글꼴이 달라지지 않게 한다
+      if (input.fonts) design = { ...design, ...input.fonts };
+      // 도식 · 끝 화면 글자도 자막과 같은 글꼴로 쓴다. 못 받으면 대체 글꼴로 만든다
+      try {
+        videoFonts = await downloadVideoFonts(chosenFonts(loadSkillFonts(skillDir), design), workDir);
+      } catch (e) {
+        warnings.push(`고른 글꼴을 받지 못해 도식 글자는 대체 글꼴로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+      }
+      writeProject(project, tl, { look, zones, behind, noCaptions: true, fonts: videoFonts });
     } catch (e) {
       design = null;
       warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
@@ -631,7 +643,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     // 제품 뒤 글자가 렌더를 막으면 그 효과만 빼고 다시 만든다
     if (!behind) throw e;
     console.warn("[video-kit] 제품 뒤 글자를 빼고 다시 렌더:", e instanceof Error ? e.message : e);
-    writeProject(project, tl, { look, zones, behind: null, noCaptions: !!design });
+    writeProject(project, tl, { look, zones, behind: null, noCaptions: !!design, fonts: videoFonts });
     hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
   }
   if (!existsSync(final) || mediaSeconds(final) < 1) throw new Error("렌더 결과가 없어요");
@@ -650,7 +662,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       console.warn("[video-kit] 자막 모션 실패, 기본 자막으로 다시 렌더:", e instanceof Error ? e.message : e);
       warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
       design = null;
-      writeProject(project, tl, { look, zones, behind: null });
+      writeProject(project, tl, { look, zones, behind: null, fonts: videoFonts });
       hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
     }
   }
@@ -672,7 +684,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       console.warn("[video-kit] 스킬 표지 실패, 기본 표지로 만든다:", e instanceof Error ? e.message : e);
     }
   }
-  cover ??= makeCover(version, workDir, coverClip, plan.thumbnail, look);
+  cover ??= makeCover(version, workDir, coverClip, plan.thumbnail, look, videoFonts);
 
   const hookText = plan.hook.on_screen.replace(/\n+/g, " ");
   return {

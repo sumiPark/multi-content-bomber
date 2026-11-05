@@ -1,7 +1,7 @@
 # 제품 사진 한 장을 움직일 레이어로 나눈다. 포장 글자가 휘지 않게 레이어는 통째로만 움직이고, 깊이맵으로 픽셀을 밀지 않는다.
 # 배경 제거: rembg isnet-general-use. 깊이: Depth Anything V2 Small(Apache-2.0)의 ONNX. 다른 크기는 비상업 라이선스라 쓰지 않는다.
-# 세로로 채우면 사진이 많이 잘리는 경우 fit(흐린 배경 위에 사진 전체)으로 둔다.
-# 출력 모드 float(제품을 띄움) / aligned(제품과 배경 분리) / depth(먼 쪽 · 가까운 쪽) / push(사진 전체).
+# 흐린 복제 배경은 쓰지 않는다(2026-11-05 사용자 결정). 제품을 오려 띄우거나, 제품이 잘리지 않는 만큼 세로로 채운다.
+# 출력 모드 float(제품을 띄움) / aligned(제품과 배경 분리) / depth(먼 쪽 · 가까운 쪽) / push(사진 전체) / unfit(제품이 잘려 쓰지 않음, 레이어 없음).
 import json
 import os
 import sys
@@ -14,6 +14,7 @@ from PIL import Image, ImageFilter
 from rembg import new_session, remove
 
 W, H = 1080, 1920
+KEEP = 0.96
 DEPTH_URL = "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx"
 _depth = None
 
@@ -64,6 +65,19 @@ def cover(im, fx=0.5, fy=0.5, extra=1.16):
     return out, round((W - out.width) * fx), round((H - out.height) * fy), s
 
 
+def frame_on(im, box, extra):
+    """제품이 가운데 오게 세로 화면을 잡는다. (가로 위치, 세로 위치, 제품이 화면 안에 들어오는지). 제품 범위를 모르면 가운데."""
+    if box is None:
+        return 0.5, 0.5, True
+    s = max(W / im.width, H / im.height) * extra
+    over_w, over_h = im.width * s - W, im.height * s - H
+    fx = min(1, max(0, ((box[0] + box[2]) / 2 * s - W / 2) / over_w)) if over_w > 0 else 0.5
+    fy = min(1, max(0, ((box[1] + box[3]) / 2 * s - H / 2) / over_h)) if over_h > 0 else 0.5
+    # 카메라가 움직여도 제품이 잘리지 않게 여유를 둔다
+    fits = (box[2] - box[0]) * s <= W * KEEP and (box[3] - box[1]) * s <= H * KEEP
+    return fx, fy, fits
+
+
 def with_shadow(fg, blur=26, dy=26):
     alpha = fg.getchannel("A").filter(ImageFilter.GaussianBlur(blur)).point(lambda v: int(v * 0.55))
     pad = 80
@@ -101,18 +115,17 @@ def main():
     layers = []
     mode = "push"
     soft = False
-    fill = max(W / im.width, H / im.height)
-    need_fit = min(W / (im.width * fill), H / (im.height * fill)) < 0.62
+    # 작은 오검출 점은 빼고 범위를 잰다. 사진 대부분이 전경으로 잡히면 질감 · 장면 사진이라 범위를 보지 않는다
+    solid = alpha > 0.5
+    xs = np.where(solid.sum(axis=0) > 6)[0]
+    ys = np.where(solid.sum(axis=1) > 6)[0]
+    box = (int(xs[0]), int(ys[0]), int(xs[-1]) + 1, int(ys[-1]) + 1) if len(xs) and len(ys) and 0.02 < ratio <= 0.7 else None
+    fx, fy, fits = frame_on(im, box, 1.16)
     if fg_ok:
-        # 작은 오검출 점은 빼고 범위를 잰다
-        solid = alpha > 0.5
-        xs = np.where(solid.sum(axis=0) > 6)[0]
-        ys = np.where(solid.sum(axis=1) > 6)[0]
-        box = (int(xs[0]), int(ys[0]), int(xs[-1]) + 1, int(ys[-1]) + 1)
         touches = box[0] <= 3 or box[1] <= 3 or box[2] >= im.width - 3 or box[3] >= im.height - 3
         plate = Image.fromarray(inpaint(rgb, alpha))
-        if not touches and (box[2] - box[0]) / im.width > 0.45:
-            # 제품 전체가 사진 안에 있고 가로로 넓다: 세로 화면에 잘리지 않게 띄운다
+        if not touches and ((box[2] - box[0]) / im.width > 0.45 or not fits):
+            # 제품 전체가 사진 안에 있고 넓거나 세로로 채우면 잘린다: 잘리지 않게 띄운다
             mode = "float"
             bg, l, t, _ = cover(plate, extra=1.12)
             layers.append(layer("bg", out_dir, bg.filter(ImageFilter.GaussianBlur(14)), l, t, "bg"))
@@ -123,15 +136,14 @@ def main():
             soft = s > 2.4
             shot = with_shadow(cut.resize((round(cut.width * s), round(cut.height * s)), Image.LANCZOS))
             layers.append(layer("fg", out_dir, shot, (W - shot.width) / 2, (H - shot.height) / 2 - 40, "fg"))
-        elif not need_fit:
+        elif fits:
             mode = "aligned"
-            cx = (box[0] + box[2]) / 2 / im.width
-            bg, l, t, s = cover(plate, fx=min(1, max(0, cx * 1.2 - 0.1)))
+            bg, l, t, s = cover(plate, fx=fx, fy=fy)
             soft = s > 2.8
             layers.append(layer("bg", out_dir, bg.filter(ImageFilter.GaussianBlur(4)), l, t, "bg"))
-            front, _, _, _ = cover(fg, fx=min(1, max(0, cx * 1.2 - 0.1)))
+            front, _, _, _ = cover(fg, fx=fx, fy=fy)
             layers.append(layer("fg", out_dir, front, l, t, "fg"))
-    elif not need_fit and depth is not None and float(depth.std()) > 0.14:
+    elif fits and depth is not None and float(depth.std()) > 0.14:
         # 먼 쪽과 가까운 쪽이 뚜렷하면 나눈다
         soft_d = cv2.GaussianBlur(depth, (0, 0), 3)
         thr = cv2.threshold((soft_d * 255).astype("uint8"), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[0] / 255.0
@@ -140,23 +152,17 @@ def main():
             mode = "depth"
             plate = Image.fromarray(inpaint(rgb, near))
             near_im = Image.fromarray(np.dstack([rgb, (near * 255).astype("uint8")]).astype("uint8"), "RGBA")
-            far, l, t, s = cover(plate, fy=0.6)
+            far, l, t, s = cover(plate, fx=fx, fy=fy if box else 0.6)
             soft = s > 2.8
-            front, _, _, _ = cover(near_im, fy=0.6)
+            front, _, _, _ = cover(near_im, fx=fx, fy=fy if box else 0.6)
             layers.append(layer("far", out_dir, far, l, t, "far"))
             layers.append(layer("near", out_dir, front, l, t, "near"))
-    if not layers and need_fit:
-        mode = "fit"
-        bg, l, t, _ = cover(im, extra=1.12)
-        layers.append(layer("bg", out_dir, bg.filter(ImageFilter.GaussianBlur(26)), l, t, "bg"))
-        s = min(W / im.width, 1500 / im.height)
-        soft = s > 2.4
-        shot = with_shadow(im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS).convert("RGBA"))
-        layers.append(layer("photo", out_dir, shot, (W - shot.width) / 2, (H - shot.height) / 2 - 40, "far"))
-    if not layers:
-        whole, l, t, s = cover(im, extra=1.1)
+    if not layers and fits:
+        whole, l, t, s = cover(im, fx=fx, fy=fy, extra=1.1)
         soft = s > 2.4
         layers.append(layer("whole", out_dir, whole, l, t, "whole"))
+    if not layers:
+        mode = "unfit"
     print(json.dumps({"mode": mode, "soft": soft, "ratio": round(ratio, 3), "layers": layers}, ensure_ascii=False))
 
 

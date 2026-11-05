@@ -1,8 +1,9 @@
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { editKit, editKitAsset } from "@/lib/agents/ko-skills";
+import { editKit } from "@/lib/agents/ko-skills";
 import type { MotionSpec } from "@/lib/agents/source-plan";
 import { contrast } from "@/lib/shoot/video-kit/caption-style";
+import { fallbackFonts, installFonts, type VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { hyperframes } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
 
@@ -17,16 +18,15 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function page(css: string, body: string, script: string): string {
+function page(css: string, body: string, script: string, fonts: VideoFonts): string {
   return `<!doctype html>
 <html lang="ko"><head><meta charset="UTF-8" /><meta name="viewport" content="width=1080, height=1920" />
 <script src="${GSAP}"></script>
 <style>
-@font-face { font-family: "Pretendard"; font-weight: 600; src: url("assets/fonts/Pretendard-SemiBold.woff2") format("woff2"); }
-@font-face { font-family: "Pretendard"; font-weight: 800; src: url("assets/fonts/Pretendard-ExtraBold.woff2") format("woff2"); }
+${fonts.css}
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; }
-#root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: "Pretendard", sans-serif; }
+#root { position: relative; width: 100%; height: 100%; overflow: hidden; font-family: ${fonts.family}; }
 .layer { position: absolute; transform-origin: 50% 50%; }
 .layer img { display: block; }
 #sweep { position: absolute; top: -200px; left: -700px; width: 420px; height: 2400px; transform: rotate(14deg); background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.08), rgba(255,255,255,0)); mix-blend-mode: screen; }
@@ -44,9 +44,8 @@ window.__timelines["main"] = tl;
 `;
 }
 
-function renderProject(dir: string, out: string): string {
-  mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
-  for (const f of ["SemiBold", "ExtraBold"]) copyFileSync(editKitAsset("fonts", `Pretendard-${f}.woff2`), join(dir, "assets", "fonts", `Pretendard-${f}.woff2`));
+function renderProject(dir: string, out: string, fonts: VideoFonts): string {
+  installFonts(dir, fonts);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "auto-clip", private: true }));
   writeFileSync(join(dir, "hyperframes.json"), JSON.stringify({ paths: { assets: "assets" }, media: { autoProxy: false } }));
   hyperframes(editKit().render.hyperframes, dir, ["render", "-o", out, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes", "-w", "1"], 10 * 60_000);
@@ -71,12 +70,23 @@ const MOVES: Record<LayerInfo["kind"], string> = {
   whole: "{ scale: 1, x: -26 }, { scale: 1.13, x: 26",
 };
 
-/** 사진 한 장 → 움직이는 컷. 레이어는 통째로만 움직여 포장 글자가 휘지 않는다. */
-export function photoClip(photo: string, workDir: string, name: string): { file: string; mode: string; soft: boolean } {
+export interface PhotoLayers {
+  mode: string;
+  soft: boolean;
+  layers: LayerInfo[];
+}
+
+/** 사진을 레이어로 나눈다. mode가 unfit이면 세로 화면에서 제품이 잘리는 사진이라 쓰지 않는다. */
+export function photoLayers(photo: string, workDir: string, name: string): PhotoLayers {
+  const res = runVisionTool<PhotoLayers>("photo_layers.py", [photo, join(workDir, name, "layers")]);
+  if (!res) throw new Error(`사진을 나누지 못했어요 (${name})`);
+  return res;
+}
+
+/** 나눈 사진 → 움직이는 컷. 레이어는 통째로만 움직여 포장 글자가 휘지 않는다. 글자가 없는 컷이다. */
+export function photoClip(res: PhotoLayers, workDir: string, name: string): { file: string; mode: string; soft: boolean } {
   const dir = join(workDir, name);
   mkdirSync(join(dir, "assets"), { recursive: true });
-  const res = runVisionTool<{ mode: string; soft: boolean; layers: LayerInfo[] }>("photo_layers.py", [photo, join(dir, "layers")]);
-  if (!res) throw new Error(`사진을 나누지 못했어요 (${name})`);
   const body: string[] = [];
   const motion: string[] = [];
   res.layers.forEach((l, i) => {
@@ -86,9 +96,10 @@ export function photoClip(photo: string, workDir: string, name: string): { file:
   });
   body.push('<div id="sweep"></div>');
   motion.push('tl.fromTo("#sweep", { x: 0 }, { x: 2300, duration: 1.5, ease: "sine.inOut" }, 1.2); tl.set("#sweep", { x: 0 }, 3.5); tl.to("#sweep", { x: 2300, duration: 1.5, ease: "sine.inOut" }, 4.8);');
-  writeFileSync(join(dir, "index.html"), page("", body.join("\n"), motion.join("\n")));
+  const fonts = fallbackFonts();
+  writeFileSync(join(dir, "index.html"), page("", body.join("\n"), motion.join("\n"), fonts));
   const file = join(workDir, `${name}.mp4`);
-  renderProject(dir, file);
+  renderProject(dir, file, fonts);
   return { file, mode: res.mode, soft: res.soft };
 }
 
@@ -131,7 +142,9 @@ tl.to("#right", { opacity: .95, duration: ${Math.max(1, step * Math.max(1, value
   return { css, body, script, shot: `비교 도식: 왼쪽 ${m.left_label} ${m.left_value}, 오른쪽 ${m.right_label}이 ${values.join(" → ")} 차례로 바뀐다(2.4~5.8초)` };
 }
 
-function countHtml(m: MotionSpec, accent: string): { css: string; body: string; script: string; shot: string } {
+function countHtml(m: MotionSpec, accent: string, seconds: number): { css: string; body: string; script: string; shot: string } {
+  // 장면이 짧으면 그 안에 숫자가 다 차오르게 한다
+  const run = Math.max(1, Math.min(4, seconds - 0.8));
   const r = 300;
   const circ = (2 * Math.PI * r).toFixed(1);
   const to = m.number_to;
@@ -146,19 +159,19 @@ function countHtml(m: MotionSpec, accent: string): { css: string; body: string; 
   const body = `<div id="bgd"></div>${title(m.title)}<div id="ring"><svg width="700" height="700"><circle id="track" cx="350" cy="350" r="${r}"/><circle id="arc" cx="350" cy="350" r="${r}"/></svg></div>
 <div id="count">0</div><div id="unit">${esc(m.unit)}</div>${m.end_text.trim() ? `<div id="endt">${esc(m.end_text.trim())}</div>` : ""}`;
   const endMotion = m.end_text.trim()
-    ? `tl.to("#count", { opacity: 0, y: -30, duration: .25 }, 4.7); tl.to("#unit", { opacity: 0, duration: .2 }, 4.7);
-tl.fromTo("#endt", { opacity: 0, scale: .8 }, { opacity: 1, scale: 1, duration: .35, ease: "back.out(2)" }, 4.9);`
+    ? `tl.to("#count", { opacity: 0, y: -30, duration: .25 }, ${(run + 0.7).toFixed(2)}); tl.to("#unit", { opacity: 0, duration: .2 }, ${(run + 0.7).toFixed(2)});
+tl.fromTo("#endt", { opacity: 0, scale: .8 }, { opacity: 1, scale: 1, duration: .35, ease: "back.out(2)" }, ${(run + 0.9).toFixed(2)});`
     : "";
   const script = `const num = { v: 0 }; const el = document.getElementById("count");
 tl.fromTo("#ring", { scale: .86, opacity: 0 }, { scale: 1, opacity: 1, duration: .45, ease: "power3.out" }, 0);
-tl.to("#arc", { strokeDashoffset: 0, duration: 4, ease: "none" }, .5);
-tl.fromTo(num, { v: 0 }, { v: ${to}, duration: 4, ease: "none", onUpdate: () => { el.textContent = String(Math.floor(num.v + 0.0001)); } }, .5);
+tl.to("#arc", { strokeDashoffset: 0, duration: ${run.toFixed(2)}, ease: "none" }, .5);
+tl.fromTo(num, { v: 0 }, { v: ${to}, duration: ${run.toFixed(2)}, ease: "none", onUpdate: () => { el.textContent = String(Math.floor(num.v + 0.0001)); } }, .5);
 ${endMotion}
-tl.to("#ring", { scale: 1.04, duration: 2.2, ease: "none" }, 5.8);`;
-  return { css, body, script, shot: `숫자 도식: 고리가 차며 0에서 ${to}${m.unit}까지 올라간다(0.5~4.5초)${m.end_text.trim() ? `, 4.9초에 "${m.end_text.trim()}" 글자가 나온다` : ""}` };
+tl.to("#ring", { scale: 1.04, duration: 2.2, ease: "none" }, ${(run + 1.8).toFixed(2)});`;
+  return { css, body, script, shot: `숫자 도식: 고리가 차며 0에서 ${to}${m.unit}까지 올라간다(0.5~${(run + 0.5).toFixed(1)}초)${m.end_text.trim() ? `, ${(run + 0.9).toFixed(1)}초에 "${m.end_text.trim()}" 글자가 나온다` : ""}` };
 }
 
-function stepsHtml(m: MotionSpec, accent: string): { css: string; body: string; script: string; shot: string } {
+function stepsHtml(m: MotionSpec, accent: string, seconds: number): { css: string; body: string; script: string; shot: string } {
   const items = m.items.slice(0, 4);
   const check = '<svg viewBox="0 0 24 24" width="58" height="58" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
   const css = `${BASE_CSS}
@@ -166,7 +179,8 @@ function stepsHtml(m: MotionSpec, accent: string): { css: string; body: string; 
 .it { display: flex; align-items: center; gap: 30px; margin-bottom: 36px; color: #fff; font-weight: 800; font-size: 66px; letter-spacing: -.03em; opacity: 0; }
 .ic { flex: none; width: 96px; height: 96px; border-radius: 50%; background: ${accent}; display: flex; align-items: center; justify-content: center; }`;
   const body = `<div id="bgd"></div>${title(m.title)}<div id="list">${items.map((t, i) => `<div class="it" id="i${i}"><span class="ic">${check}</span><span>${esc(t)}</span></div>`).join("")}</div>`;
-  const gap = 5.2 / Math.max(1, items.length);
+  // 장면이 짧아도 항목이 다 나오게 한다
+  const gap = Math.max(0.3, Math.min(6, seconds) - 0.8) / Math.max(1, items.length);
   const script = items.map((_, i) => `tl.fromTo("#i${i}", { opacity: 0, x: -50 }, { opacity: 1, x: 0, duration: .34, ease: "power3.out" }, ${(0.4 + gap * i).toFixed(2)});`).join("\n");
   return { css, body, script, shot: `목록 도식: ${items.map((t, i) => `${(0.4 + gap * i).toFixed(1)}초 "${t}"`).join(", ")}` };
 }
@@ -195,16 +209,18 @@ function readableAccent(color: string): string {
   return "#FFFFFF";
 }
 
-export function motionClip(input: MotionSpec, workDir: string, name: string): { file: string; shot: string } {
+export function motionClip(input: MotionSpec, workDir: string, name: string, opts: { seconds?: number; fonts?: VideoFonts } = {}): { file: string; shot: string } {
+  const seconds = opts.seconds ?? D;
+  const fonts = opts.fonts ?? fallbackFonts();
   // 차오르는 숫자는 자연수만 쓴다. 1.5g 같은 값을 반올림하면 사실이 바뀌니 그대로 크게 보여 준다
   const m: MotionSpec = input.kind === "count" && !(Number.isInteger(input.number_to) && input.number_to > 0) ? { ...input, kind: "big_fact", big: String(input.number_to) } : input;
   // 도식 바탕이 어두워서 어두운 강조색은 읽히지 않는다. 색 계열은 두고 밝힌다
   const accent = readableAccent(hex(m.accent, "#E04E08"));
-  const built = m.kind === "compare" ? compareHtml(m, accent) : m.kind === "count" ? countHtml(m, accent) : m.kind === "steps" ? stepsHtml(m, accent) : bigHtml(m, accent);
+  const built = m.kind === "compare" ? compareHtml(m, accent) : m.kind === "count" ? countHtml(m, accent, seconds) : m.kind === "steps" ? stepsHtml(m, accent, seconds) : bigHtml(m, accent);
   const dir = join(workDir, name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "index.html"), page(built.css, built.body, built.script));
+  writeFileSync(join(dir, "index.html"), page(built.css, built.body, built.script, fonts));
   const file = join(workDir, `${name}.mp4`);
-  renderProject(dir, file);
+  renderProject(dir, file, fonts);
   return { file, shot: built.shot };
 }

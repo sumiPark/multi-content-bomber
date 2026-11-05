@@ -6,10 +6,12 @@ import { editKit } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel, runAgent, type AgentResult } from "@/lib/agents/runner";
 import { writerSkills } from "@/lib/agents/script";
+import { motionSchema, type MotionSpec } from "@/lib/agents/source-plan";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { lookSchema } from "@/lib/shoot/video-kit/caption-style";
+import type { SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 장면표 에이전트 — AI 자동 영상의 말 · 이미지 · 화면 글자를 한 번에 정한다.
@@ -41,8 +43,9 @@ export const storyboardSchema = z.object({
   scenes: z
     .array(
       z.object({
-        source: z.enum(["photo", "archive"]).describe("photo 사진 후보, archive 자사 촬영 컷"),
-        source_id: z.string().describe("쓸 후보 번호 p1 또는 a1"),
+        source: z.enum(["photo", "archive", "motion"]).describe("photo 사진 후보, archive 자사 촬영 컷, motion 코드로 그리는 설명 화면"),
+        source_id: z.string().describe("쓸 후보 번호 p1 또는 a1. motion이면 빈 문자열"),
+        motion: motionSchema.nullable().describe("source가 motion이면 설명 화면 값, 아니면 null"),
         shows: z.string().describe("이 장면에서 시청자가 보는 것"),
         say: z.string().describe("이 장면의 말을 화면 표기로. 첫 장면은 hook.spoken과 같다"),
         tts: z.string().describe("say를 읽는 대로 바꾼 원고. 숫자와 영문을 말하는 대로"),
@@ -65,6 +68,8 @@ export const storyboardSchema = z.object({
     keywords: z.array(z.string()).describe("찾히고 싶은 검색어 2~4개"),
   }),
   look: lookSchema,
+  key_font: z.string().describe("큰 강조어 글꼴. 쓸 수 있는 글꼴 목록의 이름 그대로. 목록이 없으면 빈 문자열"),
+  small_font: z.string().describe("작은 줄 글꼴. 쓸 수 있는 글꼴 목록의 이름 그대로. 목록이 없으면 빈 문자열"),
 });
 export type Storyboard = z.infer<typeof storyboardSchema>;
 
@@ -85,10 +90,20 @@ export interface StoryboardContext {
   videoStyle?: string | null;
   phraseBlock?: string;
   visualLibrary?: { key: string; subject: string }[];
+  fontChoices?: SkillFont[];
   retry?: { board: Storyboard; problems: string[] } | null;
 }
 
 const bullets = (lines: string[]) => lines.map((l) => `- ${l}`).join("\n");
+
+/** 설명 화면에 들어가는 글. 근거 · 금지 표현 점검에 넣는다. */
+export function motionTexts(m: MotionSpec): string[] {
+  return [m.title, m.left_label, m.right_label, m.left_value, ...m.right_values, m.number_to ? `${m.number_to}${m.unit}` : "", m.end_text, ...m.items, m.big ? `${m.big}${m.unit}` : ""].filter(Boolean);
+}
+
+function motionEmpty(m: MotionSpec | null): boolean {
+  return !m || (m.kind === "steps" && !m.items.some((t) => t.trim())) || (m.kind === "big_fact" && !m.big.trim()) || (m.kind === "compare" && !m.left_value.trim() && !m.right_values.some((t) => t.trim())) || (m.kind === "count" && !m.number_to);
+}
 
 export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResult<Storyboard>> {
   const f = ctx.facts;
@@ -117,6 +132,7 @@ export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResu
 - 첫 장면은 제품이나 가장 궁금한 장면이다. texture(질감만 있는 사진)는 무엇인지 말로 설명할 때 한 번만 쓰고 첫 장면에 쓰지 않는다.
 - 같은 후보는 두 번까지, 연달아 쓰지 않는다. 자사 촬영 컷이 있으면 사진보다 먼저 고르고 후보마다 한 번만 쓴다.
 - 인증서 · 표 · 그래프, 이 상품이 아닌 물건, 잘라 낼 수 없는 글자가 있으면 usable false. 위아래 글자 띠는 trim으로 잘라 낸다.
+- 순서 · 구성 · 비교 · 숫자를 말하는 장면은 source를 motion으로 해 코드로 그린 설명 화면을 쓸 수 있다. 첫 장면에는 쓰지 않는다. 보여 줄 사진이 부족하면 motion을 늘린다. 값은 get_product_facts에 있는 것만 쓰고, 글자는 짧게, 색은 상품과 계정 분위기에 맞춘다. motion 장면에는 AI 이미지(visuals)를 넣지 않는다.
 
 자막과 그래픽:
 ${bullets(kit.caption_rules)}
@@ -126,9 +142,9 @@ ${bullets(kit.caption_rules)}
 ${bullets(kit.tts_rules)}
 
 글자 디자인(look):
-${bullets(kit.look_rules)}${visualRules(f.kind, ctx.visualLibrary ?? [])}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "무엇을 말할지와 흐름에 반영한다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글자 디자인 · 음악에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "장면 고르기에 반영한다.")}${ctx.phraseBlock ?? ""}`;
+${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의 제품 · 말의 내용 · 계정 분위기에 맞게 강조어 글꼴(key_font)과 작은 줄 글꼴(small_font)을 아래에서 하나씩 고른다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.\n${ctx.fontChoices.map((x) => `- ${x.name} · ${x.role} · ${x.look}`).join("\n")}` : ""}${visualRules(f.kind, ctx.visualLibrary ?? [])}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "무엇을 말할지와 흐름에 반영한다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글자 디자인 · 음악에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "장면 고르기에 반영한다.")}${ctx.phraseBlock ?? ""}`;
   const user = `상세페이지 원문(사실은 이 안에서만 쓴다. "원료적 특성에 한함" 같은 단서가 붙은 내용은 말로 읽지 않고 표현을 낮춰 쓴다):\n${f.sourceText}\n\n쓸 수 있는 사진 후보(가로x세로): ${ctx.candidates.map((c) => `${c.id} ${c.w}x${c.h}`).join(", ")}
-그림은 후보를 번호와 함께 모은 것이다. 위 목록에 없는 번호는 화질이 낮아 쓰지 않는다.${ctx.archive.length ? `\n\n자사 촬영 컷(소리 없음, 순서대로 마지막 ${ctx.archive.length}장의 그림이 컷마다 프레임 3개):\n${ctx.archive.map((a) => `${a.id} ${a.seconds.toFixed(1)}초 — ${a.what}`).join("\n")}` : ""}${
+그림은 후보를 번호와 함께 모은 것이다. 위 목록에 없는 번호는 화질이 낮거나 세로 화면에서 제품이 잘려 쓰지 않는다.${ctx.archive.length ? `\n\n자사 촬영 컷(소리 없음, 순서대로 마지막 ${ctx.archive.length}장의 그림이 컷마다 프레임 3개):\n${ctx.archive.map((a) => `${a.id} ${a.seconds.toFixed(1)}초 — ${a.what}`).join("\n")}` : ""}${
     ctx.retry
       ? `\n\n먼저 쓴 장면표:\n${JSON.stringify({ hook: ctx.retry.board.hook, scenes: ctx.retry.board.scenes.map((s) => ({ source_id: s.source_id, say: s.say })), visuals: ctx.retry.board.visuals.map((v) => ({ beat: v.beat, subject: v.subject })) })}\n\n이 문제를 고쳐 전체를 다시 내라:\n${bullets(ctx.retry.problems)}`
       : ""
@@ -160,6 +176,8 @@ export function storyboardProblems(b: Storyboard, archiveIds: string[], fixedHoo
   b.scenes.forEach((s, i) => {
     if (s.source === "photo" && !usable.has(s.source_id)) out.push(`${i}번 장면의 ${s.source_id}는 쓸 수 있는 후보가 아니다`);
     if (s.source === "archive" && !archiveIds.includes(s.source_id)) out.push(`${i}번 장면의 ${s.source_id}는 없는 자사 촬영 컷이다`);
+    if (s.source === "motion" && motionEmpty(s.motion)) out.push(`${i}번 장면에 도식 값이 없다`);
+    if (s.source === "motion" && i === 0) out.push("첫 장면은 설명 화면으로 쓰지 않는다");
     uses.set(s.source_id, (uses.get(s.source_id) ?? 0) + 1);
     if (i > 0 && b.scenes[i - 1].source_id === s.source_id) out.push(`${i}번 장면이 앞 장면과 같은 이미지다`);
     if (!s.say.trim() || !s.tts.trim()) out.push(`${i}번 장면에 말이 없다`);
