@@ -44,6 +44,13 @@ export function probe(file: string): ProbeResult {
   };
 }
 
+/** 이미지의 가로 · 세로. 회전 정보가 반영된 프레임을 넘겨 실제 방향을 잰다. */
+export function probeFrameSize(file: string): { width: number; height: number } {
+  const out = run(FFPROBE, ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", file]);
+  const stream = (JSON.parse(out) as { streams?: { width?: number; height?: number }[] }).streams?.[0];
+  return { width: stream?.width ?? 0, height: stream?.height ?? 0 };
+}
+
 let zscaleAvailable: boolean | null = null;
 
 /** 색 변환 필터가 있는 FFmpeg인지 — 없는 빌드면 색이 바래더라도 편집은 끝낸다. */

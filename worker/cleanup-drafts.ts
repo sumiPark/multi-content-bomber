@@ -106,7 +106,8 @@ async function listAll(service: Service, prefix: string): Promise<StorageItem[]>
 async function listWizardUploads(service: Service): Promise<{ path: string; createdAt: string | null; size: number }[]> {
   const files: { path: string; createdAt: string | null; size: number }[] = [];
   for (const org of await listAll(service, "")) {
-    if (org.id !== null) continue;
+    // 자사 촬영 아카이브는 임시 업로드가 아니다
+    if (org.id !== null || org.name === "archive") continue;
     for (const user of await listAll(service, org.name)) {
       if (user.id !== null) continue;
       for (const f of await listAll(service, `${org.name}/${user.name}`)) {

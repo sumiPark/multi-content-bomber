@@ -5,6 +5,7 @@ import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { blockingIssues, checkScript } from "@/lib/agents/check";
+import { markArchiveUsed } from "@/lib/auto-video/archive";
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import { writeScript } from "@/lib/agents/script";
@@ -124,6 +125,7 @@ async function main() {
       const made = await makeAutoVideo({
         service,
         planId: plan.id,
+        organizationId: plan.organization_id,
         account: acc,
         productId: plan.product_id,
         concept,
@@ -194,6 +196,7 @@ async function main() {
         await service.storage.from("media").remove([`${base}.mp4`, `${base}.jpg`]);
         continue;
       }
+      await markArchiveUsed(service, (made.sources as { kind?: string; id?: string }[]).filter((s) => s.kind === "archive" && s.id).map((s) => s.id as string));
       await service.from("agent_runs").insert({
         organization_id: plan.organization_id,
         agent: "edit",

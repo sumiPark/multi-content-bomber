@@ -6,6 +6,7 @@ import type { EditGraphic } from "@/lib/agents/edit-plan";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
 import { sourcePlanProblems, writeSourcePlan, type MotionSpec, type SourcePlan } from "@/lib/agents/source-plan";
+import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip } from "@/lib/auto-video/clips";
 import { stockClip } from "@/lib/auto-video/stock";
 import type { ContentRule } from "@/lib/rules/check";
@@ -15,7 +16,7 @@ import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
 import type { createServiceClient } from "@/lib/supabase/service";
 
-// AI 자동 콘텐츠 한 편 만들기. 상세페이지 사진 찾기 → 소재 에이전트 → 사진 · 도식 · 스톡 컷 → 편집 키트 → 최종 점검.
+// AI 자동 콘텐츠 한 편 만들기. 상세페이지 사진 찾기 → 소재 에이전트 → 사진 · 도식 · 스톡 · 자사 촬영 컷 → 편집 키트 → 최종 점검.
 // 참고 내용은 호출하는 쪽이 넘긴 계정 컨셉의 auto_* 값만 읽는다. 저장 · 발행은 워커가 맡는다.
 
 export type SavedScript = ScriptOutput & { fixed?: { hook?: { text?: string } | null; ending?: { text?: string } | null } };
@@ -59,6 +60,7 @@ function trimPhoto(c: Candidate, top: number, bottom: number, workDir: string): 
 export async function makeAutoVideo(input: {
   service: ReturnType<typeof createServiceClient>;
   planId: string;
+  organizationId: string;
   account: string;
   productId: string;
   concept: AccountConcept;
@@ -85,6 +87,10 @@ export async function makeAutoVideo(input: {
   const candidates = blocks?.candidates ?? [];
   console.log(`  사진 후보 ${candidates.length}개`);
 
+  const archive = await loadArchiveChoices(service, input.organizationId, productId, workDir);
+  if (archive.length) console.log(`  자사 촬영 컷 ${archive.length}개`);
+  const archiveIds = archive.map((a) => a.id);
+
   // 2. 소재 에이전트
   const beats = script.beats.map((b) => ({ spoken: b.spoken, on_screen: b.on_screen, visual: b.visual }));
   const ask = (retry: { problems: string[] } | null) =>
@@ -98,6 +104,8 @@ export async function makeAutoVideo(input: {
       beats,
       candidates,
       sheets: (blocks?.sheets ?? []).map((s) => imageDataUrl(s)),
+      archive: archive.map((a) => ({ id: a.id, what: a.what, seconds: a.seconds })),
+      archiveSheets: archive.map((a) => imageDataUrl(a.sheet)),
       tone: concept.autoTone,
       videoStyle: concept.autoVideoStyle,
       retry,
@@ -106,14 +114,14 @@ export async function makeAutoVideo(input: {
   let res = await ask(null);
   tokens = { input: tokens.input + res.tokens.input, output: tokens.output + res.tokens.output };
   let plan: SourcePlan = res.output;
-  const problems = sourcePlanProblems(plan, beats.length);
+  const problems = sourcePlanProblems(plan, beats.length, archiveIds);
   if (problems.length) {
     console.log(`  소재 계획 다시 쓰기: ${problems.join(" / ")}`);
     res = await ask({ problems });
     tokens = { input: tokens.input + res.tokens.input, output: tokens.output + res.tokens.output };
     plan = res.output;
   }
-  const left = sourcePlanProblems(plan, beats.length).filter((p) => p.includes("소재가 없다") || p.includes("쓸 수 있는 후보가 아니다"));
+  const left = sourcePlanProblems(plan, beats.length, archiveIds).filter((p) => p.includes("소재가 없다") || p.includes("쓸 수 있는 후보가 아니다"));
   if (left.length) throw new Error(`소재를 정하지 못했어요: ${left.join(" / ")}`);
 
   // 3. 소재 → 컷. 같은 사진은 한 번만 만들고, 스톡이 탈락하면 그 비트는 사진이나 다른 컷을 쓴다
@@ -140,7 +148,13 @@ export async function makeAutoVideo(input: {
   for (const b of plan.beats) {
     const line = beats[b.beat]?.spoken ?? "";
     if (b.use === "photo") addPhoto(b.photo_id);
-    else if (b.use === "motion" && b.motion) {
+    else if (b.use === "archive") {
+      const a = archive.find((x) => x.id === b.archive_id);
+      if (!a) continue;
+      const no = clips.length + 1;
+      clips.push(readClip(no, a.file, { shot: `[자사 촬영] ${a.what}`, narration: line }));
+      sources.push({ no, kind: "archive", id: a.rowId, what: a.what });
+    } else if (b.use === "motion" && b.motion) {
       const made = motionClip(b.motion, workDir, `motion-${b.beat}`);
       const no = clips.length + 1;
       clips.push(readClip(no, made.file, { shot: `[코드 모션] ${made.shot}`, narration: line }));

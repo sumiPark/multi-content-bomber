@@ -1949,8 +1949,77 @@ export type Database = {
           },
         ]
       }
+      shoot_archive_clips: {
+        Row: {
+          created_at: string
+          id: string
+          last_used_at: string | null
+          organization_id: string
+          path: string
+          product_id: string
+          seconds: number
+          shoot_request_id: string | null
+          source_path: string
+          source_start: number
+          use_count: number
+          what: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          organization_id: string
+          path: string
+          product_id: string
+          seconds: number
+          shoot_request_id?: string | null
+          source_path: string
+          source_start: number
+          use_count?: number
+          what: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          organization_id?: string
+          path?: string
+          product_id?: string
+          seconds?: number
+          shoot_request_id?: string | null
+          source_path?: string
+          source_start?: number
+          use_count?: number
+          what?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shoot_archive_clips_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shoot_archive_clips_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shoot_archive_clips_shoot_request_id_fkey"
+            columns: ["shoot_request_id"]
+            isOneToOne: false
+            referencedRelation: "shoot_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shoot_requests: {
         Row: {
+          archive_attempts: number
+          archived_at: string | null
           clips: Json
           created_at: string
           cuts: Json
@@ -1966,6 +2035,8 @@ export type Database = {
           uploaded_at: string | null
         }
         Insert: {
+          archive_attempts?: number
+          archived_at?: string | null
           clips?: Json
           created_at?: string
           cuts?: Json
@@ -1981,6 +2052,8 @@ export type Database = {
           uploaded_at?: string | null
         }
         Update: {
+          archive_attempts?: number
+          archived_at?: string | null
           clips?: Json
           created_at?: string
           cuts?: Json
