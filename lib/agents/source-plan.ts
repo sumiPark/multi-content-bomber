@@ -88,13 +88,13 @@ ${archive.length ? "- archive: 우리가 이 상품을 직접 찍은 짧은 영�
 사진 후보 판단:
 - 사람 얼굴이 보이면 usable false(모델 사진은 초상권 문제가 있어 움직이지 않는다). 손 · 팔만 보이면 괜찮다.
 - 이 상품의 제형 · 질감을 보여 주는 사진은 쓸 수 있다. 다만 그 사진을 효과의 증거처럼 말하지 않는다.
-- 이 상품이 아닌 물건, 인증서 · 표 · 그래프 · 비교 그림, 성분 목록은 false. 그림 위에 글자가 박혀 잘라 낼 수 없으면 false. 제품 글자나 로고가 화면 끝에서 잘려 보이면 false.
+- 이 상품이 아닌 물건, 인증서 · 표 · 그래프 · 비교 그림, 성분 목록은 false. 그림 위에 글자가 박혀 잘라 낼 수 없으면 false.
 - 위나 아래에 글자 띠가 있으면 trim_top, trim_bottom으로 잘라 내고 쓴다. 제품 표면에 인쇄된 글자는 괜찮다.
 - 제품 주의사항과 부딪히는 사진은 쓰지 않거나 warnings에 적는다.
 
 규칙:
 - 첫 비트(후킹)에는 가장 궁금한 장면을 쓴다. 같은 사진을 세 비트 넘게 쓰지 않는다.
-- 상품이 매력적으로 보이는 장면을 우선한다. 쓸 사진이 3장 이상이면 motion은 2개 이내로 쓰고, 정말 숫자 · 비교가 필요한 비트에만 쓴다. 쓸 사진이 적으면 motion을 늘린다. 근거 없는 숫자 · 효과를 도식에 넣지 않는다. uncertainties에 있는 내용은 넣지 않는다.
+- 쓸 사진이 적으면 motion을 늘린다. 근거 없는 숫자 · 효과를 도식에 넣지 않는다. uncertainties에 있는 내용은 넣지 않는다.
 - 건강기능식품 기능성은 approvedClaims 그대로만, 화장품은 치료 · 재생 같은 표현을 쓰지 않는다.
 - 도식의 글자는 짧게, 색은 계정 분위기와 상품에 맞춘다.${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "도식의 말과 색에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "소재 비율과 도식 분위기에 반영한다.")}`;
   const user = `대본 비트:
@@ -152,8 +152,6 @@ export function sourcePlanProblems(plan: SourcePlan, beatCount: number, archiveI
   }
   for (let i = 0; i < beatCount; i++) if (!seen.has(i)) out.push(`${i}번 비트의 소재가 없다`);
   if (stock > 2) out.push("스톡은 2개 이내로 줄인다");
-  const motions = plan.beats.filter((b) => b.use === "motion").length;
-  if (usable.size >= 3 && motions > 2) out.push(`쓸 사진이 ${usable.size}장인데 도식이 ${motions}개다. 2개 이내로 줄이고 사진을 쓴다`);
   if ([...archiveUses.values()].reduce((sum, n) => sum + n, 0) > 2) out.push("자사 촬영 컷은 2개 이내로 줄인다");
   for (const [id, n] of archiveUses) if (n > 1) out.push(`자사 촬영 컷 ${id}는 한 번만 쓴다`);
   for (const [id, n] of photoUses) if (n > 3) out.push(`사진 ${id}를 ${n}번 썼다. 3번 이내로 줄인다`);
