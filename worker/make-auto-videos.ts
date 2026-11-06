@@ -124,9 +124,10 @@ async function main() {
           mkdirSync(out, { recursive: true });
           copyFileSync(kit.final, join(out, `${plan.id}.mp4`));
           copyFileSync(kit.cover, join(out, `${plan.id}.jpg`));
-          writeFileSync(join(out, `${plan.id}.json`), JSON.stringify({ board: made.board, plan: kit.plan, sources: made.sources, warnings: made.warnings, check, blocking }, null, 1));
+          writeFileSync(join(out, `${plan.id}.json`), JSON.stringify({ board: made.board, plan: kit.plan, timeline: kit.timeline, sources: made.sources, warnings: made.warnings, check, blocking, quality: kit.quality, storyboardReviews: made.storyboardReviews, phraseNotes: made.phraseNotes, voice: { used: kit.usedVoice, id: concept.autoVoiceId, model: "s2.1-pro-free" } }, null, 1));
           console.log(`  (dry-run) 결과: ${out}`);
         }
+        if (!check.passed || blocking.length || !kit.quality?.passed) process.exitCode = 1;
         continue;
       }
 
@@ -194,6 +195,14 @@ async function main() {
       process.exitCode = 1;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[auto-video] ${label} 실패: ${message}`);
+      if (dryRun && arg(argv, "--out")) {
+        const out = arg(argv, "--out")!;
+        mkdirSync(out, { recursive: true });
+        writeFileSync(join(out, `${plan.id}-failure.json`), JSON.stringify({ error: message }, null, 2));
+        for (const [name, file] of [["storyboard-review", join(workDir, "storyboard-review.json")], ["quality", join(workDir, "kit", "quality.json")]]) {
+          try { copyFileSync(file, join(out, `${plan.id}-${name}.json`)); } catch { /* 이 단계 전 실패면 기록 없음 */ }
+        }
+      }
       if (!dryRun) {
         const stop = err instanceof StopError || attempts >= MAX_ATTEMPTS;
         await service

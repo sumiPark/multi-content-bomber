@@ -2,7 +2,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editKitAsset } from "@/lib/agents/ko-skills";
 import type { EditPlan } from "@/lib/agents/edit-plan";
-import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, ZONE_BOX, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
+import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, readableCaptionBlock, readableRows, ZONE_BOX, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import type { TimedGraphic, Timeline } from "@/lib/shoot/video-kit/timeline";
 
 // 시각표 → HyperFrames 프로젝트(index.html + compositions). 글자 · 그래픽 틀은 ig-edit-ko/kit.json과 같은 이름을 쓴다.
@@ -156,13 +156,13 @@ export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
 }
 
 // noCaptions: 자막 모션 스킬이 렌더 뒤에 자막 · 후킹 글자 · 끝 화면을 얹을 때 쓴다
-export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null; noCaptions?: boolean; fonts?: VideoFonts } = {}): void {
+export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null; noCaptions?: boolean; fonts?: VideoFonts; readable?: boolean } = {}): void {
   const fonts = opts.fonts ?? fallbackFonts();
   const look = opts.look ?? DEFAULT_LOOK;
   const zones = opts.zones ?? null;
   const hookAt: Zone = hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
   const places = captionZones(tl, zones);
-  const blocks = opts.noCaptions ? [] : tl.captions.map((c, i) => captionBlock(c, look, places[i]));
+  const blocks = opts.noCaptions ? [] : tl.captions.map((c, i) => opts.readable ? readableCaptionBlock(c, look, places[i]) : captionBlock(c, look, places[i]));
   const behind = opts.behind ?? null;
   // 제품 뒤 글자 구간에서 화면을 당기면 제품 레이어와 어긋난다
   const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.cutStart - 0.4 && t < behind.end)) : [];
@@ -194,7 +194,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
 `,
   );
 
-  const lines = hookLines(tl.hook.onScreen);
+  const lines = opts.readable ? readableRows(tl.hook.onScreen) : hookLines(tl.hook.onScreen);
   const shown = opts.noCaptions ? tl.graphics.filter((g) => g.type !== "end_card") : tl.graphics;
   writeFileSync(
     join(dir, "compositions", "graphics.html"),
@@ -283,7 +283,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
     <script>
       const tl = gsap.timeline({ paused: true });
       // 첫 컷은 살짝 밀려 들어와 눈길을 끈다
-      tl.fromTo("#stage", { scale: 1.1 }, { scale: 1, duration: ${Math.min(firstCutEnd, 1.2).toFixed(3)}, ease: "power2.out" }, 0);
+      tl.fromTo("#stage", { scale: ${opts.readable ? 1 : 1.1} }, { scale: 1, duration: ${Math.min(firstCutEnd, 1.2).toFixed(3)}, ease: "power2.out" }, 0);
       ${behind ? `tl.fromTo("#bword", { scale: 0.86, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, ${behind.start});` : ""}
       ${punches.map((t) => `tl.to("#stage", { scale: 1.035, duration: 0.09, ease: "power2.out" }, ${t.toFixed(3)}); tl.to("#stage", { scale: 1, duration: 0.26, ease: "power2.inOut" }, ${(t + 0.09).toFixed(3)});`).join("\n      ")}
       window.__timelines["main"] = tl;

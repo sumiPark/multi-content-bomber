@@ -14,9 +14,8 @@ from PIL import Image, ImageFilter
 from rembg import new_session, remove
 
 W, H = 1080, 1920
-# 세로로 채웠을 때 제품 범위가 화면의 몇 배까지면 쓰는지. 배경 제거가 거품 · 물방울까지 제품으로 잡아 범위가 크게 재진다.
-# 실측(2026-11-05): 제품 한 병이 거품 배경과 함께 1.58로 재진 사진은 깔끔했고, 두 병이 2.02인 사진은 병이 잘렸다
-KEEP = 1.6
+# 펌프/바닥까지 남기고 작은 카메라 움직임의 여유도 확보한다. 장식 거품이 함께 검출되면 보수적으로 띄운다.
+KEEP = 0.96
 DEPTH_URL = "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/main/onnx/model.onnx"
 _depth = None
 
@@ -138,7 +137,7 @@ def main():
     ys = np.where(solid.sum(axis=1) > 6)[0]
     box = (int(xs[0]), int(ys[0]), int(xs[-1]) + 1, int(ys[-1]) + 1) if len(xs) and len(ys) and 0.02 < ratio <= 0.7 else None
     fx, fy, fits = frame_on(im, box, 1.16)
-    if fg_ok:
+    if fg_ok and box is not None:
         touches = box[0] <= 3 or box[1] <= 3 or box[2] >= im.width - 3 or box[3] >= im.height - 3
         plate = Image.fromarray(inpaint(rgb, alpha))
         if not touches and ((box[2] - box[0]) / im.width > 0.45 or not fits):
@@ -149,7 +148,7 @@ def main():
             cut = fg.crop(box)
             # 희미하게 남은 배경까지 그림자가 생기면 사각형 테두리가 보인다
             cut.putalpha(cut.getchannel("A").point(lambda v: 0 if v < 48 else v))
-            s = 980 / cut.width
+            s = min(900 / cut.width, 1220 / cut.height)
             soft = s > 2.4
             shot = with_shadow(cut.resize((round(cut.width * s), round(cut.height * s)), Image.LANCZOS))
             layers.append(layer("fg", out_dir, shot, (W - shot.width) / 2, (H - shot.height) / 2 - 40, "fg"))

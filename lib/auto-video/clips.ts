@@ -65,9 +65,9 @@ interface LayerInfo {
 const MOVES: Record<LayerInfo["kind"], string> = {
   bg: "{ scale: 1, x: 14 }, { scale: 1.05, x: -14",
   far: "{ scale: 1, x: -10 }, { scale: 1.05, x: 10",
-  near: "{ scale: 1, x: 34 }, { scale: 1.11, x: -34",
-  fg: "{ scale: 0.96, x: -22, y: 14 }, { scale: 1.08, x: 22, y: -14",
-  whole: "{ scale: 1, x: -26 }, { scale: 1.13, x: 26",
+  near: "{ scale: 1, x: 8 }, { scale: 1.02, x: -8",
+  fg: "{ scale: 0.98, x: -6, y: 6 }, { scale: 1.01, x: 6, y: -6",
+  whole: "{ scale: 1, x: -8 }, { scale: 1.02, x: 8",
 };
 
 export interface PhotoLayers {

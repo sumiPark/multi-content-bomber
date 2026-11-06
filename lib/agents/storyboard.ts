@@ -13,6 +13,7 @@ import type { ContentRule } from "@/lib/rules/check";
 import { lookSchema } from "@/lib/shoot/video-kit/caption-style";
 import type { SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
 import type { createServiceClient } from "@/lib/supabase/service";
+import type { VideoIssue } from "@/lib/shoot/video-kit/quality";
 
 // 장면표 에이전트 — AI 자동 영상의 말 · 이미지 · 화면 글자를 한 번에 정한다.
 // 대본을 먼저 쓰고 소재를 나중에 붙이면 말과 화면이 어긋나서, 재료를 본 뒤 장면 단위로 함께 쓴다.
@@ -35,6 +36,9 @@ export const storyboardSchema = z.object({
     )
     .describe("받은 후보를 모두 판단한다"),
   hook: z.object({
+    purpose: z.enum(["curiosity", "information"]).describe("시청자가 더 볼 이유: 궁금증 해소 또는 구체적인 정보"),
+    answer: z.string().describe("후킹의 질문/약속에 본문이 제공하는 구체적인 답. 상품 근거에 있는 내용만"),
+    evidence_scenes: z.array(z.number().int()).describe("실제로 그 답을 보여 주거나 설명하는 본문 장면 번호(0부터, 첫 장면 제외)"),
     spoken: z.string().describe("첫 장면에서 하는 말. 화면 표기로 쓴다"),
     on_screen: z.string().describe("첫 화면 큰 글자, spoken을 그대로 줄인 12자 안팎. 두 줄이면 줄바꿈"),
     highlight: z.string().describe("on_screen에서 강조할 낱말, 없으면 빈 문자열"),
@@ -120,6 +124,9 @@ export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResu
 글:
 - 소리 내어 읽었을 때 말이 되어야 한다. 처음 보는 사람이 상품이 무엇인지 알아듣고, 앞 문장에 이어 다음 문장을 자연스럽게 듣게 쓴다.
 - 첫 문장은 시청자가 궁금해할 말이어야 한다. 용량 · 가격 같은 숫자는 그 자체로 궁금증이 아니면 첫 문장에 넣지 않는다.
+- 후킹은 궁금증 또는 정보라는 목적이 분명해야 한다. hook.answer에 실제 답을 적고 evidence_scenes에서 중간까지 그 답을 회수한다. 빈 호기심/끝까지 보라는 명령, 답 없이 상품 소개만 반복하는 흐름은 쓰지 않는다.
+- 제형/거품/사용 결과를 '보라'는 후킹은 실제 제형/사용 컷이 있을 때만 쓴다. 용기 사진과 AI 그림/도식은 실물 증거가 아니다. 재료가 포장 사진뿐이면 포장에 보이는 구분점이나 근거가 있는 사용 순서 등 답할 수 있는 질문을 고른다.
+- 체감/촉감/흡수 속도를 용기 사진으로 입증하지 않는다. 상세페이지의 설명을 전달할 때는 '제품 안내에서는'이라고 출처를 밝힌다.
 - 장면에 없는 것을 말하지 않는다. 말하는 내용이 보이는 이미지를 고른다.
 - 사실(숫자 · 성분 · 효과 · 구성)은 get_product_facts에 있는 것만. uncertainties에 있는 건 말하지 않는다.
 - 사람이 써 본 것처럼 말하지 않는다. 지어낸 후기 · 체험을 쓰지 않는다. 최고 · 유일 · 100% 같은 단정을 쓰지 않는다.
@@ -215,8 +222,9 @@ export async function reviewStoryboard(input: { board: Storyboard; facts: Produc
 - 첫 문장: 소리 내어 읽었을 때 말이 되는가, 다음이 궁금한가, 뜬금없는 숫자나 명령이 없는가.
 - 흐름: 처음 보는 사람이 이게 뭔지 알아듣는가, 앞 문장에서 다음 문장으로 이어지는가, 나열만 하다 끝나지 않는가.
 - 화면: 그 장면 이미지가 그 말과 맞는가.
-- 매력: 상품 사실 가운데 끌리는 점이 살았는가, 사용법 안내문처럼 끝나지 않는가.
-${input.fixedTexts.length ? `사람이 정한 고정 문구라 고칠 수 없다. 문제로 적지 않는다: ${input.fixedTexts.join(" / ")}` : ""}`,
+- 정보 가치: 후킹이 약속한 답이 구체적인가. 상품 이름과 장점만 나열하며 답을 피하지 않는가. 근거 있는 사용법/구분 정보로 답하는 영상은 허용한다.
+후킹의 질문에 본문이 실제로 답하는지, hook.answer와 evidence_scenes가 그 답과 맞는지 확인한다. '보라'고 약속한 제형/사용 장면은 실물이 있어야 한다. 상품 설명을 전하는 도식은 허용하되 체험의 증거로 보지 않는다.
+${input.fixedTexts.length ? `저장된 문구도 근거/소재/답 회수 검수에서 제외하지 않는다. 맞지 않으면 '저장 후킹 부적합:'으로 시작해 이유를 쓴다: ${input.fixedTexts.join(" / ")}` : ""}`,
       },
       {
         role: "user",
@@ -225,20 +233,21 @@ ${input.fixedTexts.length ? `사람이 정한 고정 문구라 고칠 수 없다
             type: "text",
             text: `상품: ${input.facts.name} — ${input.facts.oneLine ?? ""}\n상품 근거: ${input.facts.claims.map((c) => c.claim).join(" / ")}\n상세페이지 원문:\n${input.facts.sourceText}\n\n후킹 화면 글자: ${b.hook.on_screen.replace(/\n/g, " ")}\n장면:\n${b.scenes.map((s, i) => `${i}. [${b.visuals.find((v) => v.beat === i) ? `AI 그림: ${b.visuals.find((v) => v.beat === i)!.subject}` : `${s.source_id}: ${b.photos.find((p) => p.id === s.source_id)?.what ?? s.shows}`}] ${s.say}`).join("\n")}\n\n그림은 후보 이미지 묶음이다.`,
           },
-          ...input.sheets.slice(0, 3).map((url) => ({ type: "image_url" as const, image_url: { url, detail: "low" as const } })),
+          { type: "text", text: `후킹 약속과 답/근거 장면: ${JSON.stringify(b.hook)}` },
+          ...input.sheets.map((url) => ({ type: "image_url" as const, image_url: { url, detail: "high" as const } })),
         ],
       },
     ],
     response_format: zodResponseFormat(reviewSchema, "storyboard_review"),
   });
   return {
-    problems: completion.choices[0]?.message?.parsed?.problems ?? [],
+    problems: (() => { const parsed = completion.choices[0]?.message?.parsed; if (!parsed) throw new Error("장면표 검수 응답이 없어요"); return parsed.problems; })(),
     tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },
   };
 }
 
 /** 완성본 프레임을 본다. 얹은 자막까지 들어간 실제 화면 검사다. */
-export async function reviewFinalFrames(input: { sheet: string; lines: { at: number; say: string }[]; everySeconds: number }): Promise<{ issues: string[]; tokens: { input: number; output: number } }> {
+export async function reviewFinalFrames(input: { sheet: string; frames: { at: number; image: string }[]; lines: { at: number; say: string }[]; everySeconds: number }): Promise<{ issues: VideoIssue[]; tokens: { input: number; output: number } }> {
   const model = agentModel();
   const completion = await getOpenAI().chat.completions.parse({
     model,
@@ -249,16 +258,34 @@ export async function reviewFinalFrames(input: { sheet: string; lines: { at: num
         content: [
           {
             type: "text",
-            text: `완성된 릴스의 프레임이다. ${input.everySeconds.toFixed(1)}초마다 한 장, 왼쪽에서 오른쪽, 위에서 아래 순서다. 말 시각표:\n${input.lines.map((l) => `${l.at.toFixed(1)}초 ${l.say}`).join("\n")}\n\n실제 문제만 시각과 함께 적는다: 무엇인지 알 수 없는 빈 화면, 제품이 이상하게 잘리거나 지나치게 확대됨, 글자가 안 읽히거나 겹침, 글자가 제품 글자를 가림, 말과 화면이 맞지 않음. 없으면 빈 배열.`,
+            text: `완성된 릴스의 프레임이다. 첫 이미지는 ${input.everySeconds.toFixed(1)}초 간격 연락판(왼쪽→오른쪽, 위→아래), 뒤는 휴대폰 크기 개별 프레임 ${input.frames.map((f) => f.at.toFixed(2)).join(", ")}초다. 말 시각표:\n${input.lines.map((l) => `${l.at.toFixed(1)}초 ${l.say}`).join("\n")}\n\n실제 문제만 시각과 함께 적는다. kind: caption=작거나 잘리거나 읽기 어려운 자막, layout=텍스트끼리 겹침/상품을 크게 가림, crop=제품의 중요한 부분이 잘림/지나친 확대, content=말과 소재/후킹 약속 불일치, blank=알아볼 수 없는 빈 화면. severity blocking은 시청/이해를 막는 문제, minor는 작은 개선점이다. 시연을 약속하지 않는 제품 소개에 포장 사진을 쓰는 것은 허용한다. 제품 사진 속 작은 인쇄 글자를 못 읽는 것은 자막 오류가 아니다. 전환 도중 한 장만 글자가 안 보이는 것은 오류로 적지 않는다. 없으면 빈 배열.`,
           },
           { type: "image_url", image_url: { url: input.sheet, detail: "high" } },
+          ...input.frames.map((f) => ({ type: "image_url" as const, image_url: { url: f.image, detail: "high" as const } })),
         ],
       },
     ],
-    response_format: zodResponseFormat(z.object({ issues: z.array(z.string()) }), "final_review"),
+    response_format: zodResponseFormat(z.object({ issues: z.array(z.object({ kind: z.enum(["caption", "layout", "crop", "content", "blank"]), severity: z.enum(["blocking", "minor"]), at: z.number(), detail: z.string() })) }), "final_review"),
   });
   return {
-    issues: completion.choices[0]?.message?.parsed?.issues ?? [],
+    issues: (() => { const parsed = completion.choices[0]?.message?.parsed; if (!parsed) throw new Error("완성본 검수 응답이 없어요"); return parsed.issues; })(),
     tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },
   };
+}
+
+/** 저장 후킹도 실제로 보여 줄 수 있는 재료로 먼저 거른다. DB 설정 문구 자체는 바꾸지 않는다. */
+export async function reviewHookMaterials(input: { hooks: string[]; sheets: string[]; archive: string[]; facts: ProductFacts }) {
+  if (!input.hooks.length) return { rejected: [] as { index: number; why: string }[], tokens: { input: 0, output: 0 } };
+  const model = agentModel();
+  const completion = await getOpenAI().chat.completions.parse({
+    model, ...callOptions(model, 1600),
+    messages: [{ role: "user", content: [
+      { type: "text", text: `다음 저장 후킹 전부를 실제 영상 소재와 대조한다. 이미지에 없는 제형/사용법/체감/소리를 보여 준다는 약속은 부적합이다. 용기 사진과 상세페이지의 장식 거품/AI 이미지는 실제 제형 시연이 아니다. 근거에 있는 사용 순서/구성/용기의 구분점을 설명하는 정보 후킹은 사진+도식으로 답할 수 있다. 주어진 자료로 본문에서 구체적인 답을 낼 수 있어야 한다. 과도하게 거부하지 말고 소재상 불가능한 문구만 rejected에 번호와 이유를 쓴다.\n상품 근거: ${JSON.stringify({ name: input.facts.name, usage: input.facts.usage, details: input.facts.details })}\n자사 촬영: ${input.archive.join(" / ") || "없음"}\n후킹:\n${input.hooks.map((t, i) => `${i}: ${t}`).join("\n")}` },
+      ...input.sheets.map((url) => ({ type: "image_url" as const, image_url: { url, detail: "high" as const } })),
+    ] }],
+    response_format: zodResponseFormat(z.object({ rejected: z.array(z.object({ index: z.number().int(), why: z.string() })) }), "hook_materials"),
+  });
+  const parsed = completion.choices[0]?.message?.parsed;
+  if (!parsed) throw new Error("후킹 소재 검수 응답이 없어요");
+  return { ...parsed, tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 } };
 }

@@ -65,6 +65,11 @@ export function contrast(a: string, b: string): number {
 
 export const readableOn = (bg: string): string => (luminance(bg) > 0.4 ? "#111111" : "#FFFFFF");
 
+/** 사진의 평균 밝기에 의존하지 않고 글자 바로 뒤에서 대비를 확보한다. 글꼴 선택은 유지한다. */
+export function readableLook(raw: Look): Look {
+  return { ...raw, treatment: "box", box_color: "#171717", text_color: "#FFFFFF", accent_color: contrast(raw.accent_color, "#171717") >= 4.5 ? raw.accent_color : "#FFE08A", size: 86, emphasis_scale: 1, emphasis: "color", layout: "inline", reveal: "line", entrance: "fade", tilt: 0, punch: false, behind_word: "" };
+}
+
 /** AI가 낸 값을 읽을 수 있는 범위로 고친다. 값이 없으면(예전 계획) 기본 모양. */
 export function normalizeLook(raw: Partial<Look> | null | undefined): Look {
   if (!raw) return DEFAULT_LOOK;
@@ -148,6 +153,29 @@ function esc(s: string): string {
 
 function units(text: string): number {
   return [...text].reduce((s, c) => s + (c === " " ? 0.32 : /[,.!?]/.test(c) ? 0.34 : /[가-힣]/.test(c) ? 0.98 : 0.62), 0);
+}
+
+/** 낱말을 보존하며 가장 균형 잡힌 두 줄을 만든다. 조사를 홀로 떼지 않는다. */
+export function readableRows(text: string): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (units(words.join(" ")) <= 10.5 || words.length < 2) return [words.join(" ")];
+  let split = 1;
+  let best = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(" ");
+    const b = words.slice(i).join(" ");
+    const penalty = Math.max(units(a), units(b)) + (words[i].replace(/[,.!?]/g, "").length <= 1 ? 10 : 0);
+    if (penalty < best) { best = penalty; split = i; }
+  }
+  return [words.slice(0, split).join(" "), words.slice(split).join(" ")];
+}
+
+export function readableCaptionBlock(c: CaptionInput, look: Look, zone: Zone): { html: string; motion: string; keyAt: number | null } {
+  const lines = readableRows(c.text);
+  const size = Math.floor(Math.min(look.size, ...lines.map((l) => 840 / Math.max(units(l), 1))));
+  const rows = bigText(lines, c.emphasis.find((e) => e && lines.some((l) => l.includes(e))) ?? "", look, size, 840);
+  const box = ZONE_BOX[zone];
+  return { html: `<div id="${c.id}" class="lk clip" data-start="${c.start}" data-duration="${(c.end - c.start).toFixed(3)}" style="top:${box.top}px;height:${box.height}px">${rows}</div>`, motion: "", keyAt: null };
 }
 
 const fit = (text: string, size: number, width: number) => Math.floor(Math.min(size, width / Math.max(units(text), 0.5)));

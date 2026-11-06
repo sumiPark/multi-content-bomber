@@ -3,11 +3,12 @@ import { join } from "node:path";
 import { blockingIssues, checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
-import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
+import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, phraseNotes, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
 import { timeScript } from "@/lib/agents/ko-skills";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
-import { motionTexts, reviewFinalFrames, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
+import { motionTexts, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
+import { hookEvidenceProblems } from "@/lib/auto-video/hook-evidence";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
 import { kstDate } from "@/lib/automation/time";
@@ -165,6 +166,16 @@ export async function makeAutoVideo(input: {
   const add = (t: { input: number; output: number }) => {
     tokens = { input: tokens.input + t.input, output: tokens.output + t.output };
   };
+  const materialCheck = await reviewHookMaterials({ hooks: phrases.hooks.map((h) => h.text), sheets, archive: archive.map((a) => a.what), facts });
+  add(materialCheck.tokens);
+  const rejectedHooks = new Map(materialCheck.rejected.map((r) => [r.index, r.why]));
+  phrases.hooks = phrases.hooks.filter((h, i) => {
+    const why = rejectedHooks.get(i);
+    if (!why) return true;
+    phrases.rejected.push({ kind: "hook", template: h.template, why, afterCheck: true });
+    console.log(`  소재와 맞지 않는 후킹 제외: ${h.text} — ${why}`);
+    return false;
+  });
 
   const visualLibrary = await loadVisualLibrary(service);
 
@@ -194,6 +205,7 @@ export async function makeAutoVideo(input: {
   let board: Storyboard | null = null;
   let retry: { board: Storyboard; problems: string[] } | null = null;
   let left: string[] = [];
+  const storyboardReviews: unknown[] = [];
   // 못 쓰는 사진 때문에 다시 쓰는 횟수는 따로 센다. 말을 점검하기 전에 걸러 토큰을 아낀다
   let photoRetries = 3;
   const fixedTexts = () => [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t);
@@ -248,22 +260,29 @@ export async function makeAutoVideo(input: {
       retry = { board, problems: [...left, `${dropped.join(", ")} 사진은 세로 화면에 맞지 않아 쓸 수 없다. 다른 후보나 설명 화면(motion)으로 바꾼다`] };
       continue;
     }
-    const code = storyboardProblems(board, archiveIds, phrases.hooks.length > 0);
+    const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0), ...hookEvidenceProblems(board, archive)];
+    const estimated = timeScript(board.scenes.map((s) => s.tts), 20).totalSeconds;
+    if (estimated < 15 || estimated > 27) code.push(`예상 말 길이가 ${estimated.toFixed(1)}초다. 음성 속도를 바꾸거나 빈 시간을 늘리지 말고, 질문에 답하는 구체적인 정보로 15~25초를 구성한다`);
     const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts() });
     add(check.tokens);
     const review = await reviewStoryboard({ board, facts, sheets, fixedTexts: fixedTexts() });
     add(review.tokens);
     const blockingNow = blockingIssues(check.issues).map((i) => i.detail);
     left = [...code, ...blockingNow, ...review.problems];
+    storyboardReviews.push({ attempt: attempt + 1, hook: board.hook, problems: left });
     console.log(`  장면표 ${attempt + 1}번째: 코드 ${code.length} · 규칙/근거 ${blockingNow.length} · 시청자 ${review.problems.length}`);
     for (const p of left) console.log(`    - ${p.slice(0, 160)}`);
     if (!left.length) break;
+    if (phrases.hooks.length && (review.problems.some((p) => p.includes("저장 후킹 부적합")) || code.some((p) => p.includes("제형을 보라고")))) {
+      const rejected = phrases.hooks.shift()!;
+      phrases.rejected.push({ kind: "hook", template: rejected.template, why: left.join(" / "), afterCheck: true });
+    }
     dropFailedPhrases(phrases, blockingIssues(check.issues));
     retry = { board, problems: left };
   }
   if (!board) throw new Error("장면표를 만들지 못했어요");
-  const fatal = storyboardProblems(board, archiveIds, phrases.hooks.length > 0).filter((p) => p.includes("후보가 아니다") || p.includes("없는 자사") || p.includes("말이 없다") || p.includes("도식 값이 없다"));
-  if (fatal.length) throw new Error(`장면표 오류: ${fatal.join(" / ")}`);
+  writeFileSync(join(workDir, "storyboard-review.json"), JSON.stringify({ attempts: storyboardReviews, phrases: fixedRecord(phrases), board }, null, 2));
+  if (left.length) throw new StopError(`장면표를 ${MAX_BOARD_TRIES}번 고친 뒤에도 해결되지 않았어요: ${left.join(" / ")}`);
 
   // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
   // AI가 고른 글꼴을 자막 · 설명 화면이 함께 쓴다. 못 받으면 설명 화면만 대체 글꼴로 만든다
@@ -273,7 +292,7 @@ export async function makeAutoVideo(input: {
   let motionFonts: VideoFonts | undefined;
   const clips: KitClip[] = [];
   const sources: unknown[] = [];
-  const warnings: string[] = left.map((p) => `장면표 확인: ${p}`.slice(0, 200));
+  const warnings: string[] = [];
   if (pickedFonts && finalBoard.scenes.some((s) => s.source === "motion")) {
     try {
       motionFonts = await downloadVideoFonts(pickedFonts, workDir);
@@ -361,16 +380,23 @@ export async function makeAutoVideo(input: {
     editStyleText: concept.autoVideoStyle,
     voiceId: concept.autoVoiceId,
     fonts: pickedFonts ? { key_font: pickedFonts.key.name, small_font: pickedFonts.small.name } : undefined,
+    reviewFinal: async (file, timeline) => {
+      const every = Math.max(0.5, timeline.duration / 24);
+      const sheetFile = join(workDir, "final-frames.jpg");
+      ffmpeg(["-y", "-v", "error", "-i", file, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
+      // 연락판만 보면 짧은 자막을 놓친다. 모든 자막의 안정 구간을 휴대폰 크기로 별도 검사한다.
+      const times = [Math.min(0.35, timeline.hook.end / 2), ...timeline.captions.map((c) => (c.start + c.end) / 2)];
+      const frames = times.map((at, i) => {
+        const path = join(workDir, `readability-${i}.jpg`);
+        ffmpeg(["-y", "-v", "error", "-ss", at.toFixed(3), "-i", file, "-frames:v", "1", "-vf", "scale=360:640", "-q:v", "2", path]);
+        return { at, image: imageDataUrl(path) };
+      });
+      const review = await reviewFinalFrames({ sheet: imageDataUrl(sheetFile), frames, everySeconds: every, lines: timeline.lines.map((l) => ({ at: l.start, say: board!.scenes[l.beat]?.say ?? l.tts })) });
+      add(review.tokens);
+      return review;
+    },
   });
   add(kit.tokens);
-
-  // 5. 완성본 프레임과 실제로 들어간 글로 다시 점검한다
-  const sheetFile = join(workDir, "final-frames.jpg");
-  const every = Math.max(1, kit.seconds / 24);
-  ffmpeg(["-y", "-v", "error", "-i", kit.final, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
-  const finalReview = await reviewFinalFrames({ sheet: imageDataUrl(sheetFile), everySeconds: every, lines: kit.timeline.lines.map((l, i) => ({ at: l.start, say: board!.scenes[i]?.say ?? l.tts })) });
-  add(finalReview.tokens);
-  warnings.push(...finalReview.issues.map((i) => `완성본 확인: ${i}`.slice(0, 200)));
 
   const coverTexts = [kit.plan.thumbnail.title.replace(/\n+/g, " "), kit.plan.thumbnail.sub].filter(Boolean);
   const lastBeat = kit.plan.beats.length - 1;
@@ -390,7 +416,11 @@ export async function makeAutoVideo(input: {
     { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...board.scenes.flatMap((s) => (s.motion ? motionTexts(s.motion) : [])), ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
     { kind: facts.kind, rules, approvedClaims: facts.approvedClaims, stockStatus: facts.stockStatus, healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions },
   );
-  return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts, script, board };
+  if (!kit.quality?.passed) {
+    check.passed = false;
+    check.issues.push(...(kit.quality?.attempts.at(-1)?.issues.filter((i) => i.severity === "blocking").map((i) => ({ kind: "edit" as const, detail: `${i.at.toFixed(1)}초 ${i.detail}` })) ?? [{ kind: "edit" as const, detail: "완성본 검수가 완료되지 않았어요" }]));
+  }
+  return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts, script, board, storyboardReviews, phraseNotes: phraseNotes(phrases) };
 }
 
 export class StopError extends Error {}

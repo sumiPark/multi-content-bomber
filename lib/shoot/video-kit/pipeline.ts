@@ -11,7 +11,8 @@ import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
-import { hookZone, normalizeLook, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { hookZone, normalizeLook, readableLook, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { inspectAndRepairVideo, type VideoQuality, type VideoReview } from "@/lib/shoot/video-kit/quality";
 import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
 import { blockRows, captionSkillDir, designCaptions, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
 import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse, type PickedMusic } from "@/lib/shoot/video-kit/music";
@@ -51,6 +52,7 @@ export interface KitInput {
   voiceId?: string | null;
   // 글꼴을 미리 고른 흐름만 넘긴다. 없으면 자막 디자인 AI가 고른다
   fonts?: { key_font: string; small_font: string };
+  reviewFinal?: (file: string, timeline: Timeline) => Promise<VideoReview>;
   humanHook?: string | null;
   humanThumbnail?: string | null;
   shotlistHook?: { spoken: string; on_screen: string } | null;
@@ -87,6 +89,7 @@ export interface KitResult {
   tokens: { input: number; output: number };
   usedVoice: boolean;
   visuals: UsedVisual[];
+  quality?: VideoQuality;
 }
 
 const squash = (s: string) => s.replace(/[\s.,!?~·"']+/g, "");
@@ -495,7 +498,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   // 첫 비트는 후킹 글자만 — 다른 그래픽이 겹치면 후킹이 묻힌다
   plan.beats[0] = { ...plan.beats[0], graphics: plan.beats[0].graphics.filter((g) => g.type === "ring" || g.type === "arrow") };
   warnings.push(...plan.warnings);
-  const look = normalizeLook(plan.look);
+  const readable = input.source === "auto";
+  const look = readable ? readableLook(normalizeLook(plan.look)) : normalizeLook(plan.look);
 
   // 2. 음성 → 시각표
   const made = await makeVoices(plan, clips, workDir, input.voiceId);
@@ -573,6 +577,10 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     const owner = allClips.find((c) => c.no === tl.cuts[i]?.clip);
     return owner?.shot?.startsWith("[코드 모션]") ? { ...z, cover: { ...z.cover, mid: 1 } } : z;
   }) ?? null;
+  if (readable) {
+    // 마지막 대사를 다시 큰 광고 카드로 덮지 않는다. 자막은 마지막 프레임까지 유지한다.
+    tl = { ...tl, graphics: tl.graphics.filter((g) => g.type !== "end_card"), captions: tl.captions.map((c, i) => i === tl.captions.length - 1 ? { ...c, end: tl.duration } : c) };
+  }
   const behind = makeBehindWord(look, tl, allClips, baseVideo, project, workDir);
   writeProject(project, tl, { look, zones, behind });
 
@@ -580,7 +588,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const qa = await qaFrames(version, project, tl, workDir);
   tokens.input += qa.tokens.input;
   tokens.output += qa.tokens.output;
-  warnings.push(...qa.issues);
+  if (!input.reviewFinal) warnings.push(...qa.issues);
   if (qa.drop.size) {
     tl = { ...tl, graphics: tl.graphics.filter((g) => !qa.drop.has(g.id) || (g.type !== "ring" && g.type !== "arrow")) };
     writeProject(project, tl, { look, zones, behind });
@@ -601,7 +609,11 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const priorDesign = (input.reusePlan as (EditPlan & { captionDesign?: CaptionDesign }) | null | undefined)?.captionDesign;
   let design: CaptionDesign | null = null;
   let videoFonts: VideoFonts | undefined;
-  if (skillDir && tl.captions.length) {
+  if (readable && skillDir && input.fonts) {
+    // 자동 영상은 이미 장면표에서 고른 글꼴을 유지하고, 읽기 쉬운 두 줄 자막으로 조립한다.
+    videoFonts = await downloadVideoFonts(chosenFonts(loadSkillFonts(skillDir), input.fonts), workDir);
+  }
+  if (skillDir && tl.captions.length && !readable) {
     try {
       if (priorDesign?.key_fx) design = priorDesign;
       else {
@@ -636,6 +648,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
     }
   }
+  if (readable) writeProject(project, tl, { look, zones, behind: null, fonts: videoFonts, readable: true });
   let final = join(workDir, "final.mp4");
   try {
     hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
@@ -643,7 +656,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     // 제품 뒤 글자가 렌더를 막으면 그 효과만 빼고 다시 만든다
     if (!behind) throw e;
     console.warn("[video-kit] 제품 뒤 글자를 빼고 다시 렌더:", e instanceof Error ? e.message : e);
-    writeProject(project, tl, { look, zones, behind: null, noCaptions: !!design, fonts: videoFonts });
+    writeProject(project, tl, { look, zones, behind: null, noCaptions: !!design, fonts: videoFonts, readable });
     hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
   }
   if (!existsSync(final) || mediaSeconds(final) < 1) throw new Error("렌더 결과가 없어요");
@@ -665,6 +678,28 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       writeProject(project, tl, { look, zones, behind: null, fonts: videoFonts });
       hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
     }
+  }
+  // 최종 인코딩 뒤 검수한다. 음성/시간표/음악/실물 소재를 재사용해 글자만 최대 두 번 고친다.
+  let quality: VideoQuality | undefined;
+  if (input.reviewFinal) {
+    const inspected = await inspectAndRepairVideo({
+      file: final,
+      review: (file) => input.reviewFinal!(file, tl),
+      save: (report) => writeFileSync(join(workDir, "quality.json"), JSON.stringify(report, null, 2)),
+      repair: async (attempt, issues) => {
+        console.log(`[video-kit] 완성본 자동 수정 ${attempt}: ${issues.map((i) => `${i.at.toFixed(1)}초 ${i.detail}`).join(" / ")}`);
+        const repaired = { ...tl, graphics: [], hook: { ...tl.hook, position: attempt === 1 ? tl.hook.position : "top" as const } };
+        const repairZones = attempt === 1 ? zones : zones?.map((z) => ({ ...z, cover: { ...z.cover, mid: 1 } })) ?? null;
+        writeProject(project, repaired, { look: readableLook(look), zones: repairZones, behind: null, fonts: videoFonts, readable: true });
+        const out = join(workDir, `readable-${attempt}.mp4`);
+        hyperframes(version, project, ["render", "-o", out, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
+        tl = repaired;
+        return out;
+      },
+    });
+    final = inspected.file;
+    quality = inspected.quality;
+    warnings.push(...quality.attempts.at(-1)!.issues.map((i) => `${i.at.toFixed(1)}초 ${i.detail}`));
   }
   // 컷마다 가운데 프레임이 거의 한 색이면 빈 화면으로 본다
   for (const cut of tl.cuts) {
@@ -701,6 +736,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     tokens,
     usedVoice: made.usedVoice,
     visuals: visual.used,
+    quality,
   };
 }
 
