@@ -46,7 +46,15 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Install ffmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-nanum > /dev/null
+        # 실행 환경에 있는 도구를 재사용한다. 자막은 저장소/영상별 웹폰트를 써 OS 한글폰트가 필요 없다.
+        # apt 저장소가 응답하지 않아 영상 제작 전 무한히 기다리던 경우를 막는다.
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            timeout 120s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq
+            timeout 120s sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version
+          ffprobe -version
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
