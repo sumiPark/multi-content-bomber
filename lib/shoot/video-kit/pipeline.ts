@@ -11,10 +11,11 @@ import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
-import { hookZone, normalizeLook, readableCaptions, readableLook, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { hookZone, normalizeLook, readableCaptions, readableLook, readableRows, type CutZones, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { selectCaptionRenderer } from "@/lib/shoot/video-kit/caption-renderer";
 import { inspectAndRepairVideo, type VideoQuality, type VideoReview } from "@/lib/shoot/video-kit/quality";
 import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
-import { blockRows, captionSkillDir, designCaptions, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
+import { blockRows, captionSkillDir, designCaptions, isMotionEffect, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
 import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse, type PickedMusic } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
@@ -90,6 +91,7 @@ export interface KitResult {
   usedVoice: boolean;
   visuals: UsedVisual[];
   quality?: VideoQuality;
+  captionMode: "motion" | "basic";
 }
 
 const squash = (s: string) => s.replace(/[\s.,!?~·"']+/g, "");
@@ -436,6 +438,17 @@ function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditP
   return cover;
 }
 
+function motionBlocks(tl: Timeline, zones: CutZones[] | null, design: CaptionDesign): SkillBlock[] {
+  const blocks: SkillBlock[] = [{ start: 0, end: tl.hook.end, zone: hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position), fx: design.key_fx, highlight: tl.hook.highlight, rows: readableRows(tl.hook.onScreen).map((text) => ({ text, role: "key" })) }];
+  const endCard = tl.graphics.find((g) => g.type === "end_card");
+  if (endCard) {
+    const p = endCard.g;
+    const rows = [...(p.chip ? blockRows(p.chip, "small", 18) : []), ...blockRows(p.text), ...(p.sub ? blockRows(p.sub, "small", 18) : []), ...(p.note ? blockRows(p.note, "small", 18) : [])];
+    if (rows.length) blocks.push({ start: endCard.start, end: tl.duration, zone: "top", fx: design.finish_fx, rows });
+  }
+  return blocks;
+}
+
 export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const kit = editKit();
   const { workDir, clips } = input;
@@ -499,7 +512,9 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   plan.beats[0] = { ...plan.beats[0], graphics: plan.beats[0].graphics.filter((g) => g.type === "ring" || g.type === "arrow") };
   warnings.push(...plan.warnings);
   const readable = input.source === "auto";
-  const look = readable ? readableLook(normalizeLook(plan.look)) : normalizeLook(plan.look);
+  const skillDir = captionSkillDir();
+  const renderer = selectCaptionRenderer(input.source ?? "shoot", !!skillDir);
+  const look = normalizeLook(plan.look);
 
   // 2. 음성 → 시각표
   const made = await makeVoices(plan, clips, workDir, input.voiceId);
@@ -606,17 +621,12 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
 
   // 6. 렌더 · 표지
   // 자막 모션 스킬을 쓸 수 있으면 자막 없이 렌더한 뒤 얹는다. 안 되면 지금까지의 자막으로 렌더한다
-  const skillDir = captionSkillDir();
   const priorDesign = (input.reusePlan as (EditPlan & { captionDesign?: CaptionDesign }) | null | undefined)?.captionDesign;
   let design: CaptionDesign | null = null;
   let videoFonts: VideoFonts | undefined;
-  if (readable && skillDir && input.fonts) {
-    // 자동 영상은 이미 장면표에서 고른 글꼴을 유지하고, 읽기 쉬운 두 줄 자막으로 조립한다.
-    videoFonts = await downloadVideoFonts(chosenFonts(loadSkillFonts(skillDir), input.fonts), workDir);
-  }
-  if (skillDir && tl.captions.length && !readable) {
+  if (renderer === "motion" && skillDir && tl.captions.length) {
     try {
-      if (priorDesign?.key_fx) design = priorDesign;
+      if (priorDesign && isMotionEffect(priorDesign.key_fx)) design = priorDesign;
       else {
         // 제품과 장면을 보고 고르게 영상 전체에서 여섯 장면을 모아 보여 준다
         const framesFile = join(workDir, "caption-frames.jpg");
@@ -643,13 +653,14 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       } catch (e) {
         warnings.push(`고른 글꼴을 받지 못해 도식 글자는 대체 글꼴로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
       }
-      writeProject(project, tl, { look, zones, behind, noCaptions: true, fonts: videoFonts });
+      writeProject(project, tl, { look, zones, behind, noCaptions: true, fonts: videoFonts, readable });
     } catch (e) {
+      if (readable) throw new Error(`자막 모션 디자인 실패: ${e instanceof Error ? e.message : e}`);
       design = null;
       warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
     }
   }
-  if (readable) writeProject(project, tl, { look, zones, behind: null, fonts: videoFonts, readable: true });
+  // 읽기 보정 여부와 자막 렌더러 선택은 별개다. 모션 사용 시 기본 자막을 다시 쓰지 않는다.
   let final = join(workDir, "final.mp4");
   try {
     hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
@@ -664,15 +675,10 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   if (design && skillDir) {
     try {
       // 후킹 글자와 끝 화면도 자막과 같은 스킬로 얹는다
-      const blocks: SkillBlock[] = [{ start: 0, end: tl.hook.end, zone: hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position), fx: design.key_fx, highlight: tl.hook.highlight, rows: blockRows(tl.hook.onScreen) }];
-      const endCard = tl.graphics.find((g) => g.type === "end_card");
-      if (endCard) {
-        const p = endCard.g;
-        const rows = [...(p.chip ? blockRows(p.chip, "small", 18) : []), ...blockRows(p.text), ...(p.sub ? blockRows(p.sub, "small", 18) : []), ...(p.note ? blockRows(p.note, "small", 18) : [])];
-        if (rows.length) blocks.push({ start: endCard.start, end: tl.duration, zone: "top", fx: design.finish_fx, rows });
-      }
+      const blocks = motionBlocks(tl, zones, design);
       final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, workDir, blocks });
     } catch (e) {
+      if (readable) throw new Error(`자막 모션 렌더 실패: ${e instanceof Error ? e.message : e}`);
       console.warn("[video-kit] 자막 모션 실패, 기본 자막으로 다시 렌더:", e instanceof Error ? e.message : e);
       warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
       design = null;
@@ -706,13 +712,15 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
           return { ...z, cover };
         });
         const repaired = { ...tl, graphics: [] };
-        finalLook = readableLook(look);
-        writeProject(project, repaired, { look: finalLook, zones: repairZones, behind: null, fonts: videoFonts, readable: true });
+        const useMotion = !!design && !!skillDir;
+        if (readable && !useMotion) throw new Error("자막 모션을 유지할 수 없어 자동 수정을 중단해요.");
+        finalLook = useMotion ? look : readableLook(look);
+        writeProject(project, repaired, { look: finalLook, zones: repairZones, behind: null, fonts: videoFonts, noCaptions: useMotion, readable: readable || !useMotion });
         const out = join(workDir, `readable-${attempt}.mp4`);
         hyperframes(version, project, ["render", "-o", out, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
         tl = repaired;
         finalZones = repairZones;
-        return out;
+        return design && skillDir ? overlayCaptions({ dir: skillDir, video: out, captions: repaired.captions, zones: captionZones(repaired, repairZones), design, workDir, blocks: motionBlocks(repaired, repairZones, design), name: `repair-${attempt}` }) : out;
       },
     });
     final = inspected.file;
@@ -756,6 +764,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     usedVoice: made.usedVoice,
     visuals: visual.used,
     quality,
+    captionMode: design ? "motion" : "basic",
   };
 }
 

@@ -8,7 +8,7 @@ import { conceptBlock } from "@/lib/agents/concept";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
-import { ZONE_BOX, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
+import { readableRows, ZONE_BOX, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import { chosenFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import type { TimedCaption } from "@/lib/shoot/video-kit/timeline";
 import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
@@ -23,6 +23,7 @@ import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "32", "36", "38", "39", "41"];
 const EMOTION_FX = ["sway", "shiver", "heartbeat", "tilt", "hop", "droop", "impact"];
 const ALLOWED_FX = new Set(["cut", ...MOTION_FX, ...EMOTION_FX]);
+export const isMotionEffect = (value: string): boolean => value !== "cut" && ALLOWED_FX.has(value);
 // 손글씨 작은 줄은 글자 몸통이 작아 키운다
 const SMALL_SIZE = 96;
 const PLAIN_SMALL_SIZE = 80;
@@ -39,7 +40,7 @@ export function captionSkillDir(): string | null {
 }
 
 const designSchema = z.object({
-  key_fx: z.string().describe("이 영상의 대표 모션. 큰 강조어 줄의 기본이다. 효과 번호나 감정 효과 이름"),
+  key_fx: z.enum([...MOTION_FX, ...EMOTION_FX]).describe("이 영상의 대표 모션. 큰 강조어 줄의 기본이다. 정지 자막 cut은 고르지 않는다"),
   small_fx: z.string().describe("작은 줄 모션. 대표 모션을 돋보이게 하는 부드러운 효과나 cut"),
   finish_fx: z.string().describe("마지막 자막에만 쓰는 모션. 대표 모션과 같아도 된다"),
   key_font: z.string().describe("큰 강조어 줄 글꼴. 쓸 수 있는 글꼴 목록의 이름 그대로"),
@@ -131,7 +132,7 @@ function fx(value: string): string {
 /** AI가 나눈 줄이 자막과 글자가 다르면 쓰지 않고 자막 전체를 큰 줄 하나로 둔다. */
 function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, smallSize: number) {
   const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
-  const rows = usable ? line.rows : [{ text: c.text, role: "key" as const }];
+  const rows = usable ? line.rows : readableRows(c.text).map((text) => ({ text, role: "key" as const }));
   return rows.map((r, i) => ({
     text: r.text.trim(),
     fx: r.role === "key" ? (line?.fx && ALLOWED_FX.has(line.fx) ? line.fx : fx(last ? design.finish_fx : design.key_fx)) : fx(design.small_fx),
@@ -200,7 +201,7 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
     // 글자 색은 스킬 기본값을 쓴다. look 색은 글자 상자가 있을 때 고른 값이라 그대로 쓰면 빨간 배경에 초록 글자처럼 나온다
     // 강조어 줄은 keyFont, 나머지 줄은 font. subFont까지 같게 해 한 영상에 글꼴을 두 개만 쓴다
-    style: { font: fonts.small, subFont: fonts.small, keyFont: fonts.key, size: fonts.smallSize, color: "#FFFFFF", accent: "#FFD23F", glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 960 },
+    style: { font: fonts.small, subFont: fonts.small, keyFont: fonts.key, size: fonts.smallSize, color: "#FFFFFF", accent: "#FFD23F", glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 880 },
     lines: [...blocks.map((b, i) => blockLine(b, (blockBrightness[i] ?? 0) > BRIGHT, fonts.smallSize)), ...captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
@@ -218,16 +219,26 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
 }
 
 /** 자막이 놓일 자리의 평균 밝기. 재지 못한 자막은 null(어두운 배경으로 본다). */
+export function readableBrightness(pixels: Uint8Array): number | null {
+  if (!pixels.length) return null;
+  const mean = pixels.reduce((sum, n) => sum + n, 0) / pixels.length;
+  const spread = Math.sqrt(pixels.reduce((sum, n) => sum + (n - mean) ** 2, 0) / pixels.length);
+  // 흰 펌프와 붉은 배경처럼 명암이 섞이면 평균만 보고 검은 글자로 바꾸지 않는다.
+  return spread > 35 ? null : mean;
+}
+
 function zoneBrightness(video: string, captions: TimedCaption[], zones: Zone[]): (number | null)[] {
   return captions.map((c, i) => {
     const box = ZONE_BOX[zones[i] ?? "lower"];
-    const res = spawnSync("ffmpeg", ["-v", "error", "-ss", ((c.start + c.end) / 2).toFixed(3), "-i", video, "-frames:v", "1", "-vf", `crop=960:${box.height}:60:${box.top},scale=1:1,format=gray`, "-f", "rawvideo", "-"], { maxBuffer: 1024 * 1024 });
-    return res.status === 0 && res.stdout?.length ? res.stdout[0] : null;
+    const res = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-ss", ((c.start + c.end) / 2).toFixed(3), "-i", video, "-frames:v", "1", "-vf", `crop=960:${box.height}:60:${box.top},scale=16:16,format=gray`, "-f", "rawvideo", "-"], { maxBuffer: 1024 * 1024 });
+    return res.status === 0 && res.stdout?.length ? readableBrightness(res.stdout) : null;
   });
 }
 
-/** 소리까지 있는 영상 위에 자막을 얹는다. 길이가 달라지거나 실패하면 예외를 던져 호출하는 쪽이 기본 자막으로 돌아간다. */
-export function overlayCaptions(input: { dir: string; video: string; captions: TimedCaption[]; zones: Zone[]; design: CaptionDesign; workDir: string; blocks?: SkillBlock[]; name?: string }): string {
+export interface CaptionOverlayInput { dir: string; video: string; captions: TimedCaption[]; zones: Zone[]; design: CaptionDesign; workDir: string; blocks?: SkillBlock[]; name?: string }
+
+/** 프로덕션 렌더와 미리보기가 같은 모션·글꼴·시각 파일을 쓴다. */
+export function prepareCaptionFile(input: CaptionOverlayInput): string {
   const work = join(input.workDir, "caption-skill");
   mkdirSync(work, { recursive: true });
   const file = join(work, `${input.name ?? "subs"}.json`);
@@ -236,6 +247,12 @@ export function overlayCaptions(input: { dir: string; video: string; captions: T
   const brightness = zoneBrightness(input.video, input.captions, input.zones);
   const picked = chosenFonts(loadSkillFonts(input.dir), input.design);
   writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, brightness, blocks, blockBrightness, { key: picked.key.name, small: picked.small.name, smallSize: picked.small.role === "손글씨" ? SMALL_SIZE : PLAIN_SMALL_SIZE })));
+  return file;
+}
+
+/** 소리까지 있는 영상 위에 모션 자막을 얹는다. 실패 정책은 호출하는 쪽에서 결정한다. */
+export function overlayCaptions(input: CaptionOverlayInput): string {
+  const file = prepareCaptionFile(input);
   const out = join(input.workDir, `${input.name ?? "final"}-captioned.mp4`);
   const res = spawnSync(process.execPath, [join(input.dir, "scripts", "subs.cjs"), file, "--out", out], {
     encoding: "utf8",

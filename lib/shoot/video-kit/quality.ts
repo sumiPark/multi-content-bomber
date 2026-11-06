@@ -25,7 +25,7 @@ export async function inspectAndRepairVideo(input: {
     // API 오류나 해석 실패는 예외로 전파한다. 빈 결과로 바꾸지 않는다.
     const review = await input.review(file);
     const blocking = review.issues.filter((i) => i.severity === "blocking");
-    quality.attempts.push({ ...review, attempt, file, action: attempt === 0 ? "initial" : `readable-captions-${attempt}` });
+    quality.attempts.push({ ...review, attempt, file, action: attempt === 0 ? "initial" : `caption-repair-${attempt}` });
     quality.passed = blocking.length === 0;
     input.save(quality);
     if (quality.passed || attempt === max || blocking.some((i) => !["caption", "layout"].includes(i.kind))) break;
