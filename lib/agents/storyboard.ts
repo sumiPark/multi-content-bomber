@@ -120,6 +120,7 @@ export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResu
 1. get_product_facts를 읽고 받은 이미지를 모두 본다. 무엇을 보여 줄 수 있는지 먼저 판단한다.
 2. 이 상품에서 시청자가 끌릴 점을 고르고(selling_point), 보여 줄 수 있는 이미지로 어떻게 이어 갈지 정한다(story).
 3. 장면마다 이미지 하나와 그 이미지를 보며 할 말을 정한다. time_script로 길이를 재고, check_rules로 금지 표현을 확인한다.
+4. 게시물 캡션은 check_caption으로 검사하고 경고를 고친다. 첫 40자에 상품의 짧은 이름과 주제를 넣고, 검색어는 해시태그 외 본문에도 쓴다. 행동 요청은 저장 등 하나만, 구매 유도는 필요 없다.
 
 글:
 - 소리 내어 읽었을 때 말이 되어야 한다. 처음 보는 사람이 상품이 무엇인지 알아듣고, 앞 문장에 이어 다음 문장을 자연스럽게 듣게 쓴다.
@@ -135,7 +136,7 @@ export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResu
 - 요청은 끝에 하나만 한다.
 
 이미지:
-- usable인 후보만 쓴다. 쓸 만한 후보가 3개 미만이면 모든 후보를 있는 그대로 판단해 내고 억지로 장면을 채우지 않는다.
+- usable인 후보만 쓴다. 사진이 1~2개여도 근거가 있는 정보 질문에 사진과 설명 화면(motion)으로 답할 수 있으면 완성된 장면표를 쓴다. 없는 실제 시연을 만들지 않는다. 사용 가능한 실물 사진이 전혀 없을 때만 scenes를 비운다.
 - 첫 장면은 제품이나 가장 궁금한 장면이다. texture(질감만 있는 사진)는 무엇인지 말로 설명할 때 한 번만 쓰고 첫 장면에 쓰지 않는다.
 - 같은 후보는 두 번까지, 연달아 쓰지 않는다. 자사 촬영 컷이 있으면 사진보다 먼저 고르고 후보마다 한 번만 쓴다.
 - 인증서 · 표 · 그래프, 이 상품이 아닌 물건, 잘라 낼 수 없는 글자가 있으면 usable false. 위아래 글자 띠는 trim으로 잘라 낸다.
@@ -161,10 +162,10 @@ ${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의
     system,
     user,
     userImages: [...ctx.sheets, ...ctx.archiveSheets],
-    skills: writerSkills({ facts: ctx.facts, rules: ctx.rules, accountName: ctx.accountName }).filter((s) => ["get_product_facts", "time_script", "check_rules"].includes(s.name)),
+    skills: writerSkills({ facts: ctx.facts, rules: ctx.rules, accountName: ctx.accountName }).filter((s) => ["get_product_facts", "time_script", "check_rules", "check_caption"].includes(s.name)),
     outputSchema: storyboardSchema,
     outputName: "storyboard",
-    maxSteps: 8,
+    maxSteps: 12,
     service: ctx.service,
     readService: ctx.readService,
     planId: ctx.planId,
@@ -206,10 +207,11 @@ export function storyboardProblems(b: Storyboard, archiveIds: string[], fixedHoo
 
 const reviewSchema = z.object({
   problems: z.array(z.string()).describe("고쳐야 할 문제. 어느 장면의 어떤 말인지 구체적으로. 없으면 빈 배열"),
+  unsuitable_phrases: z.array(z.object({ kind: z.enum(["hook", "ending"]), reason: z.string() })).describe("소재/내용과 맞지 않아 교체해야 하는 저장 후킹 또는 마지막 문구. 그 외 문제는 problems에 쓴다"),
 });
 
 /** 처음 보는 시청자처럼 읽는다. 점수가 아니라 말이 되는지, 이어지는지, 끌리는지를 본다. */
-export async function reviewStoryboard(input: { board: Storyboard; facts: ProductFacts; sheets: string[]; fixedTexts: string[] }): Promise<{ problems: string[]; tokens: { input: number; output: number } }> {
+export async function reviewStoryboard(input: { board: Storyboard; facts: ProductFacts; sheets: string[]; fixedTexts: string[] }): Promise<{ problems: string[]; unsuitable_phrases: { kind: "hook" | "ending"; reason: string }[]; tokens: { input: number; output: number } }> {
   const b = input.board;
   const model = agentModel();
   const completion = await getOpenAI().chat.completions.parse({
@@ -224,7 +226,7 @@ export async function reviewStoryboard(input: { board: Storyboard; facts: Produc
 - 화면: 그 장면 이미지가 그 말과 맞는가.
 - 정보 가치: 후킹이 약속한 답이 구체적인가. 상품 이름과 장점만 나열하며 답을 피하지 않는가. 근거 있는 사용법/구분 정보로 답하는 영상은 허용한다.
 후킹의 질문에 본문이 실제로 답하는지, hook.answer와 evidence_scenes가 그 답과 맞는지 확인한다. '보라'고 약속한 제형/사용 장면은 실물이 있어야 한다. 상품 설명을 전하는 도식은 허용하되 체험의 증거로 보지 않는다.
-${input.fixedTexts.length ? `저장된 문구도 근거/소재/답 회수 검수에서 제외하지 않는다. 맞지 않으면 '저장 후킹 부적합:'으로 시작해 이유를 쓴다: ${input.fixedTexts.join(" / ")}` : ""}`,
+${input.fixedTexts.length ? `저장된 문구도 근거/소재/답 회수 검수에서 제외하지 않는다. 맞지 않으면 unsuitable_phrases에 종류와 이유를 쓴다. 첫 문장은 hook, 마지막 문장은 ending이다. 정상 후킹을 마지막 문구 때문에 교체하지 않는다: ${input.fixedTexts.join(" / ")}` : ""}`,
       },
       {
         role: "user",
@@ -242,6 +244,7 @@ ${input.fixedTexts.length ? `저장된 문구도 근거/소재/답 회수 검수
   });
   return {
     problems: (() => { const parsed = completion.choices[0]?.message?.parsed; if (!parsed) throw new Error("장면표 검수 응답이 없어요"); return parsed.problems; })(),
+    unsuitable_phrases: completion.choices[0]!.message.parsed!.unsuitable_phrases,
     tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },
   };
 }

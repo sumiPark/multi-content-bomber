@@ -4,6 +4,20 @@ interface EvidenceBoard {
   scenes: { source: string; source_id: string; say: string }[];
 }
 
+/** 검수에서 지적한 종류만 교체한다. 마지막 문구 문제로 정상 후킹을 버리지 않는다. */
+export function rejectIncompatiblePhrases(state: {
+  hooks: { text: string; template: string }[];
+  endings: { text: string; template: string }[];
+  rejected: { kind: "hook" | "ending"; template: string; why: string; afterCheck: boolean }[];
+}, issues: { kind: "hook" | "ending"; reason: string }[]): void {
+  for (const kind of ["hook", "ending"] as const) {
+    const reasons = issues.filter((i) => i.kind === kind).map((i) => i.reason);
+    if (!reasons.length) continue;
+    const phrase = (kind === "hook" ? state.hooks : state.endings).shift();
+    if (phrase) state.rejected.push({ kind, template: phrase.template, why: reasons.join(" / "), afterCheck: true });
+  }
+}
+
 /** 병 사진만 있는 영상에서 제형 시연을 약속했던 회귀 사례를 막는다. 설명과 실물 증거는 구분한다. */
 export function hookEvidenceProblems(board: EvidenceBoard, archive: { id: string; what: string }[]): string[] {
   const out: string[] = [];

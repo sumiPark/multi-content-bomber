@@ -8,7 +8,7 @@ import { timeScript } from "@/lib/agents/ko-skills";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
 import { motionTexts, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
-import { hookEvidenceProblems } from "@/lib/auto-video/hook-evidence";
+import { hookEvidenceProblems, rejectIncompatiblePhrases } from "@/lib/auto-video/hook-evidence";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
 import { kstDate } from "@/lib/automation/time";
@@ -233,8 +233,9 @@ export async function makeAutoVideo(input: {
     add(res.tokens);
     // 다시 쓴 답이 비어 있으면 앞서 쓴 장면표를 버리지 않는다
     if (!res.output.scenes.length || res.output.scenes.some((s) => !s.say.trim() || !s.tts.trim())) {
+      storyboardReviews.push({ attempt: attempt + 1, problems: ["빈 장면표/말이 빈 장면"], board: res.output });
       console.log(`  장면표 ${attempt + 1}번째: 말이 빈 장면이 있어 다시 쓴다`);
-      if (board) retry = { board, problems: [...left, "모든 장면에 say와 tts를 쓴다"] };
+      if (board) retry = { board, problems: [...left, "쓸 수 있는 사진이 1~2개여도 해당 사진과 정보 도식(motion)으로 완성한다. 모든 장면에 say와 tts를 쓴다. 빈 배열로 답하지 않는다"] };
       continue;
     }
     board = applyFixedPhrases(res.output, phrases);
@@ -268,15 +269,12 @@ export async function makeAutoVideo(input: {
     const review = await reviewStoryboard({ board, facts, sheets, fixedTexts: fixedTexts() });
     add(review.tokens);
     const blockingNow = blockingIssues(check.issues).map((i) => i.detail);
-    left = [...code, ...blockingNow, ...review.problems];
+    left = [...code, ...blockingNow, ...review.problems, ...review.unsuitable_phrases.map((p) => `${p.kind}: ${p.reason}`)];
     storyboardReviews.push({ attempt: attempt + 1, hook: board.hook, problems: left });
     console.log(`  장면표 ${attempt + 1}번째: 코드 ${code.length} · 규칙/근거 ${blockingNow.length} · 시청자 ${review.problems.length}`);
     for (const p of left) console.log(`    - ${p.slice(0, 160)}`);
     if (!left.length) break;
-    if (phrases.hooks.length && (review.problems.some((p) => p.includes("저장 후킹 부적합")) || code.some((p) => p.includes("제형을 보라고")))) {
-      const rejected = phrases.hooks.shift()!;
-      phrases.rejected.push({ kind: "hook", template: rejected.template, why: left.join(" / "), afterCheck: true });
-    }
+    rejectIncompatiblePhrases(phrases, [...review.unsuitable_phrases, ...code.filter((p) => p.includes("제형을 보라고")).map((reason) => ({ kind: "hook" as const, reason }))]);
     dropFailedPhrases(phrases, blockingIssues(check.issues));
     retry = { board, problems: left };
   }

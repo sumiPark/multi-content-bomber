@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { hookEvidenceProblems } from "./hook-evidence";
+import { hookEvidenceProblems, rejectIncompatiblePhrases } from "./hook-evidence";
 import { contrast, DEFAULT_LOOK, readableLook, readableRows } from "../shoot/video-kit/caption-style";
 import { inspectAndRepairVideo, type VideoIssue, type VideoQuality } from "../shoot/video-kit/quality";
 
@@ -9,6 +9,13 @@ const textureBoard = {
   photos: [{ id: "p1", usable: true, kind: "product" }],
   scenes: [{ source: "photo", source_id: "p1", say: "후킹" }, { source: "photo", source_id: "p1", say: "거품 토너예요" }],
 };
+test("마지막 문구가 소재와 맞지 않으면 후킹을 유지하고 마지막 문구만 교체한다", () => {
+  const state = { hooks: [{ text: "어느 단계에 쓸까요?", template: "어느 단계에 쓸까요?" }], endings: [{ text: "사용감부터 보세요", template: "사용감부터 보세요" }, { text: "제품 안내와 함께 확인하세요", template: "제품 안내와 함께 확인하세요" }], rejected: [] as { kind: "hook" | "ending"; template: string; why: string; afterCheck: boolean }[] };
+  rejectIncompatiblePhrases(state, [{ kind: "ending", reason: "실제 사용감 컷이 없다" }]);
+  assert.equal(state.hooks[0].text, "어느 단계에 쓸까요?");
+  assert.equal(state.endings[0].text, "제품 안내와 함께 확인하세요");
+  assert.equal(state.rejected[0].kind, "ending");
+});
 test("용기 사진만으로 제형 시연을 약속하지 않는다", () => {
   assert.match(hookEvidenceProblems(textureBoard, []).join(" "), /실제 제형/);
   assert.equal(hookEvidenceProblems({ ...textureBoard, photos: [{ id: "p1", usable: true, kind: "texture" }] }, []).length, 0);
