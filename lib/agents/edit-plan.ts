@@ -16,7 +16,7 @@ import type { createServiceClient } from "@/lib/supabase/service";
 type Service = ReturnType<typeof createServiceClient>;
 
 const graphicTypes = ["badge", "title", "chip", "notice", "stat", "split", "steps", "ring", "arrow", "end_card"] as const;
-const sfxNames = ["pop", "click", "rustle", "whoosh", "plug", "tick", "ding"] as const;
+export const sfxNames = ["pop", "click", "rustle", "whoosh", "plug", "tick", "ding"] as const;
 
 export const graphicSchema = z.object({
   type: z.enum(graphicTypes),
@@ -45,7 +45,7 @@ export const graphicSchema = z.object({
 // AI 이미지는 원료를 그림으로 설명할 수 있는 상품에만 쓴다. 과일 · 의류는 그림이 실물처럼 보여 쓰지 않는다
 export const VISUAL_KINDS: ProductKind[] = ["COSMETIC", "HEALTH_FOOD"];
 export const MAX_VISUALS = 2;
-// 60~85초 설명 영상의 상식 구간(2026-11-06 사용자 결정). 과일 품종 · 원리 설명에도 쓴다
+// 설명 영상의 상식 구간(2026-11-06 사용자 결정). 과일 품종 · 원리 설명에도 쓴다
 export const LONG_VISUALS: VisualPolicy = { max: 10, minGap: 1, allKinds: true };
 
 export interface VisualPolicy {
@@ -200,7 +200,7 @@ ${ctx.liveVoice ? "이 계정은 사람이 나와 말한다. 촬영본에 말이
 1. get_product_facts를 읽고, 프레임 묶음에서 촬영본마다 쓸 구간과 뺄 구간을 판단한다(analysis). 시각이 애매하면 look_closer로 확인한다.
 2. ${hookAsk}
 3. ${thumbAsk}
-4. 대본과 컷: 첫 비트는 후킹이고 첫 컷은 가장 궁금한 장면이다. 그 뒤로 비트마다 한 가지만 말하고 장면과 말이 맞게 한다. 합계는 촬영본과 기획에 맞춘다. 보여 주는 영상은 15~30초, 사람이 설명하는 영상은 60~85초.
+4. 대본과 컷: 첫 비트는 후킹이고 첫 컷은 가장 궁금한 장면이다. 그 뒤로 비트마다 한 가지만 말하고 장면과 말이 맞게 한다. 합계는 촬영본과 기획에 맞춘다. 보여 주는 영상은 15~30초, 사람이 설명하는 영상은 내용에 맞게 30~85초.
 5. 자막 · 그래픽 · 효과음을 정한다. 쓰는 말 전체를 check_ai_tone, check_rules로 점검하고 read_tts로 읽기용 원고를 확인한다.
 6. look을 정한다. 아래 계정 설정과 상품 · 장면을 읽고 이 영상에 맞는 글자 디자인과 음악을 직접 만든다.${auto && ctx.scriptLines?.length ? `
 

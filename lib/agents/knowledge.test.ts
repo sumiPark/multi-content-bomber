@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { cardMatches, knowledgeBlock, knowledgeEvidence } from "@/lib/agents/knowledge";
 import { cleanStatement } from "@/lib/agents/knowledge-draft";
-import { charRange, storyboardProblems, type Storyboard } from "@/lib/agents/storyboard";
-import { cropPixels } from "@/lib/auto-video/gif-clips";
+import { charRange, sentenceEnding, storyboardProblems, type Storyboard } from "@/lib/agents/storyboard";
+import { cropPixels, gifRange } from "@/lib/auto-video/gif-clips";
 import { stripFlaggedGraphics } from "@/lib/auto-video/make";
 
 const scene = (over: Partial<Storyboard["scenes"][number]>): Storyboard["scenes"][number] => ({
@@ -18,6 +18,7 @@ const scene = (over: Partial<Storyboard["scenes"][number]>): Storyboard["scenes"
   captions: [],
   emphasis: [],
   graphics: [],
+  sfx: [],
   ...over,
 });
 
@@ -26,11 +27,14 @@ function board(scenes: Storyboard["scenes"], over: Partial<Storyboard> = {}): St
     selling_point: "",
     story: "",
     question_reason: "",
+    story_type: "chase",
+    one_thing: "",
     photos: [
-      { id: "p1", usable: true, kind: "product", what: "", trim_top: 0, trim_bottom: 0 },
-      { id: "p2", usable: true, kind: "product", what: "", trim_top: 0, trim_bottom: 0 },
+      { id: "p1", usable: true, kind: "product", what: "", trim_top: 0, trim_bottom: 0, upright: true },
+      { id: "p2", usable: true, kind: "product", what: "", trim_top: 0, trim_bottom: 0, upright: true },
+      { id: "p3", usable: true, kind: "product", what: "", trim_top: 0, trim_bottom: 0, upright: false },
     ],
-    gifs: [{ id: "g1", usable: true, what: "", crop_x: 0, crop_y: 0, crop_w: 1, crop_h: 1 }],
+    gifs: [{ id: "g1", usable: true, what: "", crop_x: 0, crop_y: 0, crop_w: 1, crop_h: 1, start_sec: 0, end_sec: 4 }],
     product_first_scene: 1,
     hook: { purpose: "curiosity", answer: "답", evidence_scenes: [1], spoken: "가나다", on_screen: "가나다", highlight: "", position: "top" },
     scenes,
@@ -52,12 +56,19 @@ const knowledge = {
 // 18자 × 25장면 = 450자
 function goodScenes(): Storyboard["scenes"] {
   return Array.from({ length: 25 }, (_, i) => {
+    const say = `장면${i}의 다른 말끝${i}번`;
+    return { ...goodScene(i), say };
+  });
+}
+
+function goodScene(i: number): Storyboard["scenes"][number] {
+  return (() => {
     if (i === 0) return scene({ part: "hook", evidence: [], source: "photo", source_id: "p1" });
     if (i === 24) return scene({ part: "takeaway", evidence: [], source: "photo", source_id: "p1" });
     if (i >= 16 && i < 20) return scene({ part: "product", evidence: ["P"], source: i % 2 ? "photo" : "gif", source_id: i % 2 ? "p1" : "g1" });
     if (i >= 20) return scene({ part: "difference", evidence: ["D1"], source: i % 2 ? "photo" : "gif", source_id: i % 2 ? "p2" : "g1" });
     return scene({ source: "visual", source_id: `v${i}` });
-  });
+  })();
 }
 
 function goodBoard(): Storyboard {
@@ -65,12 +76,12 @@ function goodBoard(): Storyboard {
   return board(scenes, { visuals: scenes.flatMap((s, i) => (s.source === "visual" ? [{ beat: i, key: `k${i}`, subject: "", evidence: "", prompt: "p", motion: "solid" as const }] : [])) });
 }
 
-const limits: [number, number] = [445, 630];
+const limits: [number, number] = [222, 630];
 const problems = (b: Storyboard, k = knowledge) => storyboardProblems(b, [], false, { knowledge: k, charLimits: limits });
 
-describe("60~85초 장면표 점검", () => {
+describe("설명 영상 장면표 점검", () => {
   it("음성 속도에 맞는 글자 수를 계산한다", () => {
-    assert.deepEqual(charRange(7.4), [444, 629]);
+    assert.deepEqual(charRange(7.4), [222, 629]);
   });
 
   it("구조를 지킨 장면표는 길이 · 구조 문제가 없다", () => {
@@ -78,10 +89,36 @@ describe("60~85초 장면표 점검", () => {
     assert.deepEqual(out.filter((p) => !p.includes("번 썼다")), []);
   });
 
-  it("15~25초 분량의 짧은 장면표를 잡는다", () => {
+  it("너무 짧은 장면표를 잡는다", () => {
     const out = problems(board(goodScenes().slice(0, 7)));
     assert.equal(out.some((p) => p.includes("장면이 7개")), true);
     assert.equal(out.some((p) => p.includes("자로 쓴다")), true);
+  });
+
+  it("1분을 채우지 않은 짧은 설명 영상도 통과한다", () => {
+    const scenes = goodScenes().filter((_, i) => i === 0 || i === 24 || (i >= 16 && i < 24) || (i >= 1 && i < 5));
+    const visuals = scenes.flatMap((s, i) => (s.source === "visual" ? [{ beat: i, key: `k${i}`, subject: "", evidence: "", prompt: "p", motion: "solid" as const }] : []));
+    const out = problems(board(scenes, { visuals }));
+    assert.equal(out.some((p) => p.includes("자로 쓴다") || p.includes("장면이 ")), false);
+  });
+
+  it("눕힌 제품 사진은 쓰지 못한다", () => {
+    const scenes = goodScenes();
+    scenes[17] = { ...scenes[17], source: "photo", source_id: "p3" };
+    assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("p3는 쓸 수 있는 후보가 아니다")), true);
+  });
+
+  it("같은 말끝이 반복되면 잡는다", () => {
+    assert.equal(sentenceEnding("성분표에 이렇게 적혀 있어요."), "적혀있어요");
+    const scenes = goodScenes().map((s) => ({ ...s, say: "소듐디엔에이로 적혀 있어요." }));
+    assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("같은 말끝")), true);
+  });
+
+  it("같은 설명 화면을 되풀이하면 잡는다", () => {
+    const motion = { kind: "big_fact", title: "전성분", left_label: "", right_label: "", left_value: "", right_values: [], number_to: 0, unit: "", end_text: "", items: [], big: "성분명", accent: "#E04E08" } as const;
+    const scenes = goodScenes();
+    for (const i of [3, 8]) scenes[i] = { ...scenes[i], source: "motion", source_id: `m${i}`, motion: { ...motion, right_values: [], items: [] } };
+    assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("되풀이")), true);
   });
 
   it("상품 이름이 너무 늦게 나오면 잡는다", () => {
@@ -192,6 +229,13 @@ describe("움직이는 이미지 자르기", () => {
 
   it("너무 작은 구역이면 전체를 쓴다", () => {
     assert.deepEqual(cropPixels({ w: 400, h: 711 }, { crop_x: 0, crop_y: 0, crop_w: 0.1, crop_h: 0.1 }), { x: 0, y: 0, w: 400, h: 710 });
+  });
+
+  it("다른 상품이 나오기 전까지만 쓴다", () => {
+    const crop = { crop_x: 0, crop_y: 0, crop_w: 1, crop_h: 1 };
+    assert.deepEqual(gifRange(10, { ...crop, start_sec: 0, end_sec: 3 }), { start: 0, length: 3 });
+    assert.deepEqual(gifRange(4, crop), { start: 0, length: 4 });
+    assert.deepEqual(gifRange(4, { ...crop, start_sec: 3.9, end_sec: 4 }), { start: 0, length: 4 });
   });
 
   it("범위를 벗어난 값을 줄인다", () => {

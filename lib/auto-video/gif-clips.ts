@@ -60,6 +60,15 @@ export interface GifCrop {
   crop_y: number;
   crop_w: number;
   crop_h: number;
+  start_sec?: number;
+  end_sec?: number;
+}
+
+/** 쓸 시간 구간. 값이 이상하거나 너무 짧으면 전체를 쓴다. */
+export function gifRange(seconds: number, crop: GifCrop): { start: number; length: number } {
+  const start = Math.min(seconds, Math.max(0, Number.isFinite(crop.start_sec) ? crop.start_sec! : 0));
+  const end = Math.min(seconds, Number.isFinite(crop.end_sec) && crop.end_sec! > 0 ? crop.end_sec! : seconds);
+  return end - start >= 0.5 ? { start, length: end - start } : { start: 0, length: seconds };
 }
 
 const unit = (n: number, fallback: number) => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : fallback);
@@ -85,7 +94,7 @@ function dominantColor(file: string, c: { x: number; y: number; w: number; h: nu
   return `0x${dark(b[0])}${dark(b[1])}${dark(b[2])}`;
 }
 
-/** 자른 구간을 세로 영상 컷으로 만든다. 한 번 재생한 뒤 마지막 장면을 유지한다. */
+/** 자른 구역 · 구간을 세로 영상 컷으로 만든다. 한 번 재생한 뒤 마지막 장면을 유지한다. */
 export function gifClip(asset: GifAsset, crop: GifCrop, workDir: string): { file: string; soft: boolean } {
   const c = cropPixels(asset, crop);
   const scale = Math.min(FRAME_W / c.w, FRAME_H / c.h);
@@ -93,9 +102,10 @@ export function gifClip(asset: GifAsset, crop: GifCrop, workDir: string): { file
   const h = Math.floor((c.h * scale) / 2) * 2;
   const file = join(workDir, `${asset.id}-clip.mp4`);
   const color = dominantColor(asset.file, c);
-  const hold = Math.max(0, CLIP_SECONDS - asset.seconds + 0.2).toFixed(2);
+  const range = gifRange(asset.seconds, crop);
+  const hold = Math.max(0, CLIP_SECONDS - range.length + 0.2).toFixed(2);
   ffmpeg([
-    "-y", "-v", "error", "-i", asset.file,
+    "-y", "-v", "error", "-ss", range.start.toFixed(2), "-t", range.length.toFixed(2), "-i", asset.file,
     "-vf", `crop=${c.w}:${c.h}:${c.x}:${c.y},scale=${w}:${h}:flags=lanczos,unsharp=5:5:0.6,pad=${FRAME_W}:${FRAME_H}:(ow-iw)/2:(oh-ih)/2:color=${color},fps=30,tpad=stop_mode=clone:stop_duration=${hold},format=yuv420p`,
     "-t", String(CLIP_SECONDS), "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "18", file,
   ]);

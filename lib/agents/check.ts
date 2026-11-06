@@ -18,7 +18,7 @@ import { checkText, type ContentRule } from "@/lib/rules/check";
 const MIN_HOOK_SCORE = 50;
 const MIN_HUMAN_SCORE = 55;
 const LENGTH_RANGE: [number, number] = [12, 40];
-// 직접 촬영은 설명형 60~85초까지 허용한다(2026-11-06 사용자 결정)
+// 직접 촬영은 설명형 85초 안팎까지 허용한다(2026-11-06 사용자 결정)
 const SHOOT_LENGTH_RANGE: [number, number] = [12, 90];
 
 export interface CheckIssue {

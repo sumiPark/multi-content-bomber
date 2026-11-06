@@ -5,11 +5,11 @@ import type { AccountConcept } from "@/lib/agents/concept";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
 import { LONG_VISUALS, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, phraseNotes, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
-import { editKit } from "@/lib/agents/ko-skills";
+import { editKit, scoreHooks } from "@/lib/agents/ko-skills";
 import { loadVideoKnowledge } from "@/lib/agents/knowledge";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
-import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, charRange, firstViewerTest, motionTexts, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
+import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, MIN_AUTO_HOOK_SCORE, MIN_INTEREST, charRange, firstViewerTest, motionTexts, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
 import { hookEvidenceProblems, rejectIncompatiblePhrases } from "@/lib/auto-video/hook-evidence";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
@@ -286,6 +286,7 @@ export async function makeAutoVideo(input: {
   let left: string[] = [];
   const storyboardReviews: unknown[] = [];
   let boardNotes: string[] = [];
+  let softLeft: string[] = [];
   // 못 쓰는 사진 때문에 다시 쓰는 횟수는 따로 센다. 말을 점검하기 전에 걸러 토큰을 아낀다
   let photoRetries = 3;
   const fixedTexts = () => [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t);
@@ -363,9 +364,18 @@ export async function makeAutoVideo(input: {
     add(review.tokens);
     const blockingNow = blockingIssues(check.issues).map((i) => i.detail);
     left = [...code, ...blockingNow, ...review.problems, ...review.unsuitable_phrases.map((p) => `${p.kind}: ${p.reason}`)];
-    storyboardReviews.push({ attempt: attempt + 1, hook: board.hook, problems: left, notes: review.notes });
-    boardNotes = review.notes;
-    console.log(`  장면표 ${attempt + 1}번째: 코드 ${code.length} · 규칙/근거 ${blockingNow.length} · 시청자 ${review.problems.length}`);
+    // 재미 · 후킹 점수는 다시 쓰게 하는 이유로만 쓴다. 마지막까지 낮으면 멈추지 않고 사람이 볼 경고로 남긴다
+    const soft: string[] = [];
+    if (review.interest < MIN_INTEREST) soft.push(`재미 점수 ${review.interest}점이다. 끝까지 볼 이유가 약하다. ${review.boringParts.join(" / ")}`.trim());
+    if (!phrases.hooks.length) {
+      const hookScore = scoreHooks([board.hook.spoken])[0];
+      if (hookScore && hookScore.score < MIN_AUTO_HOOK_SCORE) soft.push(`첫 문장 "${board.hook.spoken}" 점수가 ${hookScore.score}점이다. 시청자의 오해 · 손해 · 놀라움과 이어지는 구체적인 문장으로 바꾼다`);
+    }
+    storyboardReviews.push({ attempt: attempt + 1, hook: board.hook, story: board.story_type, oneThing: board.one_thing, interest: review.interest, problems: left, soft, notes: review.notes, boring: review.boringParts });
+    boardNotes = [...review.notes, ...review.boringParts.map((b) => `지루할 수 있는 구간: ${b}`)];
+    softLeft = soft;
+    if (!left.length && soft.length && attempt < MAX_BOARD_TRIES - 1) left = soft;
+    console.log(`  장면표 ${attempt + 1}번째: 코드 ${code.length} · 규칙/근거 ${blockingNow.length} · 시청자 ${review.problems.length} · 재미 ${review.interest}점 · ${board.story_type} · ${board.one_thing}`);
     for (const p of left) console.log(`    - ${p.slice(0, 160)}`);
     if (!left.length) break;
     rejectIncompatiblePhrases(phrases, [...review.unsuitable_phrases, ...code.filter((p) => p.includes("제형을 보라고")).map((reason) => ({ kind: "hook" as const, reason }))]);
@@ -384,7 +394,7 @@ export async function makeAutoVideo(input: {
   let motionFonts: VideoFonts | undefined;
   const clips: KitClip[] = [];
   const sources: unknown[] = [];
-  const warnings: string[] = boardNotes.map((n) => `장면표 의견: ${n}`.slice(0, 300));
+  const warnings: string[] = [...softLeft, ...boardNotes.map((n) => `장면표 의견: ${n}`)].map((n) => n.slice(0, 300));
   if (pickedFonts && finalBoard.scenes.some((s) => s.source === "motion")) {
     try {
       motionFonts = await downloadVideoFonts(pickedFonts, workDir);
@@ -395,7 +405,7 @@ export async function makeAutoVideo(input: {
   const clipNo = new Map<string, number>();
   const used = new Map<string, number>();
   // AI 이미지를 못 만들면 상품 사진이 대신 나간다
-  const fallbackPhoto = finalBoard.photos.find((p) => p.usable && p.kind === "product")?.id ?? finalBoard.photos.find((p) => p.usable)?.id;
+  const fallbackPhoto = finalBoard.photos.find((p) => p.usable && p.kind === "product" && p.upright)?.id ?? finalBoard.photos.find((p) => p.usable && p.kind !== "product")?.id;
   const clipOf = (id: string, kind: "photo" | "archive" | "gif"): number | null => {
     if (clipNo.has(id)) return clipNo.get(id)!;
     const no = clips.length + 1;
@@ -448,7 +458,7 @@ export async function makeAutoVideo(input: {
       cuts: [{ clip: no, in: from, out: to, what: s.shows }],
       // 글자 없는 그래픽은 빈 막대로 나온다
       graphics: i === 0 ? [] : s.graphics.filter((g) => graphicTexts(g).length > 0),
-      sfx: [],
+      sfx: s.sfx.filter((x) => s.say.includes(x.at_word)).map((x) => ({ name: x.name, at_word: x.at_word, at: 0 })),
     });
   });
   // 표지는 제품이 보이는 장면으로. 설명 화면 · AI 이미지를 골랐으면 첫 장면을 쓴다
