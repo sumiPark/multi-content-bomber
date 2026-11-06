@@ -681,6 +681,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   }
   // 최종 인코딩 뒤 검수한다. 음성/시간표/음악/실물 소재를 재사용해 글자만 최대 두 번 고친다.
   let quality: VideoQuality | undefined;
+  let finalLook = look;
+  let finalZones = zones;
   if (input.reviewFinal) {
     const inspected = await inspectAndRepairVideo({
       file: final,
@@ -688,12 +690,27 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       save: (report) => writeFileSync(join(workDir, "quality.json"), JSON.stringify(report, null, 2)),
       repair: async (attempt, issues) => {
         console.log(`[video-kit] 완성본 자동 수정 ${attempt}: ${issues.map((i) => `${i.at.toFixed(1)}초 ${i.detail}`).join(" / ")}`);
-        const repaired = { ...tl, graphics: [], hook: { ...tl.hook, position: attempt === 1 ? tl.hook.position : "top" as const } };
-        const repairZones = attempt === 1 ? zones : zones?.map((z) => ({ ...z, cover: { ...z.cover, mid: 1 } })) ?? null;
-        writeProject(project, repaired, { look: readableLook(look), zones: repairZones, behind: null, fonts: videoFonts, readable: true });
+        const previousPlaces = captionZones(tl, finalZones);
+        const previousHook = hookZone(finalZones, tl.hook.start, tl.hook.end, tl.hook.position);
+        const repairZones = (finalZones ?? tl.cuts.map((c) => ({ start: c.start, end: c.end, cover: { top: 0, mid: 0, lower: 0 } }))).map((z) => {
+          const cover = { ...z.cover };
+          const active = issues.filter((i) => i.at >= z.start - 0.1 && i.at < z.end + 0.1);
+          if (active.length) {
+            const avoid = new Set(active.flatMap((issue) => [
+              ...tl.captions.flatMap((c, i) => issue.at >= c.start - 0.1 && issue.at <= c.end + 0.1 ? [previousPlaces[i]] : []),
+              ...(issue.at <= tl.hook.end ? [previousHook] : []),
+            ]));
+            for (const place of ["top", "mid", "lower"] as const) cover[place] = avoid.has(place) ? 1 : Math.min(0.99, cover[place]);
+          }
+          return { ...z, cover };
+        });
+        const repaired = { ...tl, graphics: [] };
+        finalLook = readableLook(look);
+        writeProject(project, repaired, { look: finalLook, zones: repairZones, behind: null, fonts: videoFonts, readable: true });
         const out = join(workDir, `readable-${attempt}.mp4`);
         hyperframes(version, project, ["render", "-o", out, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
         tl = repaired;
+        finalZones = repairZones;
         return out;
       },
     });
@@ -722,6 +739,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   cover ??= makeCover(version, workDir, coverClip, plan.thumbnail, look, videoFonts);
 
   const hookText = plan.hook.on_screen.replace(/\n+/g, " ");
+  plan.look = finalLook;
   return {
     final,
     cover,

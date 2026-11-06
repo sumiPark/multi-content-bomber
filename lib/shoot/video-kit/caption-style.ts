@@ -164,7 +164,8 @@ export function readableRows(text: string): string[] {
   for (let i = 1; i < words.length; i++) {
     const a = words.slice(0, i).join(" ");
     const b = words.slice(i).join(" ");
-    const penalty = Math.max(units(a), units(b)) + (words[i].replace(/[,.!?]/g, "").length <= 1 ? 10 : 0);
+    const modifier = /^(?:어느|어떤|무슨|몇|첫|한|두|세|각|매|이|그|저|이런|그런|저런|같은|다른|적당한)$/;
+    const penalty = Math.max(units(a), units(b)) + (words.length - i === 1 && words[i].replace(/[,.!?]/g, "").length <= 2 ? 10 : 0) + (modifier.test(words[i - 1]) ? 10 : 0);
     if (penalty < best) { best = penalty; split = i; }
   }
   return [words.slice(0, split).join(" "), words.slice(split).join(" ")];
@@ -175,7 +176,7 @@ export function readableCaptionBlock(c: CaptionInput, look: Look, zone: Zone): {
   const size = Math.floor(Math.min(look.size, ...lines.map((l) => 840 / Math.max(units(l), 1))));
   const rows = bigText(lines, c.emphasis.find((e) => e && lines.some((l) => l.includes(e))) ?? "", look, size, 840);
   const box = ZONE_BOX[zone];
-  return { html: `<div id="${c.id}" class="lk clip" data-start="${c.start}" data-duration="${(c.end - c.start).toFixed(3)}" style="top:${box.top}px;height:${box.height}px">${rows}</div>`, motion: "", keyAt: null };
+  return { html: `<div id="${c.id}" class="lk clip" data-start="${c.start}" data-duration="${(c.end - c.start).toFixed(3)}" style="top:${box.top}px;height:${box.height}px">${rows}</div>`, motion: `tl.set("#${c.id}", {opacity:0}, 0); tl.set("#${c.id}", {opacity:1}, ${c.start}); tl.set("#${c.id}", {opacity:0}, ${c.end});`, keyAt: null };
 }
 
 const fit = (text: string, size: number, width: number) => Math.floor(Math.min(size, width / Math.max(units(text), 0.5)));

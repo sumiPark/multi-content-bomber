@@ -262,8 +262,7 @@ export async function makeAutoVideo(input: {
       continue;
     }
     const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0), ...hookEvidenceProblems(board, archive)];
-    const estimated = timeScript(board.scenes.map((s) => s.tts), 20).totalSeconds;
-    if (estimated < 15 || estimated > 27) code.push(`예상 말 길이가 ${estimated.toFixed(1)}초다. 음성 속도를 바꾸거나 빈 시간을 늘리지 말고, 질문에 답하는 구체적인 정보로 15~25초를 구성한다`);
+    // 예상 길이는 checkScript에서 기존 기준으로 확인한다. 15초 목표의 소수점 오차로 기획을 버리지 않고 완성본의 실제 길이를 다시 잰다.
     const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts() });
     add(check.tokens);
     const review = await reviewStoryboard({ board, facts, sheets, fixedTexts: fixedTexts() });

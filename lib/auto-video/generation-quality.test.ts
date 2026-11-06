@@ -34,6 +34,9 @@ test("긴 자막과 고정 후킹도 낱말을 보존한 두 줄로 읽힌다", 
   const look = readableLook({ ...DEFAULT_LOOK, accent_color: "#141414" });
   assert.ok(contrast(look.text_color, look.box_color) >= 4.5);
   assert.ok(contrast(look.accent_color, look.box_color) >= 4.5);
+  assert.ok(readableRows("스킨케어 첫 단계에 써요.").every((r) => !r.endsWith("첫")));
+  assert.deepEqual(readableRows("스킨케어 첫 단계에 써요."), ["스킨케어", "첫 단계에 써요."]);
+  assert.ok(readableRows("버블토너, 어느 단계에 쓸까요?").every((r) => !r.endsWith("어느")));
 });
 
 const issue: VideoIssue = { kind: "caption", severity: "blocking", at: 2, detail: "자막이 겹침" };
