@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { TimedCaption } from "@/lib/shoot/video-kit/timeline";
 
 // 영상의 글자 디자인(look). 편집 에이전트가 계정 설정(말투 · 분위기 · 편집 스타일)을 읽고 영상마다 값을 만들고,
 // 코드는 값을 안전한 범위로 고친 뒤 그대로 그린다. 정해진 틀을 고르는 방식이 아니라 값의 조합이다.
@@ -171,10 +172,25 @@ export function readableRows(text: string): string[] {
   return [words.slice(0, split).join(" "), words.slice(split).join(" ")];
 }
 
+/** 실제 음성 시각은 그대로 두고 짧은 구절만 합친다. 고유명사나 '수 있어요'가 깜빡이며 분리되지 않게 한다. */
+export function readableCaptions(captions: TimedCaption[]): TimedCaption[] {
+  const out: TimedCaption[] = [];
+  for (const c of captions) {
+    const previous = out.at(-1);
+    const joined = previous ? `${previous.text} ${c.text}` : "";
+    if (previous && previous.beat === c.beat && c.start - previous.end <= 0.18 && units(joined) <= 22 && (previous.end - previous.start < 1.05 || c.end - c.start < 1)) {
+      previous.text = joined;
+      previous.end = c.end;
+      previous.emphasis = [...new Set([...previous.emphasis, ...c.emphasis])];
+    } else out.push({ ...c, emphasis: [...c.emphasis] });
+  }
+  return out;
+}
+
 export function readableCaptionBlock(c: CaptionInput, look: Look, zone: Zone): { html: string; motion: string; keyAt: number | null } {
   const lines = readableRows(c.text);
   const size = Math.floor(Math.min(look.size, ...lines.map((l) => 840 / Math.max(units(l), 1))));
-  const rows = bigText(lines, c.emphasis.find((e) => e && lines.some((l) => l.includes(e))) ?? "", look, size, 840);
+  const rows = bigText(lines, c.emphasis.find((e) => e && lines.some((l) => l.includes(e))) ?? "", look, size, 840, true);
   const box = ZONE_BOX[zone];
   return { html: `<div id="${c.id}" class="lk clip" data-start="${c.start}" data-duration="${(c.end - c.start).toFixed(3)}" style="top:${box.top}px;height:${box.height}px">${rows}</div>`, motion: `tl.set("#${c.id}", {opacity:0}, 0); tl.set("#${c.id}", {opacity:1}, ${c.start}); tl.set("#${c.id}", {opacity:0}, ${c.end});`, keyAt: null };
 }
@@ -287,10 +303,16 @@ export function captionBlock(c: CaptionInput, look: Look, zone: Zone): { html: s
 }
 
 /** 후킹 · 표지의 큰 글자. 첫 프레임부터 보여야 하므로 등장 움직임을 넣지 않는다. */
-export function bigText(lines: string[], highlight: string, look: Look, max: number, width: number): string {
+export function bigText(lines: string[], highlight: string, look: Look, max: number, width: number, inline = false): string {
   const size = Math.floor(Math.min(max, width / Math.max(1, ...lines.map(units))));
   return lines
     .map((line, n) => {
+      if (inline) {
+        // 강조어를 flex 자식으로 쪼개면 조사 앞에 공백/추가 줄바꿈이 생긴다. 한 줄을 한 인라인 문장으로 그린다.
+        const text = esc(line);
+        const body = highlight && line.includes(highlight) ? text.split(esc(highlight)).join(`<span class="k">${esc(highlight)}</span>`) : text;
+        return `<div class="row"><span class="w" data-fit-width="${width}" style="font-size:${size}px">${body}</span></div>`;
+      }
       const parts = highlight && line.includes(highlight) ? line.split(highlight) : [line];
       const tokens: string[] = [];
       parts.forEach((p, i) => {

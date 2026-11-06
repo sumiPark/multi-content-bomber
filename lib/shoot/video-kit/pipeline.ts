@@ -11,7 +11,7 @@ import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
-import { hookZone, normalizeLook, readableLook, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { hookZone, normalizeLook, readableCaptions, readableLook, type Look } from "@/lib/shoot/video-kit/caption-style";
 import { inspectAndRepairVideo, type VideoQuality, type VideoReview } from "@/lib/shoot/video-kit/quality";
 import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
 import { blockRows, captionSkillDir, designCaptions, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
@@ -552,6 +552,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     live.set(line.beat, shifted);
   }
   let tl = timeText(plan, base, words, live);
+  if (readable) tl = { ...tl, captions: readableCaptions(tl.captions) };
   // 사람이 볼 수 있게 어디에 들어갔는지 남긴다. 경고가 있으면 자동 발행도 멈춘다
   for (const u of visual.used) {
     const line = tl.lines[u.beat];

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hookEvidenceProblems, rejectIncompatiblePhrases } from "./hook-evidence";
-import { contrast, DEFAULT_LOOK, readableLook, readableRows } from "../shoot/video-kit/caption-style";
+import { bigText, contrast, DEFAULT_LOOK, readableCaptions, readableLook, readableRows } from "../shoot/video-kit/caption-style";
 import { inspectAndRepairVideo, type VideoIssue, type VideoQuality } from "../shoot/video-kit/quality";
 
 const textureBoard = {
@@ -37,6 +37,24 @@ test("긴 자막과 고정 후킹도 낱말을 보존한 두 줄로 읽힌다", 
   assert.ok(readableRows("스킨케어 첫 단계에 써요.").every((r) => !r.endsWith("첫")));
   assert.deepEqual(readableRows("스킨케어 첫 단계에 써요."), ["스킨케어", "첫 단계에 써요."]);
   assert.ok(readableRows("버블토너, 어느 단계에 쓸까요?").every((r) => !r.endsWith("어느")));
+});
+test("강조어 뒤 조사가 별도 flex 항목으로 감기지 않는다", () => {
+  const html = bigText(["버블토너,", "어느 단계에 쓸까요?"], "어느 단계", readableLook(DEFAULT_LOOK), 130, 880, true);
+  assert.ok(html.includes('<span class="k">어느 단계</span>에 쓸까요?'));
+  assert.equal((html.match(/class="row"/g) ?? []).length, 2);
+});
+test("실제 0.7초 제품명 자막을 음성 시각 그대로 합친다", () => {
+  const input = [
+    { id: "a", text: "파이니티 버블", start: 2.003, end: 2.76, beat: 1, emphasis: [] },
+    { id: "b", text: "액티베이터는", start: 2.76, end: 3.5, beat: 1, emphasis: [] },
+    { id: "c", text: "다음 장면", start: 3.6, end: 4.2, beat: 2, emphasis: [] },
+  ];
+  const result = readableCaptions(input);
+  assert.equal(result.length, 2);
+  assert.equal(result[0].text, "파이니티 버블 액티베이터는");
+  assert.equal(result[0].start, 2.003);
+  assert.equal(result[0].end, 3.5);
+  assert.equal(input[0].text, "파이니티 버블");
 });
 
 const issue: VideoIssue = { kind: "caption", severity: "blocking", at: 2, detail: "자막이 겹침" };

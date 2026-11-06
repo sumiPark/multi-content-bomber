@@ -173,6 +173,8 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   writeFileSync(join(dir, "hyperframes.json"), JSON.stringify({ paths: { blocks: "compositions", components: "compositions/components", assets: "assets" }, media: { autoProxy: false } }));
 
   const D = tl.duration;
+  // 브라우저가 실제로 받은 글꼴의 폭으로 한 번 더 맞춘다. 강조어 포함 문장 전체의 크기를 함께 조정한다.
+  const fitReadable = opts.readable ? `document.fonts.ready.then(() => document.querySelectorAll('[data-fit-width]').forEach(el => { const width = Number(el.dataset.fitWidth); const actual = el.getBoundingClientRect().width; if (actual > width) el.style.fontSize = Math.floor(parseFloat(getComputedStyle(el).fontSize) * width / actual) + 'px'; }));` : "";
   const caps = blocks.map((b) => b.html).join("\n    ");
   writeFileSync(
     join(dir, "compositions", "captions.html"),
@@ -187,6 +189,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
+    ${fitReadable}
     ${blocks.map((b) => b.motion).join("\n    ")}
     window.__timelines["captions"] = tl;
   </script>
@@ -234,12 +237,13 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
     .ecard em { display: block; margin-top: 18px; font-style: normal; font-size: 33px; font-weight: 400; color: #ccc; letter-spacing: -.5px; }
   </style>
   <div id="root" data-composition-id="graphics" data-width="1080" data-height="1920">
-    ${opts.noCaptions ? "" : `<div id="hook" class="lk clip" data-start="0" data-duration="${tl.hook.end}" style="top:${ZONE_BOX[hookAt].top}px;height:${ZONE_BOX[hookAt].height}px">${bigText(lines, tl.hook.highlight, look, Math.max(112, Math.min(150, look.size * 1.7)), 950)}</div>`}
+    ${opts.noCaptions ? "" : `<div id="hook" class="lk clip" data-start="0" data-duration="${tl.hook.end}" style="top:${ZONE_BOX[hookAt].top}px;height:${ZONE_BOX[hookAt].height}px">${bigText(lines, tl.hook.highlight, look, Math.max(112, Math.min(150, look.size * 1.7)), opts.readable ? 880 : 950, !!opts.readable)}</div>`}
     ${shown.map(graphicHtml).join("\n    ")}
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
     // 후킹은 첫 프레임부터 보인다 — 살짝 커지기만 하고, 말이 끝나면 사라진다
+    ${fitReadable}
     ${opts.noCaptions ? "" : `tl.fromTo("#hook", { scale: 1 }, { scale: 1.035, duration: ${Math.max(0.4, tl.hook.end - 0.1).toFixed(3)}, ease: "none" }, 0);
     tl.to("#hook", { opacity: 0, duration: 0.1, ease: "power2.in" }, ${(tl.hook.end - 0.1).toFixed(3)});`}
     ${shown.map(graphicMotion).join("\n    ")}
