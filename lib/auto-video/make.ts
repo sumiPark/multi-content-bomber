@@ -89,8 +89,9 @@ export function stripFlaggedGraphics(board: Storyboard, issues: { kind: string; 
     let hit = false;
     for (const s of scenes) {
       const kept = s.graphics.filter((g) => {
-        const joined = squash(graphicTexts(g).join(" "));
-        const flagged = g.type !== "end_card" && joined.length > 0 && (joined.includes(target) || target.includes(joined));
+        // 점검은 화면에 보이는 순서로 인용해 그래픽의 칸 순서와 다를 수 있다. 칸마다 글자가 인용문에 있는지 본다
+        const pieces = graphicTexts(g).map(squash).filter(Boolean);
+        const flagged = g.type !== "end_card" && pieces.length > 0 && (pieces.join("").includes(target) || pieces.every((p) => target.includes(p)));
         if (flagged) hit = true;
         return !flagged;
       });
