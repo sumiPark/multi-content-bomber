@@ -4,6 +4,7 @@ import { cardMatches, knowledgeBlock, knowledgeEvidence } from "@/lib/agents/kno
 import { cleanStatement } from "@/lib/agents/knowledge-draft";
 import { charRange, storyboardProblems, type Storyboard } from "@/lib/agents/storyboard";
 import { cropPixels } from "@/lib/auto-video/gif-clips";
+import { stripFlaggedGraphics } from "@/lib/auto-video/make";
 
 const scene = (over: Partial<Storyboard["scenes"][number]>): Storyboard["scenes"][number] => ({
   part: "knowledge",
@@ -137,6 +138,43 @@ describe("상식 카드 찾기", () => {
     const text = knowledgeEvidence(knowledge);
     assert.ok(text.includes("K1: 소듐디엔에이"));
     assert.ok(text.includes("D1: 거품 밀도"));
+  });
+});
+
+describe("화면 그래픽 근거", () => {
+  const graphic = (type: string, text: string, small = "") => ({ type, text, small, sub: "", note: "", chip: "", number: "", unit: "", left: "", right: "", from: "", items: [] }) as unknown as Storyboard["scenes"][number]["graphics"][number];
+  const withGraphics = () => {
+    const scenes = goodScenes();
+    scenes[3] = { ...scenes[3], graphics: [graphic("badge", "비타민 B12", "전성분 표기"), graphic("chip", "미세거품")] };
+    scenes[24] = { ...scenes[24], graphics: [graphic("end_card", "성분표부터 보세요")] };
+    return board(scenes);
+  };
+
+  it("걸린 그래픽만 빼고 말은 그대로 둔다", () => {
+    const b = withGraphics();
+    const out = stripFlaggedGraphics(b, [{ kind: "grounding", detail: '근거 없음: "전성분 표기 비타민 B12" — 표기가 달라요' }]);
+    assert.equal(out.removed, 1);
+    assert.equal(out.unresolved, 0);
+    assert.deepEqual(out.board.scenes[3].graphics.map((g) => g.text), ["미세거품"]);
+    assert.equal(out.board.scenes[3].say, b.scenes[3].say);
+  });
+
+  it("말에서 걸린 문제나 다른 종류는 해결된 것으로 치지 않는다", () => {
+    const b = withGraphics();
+    assert.equal(stripFlaggedGraphics(b, [{ kind: "grounding", detail: '근거 없음: "피부가 좋아져요" — 근거 없음' }]).unresolved, 1);
+    assert.equal(stripFlaggedGraphics(b, [{ kind: "rules", detail: "금지 표현" }]).unresolved, 1);
+  });
+
+  it("끝 카드는 빼지 않는다", () => {
+    const out = stripFlaggedGraphics(withGraphics(), [{ kind: "grounding", detail: '근거 없음: "성분표부터 보세요" — 근거 없음' }]);
+    assert.equal(out.removed, 0);
+    assert.equal(out.unresolved, 1);
+  });
+
+  it("근거 번호 뒤에 문구를 덧붙여도 번호로 본다", () => {
+    const scenes = goodScenes();
+    scenes[5] = { ...scenes[5], evidence: ["K1: 소듐디엔에이 설명"] };
+    assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("받은 자료에 없다")), false);
   });
 });
 

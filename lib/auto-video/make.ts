@@ -74,6 +74,34 @@ function applyFixedPhrases(board: Storyboard, phrases: PhraseState): Storyboard 
   return { ...board, scenes, hook: hook ? { ...board.hook, spoken: hook, on_screen: hook } : { ...board.hook, spoken: scenes[0]?.say ?? board.hook.spoken } };
 }
 
+/** 근거 점검이 화면 그래픽의 글자만 잡았으면 그 그래픽을 뺀다. 그래픽은 없어도 영상이 되고, 말은 건드리지 않는다. 끝 카드는 남긴다. */
+export function stripFlaggedGraphics(board: Storyboard, issues: { kind: string; detail: string }[]): { board: Storyboard; removed: number; unresolved: number } {
+  let removed = 0;
+  let unresolved = 0;
+  const scenes = board.scenes.map((s) => ({ ...s }));
+  for (const issue of issues) {
+    const sentence = issue.kind === "grounding" ? issue.detail.match(/근거 없음: "([^"]+)"/)?.[1] : null;
+    if (!sentence) {
+      unresolved++;
+      continue;
+    }
+    const target = squash(sentence);
+    let hit = false;
+    for (const s of scenes) {
+      const kept = s.graphics.filter((g) => {
+        const joined = squash(graphicTexts(g).join(" "));
+        const flagged = g.type !== "end_card" && joined.length > 0 && (joined.includes(target) || target.includes(joined));
+        if (flagged) hit = true;
+        return !flagged;
+      });
+      removed += s.graphics.length - kept.length;
+      s.graphics = kept;
+    }
+    if (!hit) unresolved++;
+  }
+  return { board: { ...board, scenes }, removed, unresolved };
+}
+
 function boardAsScript(board: Storyboard): ScriptOutput {
   return {
     hooks: [{ formula_id: 0, spoken: board.hook.spoken, on_screen: board.hook.on_screen }],
@@ -319,8 +347,17 @@ export async function makeAutoVideo(input: {
     const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0, { knowledge, charLimits }), ...hookEvidenceProblems(board, archive)];
     // 길이는 글자 수로 storyboardProblems가 재고, 완성본의 실제 길이를 다시 잰다.
     const estimated = board.scenes.reduce((n, s) => n + squash(s.tts).length, 0) / speechRate;
-    const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999], longBeatSeconds: LONG_BEAT_SECONDS });
+    const boardCheck = () => checkScript(boardAsScript(board!), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999], longBeatSeconds: LONG_BEAT_SECONDS });
+    let check = await boardCheck();
     add(check.tokens);
+    // 말은 통과했는데 화면 그래픽 글자만 걸리면 그 그래픽을 빼고 다시 본다. 대본 전체를 다시 쓰지 않는다
+    const stripped = stripFlaggedGraphics(board, blockingIssues(check.issues));
+    if (stripped.removed > 0 && stripped.unresolved === 0) {
+      console.log(`  근거가 맞지 않는 화면 그래픽 ${stripped.removed}개 제외`);
+      board = stripped.board;
+      check = await boardCheck();
+      add(check.tokens);
+    }
     const review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...gifSheets], fixedTexts: fixedTexts() });
     add(review.tokens);
     const blockingNow = blockingIssues(check.issues).map((i) => i.detail);

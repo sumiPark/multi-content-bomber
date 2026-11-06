@@ -75,7 +75,7 @@ export const storyboardSchema = z.object({
     .array(
       z.object({
         part: z.enum(["hook", "knowledge", "product", "difference", "takeaway"]).describe("이 장면의 역할: 궁금증, 상식, 우리 상품, 우리 차이, 기억할 기준"),
-        evidence: z.array(z.string()).describe("이 장면의 사실 근거. 상식 카드 K1, 우리 차이 D1, 상품 자료 P. 사실이 없는 연결 문장은 빈 배열"),
+        evidence: z.array(z.string()).describe("이 장면의 사실 근거 번호만. 상식 카드 K1, 우리 차이 D1, 상품 자료 P. 문구를 옮기지 않는다. 사실이 없는 연결 문장은 빈 배열"),
         source: z.enum(["photo", "gif", "archive", "visual", "motion"]).describe("photo 사진 후보, gif 움직이는 이미지, archive 자사 촬영 컷, visual AI 이미지, motion 코드로 그리는 설명 화면"),
         source_id: z.string().describe("쓸 후보 번호 p1 · g1 · a1. visual · motion이면 빈 문자열"),
         motion: motionSchema.nullable().describe("source가 motion이면 설명 화면 값, 아니면 null"),
@@ -177,6 +177,7 @@ export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResu
 - 장면에 없는 것을 말하지 않는다. 말하는 내용이 보이는 이미지를 고른다.
 - 사실(숫자 · 성분 · 효과 · 구성)은 get_product_facts와 근거 자료에 있는 것만. 없는 상식을 지어내지 않는다. uncertainties에 있는 건 말하지 않는다.
 - 전성분 이름은 표기 그대로 쓴다. "모나스커스/쌀발효물"처럼 한 이름을 나누거나 줄이지 않는다. 다른 이름으로 부를 때는 "성분표에는 ○○로 적혀 있어요"처럼 구분한다.
+- 화면 그래픽에 "전성분 표기" 같은 이름표를 쓸 때는 실제 전성분 이름을 줄이지 않고 그대로 쓴다. 통용 이름(비타민 B12, 홍국)을 쓸 때는 그런 이름표를 붙이지 않는다.
 - 성분 이름을 연달아 나열하지 않는다. 성분 하나마다 뜻을 말하고 이 상품과 왜 관련 있는지 잇는다.
 - 상식 카드의 원료 설명은 원료의 뜻이다. 이 제품의 효과처럼 잇지 않는다. "그래서 피부가 좋아져요" 같은 결론을 쓰지 않는다.
 - 사람이 써 본 것처럼 말하지 않는다. 지어낸 후기 · 체험을 쓰지 않는다. 최고 · 유일 · 100% 같은 단정을 쓰지 않는다.
@@ -254,8 +255,10 @@ export function storyboardProblems(b: Storyboard, archiveIds: string[], fixedHoo
   if (b.scenes.length && motions / b.scenes.length > 0.25) out.push(`설명 화면이 ${motions}개로 많다. 전체의 25% 이하로 줄이고 사진 · AI 이미지로 바꾼다`);
   const uses = new Map<string, number>();
   b.scenes.forEach((s, i) => {
-    for (const r of s.evidence) if (!validRefs.has(r)) out.push(`${i}번 장면의 근거 ${r}는 받은 자료에 없다`);
-    if (s.part === "difference" && !s.evidence.some((r) => r.startsWith("D"))) out.push(`${i}번 장면은 우리 차이인데 확정된 차이(D) 근거가 없다`);
+    // "P: 상세 문구"처럼 번호 뒤에 문구를 덧붙여도 번호만 본다
+    const refs = s.evidence.map((r) => r.trim().split(/[\s:：]/)[0]);
+    for (const r of refs) if (!validRefs.has(r)) out.push(`${i}번 장면의 근거 ${r}는 받은 자료에 없다`);
+    if (s.part === "difference" && !refs.some((r) => r.startsWith("D"))) out.push(`${i}번 장면은 우리 차이인데 확정된 차이(D) 근거가 없다`);
     if (s.source === "photo" && !usable.has(s.source_id)) out.push(`${i}번 장면의 ${s.source_id}는 쓸 수 있는 후보가 아니다`);
     if (s.source === "gif" && !usableGifs.has(s.source_id)) out.push(`${i}번 장면의 ${s.source_id}는 쓸 수 있는 움직이는 이미지가 아니다`);
     if (s.source === "visual" && !b.visuals.some((v) => v.beat === i)) out.push(`${i}번 장면에 AI 이미지 설명(visuals)이 없다`);
