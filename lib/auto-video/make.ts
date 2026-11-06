@@ -9,7 +9,7 @@ import { editKit, scoreHooks } from "@/lib/agents/ko-skills";
 import { loadVideoKnowledge } from "@/lib/agents/knowledge";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
-import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, MIN_AUTO_HOOK_SCORE, MIN_INTEREST, charRange, firstViewerTest, motionTexts, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
+import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, MIN_AUTO_HOOK_SCORE, MIN_INTEREST, charRange, firstViewerTest, motionTexts, rankAngles, repairEdgeVisuals, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeAngles, writeStoryboard, type Storyboard, type StoryAngle } from "@/lib/agents/storyboard";
 import { hookEvidenceProblems, rejectIncompatiblePhrases } from "@/lib/auto-video/hook-evidence";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
@@ -280,6 +280,22 @@ export async function makeAutoVideo(input: {
     return made;
   };
 
+  // 이야기 각도: 저장한 후킹이 없으면 서로 다른 각도를 내고, 상품 사정을 모르는 눈으로 가장 궁금한 것부터 쓴다
+  let angles: StoryAngle[] = [];
+  let angleOrder: number[] = [];
+  let angleScores: number[] = [];
+  let anglePos = 0;
+  if (!phrases.hooks.length) {
+    const written = await writeAngles({ accountName: account, facts, knowledge });
+    add(written.tokens);
+    angles = written.angles;
+    const ranked = await rankAngles(angles);
+    add(ranked.tokens);
+    angleOrder = ranked.order;
+    angleScores = ranked.scores;
+    angleOrder.forEach((i) => console.log(`  각도 ${angleScores[i]}점 [${angles[i].story_type}] ${angles[i].hook_line}`));
+  }
+
   // 2. 장면표: 쓰고, 코드 · 시청자 눈 · 광고 규칙으로 보고, 걸리면 고쳐 쓴다
   let board: Storyboard | null = null;
   let retry: { board: Storyboard; problems: string[] } | null = null;
@@ -307,6 +323,7 @@ export async function makeAutoVideo(input: {
       gifSheets,
       knowledge,
       charLimits,
+      angle: angles.length ? angles[angleOrder[anglePos]] : null,
       concept: concept.autoConcept,
       tone: concept.autoTone,
       videoStyle: concept.autoVideoStyle,
@@ -326,7 +343,7 @@ export async function makeAutoVideo(input: {
     board = applyFixedPhrases(res.output, phrases);
     // 설명 화면 · AI 이미지는 후보 번호가 없어 장면 순서로 번호를 붙인다. AI 이미지는 visual 장면에만 얹는다
     const scenes = board.scenes.map((s, i) => (s.source === "motion" ? { ...s, source_id: `m${i}` } : s.source === "visual" ? { ...s, source_id: `v${i}` } : s));
-    board = { ...board, scenes, visuals: board.visuals.filter((v) => scenes[v.beat]?.source === "visual") };
+    board = repairEdgeVisuals({ ...board, scenes, visuals: board.visuals.filter((v) => scenes[v.beat]?.source === "visual") });
     // 세로 화면에서 제품이 많이 잘리는 사진과, 제품이 아닌데 오려야 하는 사진(손 · 사용 장면)은 쓰지 않는다. 후보에서 빼고 다시 쓰게 한다
     const dropped: string[] = [];
     for (const s of board.scenes) {
@@ -374,16 +391,22 @@ export async function makeAutoVideo(input: {
     storyboardReviews.push({ attempt: attempt + 1, hook: board.hook, story: board.story_type, oneThing: board.one_thing, interest: review.interest, problems: left, soft, notes: review.notes, boring: review.boringParts });
     boardNotes = [...review.notes, ...review.boringParts.map((b) => `지루할 수 있는 구간: ${b}`)];
     softLeft = soft;
-    if (!left.length && soft.length && attempt < MAX_BOARD_TRIES - 1) left = soft;
     console.log(`  장면표 ${attempt + 1}번째: 코드 ${code.length} · 규칙/근거 ${blockingNow.length} · 시청자 ${review.problems.length} · 재미 ${review.interest}점 · ${board.story_type} · ${board.one_thing}`);
     for (const p of left) console.log(`    - ${p.slice(0, 160)}`);
-    if (!left.length) break;
+    if (!left.length && (!soft.length || attempt === MAX_BOARD_TRIES - 1)) break;
     rejectIncompatiblePhrases(phrases, [...review.unsuitable_phrases, ...code.filter((p) => p.includes("제형을 보라고")).map((reason) => ({ kind: "hook" as const, reason }))]);
     dropFailedPhrases(phrases, blockingIssues(check.issues));
-    retry = { board, problems: left };
+    // 재미가 낮으면 문장을 고치지 않고 다음 각도로 새로 쓴다
+    if (review.interest < MIN_INTEREST && !left.length && anglePos < angleOrder.length - 1) {
+      anglePos++;
+      retry = null;
+      console.log(`  재미가 낮아 다음 각도로 바꾼다: ${angles[angleOrder[anglePos]].hook_line}`);
+      continue;
+    }
+    retry = { board, problems: [...left, ...soft] };
   }
   if (!board) throw new Error("장면표를 만들지 못했어요");
-  writeFileSync(join(workDir, "storyboard-review.json"), JSON.stringify({ attempts: storyboardReviews, phrases: fixedRecord(phrases), board }, null, 2));
+  writeFileSync(join(workDir, "storyboard-review.json"), JSON.stringify({ angles: angleOrder.map((i) => ({ score: angleScores[i], ...angles[i] })), attempts: storyboardReviews, phrases: fixedRecord(phrases), board }, null, 2));
   if (left.length) throw new StopError(`장면표를 ${MAX_BOARD_TRIES}번 고친 뒤에도 해결되지 않았어요: ${left.join(" / ")}`);
 
   // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다

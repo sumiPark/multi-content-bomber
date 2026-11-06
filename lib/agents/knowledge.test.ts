@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { cardMatches, knowledgeBlock, knowledgeEvidence } from "@/lib/agents/knowledge";
 import { cleanStatement } from "@/lib/agents/knowledge-draft";
-import { charRange, sentenceEnding, storyboardProblems, type Storyboard } from "@/lib/agents/storyboard";
+import { charRange, repairEdgeVisuals, sentenceEnding, storyboardProblems, type Storyboard } from "@/lib/agents/storyboard";
 import { cropPixels, gifRange } from "@/lib/auto-video/gif-clips";
 import { stripFlaggedGraphics } from "@/lib/auto-video/make";
 
@@ -100,6 +100,16 @@ describe("설명 영상 장면표 점검", () => {
     const visuals = scenes.flatMap((s, i) => (s.source === "visual" ? [{ beat: i, key: `k${i}`, subject: "", evidence: "", prompt: "p", motion: "solid" as const }] : []));
     const out = problems(board(scenes, { visuals }));
     assert.equal(out.some((p) => p.includes("자로 쓴다") || p.includes("장면이 ")), false);
+  });
+
+  it("첫 · 마지막 장면의 AI 이미지는 똑바로 선 상품 사진으로 바꾼다", () => {
+    const scenes = goodScenes();
+    scenes[24] = { ...scenes[24], source: "visual", source_id: "v24" };
+    const visuals = [{ beat: 24, key: "a", subject: "", evidence: "", prompt: "p", motion: "solid" as const }, { beat: 3, key: "b", subject: "", evidence: "", prompt: "p", motion: "solid" as const }];
+    const fixed = repairEdgeVisuals(board(scenes, { visuals, photos: [{ id: "p3", usable: true, kind: "product", what: "", trim_top: 0, trim_bottom: 0, upright: false }, { id: "p1", usable: true, kind: "product", what: "", trim_top: 0, trim_bottom: 0, upright: true }] }));
+    assert.equal(fixed.scenes[24].source, "photo");
+    assert.equal(fixed.scenes[24].source_id, "p1");
+    assert.deepEqual(fixed.visuals.map((v) => v.beat), [3]);
   });
 
   it("눕힌 제품 사진은 쓰지 못한다", () => {

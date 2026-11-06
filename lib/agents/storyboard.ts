@@ -121,6 +121,87 @@ export const storyboardSchema = z.object({
 });
 export type Storyboard = z.infer<typeof storyboardSchema>;
 
+const angleSchema = z.object({
+  story_type: z.enum(["myth", "chase", "versus", "reveal", "mistake", "calculation"]),
+  hook_line: z.string().describe("첫 문장. 사실이면서 의외인 말. 근거 자료로 답할 수 있어야 한다"),
+  one_thing: z.string().describe("시청자가 얻어 갈 단 한 가지"),
+  answer: z.string().describe("후킹의 답. 근거 자료에 있는 내용만"),
+  beats: z.array(z.string()).describe("이야기 흐름 3~5단계. 단서 → 뒤집기 → 답 순서"),
+  evidence: z.array(z.string()).describe("쓸 근거 번호. K1, D1, P"),
+});
+export type StoryAngle = z.infer<typeof angleSchema>;
+
+/** 대본을 쓰기 전에 서로 다른 이야기 각도를 낸다. 한 각도에 매달린 채 문장만 고치지 않기 위한 단계다. */
+export async function writeAngles(input: { accountName: string; facts: ProductFacts; knowledge: VideoKnowledge; rejected?: string[] }): Promise<{ angles: StoryAngle[]; tokens: { input: number; output: number } }> {
+  const f = input.facts;
+  const model = agentModel();
+  const completion = await getOpenAI().chat.completions.parse({
+    model,
+    ...callOptions(model, 3000),
+    messages: [
+      {
+        role: "system",
+        content: `너는 인스타그램 @${input.accountName} 릴스 기획자다. 사람이 나오지 않는 짧은 설명 영상의 이야기 각도를 5개 낸다.
+- 5개는 서로 다른 질문과 다른 소재여야 한다. 표현만 바꾼 비슷한 각도를 내지 않는다.
+- 사진을 보면 누구나 떠올리는 질문은 쓰지 않는다. 시청자의 오해 · 손해 · 놀라움 · 호기심과 이어지는 질문을 쓴다.
+- 상품 소개 문장을 후킹으로 바꾸지 않는다. 듣자마자 "어? 왜?"가 나와야 한다. 재미가 생기는 자리는 이런 곳이다:
+  · 부르는 이름과 실제 표기가 다른 곳 (광고에서 부르는 이름이 성분표에는 다른 이름으로 적힘)
+  · 모두가 당연하게 믿는 것과 사실이 다른 곳 (이름에 들어간 말의 진짜 뜻, 흔한 오해)
+  · 겉보기와 속이 다른 곳 (생김새와 맛 · 쓰임이 다름)
+  · 사람들이 놓치는 숫자 · 기준 (단위, 1회 기준, 계절, 크기)
+  · 왜 이런 원료가 이런 데 쓰이는지 이상한 조합 (생뚱맞은 원료 · 유래)
+- 약한 예: "이 토너의 향은 머스크로 이어져요", "사용법은 펌핑에서 끝나지 않아요". 강한 예의 모양: "○○ 제품인데 성분표 어디에도 ○○가 없어요", "겉은 A인데 속은 왜 B일까요?".
+- 상품을 살 생각이 없는 사람도 답이 궁금해야 한다. 그리고 답이 이 상품의 특징이나 우리 차이로 이어져야 한다.
+- 한 각도는 이야기 하나만 다룬다. 성분 · 특징을 나열하지 않는다.
+- 사실은 근거 자료에 있는 것만 쓴다. 치료 · 재생 · 효과 보장, 지어낸 체험, 최고 · 유일 같은 단정을 쓰지 않는다. 원료 설명을 제품의 효과처럼 잇지 않는다.
+- story_type: myth 다들 잘못 아는 것 깨기, chase 단서를 따라 답을 찾기, versus 둘을 맞붙이기, reveal 숨은 사실 공개, mistake 흔한 실수와 해결, calculation 직접 계산하기.${input.rejected?.length ? `\n- 이미 써 봤지만 재미가 낮았던 각도와 비슷하게 쓰지 않는다: ${input.rejected.join(" / ")}` : ""}`,
+      },
+      {
+        role: "user",
+        content: `상품: ${f.shop} ${f.kindLabel} "${f.name}"\n한 줄 소개: ${f.oneLine ?? "없음"}\n상세 항목: ${JSON.stringify(f.details)}\n확인된 특징: ${f.claims.map((c) => c.claim).join(" / ")}\n상세페이지 원문:\n${f.sourceText.slice(0, 4000)}\n\n${knowledgeBlock(input.knowledge)}`,
+      },
+    ],
+    response_format: zodResponseFormat(z.object({ angles: z.array(angleSchema) }), "story_angles"),
+  });
+  const parsed = completion.choices[0]?.message?.parsed;
+  if (!parsed?.angles.length) throw new Error("이야기 각도 응답이 없어요");
+  return { angles: parsed.angles, tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 } };
+}
+
+/** 상품 자료 없이 첫 문장과 흐름만 보고 더 보고 싶은 순서를 정한다. 파는 쪽 사정을 모르는 사람의 눈으로 고르기 위해서다. */
+export async function rankAngles(angles: StoryAngle[]): Promise<{ order: number[]; scores: number[]; tokens: { input: number; output: number } }> {
+  const model = agentModel();
+  const completion = await getOpenAI().chat.completions.parse({
+    model,
+    ...callOptions(model, 1000),
+    messages: [
+      {
+        role: "user",
+        content: `인스타 릴스를 넘겨 보는 평범한 사람으로서, 아래 첫 문장과 이야기 흐름을 보고 끝까지 보고 싶은 정도를 1~5점으로 매긴다. 이 상품을 살 생각은 없다. 뻔하거나 수업 같거나 광고 같으면 낮게 준다.\n${angles.map((a, i) => `${i}. "${a.hook_line}" — ${a.beats.join(" → ")}`).join("\n")}`,
+      },
+    ],
+    response_format: zodResponseFormat(z.object({ scores: z.array(z.object({ index: z.number().int(), score: z.number().int() })) }), "angle_scores"),
+  });
+  const rows = completion.choices[0]?.message?.parsed?.scores ?? [];
+  const scores = angles.map((_, i) => rows.find((r) => r.index === i)?.score ?? 0);
+  const order = angles.map((_, i) => i).sort((a, b) => scores[b] - scores[a] || a - b);
+  return { order, scores, tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 } };
+}
+
+/** 첫 · 마지막 장면의 AI 이미지는 상품 사진으로 바꾼다. 다시 쓰게 할 일이 아니라 코드가 바로 고칠 수 있는 실수다. */
+export function repairEdgeVisuals(b: Storyboard): Storyboard {
+  const last = b.scenes.length - 1;
+  const photo = b.photos.find((p) => p.usable && p.kind === "product" && p.upright)?.id;
+  if (!photo || last < 0) return b;
+  const edges = new Set([0, last].filter((i) => b.scenes[i]?.source === "visual"));
+  if (!edges.size) return b;
+  return {
+    ...b,
+    scenes: b.scenes.map((s, i) => (edges.has(i) ? { ...s, source: "photo" as const, source_id: photo } : s)),
+    visuals: b.visuals.filter((v) => !edges.has(v.beat)),
+  };
+}
+
 export interface StoryboardContext {
   service: Service | null;
   readService?: Service;
@@ -137,6 +218,7 @@ export interface StoryboardContext {
   gifSheets?: string[];
   knowledge: VideoKnowledge;
   charLimits: [number, number];
+  angle?: StoryAngle | null;
   concept?: string | null;
   tone?: string | null;
   videoStyle?: string | null;
@@ -226,7 +308,7 @@ ${bullets(kit.caption_rules)}
 ${bullets(kit.tts_rules)}
 
 글자 디자인(look):
-${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의 제품 · 말의 내용 · 계정 분위기에 맞게 강조어 글꼴(key_font)과 작은 줄 글꼴(small_font)을 아래에서 하나씩 고른다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.\n${ctx.fontChoices.map((x) => `- ${x.name} · ${x.role} · ${x.look}`).join("\n")}` : ""}${visualRules(f.kind, ctx.visualLibrary ?? [], LONG_VISUALS)}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "무엇을 말할지와 흐름에 반영한다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글자 디자인 · 음악에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "장면 고르기에 반영한다.")}${ctx.phraseBlock ?? ""}`;
+${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의 제품 · 말의 내용 · 계정 분위기에 맞게 강조어 글꼴(key_font)과 작은 줄 글꼴(small_font)을 아래에서 하나씩 고른다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.\n${ctx.fontChoices.map((x) => `- ${x.name} · ${x.role} · ${x.look}`).join("\n")}` : ""}${visualRules(f.kind, ctx.visualLibrary ?? [], LONG_VISUALS)}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "무엇을 말할지와 흐름에 반영한다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글자 디자인 · 음악에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "장면 고르기에 반영한다.")}${ctx.phraseBlock ?? ""}${ctx.angle ? `\n\n이 영상의 각도(이미 정해졌다. 이 질문과 흐름으로 쓰고 다른 소재로 새지 않는다. story_type · one_thing도 이 값을 쓴다):\n- 방식: ${ctx.angle.story_type}\n- 첫 문장: ${ctx.angle.hook_line}\n- 얻어 갈 한 가지: ${ctx.angle.one_thing}\n- 답: ${ctx.angle.answer}\n- 흐름: ${ctx.angle.beats.join(" → ")}` : ""}`;
   const gifs = ctx.gifs ?? [];
   const user = `상세페이지 원문(상품 사실은 이 안에서만 쓴다. "원료적 특성에 한함" 같은 단서가 붙은 내용은 말로 읽지 않고 표현을 낮춰 쓴다):\n${f.sourceText}\n\n${knowledgeBlock(ctx.knowledge)}\n\n쓸 수 있는 사진 후보(가로x세로): ${ctx.candidates.map((c) => `${c.id} ${c.w}x${c.h}`).join(", ")}
 그림은 후보를 번호와 함께 모은 것이다. 위 목록에 없는 번호는 화질이 낮거나 세로 화면에서 제품이 잘려 쓰지 않는다.${gifs.length ? `\n\n움직이는 이미지(사진 묶음 다음 그림부터 차례로, 그림마다 왼쪽부터 시간 순서로 프레임 6개):\n${gifs.map((g) => `${g.id} 원본 ${g.w}x${g.h}, ${g.seconds.toFixed(1)}초`).join("\n")}` : ""}${ctx.archive.length ? `\n\n자사 촬영 컷(소리 없음, 순서대로 마지막 ${ctx.archive.length}장의 그림이 컷마다 프레임 3개):\n${ctx.archive.map((a) => `${a.id} ${a.seconds.toFixed(1)}초 — ${a.what}`).join("\n")}` : ""}${
