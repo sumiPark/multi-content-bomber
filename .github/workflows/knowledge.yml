@@ -1,0 +1,42 @@
+name: knowledge
+
+# 상식 카드 · 우리 차이 초안(worker/draft-knowledge.ts). 초안만 만들고, 사람이 승인해야 영상에 들어간다.
+# 상품 제안(b-plan)이 끝나면 새 상품만 만들고, 화면의 "AI 초안 만들기"는 draft-knowledge로 깨운다.
+on:
+  workflow_run:
+    workflows: [b-plan]
+    types: [completed]
+  repository_dispatch:
+    types: [draft-knowledge]
+  workflow_dispatch:
+    inputs:
+      product:
+        description: "이 상품만 만들기 (비우면 다가오는 칸의 새 상품)"
+        required: false
+
+concurrency:
+  group: knowledge-worker
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Draft cards
+        run: npm run worker:knowledge -- ${PRODUCT_ARG}
+        env:
+          PRODUCT_ARG: ${{ (inputs.product || github.event.client_payload.product) && format('--product {0}', inputs.product || github.event.client_payload.product) || '' }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}

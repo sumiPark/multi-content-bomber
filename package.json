@@ -23,6 +23,7 @@
     "worker:edit-kit-smoke": "tsx worker/edit-kit-smoke.ts",
     "worker:auto-video": "tsx worker/make-auto-videos.ts",
     "worker:archive-shoots": "tsx worker/archive-shoots.ts",
+    "worker:knowledge": "tsx worker/draft-knowledge.ts",
     "worker:cleanup-drafts": "tsx worker/cleanup-drafts.ts",
     "worker:profile-review": "tsx worker/review-profiles.ts",
     "worker:benchmarks": "tsx worker/collect-benchmarks.ts",

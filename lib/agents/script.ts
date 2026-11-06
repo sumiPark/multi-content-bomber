@@ -93,7 +93,7 @@ export function writerSkills(ctx: Pick<ScriptContext, "facts" | "rules" | "accou
     {
       name: "time_script",
       description: "대본 비트(한 줄 = 한 비트)의 말하는 시간을 재고 경고(훅 3초 초과, 비트 4초 초과, 구체성 없는 비트 연속, 루프 없음)를 준다",
-      input: z.object({ lines: z.array(z.string()).min(2).max(12), target_seconds: z.number().min(10).max(45) }),
+      input: z.object({ lines: z.array(z.string()).min(2).max(40), target_seconds: z.number().min(10).max(90) }),
       async run(args) {
         const a = args as { lines: string[]; target_seconds: number };
         return timeScript(a.lines, a.target_seconds);

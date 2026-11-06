@@ -3,14 +3,17 @@ import { join } from "node:path";
 import { blockingIssues, checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
+import { LONG_VISUALS, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, phraseNotes, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
-import { timeScript } from "@/lib/agents/ko-skills";
+import { editKit } from "@/lib/agents/ko-skills";
+import { loadVideoKnowledge } from "@/lib/agents/knowledge";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
-import { motionTexts, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
+import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, charRange, firstViewerTest, motionTexts, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeStoryboard, type Storyboard } from "@/lib/agents/storyboard";
 import { hookEvidenceProblems, rejectIncompatiblePhrases } from "@/lib/auto-video/hook-evidence";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
+import { gifClip, isAnimatedGif, isGif, prepareGifAssets } from "@/lib/auto-video/gif-clips";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
 import { finalBlocking } from "@/lib/shoot/final-check";
@@ -19,7 +22,7 @@ import type { VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { loadVisualLibrary } from "@/lib/shoot/video-kit/generated-visual";
 import { readClip, renderKitEdit, type KitClip } from "@/lib/shoot/video-kit/pipeline";
 import { chosenFonts, downloadVideoFonts, loadSkillFonts, type SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
-import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
+import { ffmpeg, fishTts, imageDataUrl, voicedSpan } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
 import type { createServiceClient } from "@/lib/supabase/service";
 
@@ -28,7 +31,13 @@ import type { createServiceClient } from "@/lib/supabase/service";
 
 // 제품을 띄우는 컷은 가로 약 2.4배까지 키워도 볼 만하다. 그보다 작으면 흐리다
 const MIN_NATIVE = 400;
-const MIN_MATERIALS = 3;
+const MIN_MATERIALS = 2;
+const MAX_DETAIL_FILES = 40;
+// 완성본을 볼 때 쓰는 자막 프레임 수. 긴 영상은 자막이 많아 전부 보내지 않는다
+const MAX_REVIEW_FRAMES = 30;
+// 음성으로 잰 길이의 허용 오차(초). 대본은 60~85초에 맞춰 쓰고, 합성 결과의 작은 차이로 칸을 멈추지 않는다
+const LENGTH_TOLERANCE = 3;
+const CALIBRATION_TEXT = "처음 듣는 사람도 알아듣게 천천히 설명해 볼게요. 이름이 낯설어도 뜻을 알면 고르기 쉬워져요.";
 const MAX_BOARD_TRIES = 3;
 const CAPTION_CHARS = 16;
 
@@ -74,22 +83,45 @@ function boardAsScript(board: Storyboard): ScriptOutput {
   };
 }
 
-async function detailImages(urls: string[], dir: string): Promise<string[]> {
+/** 상세페이지 소재를 전부 받는다. 사진은 사진 후보로, 움직이는 이미지는 영상 소재로 나눈다. */
+async function detailAssets(urls: string[], dir: string): Promise<{ images: string[]; gifs: string[] }> {
   mkdirSync(dir, { recursive: true });
-  const files: string[] = [];
-  for (const [i, url] of urls.slice(0, 12).entries()) {
+  const images: string[] = [];
+  const gifs: string[] = [];
+  for (const [i, url] of [...new Set(urls)].slice(0, MAX_DETAIL_FILES).entries()) {
     // 한 장이 안 받아져도 나머지로 만든다
     try {
       const res = await fetch(url, { headers: { "User-Agent": "MCB-Video/1.0" } });
       if (!res.ok) throw new Error(String(res.status));
-      const f = join(dir, `d${i}${url.toLowerCase().includes(".png") ? ".png" : ".jpg"}`);
-      writeFileSync(f, Buffer.from(await res.arrayBuffer()));
-      files.push(f);
+      const bytes = Buffer.from(await res.arrayBuffer());
+      const gif = isGif(bytes);
+      const f = join(dir, `d${i}${gif ? ".gif" : url.toLowerCase().includes(".png") ? ".png" : ".jpg"}`);
+      writeFileSync(f, bytes);
+      if (gif && isAnimatedGif(f)) gifs.push(f);
+      else images.push(f);
     } catch (e) {
       console.warn(`  이미지 ${i + 1} 내려받기 실패(${e instanceof Error ? e.message : e})`);
     }
   }
-  return files;
+  return { images, gifs };
+}
+
+/** 이 목소리의 말 속도(초당 글자)를 잰다. 대본 분량을 영상마다 실제 음성에 맞춘다. */
+async function measureSpeechRate(voiceId: string | null | undefined, workDir: string): Promise<number> {
+  try {
+    const kit = editKit();
+    const buf = await fishTts(CALIBRATION_TEXT, { ...kit.voice, id: voiceId || process.env.FISH_VOICE_ID || kit.voice.id });
+    if (!buf) return DEFAULT_SPEECH_RATE;
+    const file = join(workDir, "calibration.wav");
+    writeFileSync(file, buf);
+    const span = voicedSpan(file);
+    const seconds = span.to - span.from;
+    const rate = seconds > 1 ? squash(CALIBRATION_TEXT).replace(/[.,]/g, "").length / seconds : DEFAULT_SPEECH_RATE;
+    return Math.min(9.5, Math.max(5, rate));
+  } catch (e) {
+    console.warn("  말 속도를 재지 못해 기본값을 써요:", e instanceof Error ? e.message : e);
+    return DEFAULT_SPEECH_RATE;
+  }
 }
 
 interface Candidate {
@@ -133,7 +165,9 @@ export async function makeAutoVideo(input: {
   // 1. 상세페이지에서 사진 구간만 잘라 후보로
   // 대표 이미지는 제품만 찍힌 사진인 경우가 많아 맨 앞에 넣는다
   const urls = [...(product?.represent_image_url ? [product.represent_image_url] : []), ...(product?.detail_image_urls ?? [])];
-  const images = await detailImages(urls, join(workDir, "detail"));
+  const { images, gifs: gifFiles } = await detailAssets(urls, join(workDir, "detail"));
+  const gifs = prepareGifAssets(gifFiles, workDir);
+  console.log(`  상세 소재 사진 ${images.length}개 · 움직이는 이미지 ${gifs.length}개`);
   const listFile = join(workDir, "images.json");
   writeFileSync(listFile, JSON.stringify(images));
   const blocks = images.length
@@ -149,9 +183,21 @@ export async function makeAutoVideo(input: {
   // 재료 판단: 원본 해상도가 낮으면 후보에서 뺀다. 세로 영상에서 흐려진다
   const sharp = candidates.filter((c) => Math.min(c.native_w ?? c.w, (c.native_h ?? c.h) * 1.4) >= MIN_NATIVE);
   console.log(`  화질 통과 사진 ${sharp.length}개 / ${candidates.length}개`);
-  if (sharp.length + archive.length < MIN_MATERIALS) throw new StopError(`쓸 수 있는 이미지가 ${sharp.length + archive.length}개뿐이에요. 제품이 잘 보이는 사진이 더 필요해요.`);
+  if (sharp.length + gifs.length + archive.length < MIN_MATERIALS) throw new StopError(`쓸 수 있는 이미지가 ${sharp.length + gifs.length + archive.length}개뿐이에요. 제품이 잘 보이는 사진이 더 필요해요.`);
   const sharpIds = new Set(sharp.map((c) => c.id));
   const sheets = (blocks?.sheets ?? []).map((f) => imageDataUrl(f));
+  const gifSheets = gifs.map((g) => imageDataUrl(g.sheet));
+
+  // 상식 카드와 우리 차이. 사람이 승인한 것만 쓴다. 초안은 저장하지 않는 시험에서만 명시적으로 켠다
+  const includeDrafts = input.dryRun && process.env.TEST_USE_DRAFT_KNOWLEDGE === "1";
+  const knowledge = await loadVideoKnowledge(service, input.organizationId, facts, { includeDrafts });
+  console.log(`  근거: 상식 카드 ${knowledge.cards.length}개 · 우리 차이 ${knowledge.differences.length}개${includeDrafts ? " (시험: 초안 포함)" : ""}`);
+  const visualPolicy: VisualPolicy = { ...LONG_VISUALS, evidence: knowledge.cards.map((c) => c.statement).join(" ") };
+
+  // 대본 분량을 이 목소리의 실제 말 속도에 맞춘다
+  const speechRate = await measureSpeechRate(concept.autoVoiceId, workDir);
+  const charLimits = charRange(speechRate);
+  console.log(`  말 속도 초당 ${speechRate.toFixed(1)}자 → 대본 ${charLimits[0]}~${charLimits[1]}자`);
 
   // 저장한 후킹 · 마지막 문구는 장면표에 그대로 쓴다
   const hasPhrases = concept.autoHooks.length > 0 || concept.autoEndings.length > 0;
@@ -166,7 +212,7 @@ export async function makeAutoVideo(input: {
   const add = (t: { input: number; output: number }) => {
     tokens = { input: tokens.input + t.input, output: tokens.output + t.output };
   };
-  const materialCheck = await reviewHookMaterials({ hooks: phrases.hooks.map((h) => h.text), sheets, archive: archive.map((a) => a.what), facts });
+  const materialCheck = await reviewHookMaterials({ hooks: phrases.hooks.map((h) => h.text), sheets: [...sheets, ...gifSheets], archive: archive.map((a) => a.what), facts });
   add(materialCheck.tokens);
   const rejectedHooks = new Map(materialCheck.rejected.map((r) => [r.index, r.why]));
   phrases.hooks = phrases.hooks.filter((h, i) => {
@@ -222,6 +268,10 @@ export async function makeAutoVideo(input: {
       sheets,
       archive: archive.map((a) => ({ id: a.id, what: a.what, seconds: a.seconds })),
       archiveSheets: archive.map((a) => imageDataUrl(a.sheet)),
+      gifs: gifs.map((g) => ({ id: g.id, w: g.w, h: g.h, seconds: g.seconds })),
+      gifSheets,
+      knowledge,
+      charLimits,
       concept: concept.autoConcept,
       tone: concept.autoTone,
       videoStyle: concept.autoVideoStyle,
@@ -239,9 +289,9 @@ export async function makeAutoVideo(input: {
       continue;
     }
     board = applyFixedPhrases(res.output, phrases);
-    // 설명 화면은 후보 번호가 없어 장면 순서로 번호를 붙이고, AI 이미지를 얹지 않는다
-    const scenes = board.scenes.map((s, i) => (s.source === "motion" ? { ...s, source_id: `m${i}` } : s));
-    board = { ...board, scenes, visuals: board.visuals.filter((v) => scenes[v.beat]?.source !== "motion") };
+    // 설명 화면 · AI 이미지는 후보 번호가 없어 장면 순서로 번호를 붙인다. AI 이미지는 visual 장면에만 얹는다
+    const scenes = board.scenes.map((s, i) => (s.source === "motion" ? { ...s, source_id: `m${i}` } : s.source === "visual" ? { ...s, source_id: `v${i}` } : s));
+    board = { ...board, scenes, visuals: board.visuals.filter((v) => scenes[v.beat]?.source === "visual") };
     // 세로 화면에서 제품이 많이 잘리는 사진과, 제품이 아닌데 오려야 하는 사진(손 · 사용 장면)은 쓰지 않는다. 후보에서 빼고 다시 쓰게 한다
     const dropped: string[] = [];
     for (const s of board.scenes) {
@@ -261,11 +311,12 @@ export async function makeAutoVideo(input: {
       retry = { board, problems: [...left, `${dropped.join(", ")} 사진은 세로 화면에 맞지 않아 쓸 수 없다. 다른 후보나 설명 화면(motion)으로 바꾼다`] };
       continue;
     }
-    const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0), ...hookEvidenceProblems(board, archive)];
-    // 예상 길이는 checkScript에서 기존 기준으로 확인한다. 15초 목표의 소수점 오차로 기획을 버리지 않고 완성본의 실제 길이를 다시 잰다.
-    const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts() });
+    const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0, { knowledge, charLimits }), ...hookEvidenceProblems(board, archive)];
+    // 길이는 글자 수로 storyboardProblems가 재고, 완성본의 실제 길이를 다시 잰다.
+    const estimated = board.scenes.reduce((n, s) => n + squash(s.tts).length, 0) / speechRate;
+    const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999] });
     add(check.tokens);
-    const review = await reviewStoryboard({ board, facts, sheets, fixedTexts: fixedTexts() });
+    const review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...gifSheets], fixedTexts: fixedTexts() });
     add(review.tokens);
     const blockingNow = blockingIssues(check.issues).map((i) => i.detail);
     left = [...code, ...blockingNow, ...review.problems, ...review.unsuitable_phrases.map((p) => `${p.kind}: ${p.reason}`)];
@@ -299,10 +350,20 @@ export async function makeAutoVideo(input: {
   }
   const clipNo = new Map<string, number>();
   const used = new Map<string, number>();
-  const clipOf = (id: string, kind: "photo" | "archive"): number | null => {
+  // AI 이미지를 못 만들면 상품 사진이 대신 나간다
+  const fallbackPhoto = finalBoard.photos.find((p) => p.usable && p.kind === "product")?.id ?? finalBoard.photos.find((p) => p.usable)?.id;
+  const clipOf = (id: string, kind: "photo" | "archive" | "gif"): number | null => {
     if (clipNo.has(id)) return clipNo.get(id)!;
     const no = clips.length + 1;
-    if (kind === "archive") {
+    if (kind === "gif") {
+      const asset = gifs.find((g) => g.id === id);
+      const meta = finalBoard.gifs.find((g) => g.id === id);
+      if (!asset || !meta) return null;
+      const made = gifClip(asset, meta, workDir);
+      if (made.soft) warnings.push(`${id} 움직이는 이미지(${meta.what})는 원본 해상도가 낮아 영상에서 흐릴 수 있어요.`);
+      clips.push(readClip(no, made.file, { shot: `[상세 움직임] ${meta.what}` }));
+      sources.push({ no, kind: "gif", id, what: meta.what });
+    } else if (kind === "archive") {
       const a = archive.find((x) => x.id === id);
       if (!a) return null;
       clips.push(readClip(no, a.file, { shot: `[자사 촬영] ${a.what}` }));
@@ -326,11 +387,10 @@ export async function makeAutoVideo(input: {
     sources.push({ no, kind: "motion", spec });
     return no;
   };
-  const timing = timeScript(board.scenes.map((s) => s.tts), 20).beats;
   const beats: EditPlan["beats"] = [];
   board.scenes.forEach((s, i) => {
-    const want = Math.max(1.2, (timing[i]?.dur ?? 2.5) + 0.25);
-    const no = s.source === "motion" ? (s.motion ? motionClipOf(s.motion, i, want) : null) : clipOf(s.source_id, s.source);
+    const want = Math.max(1.2, squash(s.tts).length / speechRate + 0.25);
+    const no = s.source === "motion" ? (s.motion ? motionClipOf(s.motion, i, want) : null) : s.source === "visual" ? (fallbackPhoto ? clipOf(fallbackPhoto, "photo") : null) : clipOf(s.source_id, s.source);
     if (!no) throw new Error(`${s.source_id} 이미지를 만들지 못했어요`);
     const seconds = clips[no - 1].duration;
     const from = Math.min(used.get(s.source_id) ?? 0, Math.max(0, seconds - want));
@@ -347,9 +407,10 @@ export async function makeAutoVideo(input: {
       sfx: [],
     });
   });
-  // 표지는 제품이 보이는 장면으로. 설명 화면을 골랐으면 첫 장면을 쓴다
+  // 표지는 제품이 보이는 장면으로. 설명 화면 · AI 이미지를 골랐으면 첫 장면을 쓴다
   const coverAt = Math.min(Math.max(0, board.thumbnail.scene), beats.length - 1);
-  const coverScene = beats[board.scenes[coverAt]?.source === "motion" ? 0 : coverAt]?.cuts[0];
+  const coverSource = board.scenes[coverAt]?.source;
+  const coverScene = beats[coverSource === "motion" || coverSource === "visual" ? 0 : coverAt]?.cuts[0];
   const plan: EditPlan = {
     look: board.look,
     analysis: [],
@@ -377,12 +438,15 @@ export async function makeAutoVideo(input: {
     editStyleText: concept.autoVideoStyle,
     voiceId: concept.autoVoiceId,
     fonts: pickedFonts ? { key_font: pickedFonts.key.name, small_font: pickedFonts.small.name } : undefined,
+    visualPolicy,
     reviewFinal: async (file, timeline) => {
       const every = Math.max(0.5, timeline.duration / 24);
       const sheetFile = join(workDir, "final-frames.jpg");
       ffmpeg(["-y", "-v", "error", "-i", file, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
       // 연락판만 보면 짧은 자막을 놓친다. 모든 자막의 안정 구간을 휴대폰 크기로 별도 검사한다.
-      const times = [Math.min(0.35, timeline.hook.end / 2), ...timeline.captions.map((c) => (c.start + c.end) / 2)];
+      const allTimes = timeline.captions.map((c) => (c.start + c.end) / 2);
+      const step = Math.max(1, allTimes.length / MAX_REVIEW_FRAMES);
+      const times = [Math.min(0.35, timeline.hook.end / 2), ...Array.from({ length: Math.min(MAX_REVIEW_FRAMES, allTimes.length) }, (_, n) => allTimes[Math.floor(n * step)])];
       const frames = times.map((at, i) => {
         const path = join(workDir, `readability-${i}.jpg`);
         ffmpeg(["-y", "-v", "error", "-ss", at.toFixed(3), "-i", file, "-frames:v", "1", "-vf", "scale=360:640", "-q:v", "2", path]);
@@ -407,8 +471,20 @@ export async function makeAutoVideo(input: {
     facts,
     rules,
     account,
-    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts() },
+    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts(), knowledge, lengthRange: [AUTO_SECONDS[0] - LENGTH_TOLERANCE, AUTO_SECONDS[1] + LENGTH_TOLERANCE] },
   );
+  // 처음 보는 사람 시험 — 상품 자료 없이 영상만 보고 답하게 한다. 멈추지 않고 사람이 볼 경고로 남긴다
+  let firstViewer: Awaited<ReturnType<typeof firstViewerTest>> | null = null;
+  try {
+    const every = Math.max(0.5, kit.seconds / 24);
+    const sheetFile = join(workDir, "first-viewer.jpg");
+    ffmpeg(["-y", "-v", "error", "-i", kit.final, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
+    firstViewer = await firstViewerTest({ sheet: imageDataUrl(sheetFile), lines: board.scenes.map((s) => s.say), hasDifference: knowledge.differences.length > 0 });
+    add(firstViewer.tokens);
+    if (firstViewer.gaps.length) warnings.push(`처음 보는 사람 시험: 영상만 보고 알기 어려운 항목이 있어요. (${firstViewer.gaps.join(", ")})`);
+  } catch (e) {
+    console.warn("  처음 보는 사람 시험 실패:", e instanceof Error ? e.message : e);
+  }
   const blocking = finalBlocking(
     { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...board.scenes.flatMap((s) => (s.motion ? motionTexts(s.motion) : [])), ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
     { kind: facts.kind, rules, approvedClaims: facts.approvedClaims, stockStatus: facts.stockStatus, healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions },
@@ -417,7 +493,7 @@ export async function makeAutoVideo(input: {
     check.passed = false;
     check.issues.push(...(kit.quality?.attempts.at(-1)?.issues.filter((i) => i.severity === "blocking").map((i) => ({ kind: "edit" as const, detail: `${i.at.toFixed(1)}초 ${i.detail}` })) ?? [{ kind: "edit" as const, detail: "완성본 검수가 완료되지 않았어요" }]));
   }
-  return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts, script, board, storyboardReviews, phraseNotes: phraseNotes(phrases) };
+  return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts, script, board, storyboardReviews, phraseNotes: phraseNotes(phrases), knowledge, firstViewer, speechRate };
 }
 
 export class StopError extends Error {}

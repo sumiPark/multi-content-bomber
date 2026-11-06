@@ -23,6 +23,10 @@ on:
       test_tone:
         description: "시험에서만 쓸 말투 · 분위기 (dry_run 전용, 저장 안 됨)"
         required: false
+      use_draft_knowledge:
+        description: "승인 전 상식 카드 · 우리 차이 초안도 쓰기 (dry_run 전용, 저장 안 됨)"
+        type: boolean
+        default: false
       test_settings:
         description: "시험에서만 쓸 자동 콘텐츠 설정 JSON (dry_run 전용, 저장 안 됨)"
         required: false
@@ -95,6 +99,7 @@ jobs:
           AUTO_VIDEO_PUBLISH: ${{ vars.AUTO_VIDEO_PUBLISH }}
           VIDEO_PYTHON: python
           TEST_AUTO_TONE: ${{ inputs.test_tone }}
+          TEST_USE_DRAFT_KNOWLEDGE: ${{ inputs.use_draft_knowledge && '1' || '' }}
           TEST_AUTO_SETTINGS: ${{ inputs.test_settings }}
       - name: Keep dry-run result
         if: ${{ inputs.dry_run && !cancelled() }}

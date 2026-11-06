@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import { writeEditPlan, type EditClipInfo, type EditPlan } from "@/lib/agents/edit-plan";
+import { writeEditPlan, type EditClipInfo, type EditPlan, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { editKit, editKitAsset, ttsReading } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
@@ -54,6 +54,8 @@ export interface KitInput {
   // 글꼴을 미리 고른 흐름만 넘긴다. 없으면 자막 디자인 AI가 고른다
   fonts?: { key_font: string; small_font: string };
   reviewFinal?: (file: string, timeline: Timeline) => Promise<VideoReview>;
+  // AI 이미지 규칙. 없으면 직접 촬영 기본값
+  visualPolicy?: VisualPolicy;
   humanHook?: string | null;
   humanThumbnail?: string | null;
   shotlistHook?: { spoken: string; on_screen: string } | null;
@@ -194,7 +196,7 @@ export function planProblems(plan: EditPlan): string[] {
   }
   const syllables = plan.beats.reduce((s, b) => s + squash(b.tts).length, 0);
   if (plan.beats.some((b) => b.mode === "tts") && syllables < 60) problems.push("대본이 너무 짧아요. 15초 이상 나오게 쓰세요.");
-  if (syllables > 240) problems.push("대본이 너무 길어요. 35초 안에 들어오게 줄이세요.");
+  if (syllables > 630) problems.push("대본이 너무 길어요. 85초 안에 들어오게 줄이세요.");
   if (all.length < 6) problems.push(`컷이 ${all.length}개뿐이에요. 비트를 나눠 컷을 더 쓰세요.`);
   if (!plan.beats[plan.beats.length - 1]?.graphics.some((g) => g.type === "end_card")) problems.push("마지막 비트에 end_card가 없어요.");
   if (squash(plan.hook.on_screen).length > 22) problems.push("후킹 글자가 너무 길어요. 12자 안팎으로 줄이세요.");
@@ -526,6 +528,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     clips,
     lengths: made.voices.map((v) => v.estimated ?? v.fileOut - v.fileIn),
     facts: input.facts,
+    policy: input.visualPolicy,
     service: input.service,
     readService: input.readService,
     workDir,

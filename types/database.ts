@@ -973,6 +973,111 @@ export type Database = {
           },
         ]
       }
+      knowledge_cards: {
+        Row: {
+          created_at: string
+          id: string
+          organization_id: string
+          origin: string
+          product_id: string | null
+          product_kind: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          source_checked: boolean
+          source_quote: string
+          source_title: string
+          source_url: string
+          statement: string
+          status: string
+          terms: string[]
+          topic: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          organization_id: string
+          origin?: string
+          product_id?: string | null
+          product_kind: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_checked?: boolean
+          source_quote: string
+          source_title: string
+          source_url: string
+          statement: string
+          status?: string
+          terms?: string[]
+          topic: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          organization_id?: string
+          origin?: string
+          product_id?: string | null
+          product_kind?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          source_checked?: boolean
+          source_quote?: string
+          source_title?: string
+          source_url?: string
+          statement?: string
+          status?: string
+          terms?: string[]
+          topic?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      product_differences: {
+        Row: {
+          compare_to: string
+          created_at: string
+          difference: string
+          evidence: string
+          id: string
+          organization_id: string
+          origin: string
+          product_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          compare_to: string
+          created_at?: string
+          difference: string
+          evidence: string
+          id?: string
+          organization_id: string
+          origin?: string
+          product_id: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          compare_to?: string
+          created_at?: string
+          difference?: string
+          evidence?: string
+          id?: string
+          organization_id?: string
+          origin?: string
+          product_id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       generated_visuals: {
         Row: {
           cost_usd: number

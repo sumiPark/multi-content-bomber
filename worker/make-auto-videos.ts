@@ -127,7 +127,7 @@ async function main() {
           // 다음 자막 보정은 음성/소재를 다시 생성하지 않고 재현할 수 있게 남긴다. 구매한 글꼴 파일은 포함하지 않는다.
           copyFileSync(join(workDir, "kit", "project", "assets", "base.mp4"), join(out, `${plan.id}-base.mp4`));
           copyFileSync(join(workDir, "kit", "project", "assets", "mix.wav"), join(out, `${plan.id}-mix.wav`));
-          writeFileSync(join(out, `${plan.id}.json`), JSON.stringify({ board: made.board, plan: kit.plan, timeline: kit.timeline, sources: made.sources, warnings: made.warnings, check, blocking, quality: kit.quality, captionMode: kit.captionMode, storyboardReviews: made.storyboardReviews, phraseNotes: made.phraseNotes, voice: { used: kit.usedVoice, id: concept.autoVoiceId, model: "s2.1-pro-free" } }, null, 1));
+          writeFileSync(join(out, `${plan.id}.json`), JSON.stringify({ knowledge: made.knowledge, firstViewer: made.firstViewer?.answer ?? null, firstViewerGaps: made.firstViewer?.gaps ?? null, speechRate: made.speechRate, board: made.board, plan: kit.plan, timeline: kit.timeline, sources: made.sources, warnings: made.warnings, check, blocking, quality: kit.quality, captionMode: kit.captionMode, storyboardReviews: made.storyboardReviews, phraseNotes: made.phraseNotes, voice: { used: kit.usedVoice, id: concept.autoVoiceId, model: "s2.1-pro-free" } }, null, 1));
           console.log(`  (dry-run) 결과: ${out}`);
         }
         if (!check.passed || blocking.length || !kit.quality?.passed) process.exitCode = 1;

@@ -219,7 +219,9 @@ export function motionClip(input: MotionSpec, workDir: string, name: string, opt
   const built = m.kind === "compare" ? compareHtml(m, accent) : m.kind === "count" ? countHtml(m, accent, seconds) : m.kind === "steps" ? stepsHtml(m, accent, seconds) : bigHtml(m, accent);
   const dir = join(workDir, name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "index.html"), page(built.css, built.body, built.script, fonts));
+  // 검은 화면이 이어지지 않게 바탕을 강조색 계열로 물들인다
+  const tinted = `${built.css}\n#bgd { background: linear-gradient(160deg, color-mix(in srgb, ${accent} 42%, ${MOTION_BG}) 0%, color-mix(in srgb, ${accent} 16%, ${MOTION_BG}) 100%); }`;
+  writeFileSync(join(dir, "index.html"), page(tinted, built.body, built.script, fonts));
   const file = join(workDir, `${name}.mp4`);
   renderProject(dir, file, fonts);
   return { file, shot: built.shot };

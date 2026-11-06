@@ -45,6 +45,17 @@ export const graphicSchema = z.object({
 // AI 이미지는 원료를 그림으로 설명할 수 있는 상품에만 쓴다. 과일 · 의류는 그림이 실물처럼 보여 쓰지 않는다
 export const VISUAL_KINDS: ProductKind[] = ["COSMETIC", "HEALTH_FOOD"];
 export const MAX_VISUALS = 2;
+// 60~85초 설명 영상의 상식 구간(2026-11-06 사용자 결정). 과일 품종 · 원리 설명에도 쓴다
+export const LONG_VISUALS: VisualPolicy = { max: 10, minGap: 1, allKinds: true };
+
+export interface VisualPolicy {
+  max: number;
+  // 그림 사이 최소 비트 간격. 1이면 연달아 넣을 수 있다
+  minGap: number;
+  allKinds: boolean;
+  // 근거 문구를 찾을 추가 글(상식 카드 등)
+  evidence?: string;
+}
 
 export const visualSchema = z.object({
   beat: z.number().int().describe("이 그림으로 화면을 채울 비트 번호(0부터)"),
@@ -57,7 +68,16 @@ export const visualSchema = z.object({
 export type EditVisual = z.infer<typeof visualSchema>;
 
 /** 편집 계획과 장면표가 함께 쓰는 AI 이미지 규칙. */
-export function visualRules(kind: ProductKind, library: { key: string; subject: string }[]): string {
+export function visualRules(kind: ProductKind, library: { key: string; subject: string }[], policy?: VisualPolicy): string {
+  if (policy) {
+    return `
+
+AI 이미지(visuals) — 상식 구간에서 말로 설명하는 원료 · 품종 · 원리를 보여 준다. source가 visual인 장면마다 하나씩, 영상당 ${policy.max}개까지:
+- 그림이 나오는 동안의 말은 그 그림이 설명하는 내용이어야 한다. 같은 그림만 이어지지 않게 장면마다 다른 구도로 만든다.
+- 상품처럼 보이는 그림은 만들지 않는다. 제품 · 용기 · 포장 · 피부 · 사람 · 손 · 사용 전후 · 몸속 작용 · 글자 · 로고를 넣지 않는다.
+- 효과가 나타나는 모습을 그리지 않는다. 원료의 생김새, 유래, 개념만 보여 준다.${kind === "FRUIT" ? "\n- 과일은 품종이나 원리를 설명하는 그림으로만 쓴다. 판매 상품의 크기 · 신선도 · 과즙을 과장하지 않고, 상자 · 스티커를 넣지 않는다." : ""}
+- evidence에는 그 그림의 근거가 되는 상품 자료 문구나 상식 카드 문장을 글자 그대로 옮긴다.${library.length ? `\n이미 만든 그림(같은 내용이면 이 key를 쓴다):\n${library.map((l) => `${l.key}: ${l.subject}`).join("\n")}` : ""}`;
+  }
   if (!VISUAL_KINDS.includes(kind)) return "\n\nAI 이미지(visuals): 이 상품에는 쓰지 않는다. 빈 배열로 낸다.";
   return `
 
@@ -108,7 +128,7 @@ export const editPlanSchema = z.object({
   visuals: z.array(visualSchema).describe("AI 이미지. 없으면 빈 배열"),
   warnings: z
     .array(z.string())
-    .describe("사람이 확인할 문제만 시각과 함께: 구성품이 아닌 소품, 주의사항과 부딪히는 장면, 얼굴이 나오는 구간, 근거가 약한 말. 편집 과정이나 지시 사항은 쓰지 않는다. 없으면 빈 배열"),
+    .describe("사람이 확인할 문제만 시각과 함께: 구성품이 아닌 소품, 주의사항과 부딪히는 장면, 근거가 약한 말. 편집 과정이나 지시 사항은 쓰지 않는다. 없으면 빈 배열"),
 });
 export type EditPlan = z.infer<typeof editPlanSchema>;
 export type EditBeat = EditPlan["beats"][number];
@@ -180,7 +200,7 @@ ${ctx.liveVoice ? "이 계정은 사람이 나와 말한다. 촬영본에 말이
 1. get_product_facts를 읽고, 프레임 묶음에서 촬영본마다 쓸 구간과 뺄 구간을 판단한다(analysis). 시각이 애매하면 look_closer로 확인한다.
 2. ${hookAsk}
 3. ${thumbAsk}
-4. 대본과 컷: 첫 비트는 후킹이고 첫 컷은 가장 궁금한 장면이다. 그 뒤로 비트마다 한 가지만 말하고 장면과 말이 맞게 한다. 합계 15~30초.
+4. 대본과 컷: 첫 비트는 후킹이고 첫 컷은 가장 궁금한 장면이다. 그 뒤로 비트마다 한 가지만 말하고 장면과 말이 맞게 한다. 합계는 촬영본과 기획에 맞춘다. 보여 주는 영상은 15~30초, 사람이 설명하는 영상은 60~85초.
 5. 자막 · 그래픽 · 효과음을 정한다. 쓰는 말 전체를 check_ai_tone, check_rules로 점검하고 read_tts로 읽기용 원고를 확인한다.
 6. look을 정한다. 아래 계정 설정과 상품 · 장면을 읽고 이 영상에 맞는 글자 디자인과 음악을 직접 만든다.${auto && ctx.scriptLines?.length ? `
 

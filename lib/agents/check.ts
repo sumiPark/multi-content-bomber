@@ -1,5 +1,6 @@
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
+import { knowledgeEvidence, type VideoKnowledge } from "@/lib/agents/knowledge";
 import { checkCaption, checkTone, scoreHooks, timeScript } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
@@ -17,6 +18,8 @@ import { checkText, type ContentRule } from "@/lib/rules/check";
 const MIN_HOOK_SCORE = 50;
 const MIN_HUMAN_SCORE = 55;
 const LENGTH_RANGE: [number, number] = [12, 40];
+// 직접 촬영은 설명형 60~85초까지 허용한다(2026-11-06 사용자 결정)
+const SHOOT_LENGTH_RANGE: [number, number] = [12, 90];
 
 export interface CheckIssue {
   kind: "hook" | "length" | "rules" | "tone" | "caption" | "stock" | "grounding" | "fabrication" | "edit";
@@ -53,6 +56,10 @@ export interface CheckOptions {
   fixedHook?: boolean;
   // 사람이 고정한 문구 — AI 말투 점수에서 뺀다(사람이 쓴 글을 AI 티로 잡지 않는다)
   fixedTexts?: string[];
+  // AI 자동 설명 영상의 길이 기준(초). 없으면 트랙 기본값
+  lengthRange?: [number, number];
+  // 승인된 상식 카드 · 확정된 우리 차이. 있으면 근거로 함께 대조한다
+  knowledge?: VideoKnowledge;
 }
 
 // 훅 채점 축 이름(.claude/skills/ig-reel-ko/hookscore_ko.py CHECK_KO와 같다)
@@ -82,8 +89,9 @@ export async function checkScript(
   // 2. 길이 · 비트
   const timing = timeScript(spoken.length >= 2 ? spoken : [...spoken, ""], 20);
   const seconds = opts.seconds ?? timing.totalSeconds;
-  if (seconds < LENGTH_RANGE[0] || seconds > LENGTH_RANGE[1]) {
-    issues.push({ kind: "length", detail: `길이 ${seconds.toFixed(1)}초 (기준 ${LENGTH_RANGE[0]}~${LENGTH_RANGE[1]}초)` });
+  const lengthRange = opts.lengthRange ?? (track === "A" ? SHOOT_LENGTH_RANGE : LENGTH_RANGE);
+  if (seconds < lengthRange[0] || seconds > lengthRange[1]) {
+    issues.push({ kind: "length", detail: `길이 ${seconds.toFixed(1)}초 (기준 ${lengthRange[0]}~${lengthRange[1]}초)` });
   }
   const longBeats = track === "B" ? timing.beats.filter((b) => b.dur > 4.5) : [];
   if (longBeats.length) issues.push({ kind: "length", detail: `4초 넘는 비트 ${longBeats.length}개: "${longBeats[0].text.slice(0, 30)}…"` });
@@ -127,7 +135,9 @@ export async function checkScript(
       {
         role: "system",
         content: `너는 쇼핑몰 릴스의 광고 심의 담당이다. 대본 · 화면 문구 · 캡션의 문장을 하나씩 상품 사실과 원문에 대조한다.
-- 사실 주장(숫자 · 성분 · 효과 · 산지 · 구성 · 가격)이 상품 사실이나 원문에 없으면 unsupported.
+- 사실 주장(숫자 · 성분 · 효과 · 산지 · 구성 · 가격)이 상품 사실이나 원문, 승인된 상식 카드, 확정된 우리 차이에 없으면 unsupported.
+- 상식 카드는 원료 · 품종 일반에 대한 설명이다. 그 내용을 이 제품의 효과나 사용 결과처럼 말하면 unsupported.
+- 우리가 다르다는 말은 확정된 우리 차이에 있어야 한다. 없으면 unsupported.
 - 말투 · 감탄 · 권유(예: "가볍게 써 보세요")는 사실 주장이 아니니 괜찮다.
 - 판매처 이름(shop)을 말하거나 태그로 쓰는 것은 사실 주장이 아니니 괜찮다.
 ${
@@ -140,7 +150,7 @@ ${
       },
       {
         role: "user",
-        content: `상품 사실:\n${JSON.stringify({ name: facts.name, listingName: facts.rawName, shop: facts.shop, price: facts.price, oneLine: facts.oneLine, claims: facts.claims, details: facts.details, usage: facts.usage, cautions: facts.cautions, approvedClaims: facts.approvedClaims })}\n\n상세페이지 원문(일부):\n${facts.sourceText}\n\n점검할 글:\n[내레이션]\n${spoken.join("\n")}\n[화면 문구]\n${onScreen.join("\n")}\n[캡션]\n${script.caption.text}`,
+        content: `상품 사실:\n${JSON.stringify({ name: facts.name, listingName: facts.rawName, shop: facts.shop, price: facts.price, oneLine: facts.oneLine, claims: facts.claims, details: facts.details, usage: facts.usage, cautions: facts.cautions, approvedClaims: facts.approvedClaims })}\n\n상세페이지 원문(일부):\n${facts.sourceText}${opts.knowledge ? knowledgeEvidence(opts.knowledge) : ""}\n\n점검할 글:\n[내레이션]\n${spoken.join("\n")}\n[화면 문구]\n${onScreen.join("\n")}\n[캡션]\n${script.caption.text}`,
       },
     ],
     response_format: zodResponseFormat(groundingSchema, "grounding"),

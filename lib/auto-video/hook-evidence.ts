@@ -1,6 +1,7 @@
 interface EvidenceBoard {
   hook: { spoken: string; answer: string; evidence_scenes: number[] };
   photos: { id: string; kind: string; usable: boolean }[];
+  gifs?: { id: string; usable: boolean }[];
   scenes: { source: string; source_id: string; say: string }[];
 }
 
@@ -29,6 +30,7 @@ export function hookEvidenceProblems(board: EvidenceBoard, archive: { id: string
     const visualProof = evidence.some((i) => {
       const s = board.scenes[i];
       if (!s) return false;
+      if (s.source === "gif") return !!board.gifs?.some((g) => g.id === s.source_id && g.usable);
       if (s.source === "photo") return board.photos.some((p) => p.id === s.source_id && p.usable && ["texture", "use"].includes(p.kind));
       return s.source === "archive" && archive.some((a) => a.id === s.source_id && /제형|거품|발림|바르|텍스처/.test(a.what));
     });

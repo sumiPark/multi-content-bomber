@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import { MAX_VISUALS, VISUAL_KINDS, type EditPlan, type EditVisual } from "@/lib/agents/edit-plan";
+import { MAX_VISUALS, VISUAL_KINDS, type EditPlan, type EditVisual, type VisualPolicy } from "@/lib/agents/edit-plan";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI, OPENAI_IMAGE_MODEL } from "@/lib/openai";
@@ -51,9 +51,11 @@ export async function loadVisualLibrary(db: Service | null | undefined): Promise
 const squash = (t: string) => t.replace(/[\s.,!?~·…'"()[\]]+/g, "");
 
 /** 계획의 그림 가운데 코드 규칙을 지키는 것만 고른다. 근거 문구가 상품 자료에 없으면 쓰지 않는다. */
-export function usableVisuals(plan: EditPlan, facts: ProductFacts): EditVisual[] {
-  if (!VISUAL_KINDS.includes(facts.kind)) return [];
-  const source = squash([facts.sourceText, facts.oneLine ?? "", ...facts.claims.flatMap((c) => [c.claim, c.quote])].join(" "));
+export function usableVisuals(plan: EditPlan, facts: ProductFacts, policy?: VisualPolicy): EditVisual[] {
+  if (!policy?.allKinds && !VISUAL_KINDS.includes(facts.kind)) return [];
+  const source = squash([facts.sourceText, facts.oneLine ?? "", policy?.evidence ?? "", ...facts.claims.flatMap((c) => [c.claim, c.quote])].join(" "));
+  const maxVisuals = policy?.max ?? MAX_VISUALS;
+  const minGap = policy?.minGap ?? 2;
   const last = plan.beats.length - 1;
   const chosen: EditVisual[] = [];
   for (const v of plan.visuals ?? []) {
@@ -63,8 +65,8 @@ export function usableVisuals(plan: EditPlan, facts: ProductFacts): EditVisual[]
       : beat.mode !== "tts" ? "사람이 말하는 비트"
       : !v.prompt.trim() ? "그림 설명 없음"
       : squash(v.evidence).length < 2 || !source.includes(squash(v.evidence)) ? `근거 문구가 상품 자료에 없음("${v.evidence}")`
-      : chosen.some((c) => Math.abs(c.beat - v.beat) < 2) ? "연달아 넣음"
-      : chosen.length >= MAX_VISUALS ? `영상당 ${MAX_VISUALS}개 초과`
+      : chosen.some((c) => Math.abs(c.beat - v.beat) < minGap) ? "연달아 넣음"
+      : chosen.length >= maxVisuals ? `영상당 ${maxVisuals}개 초과`
       : null;
     if (why) console.log(`[video-kit] AI 이미지 제외(${v.subject}): ${why}`);
     else chosen.push(v);
@@ -125,6 +127,7 @@ export async function buildVisualClips(input: {
   // 비트마다 말 길이(초). 컷 길이를 말에 맞춘다
   lengths: number[];
   facts: ProductFacts;
+  policy?: VisualPolicy;
   // 시험(dry-run)은 service가 null이라 저장하지 않는다
   service: Service | null;
   readService?: Service;
@@ -135,7 +138,7 @@ export async function buildVisualClips(input: {
   const realClipOf = new Map<number, number>();
   const warnings: string[] = [];
   const tokens = { input: 0, output: 0 };
-  const chosen = process.env.OPENAI_API_KEY ? usableVisuals(plan, input.facts) : [];
+  const chosen = process.env.OPENAI_API_KEY ? usableVisuals(plan, input.facts, input.policy) : [];
   if (!chosen.length) return { plan, clips: input.clips, used, realClipOf, warnings, tokens };
 
   const dir = join(input.workDir, "visuals");
