@@ -60,6 +60,8 @@ export interface CheckOptions {
   lengthRange?: [number, number];
   // 승인된 상식 카드 · 확정된 우리 차이. 있으면 근거로 함께 대조한다
   knowledge?: VideoKnowledge;
+  // 이 초를 넘는 비트를 잡는다. 없으면 4.5초. 긴 설명 영상은 한 문장이 조금 더 길 수 있다
+  longBeatSeconds?: number;
 }
 
 // 훅 채점 축 이름(.claude/skills/ig-reel-ko/hookscore_ko.py CHECK_KO와 같다)
@@ -93,8 +95,8 @@ export async function checkScript(
   if (seconds < lengthRange[0] || seconds > lengthRange[1]) {
     issues.push({ kind: "length", detail: `길이 ${seconds.toFixed(1)}초 (기준 ${lengthRange[0]}~${lengthRange[1]}초)` });
   }
-  const longBeats = track === "B" ? timing.beats.filter((b) => b.dur > 4.5) : [];
-  if (longBeats.length) issues.push({ kind: "length", detail: `4초 넘는 비트 ${longBeats.length}개: "${longBeats[0].text.slice(0, 30)}…"` });
+  const longBeats = track === "B" ? timing.beats.filter((b) => b.dur > (opts.longBeatSeconds ?? 4.5)) : [];
+  if (longBeats.length) issues.push({ kind: "length", detail: `${opts.longBeatSeconds ?? 4}초 넘는 비트 ${longBeats.length}개: "${longBeats[0].text.slice(0, 30)}…"` });
 
   // 3. 광고 문구 규칙 — 내레이션 · 화면 문구 · 캡션 전부
   const allText = [...spoken, ...onScreen, script.caption.text].join("\n");

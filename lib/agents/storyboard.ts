@@ -176,6 +176,8 @@ export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResu
 - 체감/촉감/흡수 속도를 용기 사진으로 입증하지 않는다. 상세페이지의 설명을 전달할 때는 '제품 안내에서는'이라고 출처를 밝힌다.
 - 장면에 없는 것을 말하지 않는다. 말하는 내용이 보이는 이미지를 고른다.
 - 사실(숫자 · 성분 · 효과 · 구성)은 get_product_facts와 근거 자료에 있는 것만. 없는 상식을 지어내지 않는다. uncertainties에 있는 건 말하지 않는다.
+- 전성분 이름은 표기 그대로 쓴다. "모나스커스/쌀발효물"처럼 한 이름을 나누거나 줄이지 않는다. 다른 이름으로 부를 때는 "성분표에는 ○○로 적혀 있어요"처럼 구분한다.
+- 성분 이름을 연달아 나열하지 않는다. 성분 하나마다 뜻을 말하고 이 상품과 왜 관련 있는지 잇는다.
 - 상식 카드의 원료 설명은 원료의 뜻이다. 이 제품의 효과처럼 잇지 않는다. "그래서 피부가 좋아져요" 같은 결론을 쓰지 않는다.
 - 사람이 써 본 것처럼 말하지 않는다. 지어낸 후기 · 체험을 쓰지 않는다. 최고 · 유일 · 100% 같은 단정을 쓰지 않는다.
 - 건강기능식품 기능성 표현은 approvedClaims 문장 그대로만. 비어 있으면 기능성을 말하지 않는다.${f.kind === "COSMETIC" ? "\n- 화장품: 치료 · 재생 · 염증 같은 표현을 쓰지 않는다. 캡션에 개인차가 있음을 밝힌다." : ""}
@@ -283,12 +285,13 @@ export function storyboardProblems(b: Storyboard, archiveIds: string[], fixedHoo
 }
 
 const reviewSchema = z.object({
-  problems: z.array(z.string()).describe("고쳐야 할 문제. 어느 장면의 어떤 말인지 구체적으로. 없으면 빈 배열"),
+  problems: z.array(z.string()).describe("반드시 고칠 문제만: 말이 안 되는 문장, 사실과 어긋남, 앞뒤 흐름이 끊겨 이해할 수 없음, 화면이 말과 정반대. 어느 장면의 어떤 말인지 구체적으로. 없으면 빈 배열"),
+  notes: z.array(z.string()).describe("더 좋아질 수 있는 점. 사람이 참고할 의견이고 제작을 막지 않는다. 없으면 빈 배열"),
   unsuitable_phrases: z.array(z.object({ kind: z.enum(["hook", "ending"]), reason: z.string() })).describe("소재/내용과 맞지 않아 교체해야 하는 저장 후킹 또는 마지막 문구. 그 외 문제는 problems에 쓴다"),
 });
 
 /** 처음 보는 시청자처럼 읽는다. 점수가 아니라 말이 되는지, 이어지는지, 끌리는지를 본다. */
-export async function reviewStoryboard(input: { board: Storyboard; facts: ProductFacts; knowledge: VideoKnowledge; sheets: string[]; fixedTexts: string[] }): Promise<{ problems: string[]; unsuitable_phrases: { kind: "hook" | "ending"; reason: string }[]; tokens: { input: number; output: number } }> {
+export async function reviewStoryboard(input: { board: Storyboard; facts: ProductFacts; knowledge: VideoKnowledge; sheets: string[]; fixedTexts: string[] }): Promise<{ problems: string[]; notes: string[]; unsuitable_phrases: { kind: "hook" | "ending"; reason: string }[]; tokens: { input: number; output: number } }> {
   const b = input.board;
   const model = agentModel();
   const completion = await getOpenAI().chat.completions.parse({
@@ -305,6 +308,7 @@ export async function reviewStoryboard(input: { board: Storyboard; facts: Produc
 - 화면: 그 장면 이미지가 그 말과 맞는가.
 - 정보 가치: 후킹이 약속한 답이 구체적인가. 상품 이름과 장점만 나열하며 답을 피하지 않는가. 근거 있는 사용법/구분 정보로 답하는 영상은 허용한다.
 후킹의 질문에 본문이 실제로 답하는지, hook.answer와 evidence_scenes가 그 답과 맞는지 확인한다. '보라'고 약속한 제형/사용 장면은 실물이 있어야 한다. 상품 설명을 전하는 도식은 허용하되 체험의 증거로 보지 않는다.
+실제 사용 영상이 없는 상품이 많다. 사용법이나 안내 문구를 말할 때 화면에 용기 · 상품 사진이 나오는 것은 문제가 아니다. 효과를 눈으로 보여 준다고 약속할 때만 문제다.
 ${input.fixedTexts.length ? `저장된 문구도 근거/소재/답 회수 검수에서 제외하지 않는다. 맞지 않으면 unsuitable_phrases에 종류와 이유를 쓴다. 첫 문장은 hook, 마지막 문장은 ending이다. 정상 후킹을 마지막 문구 때문에 교체하지 않는다: ${input.fixedTexts.join(" / ")}` : ""}`,
       },
       {
@@ -323,6 +327,7 @@ ${input.fixedTexts.length ? `저장된 문구도 근거/소재/답 회수 검수
   });
   return {
     problems: (() => { const parsed = completion.choices[0]?.message?.parsed; if (!parsed) throw new Error("장면표 검수 응답이 없어요"); return parsed.problems; })(),
+    notes: completion.choices[0]!.message.parsed!.notes,
     unsuitable_phrases: completion.choices[0]!.message.parsed!.unsuitable_phrases,
     tokens: { input: completion.usage?.prompt_tokens ?? 0, output: completion.usage?.completion_tokens ?? 0 },
   };

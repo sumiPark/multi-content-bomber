@@ -38,7 +38,8 @@ const MAX_REVIEW_FRAMES = 30;
 // 음성으로 잰 길이의 허용 오차(초). 대본은 60~85초에 맞춰 쓰고, 합성 결과의 작은 차이로 칸을 멈추지 않는다
 const LENGTH_TOLERANCE = 3;
 const CALIBRATION_TEXT = "처음 듣는 사람도 알아듣게 천천히 설명해 볼게요. 이름이 낯설어도 뜻을 알면 고르기 쉬워져요.";
-const MAX_BOARD_TRIES = 3;
+const MAX_BOARD_TRIES = 4;
+const LONG_BEAT_SECONDS = 6.5;
 const CAPTION_CHARS = 16;
 
 const squash = (t: string) => t.replace(/\s+/g, "");
@@ -159,7 +160,10 @@ export async function makeAutoVideo(input: {
   const { service, planId, account, productId, rules, workDir } = input;
   const facts = await loadProductFacts(service, productId);
   if (facts.stockStatus !== "available") throw new StopError(`지금 판매 중이 아닌 상품이에요 (${facts.stockStatus})`);
-  const concept = input.concept;
+  // 저장하지 않는 시험에서만 지금 계정 설정의 컨셉 · 스타일 · 고정 문구를 빼고 새 구조를 본다. 말투 · 목소리는 그대로 둔다
+  const ignoreSaved = input.dryRun && process.env.TEST_IGNORE_SAVED_CONCEPT === "1";
+  const concept: AccountConcept = ignoreSaved ? { ...input.concept, autoConcept: "", autoVideoStyle: "", autoHooks: [], autoEndings: [] } : input.concept;
+  if (ignoreSaved) console.log("  (시험) 저장된 컨셉 · 영상 스타일 · 고정 문구 제외");
   const { data: product } = await service.from("products").select("detail_image_urls, represent_image_url").eq("id", productId).maybeSingle();
 
   // 1. 상세페이지에서 사진 구간만 잘라 후보로
@@ -252,6 +256,7 @@ export async function makeAutoVideo(input: {
   let retry: { board: Storyboard; problems: string[] } | null = null;
   let left: string[] = [];
   const storyboardReviews: unknown[] = [];
+  let boardNotes: string[] = [];
   // 못 쓰는 사진 때문에 다시 쓰는 횟수는 따로 센다. 말을 점검하기 전에 걸러 토큰을 아낀다
   let photoRetries = 3;
   const fixedTexts = () => [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t);
@@ -314,13 +319,14 @@ export async function makeAutoVideo(input: {
     const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0, { knowledge, charLimits }), ...hookEvidenceProblems(board, archive)];
     // 길이는 글자 수로 storyboardProblems가 재고, 완성본의 실제 길이를 다시 잰다.
     const estimated = board.scenes.reduce((n, s) => n + squash(s.tts).length, 0) / speechRate;
-    const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999] });
+    const check = await checkScript(boardAsScript(board), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999], longBeatSeconds: LONG_BEAT_SECONDS });
     add(check.tokens);
     const review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...gifSheets], fixedTexts: fixedTexts() });
     add(review.tokens);
     const blockingNow = blockingIssues(check.issues).map((i) => i.detail);
     left = [...code, ...blockingNow, ...review.problems, ...review.unsuitable_phrases.map((p) => `${p.kind}: ${p.reason}`)];
-    storyboardReviews.push({ attempt: attempt + 1, hook: board.hook, problems: left });
+    storyboardReviews.push({ attempt: attempt + 1, hook: board.hook, problems: left, notes: review.notes });
+    boardNotes = review.notes;
     console.log(`  장면표 ${attempt + 1}번째: 코드 ${code.length} · 규칙/근거 ${blockingNow.length} · 시청자 ${review.problems.length}`);
     for (const p of left) console.log(`    - ${p.slice(0, 160)}`);
     if (!left.length) break;
@@ -340,7 +346,7 @@ export async function makeAutoVideo(input: {
   let motionFonts: VideoFonts | undefined;
   const clips: KitClip[] = [];
   const sources: unknown[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = boardNotes.map((n) => `장면표 의견: ${n}`.slice(0, 300));
   if (pickedFonts && finalBoard.scenes.some((s) => s.source === "motion")) {
     try {
       motionFonts = await downloadVideoFonts(pickedFonts, workDir);
@@ -471,7 +477,7 @@ export async function makeAutoVideo(input: {
     facts,
     rules,
     account,
-    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts(), knowledge, lengthRange: [AUTO_SECONDS[0] - LENGTH_TOLERANCE, AUTO_SECONDS[1] + LENGTH_TOLERANCE] },
+    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts(), knowledge, longBeatSeconds: LONG_BEAT_SECONDS, lengthRange: [AUTO_SECONDS[0] - LENGTH_TOLERANCE, AUTO_SECONDS[1] + LENGTH_TOLERANCE] },
   );
   // 처음 보는 사람 시험 — 상품 자료 없이 영상만 보고 답하게 한다. 멈추지 않고 사람이 볼 경고로 남긴다
   let firstViewer: Awaited<ReturnType<typeof firstViewerTest>> | null = null;
