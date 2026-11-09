@@ -8,13 +8,13 @@ import { DEFAULT_EDIT_STYLE, editStyleResultSchema, parseEditStyle, type EditSty
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 계정 컨셉(0038) — 계정마다 사람이 적어 둔 방향을 에이전트 · 편집 워커가 읽는 곳.
-// 비어 있으면 프롬프트와 편집이 예전과 같다. AI 자동 쪽은 대본 방식 · 바꾸고 싶은 점(autoNotes)만 읽는다(0052).
+// 비어 있으면 프롬프트와 편집이 예전과 같다. AI 자동 쪽은 목소리 · 대본 방식 · 바꾸고 싶은 점(autoNotes) · 고정 문구만 읽는다(0052).
+// AI 자동의 장면 방향(auto_role_focus)은 2026-11-10 사용자 결정으로 읽지 않는다. 칸은 main 코드가 아직 읽어 DB에 남겨 둔다.
 
 type Service = ReturnType<typeof createServiceClient>;
 
 export interface AccountConcept {
-  // 영상 방향(0043) — 방식별로 따로. 전체 자동 영상과 직접 촬영 영상의 참고 내용은 섞이지 않는다
-  autoRole: string | null;
+  // 직접 촬영 영상 방향(0043). AI 자동 콘텐츠에는 영상 방향이 없다
   shootRole: string | null;
   // 직접 촬영 음성(0044) — true면 찍을 때 말한 소리, 기본은 AI 음성. 영상 방향과 별개다
   shootLiveVoice: boolean;
@@ -37,7 +37,6 @@ export interface AccountConcept {
 }
 
 const EMPTY: AccountConcept = {
-  autoRole: null,
   shootRole: null,
   shootLiveVoice: false,
   autoScriptStyle: "KNOWLEDGE",
@@ -58,13 +57,12 @@ const EMPTY: AccountConcept = {
 export async function loadAccountConcept(service: Service, accountId: string): Promise<AccountConcept> {
   const { data, error } = await service
     .from("account_concepts")
-    .select("auto_role_focus, shoot_role_focus, shoot_voice_mode, auto_script_style, auto_notes, auto_hooks, auto_endings, auto_voice_id, shoot_voice_id, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params")
+    .select("shoot_role_focus, shoot_voice_mode, auto_script_style, auto_notes, auto_hooks, auto_endings, auto_voice_id, shoot_voice_id, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params")
     .eq("social_account_id", accountId)
     .maybeSingle();
   if (error) console.warn(`[concept] 읽기 실패(${accountId}): ${error.message}`);
   if (!data) return EMPTY;
   return {
-    autoRole: data.auto_role_focus,
     shootRole: data.shoot_role_focus,
     shootLiveVoice: data.shoot_voice_mode === "LIVE",
     autoScriptStyle: scriptStyleOf(data.auto_script_style),

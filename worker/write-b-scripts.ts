@@ -50,7 +50,7 @@ async function main() {
 
   let q = service
     .from("content_plans")
-    .select("id, social_account_id, slot_date, slot_time, status, product_id, social_accounts(display_name, role_focus, role_note)")
+    .select("id, social_account_id, slot_date, slot_time, status, product_id, social_accounts(display_name)")
     .eq("track", "B")
     .order("slot_date")
     .order("slot_time");
@@ -107,8 +107,6 @@ async function main() {
             service,
             planId: plan.id,
             accountName: acc?.display_name ?? "",
-            roleFocus: concept.autoRole,
-            roleNote: acc?.role_note ?? null,
             slotTime: plan.slot_time as string,
             facts,
             rules,

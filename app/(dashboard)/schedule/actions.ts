@@ -349,10 +349,9 @@ const roleSchema = z
 // 목록에 있는 목소리만 저장한다. 비었거나 목록에서 빠진 목소리는 기본 목소리
 const voiceChoice = z.string().transform((v) => voiceIdOf(v));
 
-// AI 자동은 대본 방식 + 바꾸고 싶은 점 한 칸(0052). 옛 컨셉 · 말투 · 영상 스타일 세 칸을 합쳐서 길이도 그만큼 둔다
+// AI 자동은 목소리 · 대본 방식 + 바꾸고 싶은 점 한 칸(0052). 장면 방향(auto_role_focus)은 2026-11-10부터 저장하지 않는다. 옛 컨셉 · 말투 · 영상 스타일 세 칸을 합쳐서 길이도 그만큼 둔다
 const autoConceptSchema = z.object({
   accountId: z.string().uuid(),
-  autoRole: roleSchema,
   autoScriptStyle: z.enum(["KNOWLEDGE", "STORY"]),
   autoNotes: z.string().trim().max(3000, "3,000자 안으로 줄여 주세요."),
   autoHooks: phraseLines,
@@ -389,7 +388,6 @@ export async function saveAutoConceptAction(input: z.input<typeof autoConceptSch
   const { error } = await service.from("account_concepts").upsert({
     social_account_id: d.accountId,
     organization_id: auth.orgId,
-    auto_role_focus: d.autoRole,
     auto_script_style: d.autoScriptStyle,
     auto_notes: d.autoNotes,
     auto_hooks: d.autoHooks,

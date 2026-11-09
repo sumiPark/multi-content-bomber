@@ -17,7 +17,6 @@ import { Textarea } from "@/components/ui/textarea";
 export interface ConceptCardData {
   accountId: string;
   name: string;
-  autoRole: string;
   // 대본 방식(0052) — KNOWLEDGE(상식 · 상품 연결형, 기본) · STORY(이야기형)
   autoScriptStyle: string;
   // 바꾸고 싶은 점(0052) — 옛 컨셉 · 말투 · 영상 스타일을 합친 한 칸
@@ -42,9 +41,10 @@ export interface ConceptCardData {
 }
 
 type Role = "" | "PRODUCT" | "PERSON";
-type AutoKey = "autoRole" | "autoScriptStyle" | "autoNotes" | "autoHooks" | "autoEndings" | "autoVoiceId";
+// AI 자동에는 영상 방향이 없다(2026-11-10). 직접 촬영만 영상 방향을 정한다
+type AutoKey = "autoScriptStyle" | "autoNotes" | "autoHooks" | "autoEndings" | "autoVoiceId";
 type ShootKey = "shootRole" | "shootVoice" | "shootVoiceId" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
-const AUTO_KEYS: AutoKey[] = ["autoRole", "autoScriptStyle", "autoNotes", "autoHooks", "autoEndings", "autoVoiceId"];
+const AUTO_KEYS: AutoKey[] = ["autoScriptStyle", "autoNotes", "autoHooks", "autoEndings", "autoVoiceId"];
 const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootVoice", "shootVoiceId", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
 
 function Field({
@@ -177,7 +177,6 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
       mode === "auto"
         ? saveAutoConceptAction({
             accountId: data.accountId,
-            autoRole: form.autoRole as Role,
             autoScriptStyle: form.autoScriptStyle === "STORY" ? "STORY" : "KNOWLEDGE",
             autoNotes: form.autoNotes,
             autoHooks: form.autoHooks,
@@ -204,8 +203,7 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
 
       {mode === "auto" ? (
         <>
-          <div className="grid gap-4 lg:grid-cols-3">
-            <RoleField {...bind("autoRole")} help="AI가 만드는 영상의 장면과 말투 방향이에요. 직접 촬영과는 따로 정해요." />
+          <div className="grid gap-4 lg:grid-cols-2">
             <VoicePickField {...bind("autoVoiceId")} help="AI 자동 콘텐츠의 내레이션 목소리예요. 직접 촬영과는 따로 정해요." />
             <ScriptStyleField {...bind("autoScriptStyle")} />
           </div>

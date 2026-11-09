@@ -32,7 +32,7 @@ async function main() {
 
   const { data: settings, error } = await service
     .from("track_settings")
-    .select("social_account_id, organization_id, product_scopes, b_full_auto, repeat_gap_days, social_accounts!inner(display_name, role_focus, role_note, is_active, disconnected_at)");
+    .select("social_account_id, organization_id, product_scopes, b_full_auto, repeat_gap_days, social_accounts!inner(display_name, is_active, disconnected_at)");
   if (error) throw new Error(`track_settings 조회 실패: ${error.message}`);
 
   // 올릴 시각까지 확인이 없던 제안은 건너뜀으로 (사람이 안 봤으면 B 영상을 만들지 않는다)
@@ -81,8 +81,6 @@ async function main() {
           concept: concept.autoNotes,
           accountId: st.social_account_id,
           accountName: acc.display_name ?? "",
-          roleFocus: concept.autoRole,
-          roleNote: acc.role_note,
           scopes,
           repeatGapDays: st.repeat_gap_days,
           slotDate,

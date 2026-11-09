@@ -18,8 +18,9 @@ export interface SelectContext {
   service: Service;
   accountId: string;
   accountName: string;
-  roleFocus: string | null;
-  roleNote: string | null;
+  // 직접 촬영 기획(plan-a)만 쓴다. AI 자동 상품 고르기는 계정 역할을 읽지 않는다(2026-11-10)
+  roleFocus?: string | null;
+  roleNote?: string | null;
   scopes: ProductScope[];
   repeatGapDays: number;
   slotDate: string;
@@ -226,9 +227,7 @@ export function topicLine(ctx: Pick<SelectContext, "slotTimes" | "slotTopics">, 
 }
 
 function systemPrompt(ctx: SelectContext): string {
-  const focus = ctx.roleFocus === "PERSON" ? "사람 중심(1인칭 후기 · 일상 루틴)" : ctx.roleFocus === "PRODUCT" ? "상품 중심(성분 · 제형 · 구성 · 가격)" : "미정";
   return `너는 인스타그램 계정 @${ctx.accountName}의 B 트랙(AI 자동 생성 릴스) 상품 선정 담당이다.
-계정 역할: ${focus}${ctx.roleNote ? ` — ${ctx.roleNote}` : ""}
 쓸 수 있는 상품: ${ctx.scopes.map((s) => `${SHOPS[s.shop].name} ${KIND_LABEL[s.kind]}`).join(", ")}
 
 할 일: ${ctx.slotDate}의 B 칸(${ctx.slotTimes.join(", ")})마다 상품 하나씩 고른다.

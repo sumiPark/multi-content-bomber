@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { blockingIssues, checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
-import { scriptStyleOf, type ScriptStyle } from "@/lib/agents/script-style";
+import type { ScriptStyle } from "@/lib/agents/script-style";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
 import { LONG_VISUALS, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, phraseNotes, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
@@ -192,12 +192,9 @@ export async function makeAutoVideo(input: {
   const { service, planId, account, productId, rules, workDir } = input;
   const facts = await loadProductFacts(service, productId);
   if (facts.stockStatus !== "available") throw new StopError(`지금 판매 중이 아닌 상품이에요 (${facts.stockStatus})`);
-  // 저장하지 않는 시험에서만 지금 계정 설정의 바꾸고 싶은 점 · 고정 문구를 빼고 새 구조를 본다. 대본 방식 · 목소리는 그대로 둔다
-  const ignoreSaved = input.dryRun && process.env.TEST_IGNORE_SAVED_CONCEPT === "1";
-  const concept: AccountConcept = ignoreSaved ? { ...input.concept, autoNotes: "", autoHooks: [], autoEndings: [] } : input.concept;
-  if (ignoreSaved) console.log("  (시험) 저장된 바꾸고 싶은 점 · 고정 문구 제외");
-  // 시험에서만 대본 방식을 바꿔 본다(TEST_SCRIPT_STYLE=STORY). 저장된 설정은 그대로다
-  const style: ScriptStyle = input.dryRun && process.env.TEST_SCRIPT_STYLE?.trim() ? scriptStyleOf(process.env.TEST_SCRIPT_STYLE.trim()) : concept.autoScriptStyle;
+  // 시험(--dry-run)도 저장된 계정 설정을 그대로 읽는다. 시험만 다르게 만드는 덮어쓰기를 두지 않는다(2026-11-10)
+  const concept: AccountConcept = input.concept;
+  const style: ScriptStyle = concept.autoScriptStyle;
   console.log(`  대본 방식: ${style === "STORY" ? "이야기형" : "상식 · 상품 연결형"}`);
   const { data: product } = await service.from("products").select("detail_image_urls, represent_image_url").eq("id", productId).maybeSingle();
 
@@ -328,7 +325,6 @@ export async function makeAutoVideo(input: {
       readService: service,
       planId,
       accountName: account,
-      roleFocus: concept.autoRole,
       facts,
       rules,
       candidates: sharp.filter((c) => sharpIds.has(c.id)).map((c) => ({ id: c.id, w: c.w, h: c.h })),
@@ -475,7 +471,7 @@ export async function makeAutoVideo(input: {
     boardNotes = best.notes;
   }
   if (!board) throw new Error("장면표를 만들지 못했어요");
-  writeFileSync(join(workDir, "storyboard-review.json"), JSON.stringify({ angles: angleOrder.map((i) => ({ score: angleScores[i], ...angles[i] })), attempts: storyboardReviews, phrases: fixedRecord(phrases), board }, null, 2));
+  writeFileSync(join(workDir, "storyboard-review.json"), JSON.stringify({ angles: angleOrder.map((i) => ({ score: angleScores[i], ...angles[i] })), attempts: storyboardReviews, phrases: fixedRecord(phrases), board, left }, null, 2));
   if (left.length) throw new StopError(`장면표를 ${MAX_BOARD_TRIES}번 고친 뒤에도 해결되지 않았어요: ${left.join(" / ")}`);
 
   // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다

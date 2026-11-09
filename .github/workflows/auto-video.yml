@@ -20,20 +20,10 @@ on:
         description: "만들기만 하고 저장 · 발행하지 않기 (결과는 실행 기록의 파일로)"
         type: boolean
         default: false
-      test_tone:
-        description: "시험에서만 쓸 말투 · 분위기 (dry_run 전용, 저장 안 됨)"
-        required: false
-      ignore_saved_concept:
-        description: "저장된 컨셉 · 영상 스타일 · 고정 문구 빼고 만들기 (dry_run 전용, 저장 안 됨)"
-        type: boolean
-        default: false
       use_draft_knowledge:
         description: "승인 전 상식 카드 · 우리 차이 초안도 쓰기 (dry_run 전용, 저장 안 됨)"
         type: boolean
         default: false
-      test_settings:
-        description: "시험에서만 쓸 자동 콘텐츠 설정 JSON (dry_run 전용, 저장 안 됨)"
-        required: false
 
 # 저장하지 않는 시험은 칸을 차지하지 않으니 상품별로 동시에 돌린다
 concurrency:
@@ -103,10 +93,7 @@ jobs:
           AGENT_MODEL: ${{ vars.AGENT_MODEL }}
           AUTO_VIDEO_PUBLISH: ${{ vars.AUTO_VIDEO_PUBLISH }}
           VIDEO_PYTHON: python
-          TEST_AUTO_TONE: ${{ inputs.test_tone }}
           TEST_USE_DRAFT_KNOWLEDGE: ${{ inputs.use_draft_knowledge && '1' || '' }}
-          TEST_IGNORE_SAVED_CONCEPT: ${{ inputs.ignore_saved_concept && '1' || '' }}
-          TEST_AUTO_SETTINGS: ${{ inputs.test_settings }}
       - name: Keep dry-run result
         if: ${{ inputs.dry_run && !cancelled() }}
         uses: actions/upload-artifact@v4

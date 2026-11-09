@@ -220,7 +220,6 @@ export interface StoryboardContext {
   readService?: Service;
   planId?: string;
   accountName: string;
-  roleFocus?: string | null;
   facts: ProductFacts;
   rules: ContentRule[];
   candidates: { id: string; w: number; h: number }[];
@@ -275,7 +274,6 @@ ${
       : `시청자가 "어, 내 얘기네" 하고 멈춘 뒤, 그 고민이 왜 생기는지 상식 하나를 배우고, 이 상품이 그 고민에 어떻게 답하는지 알게 되는 영상이다. 수업이나 광고처럼 들리면 실패다.`
   }
 상품: ${f.shop} ${f.kindLabel} "${f.name}"
-계정 역할: ${ctx.roleFocus === "PERSON" ? "사람 중심" : ctx.roleFocus === "PRODUCT" ? "상품 중심" : "미정"}
 
 순서:
 1. get_product_facts와 근거 자료를 읽고 받은 이미지 · 움직이는 이미지를 모두 본다. 무엇을 보여 줄 수 있는지 먼저 판단한다.

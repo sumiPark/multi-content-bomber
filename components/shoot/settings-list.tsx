@@ -2,11 +2,12 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 
 // 설정 목록 — 촬영 설정 · 자동 콘텐츠 설정이 같이 쓴다. 계정마다 영상 방향 · 쓸 상품 · 무엇을 저장해 뒀는지만 보여 주고, 누르면 상세에서 고친다.
+// 자동 콘텐츠 설정에는 영상 방향이 없어 role을 넘기지 않는다.
 
 export interface SettingsRow {
   accountId: string;
   name: string;
-  role: string | null;
+  role?: string | null;
   // 방식별 한마디 — "기획 5개", "하루 2칸 · 08:00 · 21:00"
   meta: string;
   scopeLabels: string[];
@@ -24,7 +25,8 @@ export function SettingsList({ rows, basePath, emptyNote }: { rows: SettingsRow[
               <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="text-sm font-semibold">@{r.name}</span>
                 <span className="text-xs text-muted-foreground tabular-nums">
-                  {r.role ?? "방향 미정"} · {r.meta}
+                  {r.role !== undefined && `${r.role ?? "방향 미정"} · `}
+                  {r.meta}
                 </span>
               </span>
               <span className="flex flex-wrap items-center gap-1.5">

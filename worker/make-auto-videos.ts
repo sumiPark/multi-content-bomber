@@ -66,11 +66,8 @@ async function main() {
     if (!plan.product_id) continue;
     const acc = plan.social_accounts?.display_name ?? "";
     const label = `@${acc} ${plan.slot_date} ${plan.slot_time}`;
+    // 시험(--dry-run)도 저장된 자동 콘텐츠 설정 그대로 만든다. 실제 생성과 같은 결과를 봐야 해서 덮어쓰기 입력을 두지 않는다(2026-11-10)
     const concept = await loadAccountConcept(service, plan.social_account_id);
-    // 시험(--dry-run)에서만 바꾸고 싶은 점을 바꿔 설정 반영을 본다. 저장하지 않는다
-    if (dryRun && process.env.TEST_AUTO_NOTES?.trim()) concept.autoNotes = process.env.TEST_AUTO_NOTES.trim();
-    // 시험(--dry-run)에서만 설정 초안을 넣어 본다. 저장하지 않는다
-    if (dryRun && process.env.TEST_AUTO_SETTINGS?.trim()) Object.assign(concept, JSON.parse(process.env.TEST_AUTO_SETTINGS) as Partial<typeof concept>);
     const prev = (plan.video ?? {}) as AutoVideo;
     // 확인한 칸은 시각이 지나도 만든다(끝나는 즉시 올라간다). 그제 이전 칸은 사람이 다시 만들라고 했을 때만 만든다
     if (!onlyPlan && !prev.remake && (plan.slot_date as string) < kstDate(-1)) {
