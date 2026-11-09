@@ -61,7 +61,7 @@ export function usableVisuals(plan: EditPlan, facts: ProductFacts, policy?: Visu
   for (const v of plan.visuals ?? []) {
     const beat = plan.beats[v.beat];
     const why =
-      !beat || v.beat <= 0 || v.beat >= last ? "첫 · 마지막 비트"
+      !beat || v.beat < 0 || (v.beat === 0 && !policy?.firstBeat) || v.beat >= last ? "첫 · 마지막 비트"
       : beat.mode !== "tts" ? "사람이 말하는 비트"
       : !v.prompt.trim() ? "그림 설명 없음"
       : squash(v.evidence).length < 2 || !source.includes(squash(v.evidence)) ? `근거 문구가 상품 자료에 없음("${v.evidence}")`

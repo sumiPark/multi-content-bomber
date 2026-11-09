@@ -46,13 +46,16 @@ export const graphicSchema = z.object({
 export const VISUAL_KINDS: ProductKind[] = ["COSMETIC", "HEALTH_FOOD"];
 export const MAX_VISUALS = 2;
 // 설명 영상의 상식 구간(2026-11-06 사용자 결정). 과일 품종 · 원리 설명에도 쓴다
-export const LONG_VISUALS: VisualPolicy = { max: 10, minGap: 1, allKinds: true };
+// 첫 장면은 상황 장면이라 사람 없는 생활 장면 그림을 쓸 수 있다(2026-11-09 사용자 결정)
+export const LONG_VISUALS: VisualPolicy = { max: 10, minGap: 1, allKinds: true, firstBeat: true };
 
 export interface VisualPolicy {
   max: number;
   // 그림 사이 최소 비트 간격. 1이면 연달아 넣을 수 있다
   minGap: number;
   allKinds: boolean;
+  // 첫 비트에도 그림을 넣을 수 있다. 마지막 비트는 늘 상품으로 끝낸다
+  firstBeat?: boolean;
   // 근거 문구를 찾을 추가 글(상식 카드 등)
   evidence?: string;
 }

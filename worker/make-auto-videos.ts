@@ -108,6 +108,8 @@ async function main() {
         rules,
         dryRun,
         workDir,
+        // 시험에서만: --board <storyboard-review.json> 으로 저장된 장면표부터 영상을 만든다
+        savedBoard: dryRun && arg(argv, "--board") ? JSON.parse(readFileSync(arg(argv, "--board")!, "utf8")).board : undefined,
       });
       const { kit, check, blocking } = made;
       const seconds = Math.round((Date.now() - t0) / 1000);
