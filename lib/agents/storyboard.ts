@@ -2,7 +2,7 @@ import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { conceptBlock } from "@/lib/agents/concept";
 import { LONG_VISUALS, graphicSchema, sfxNames, visualRules, visualSchema, type EditVisual } from "@/lib/agents/edit-plan";
-import { knowledgeBlock, type VideoKnowledge } from "@/lib/agents/knowledge";
+import { COMMON_KNOWLEDGE_REF, evidenceRef, knowledgeBlock, type VideoKnowledge } from "@/lib/agents/knowledge";
 import { editKit } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel, runAgent, type AgentResult } from "@/lib/agents/runner";
@@ -92,7 +92,7 @@ export const storyboardSchema = z.object({
     .array(
       z.object({
         part: z.enum(["situation", "worry", "knowledge", "product", "difference", "takeaway"]).describe("이 장면의 역할: 상황(첫 장면), 고민, 상식, 우리 상품, 우리 차이, 기억할 기준"),
-        evidence: z.array(z.string()).describe("이 장면의 사실 근거 번호만. 상식 카드 K1, 우리 차이 D1, 상품 자료 P. 문구를 옮기지 않는다. 사실이 없는 연결 문장은 빈 배열"),
+        evidence: z.array(z.string()).describe("이 장면의 사실 근거 번호만. 상식 카드 K1, 우리 차이 D1, 상품 자료 P, 널리 알려진 내용은 \"일반 상식\". 문구를 옮기지 않는다. 사실이 없는 연결 문장은 빈 배열"),
         source: z.enum(["photo", "gif", "archive", "visual", "motion", "stock"]).describe("photo 사진 후보, gif 움직이는 이미지, archive 자사 촬영 컷, visual AI 이미지, motion 코드로 그리는 설명 화면, stock 무료 스톡 영상"),
         source_id: z.string().describe("쓸 후보 번호 p1 · g1 · a1. visual · motion · stock이면 빈 문자열"),
         stock_query: z.string().describe("source가 stock이면 Pixabay 영어 검색어 2~3낱말(상표 없이, 얼굴이 안 나올 장면: hands, close up, back view 등). 아니면 빈 문자열"),
@@ -130,9 +130,9 @@ const angleSchema = z.object({
   worry: z.string().describe("그 상황의 불편이나 흔한 실수"),
   hook_line: z.string().describe("첫 문장. 그 상황을 시청자에게 말 거는 한 문장(\"~할 때 있죠?\"). 지어낸 인물 · 체험이 아니다"),
   one_thing: z.string().describe("시청자가 얻어 갈 단 한 가지"),
-  answer: z.string().describe("고민에 대한 답. 근거 자료에 있는 내용만"),
+  answer: z.string().describe("고민에 대한 답. 상품에 대한 내용은 근거 자료에 있는 것만, 왜 그런지는 널리 알려진 일반 상식도 된다"),
   beats: z.array(z.string()).describe("이야기 흐름 3~5단계. 상황 → 고민 → 왜 그런지 → 이 상품의 답 순서"),
-  evidence: z.array(z.string()).describe("쓸 근거 번호. K1, D1, P"),
+  evidence: z.array(z.string()).describe("쓸 근거 번호. K1, D1, P, 일반 상식"),
 });
 export type StoryAngle = z.infer<typeof angleSchema>;
 
@@ -150,12 +150,12 @@ export async function writeAngles(input: { accountName: string; facts: ProductFa
 각도마다 상황 · 고민 · 답을 정한다. 시청자가 자기 일로 알아보는 상황에서 시작해, 그 상황의 고민을 이 상품이 어떻게 풀어 주는지로 간다.
 - 상황(situation): 이 상품을 고르거나 쓰거나 먹거나 보관하는 일상의 한 순간. 듣자마자 "어, 나도 그래"가 나와야 한다. 예의 모양: "마트에서 ○○ 고를 때 뭘 봐야 할지 모르겠죠?", "○○ 하고 나면 늘 ○○하죠?".
 - 고민(worry): 그 상황에서 겪는 불편이나 흔한 실수. 누구나 겪을 만한 일로 쓰고, 숫자 · 통계 · "많은 분들이" 같은 사실 주장을 지어내지 않는다.
-- 답(answer): 왜 그런 일이 생기는지와 이 상품이 그 고민에 어떻게 답하는지. 근거 자료에 있는 내용만.
+- 답(answer): 왜 그런 일이 생기는지와 이 상품이 그 고민에 어떻게 답하는지. 왜 그런지는 원리 · 원료 일반 · 생활 상식처럼 널리 알려진 내용으로 설명해도 되고, 이 상품에 대한 내용은 근거 자료에 있는 것만 쓴다.
 - 첫 문장(hook_line)은 상황을 시청자에게 말 거는 한 문장이다. 지어낸 인물("제 친구가", "어떤 고객님이")이나 1인칭 체험("써 봤는데")으로 시작하지 않는다.
 - 5개는 서로 다른 상황이어야 한다(고르는 순간 · 쓰는 순간 · 먹는 순간 · 보관 · 선물 등). 표현만 바꾼 비슷한 각도를 내지 않는다.
 - 상품 소개 문장을 상황으로 바꾸지 않는다. 상품을 살 생각이 없는 사람도 자기 이야기처럼 들려야 한다. 그리고 답이 이 상품의 특징이나 우리 차이로 이어져야 한다.
 - 한 각도는 고민 하나만 다룬다. 성분 · 특징을 나열하지 않는다.
-- 사실은 근거 자료에 있는 것만 쓴다. 치료 · 재생 · 효과 보장, 지어낸 체험, 최고 · 유일 같은 단정을 쓰지 않는다. 원료 설명을 제품의 효과처럼 잇지 않는다.${input.rejected?.length ? `\n- 이미 써 봤지만 재미가 낮았던 각도와 비슷하게 쓰지 않는다: ${input.rejected.join(" / ")}` : ""}`,
+- 상품 사실은 근거 자료에 있는 것만 쓰고, 출처를 밝히는 말투("제품 안내에서는", "~래요") 없이 직접 설명한다. 숫자 · 통계 · 의학적 효과를 지어내지 않는다. 치료 · 재생 · 효과 보장, 지어낸 체험, 최고 · 유일 같은 단정을 쓰지 않는다. 원료 설명을 제품의 효과처럼 잇지 않는다.${input.rejected?.length ? `\n- 이미 써 봤지만 재미가 낮았던 각도와 비슷하게 쓰지 않는다: ${input.rejected.join(" / ")}` : ""}`,
       },
       {
         role: "user",
@@ -288,20 +288,23 @@ export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResu
 - 기본은 시청자에게 말 거는 사람이다. 상황 · 고민 · 상식 · 상품 · 기준을 이 목소리로 말한다.
 - 판매자 목소리("저희는 고를 때 ○○를 봐요")는 우리 차이(difference) 장면에서만, 확정된 우리 차이(D)에 있는 내용으로만 쓴다. 다른 구간에서는 "저희"라고 말하지 않는다.
 - 지어낸 인물("제 친구가", "어떤 고객님이"), 1인칭 체험("써 봤는데", "제 피부가"), 지어낸 후기는 쓰지 않는다.
-- 장면마다 evidence를 채운다. 상식 문장은 상식 카드(K1...)나 상품 자료(P)에 있어야 하고, 우리 차이는 D1...만 쓴다.
+- 장면마다 evidence를 채운다. 상품에 대한 문장은 상품 자료(P), 상식 문장은 상식 카드(K1...)를 먼저 쓰고, 카드에 없는 널리 알려진 원리 · 원료 일반 · 생활 상식은 "일반 상식"이라고 적는다. 우리 차이는 D1...만 쓴다.
 
 글:
 - 소리 내어 읽었을 때 말이 되어야 한다. 처음 보는 사람이 상품이 무엇인지 알아듣고, 앞 문장에 이어 다음 문장을 자연스럽게 듣게 쓴다.
 - 첫 문장은 시청자가 자기 일로 알아볼 상황이어야 한다. 용량 · 가격 같은 숫자는 첫 문장에 넣지 않는다.
 - 후킹은 궁금증 또는 정보라는 목적이 분명해야 한다. hook.answer에 실제 답을 적고 evidence_scenes에서 중간까지 그 답을 회수한다. 빈 호기심/끝까지 보라는 명령, 답 없이 상품 소개만 반복하는 흐름은 쓰지 않는다.
 - 제형/거품/사용 결과를 '보라'는 후킹은 실제 제형/사용 컷이 있을 때만 쓴다. 용기 사진과 AI 그림/도식은 실물 증거가 아니다. 재료가 포장 사진뿐이면 포장에 보이는 구분점이나 근거가 있는 사용 순서 등 답할 수 있는 질문을 고른다.
-- 체감/촉감/흡수 속도를 용기 사진으로 입증하지 않는다. 상세페이지의 설명을 전달할 때는 '제품 안내에서는'이라고 출처를 밝힌다.
+- 체감/촉감/흡수 속도를 용기 사진으로 입증하지 않는다.
+- 상품 사실은 직접 설명하는 말투로 쓴다. "제품 안내에서는", "상세페이지에 따르면", "~래요"처럼 출처를 밝히며 전하는 말투를 쓰지 않는다.
 - 장면에 없는 것을 말하지 않는다. 말하는 내용이 보이는 이미지를 고른다.
-- 사실(숫자 · 성분 · 효과 · 구성)은 get_product_facts와 근거 자료에 있는 것만. 없는 상식을 지어내지 않는다. uncertainties에 있는 건 말하지 않는다.
+- 이 상품에 대한 사실(숫자 · 성분 · 효과 · 구성)은 get_product_facts와 근거 자료에 있는 것만. uncertainties에 있는 건 말하지 않는다.
+- 원리 · 원료 일반 · 생활 상식처럼 널리 알려진 내용은 상세페이지나 카드에 없어도 쓴다. 학계에서 논란이 있거나 확실하지 않은 내용은 쓰지 않는다.
+- 숫자 · 통계 · 의학적 효과는 지어내지 않고 일반 상식으로도 쓰지 않는다. 다만 이 성분(원료)의 숫자 · 통계 · 의학적 효과가 상세페이지 원문이나 상식 카드에 있으면, 말(say · tts)로 읽지 않고 화면 그래픽에만 원료의 특성이라는 뜻이 드러나게 쓴다(예: 작은 글씨 "원료 특성"과 함께). 이 제품을 쓰면 그렇게 된다는 뜻으로 쓰지 않고, 금지 표현(check_rules)은 그래픽에도 그대로 지킨다.
 - 전성분 이름은 표기 그대로 쓴다. "모나스커스/쌀발효물"처럼 한 이름을 나누거나 줄이지 않는다. 다른 이름으로 부를 때는 "성분표에는 ○○로 적혀 있어요"처럼 구분한다.
 - 화면 그래픽에 "전성분 표기" 같은 이름표를 쓸 때는 실제 전성분 이름을 줄이지 않고 그대로 쓴다. 통용 이름(비타민 B12, 홍국)을 쓸 때는 그런 이름표를 붙이지 않는다.
 - 성분 이름을 연달아 나열하지 않는다. 성분 하나마다 뜻을 말하고 이 상품과 왜 관련 있는지 잇는다.
-- 상식 카드의 원료 설명은 원료의 뜻이다. 이 제품의 효과처럼 잇지 않는다. "그래서 피부가 좋아져요" 같은 결론을 쓰지 않는다.
+- 상식 카드 · 일반 상식의 원료 설명은 원료의 뜻이다. 이 제품의 효과처럼 잇지 않는다. "그래서 피부가 좋아져요" 같은 결론을 쓰지 않는다.
 - 최고 · 유일 · 100% 같은 단정을 쓰지 않는다.
 - 건강기능식품 기능성 표현은 approvedClaims 문장 그대로만. 비어 있으면 기능성을 말하지 않는다.${f.kind === "COSMETIC" ? "\n- 화장품: 치료 · 재생 · 염증 같은 표현을 쓰지 않는다. 캡션에 개인차가 있음을 밝힌다." : ""}
 - 판매 상태(재고 · 할인 · 배송)는 말하지 않는다. 인사 · 자기소개로 시작하지 않는다.
@@ -331,7 +334,7 @@ ${bullets(kit.tts_rules)}
 글자 디자인(look):
 ${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의 제품 · 말의 내용 · 계정 분위기에 맞게 강조어 글꼴(key_font)과 작은 줄 글꼴(small_font)을 아래에서 하나씩 고른다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.\n${FONT_PAIRING_RULES.map((r) => `- ${r}`).join("\n")}\n${fontChoiceLines(ctx.fontChoices)}` : ""}${visualRules(f.kind, ctx.visualLibrary ?? [], LONG_VISUALS)}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "무엇을 말할지와 흐름에 반영한다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글자 디자인 · 음악에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "장면 고르기에 반영한다.")}${ctx.phraseBlock ?? ""}${ctx.angle ? `\n\n이 영상의 각도(이미 정해졌다. 이 상황과 흐름으로 쓰고 다른 소재로 새지 않는다. situation · worry · one_thing도 이 값을 쓴다):\n- 상황: ${ctx.angle.situation}\n- 고민: ${ctx.angle.worry}\n- 첫 문장: ${ctx.angle.hook_line}\n- 얻어 갈 한 가지: ${ctx.angle.one_thing}\n- 답: ${ctx.angle.answer}\n- 흐름: ${ctx.angle.beats.join(" → ")}` : ""}`;
   const gifs = ctx.gifs ?? [];
-  const user = `상세페이지 원문(상품 사실은 이 안에서만 쓴다. "원료적 특성에 한함" 같은 단서가 붙은 내용은 말로 읽지 않고 표현을 낮춰 쓴다):\n${f.sourceText}\n\n${knowledgeBlock(ctx.knowledge)}\n\n쓸 수 있는 사진 후보(가로x세로): ${ctx.candidates.map((c) => `${c.id} ${c.w}x${c.h}`).join(", ")}
+  const user = `상세페이지 원문(상품 사실은 이 안에서만 쓴다. "원료적 특성에 한함" 같은 단서가 붙은 내용은 말로 읽지 않고, 화면 그래픽에 원료의 특성이라고 밝혀 쓴다):\n${f.sourceText}\n\n${knowledgeBlock(ctx.knowledge)}\n\n쓸 수 있는 사진 후보(가로x세로): ${ctx.candidates.map((c) => `${c.id} ${c.w}x${c.h}`).join(", ")}
 그림은 후보를 번호와 함께 모은 것이다. 위 목록에 없는 번호는 화질이 낮거나 세로 화면에서 제품이 잘려 쓰지 않는다.${gifs.length ? `\n\n움직이는 이미지(사진 묶음 다음 그림부터 차례로, 그림마다 왼쪽부터 시간 순서로 프레임 6개):\n${gifs.map((g) => `${g.id} 원본 ${g.w}x${g.h}, ${g.seconds.toFixed(1)}초`).join("\n")}` : ""}${ctx.archive.length ? `\n\n자사 촬영 컷(소리 없음, 순서대로 마지막 ${ctx.archive.length}장의 그림이 컷마다 프레임 3개):\n${ctx.archive.map((a) => `${a.id} ${a.seconds.toFixed(1)}초 — ${a.what}`).join("\n")}` : ""}${
     ctx.retry
       ? `\n\n먼저 쓴 장면표:\n${JSON.stringify({ hook: ctx.retry.board.hook, scenes: ctx.retry.board.scenes.map((s) => ({ part: s.part, source: s.source, source_id: s.source_id, stock_query: s.stock_query, say: s.say })), visuals: ctx.retry.board.visuals.map((v) => ({ beat: v.beat, subject: v.subject })) })}\n\n이 문제를 고쳐 전체를 다시 내라:\n${bullets(ctx.retry.problems)}${ctx.retry.earlier?.length ? `\n\n앞 회차에서 지적돼 고친 것이다. 이번에 고치면서 다시 생기지 않게 함께 지킨다:\n${bullets(ctx.retry.earlier)}` : ""}`
@@ -473,7 +476,7 @@ export function storyboardProblems(b: Storyboard, archiveIds: string[], fixedHoo
   const chars = sizes.reduce((a, n) => a + n, 0);
   const slack = Math.round(LENGTH_TOLERANCE * (opts.charLimits[1] / AUTO_SECONDS[1]));
   if (chars < opts.charLimits[0] - slack || chars > opts.charLimits[1] + slack) out.push(`말이 ${chars}자다. 음성 ${AUTO_SECONDS[0]}~${AUTO_SECONDS[1]}초에 맞게 ${opts.charLimits[0]}~${opts.charLimits[1]}자로 쓴다`);
-  const validRefs = new Set(["P", ...opts.knowledge.cards.map((c) => c.ref), ...opts.knowledge.differences.map((d) => d.ref)]);
+  const validRefs = new Set(["P", COMMON_KNOWLEDGE_REF, ...opts.knowledge.cards.map((c) => c.ref), ...opts.knowledge.differences.map((d) => d.ref)]);
   const hasDifferences = opts.knowledge.differences.length > 0;
   const firstName = b.product_first_scene;
   if (!Number.isInteger(firstName) || firstName < 0 || firstName >= b.scenes.length) out.push("product_first_scene이 올바른 장면 번호가 아니다");
@@ -510,8 +513,8 @@ export function storyboardProblems(b: Storyboard, archiveIds: string[], fixedHoo
   if ([...motionKeys.values()].some((n) => n > 1)) out.push("같은 설명 화면을 되풀이한다. 화면마다 내용을 다르게 하거나 다른 소재로 바꾼다");
   const uses = new Map<string, number>();
   b.scenes.forEach((s, i) => {
-    // "P: 상세 문구"처럼 번호 뒤에 문구를 덧붙여도 번호만 본다
-    const refs = s.evidence.map((r) => r.trim().split(/[\s:：]/)[0]);
+    // "P: 상세 문구"처럼 번호 뒤에 문구를 덧붙여도 번호만 본다. "일반 상식"은 카드 없이 쓰는 널리 알려진 내용이다
+    const refs = s.evidence.map(evidenceRef);
     for (const r of refs) if (!validRefs.has(r)) out.push(`${i}번 장면의 근거 ${r}는 받은 자료에 없다`);
     if (s.part === "difference" && !refs.some((r) => r.startsWith("D"))) out.push(`${i}번 장면은 우리 차이인데 확정된 차이(D) 근거가 없다`);
     if (s.source === "photo" && !usable.has(s.source_id)) out.push(`${i}번 장면의 ${s.source_id}는 쓸 수 있는 후보가 아니다`);
@@ -570,7 +573,8 @@ export async function reviewStoryboard(input: { board: Storyboard; facts: Produc
 - 말하는 사람: 지어낸 인물 · 1인칭 체험 · 지어낸 후기가 없는가. "저희"(판매자)는 우리 차이를 말하는 곳에서만 나오는가.
 - 흐름: 처음 보는 사람이 이게 뭔지 알아듣는가, 앞 문장에서 다음 문장으로 이어지는가, 강의처럼 사실만 나열하다 끝나지 않는가. 긴 영상이니 8~12초마다 다음이 궁금해지는가.
 - 이해: 다 보고 나면 무슨 상품인지, 성분이나 품종이 무슨 뜻인지 말할 수 있는가. 확정된 우리 차이가 있으면 무엇이 다른지도 말할 수 있는가. 낯선 단어를 뜻 없이 넘기지 않는가.
-- 상식과 효과: 원료 설명을 이 제품의 효과처럼 잇지 않는가.
+- 상식과 효과: 원료 설명을 이 제품의 효과처럼 잇지 않는가. 원료의 숫자 · 통계 · 의학적 효과를 말로 읽지 않는가(화면 그래픽에 원료 특성으로 밝힌 것은 괜찮다). 널리 알려진 일반 상식은 상세페이지에 없어도 문제로 적지 않는다.
+- 말투: "제품 안내에서는", "상세페이지에 따르면", "~래요"처럼 출처를 밝히며 전하는 말투가 있으면 직접 설명하는 말투로 고치라고 적는다.
 - 재미: 이 상품을 살 생각이 없는 사람도 끝까지 볼 만한가. 다음 말이 궁금한가, 뻔한 사실을 읽어 주는 수업처럼 들리지 않는가. interest와 boring_parts에 솔직하게 적는다.
 - 화면: 그 장면 이미지가 그 말과 맞는가. [스톡: ...]은 아직 받지 않은 분위기 영상이라 적힌 장면 설명으로 판단한다.
 - 정보 가치: 후킹이 약속한 답이 구체적인가. 상품 이름과 장점만 나열하며 답을 피하지 않는가. 근거 있는 사용법/구분 정보로 답하는 영상은 허용한다.

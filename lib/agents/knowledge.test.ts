@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cardMatches, knowledgeBlock, knowledgeEvidence } from "@/lib/agents/knowledge";
+import { approvedFirst, cardMatches, COMMON_KNOWLEDGE_REF, evidenceRef, knowledgeBlock, knowledgeEvidence } from "@/lib/agents/knowledge";
 import { cleanStatement } from "@/lib/agents/knowledge-draft";
 import { charRange, repairEdgeVisuals, repairOverflow, repeatLimit, sentenceEnding, storyboardProblems, type Storyboard } from "@/lib/agents/storyboard";
 import { cropPixels, gifRange } from "@/lib/auto-video/gif-clips";
@@ -51,7 +51,7 @@ function board(scenes: Storyboard["scenes"], over: Partial<Storyboard> = {}): St
 }
 
 const knowledge = {
-  cards: [{ ref: "K1", id: "1", topic: "PDRN", statement: "소듐디엔에이는 DNA의 소듐염이다", sourceTitle: "성분사전", sourceUrl: "https://example.com" }],
+  cards: [{ ref: "K1", id: "1", topic: "PDRN", statement: "소듐디엔에이는 DNA의 소듐염이다", sourceTitle: "성분사전", sourceUrl: "https://example.com", approved: true }],
   differences: [{ ref: "D1", id: "2", difference: "거품 밀도가 높아요", compareTo: "일반 버블토너", evidence: "상세" }],
 };
 
@@ -268,6 +268,32 @@ describe("상식 카드 찾기", () => {
     const text = knowledgeBlock({ cards: [], differences: [] });
     assert.ok(text.includes("우리가 다르다는 말을 하지 않고"));
     assert.equal(knowledgeEvidence({ cards: [], differences: [] }), "");
+  });
+
+  it("승인된 카드를 앞에 두고, 같은 상태 안에서는 순서를 지킨다", () => {
+    const rows = [{ id: "a", status: "DRAFT" }, { id: "b", status: "APPROVED" }, { id: "c", status: "DRAFT" }, { id: "d", status: "APPROVED" }];
+    assert.deepEqual(approvedFirst(rows).map((r) => r.id), ["b", "d", "a", "c"]);
+  });
+
+  it("승인 전 초안 카드는 표시하고, 일반 상식을 쓰는 법을 알린다", () => {
+    const text = knowledgeBlock({ cards: [knowledge.cards[0], { ...knowledge.cards[0], ref: "K2", approved: false }], differences: [] });
+    assert.ok(text.includes("- K1 [PDRN]"));
+    assert.ok(text.includes("- K2 (승인 전 초안) [PDRN]"));
+    assert.ok(text.includes(`"${COMMON_KNOWLEDGE_REF}"`));
+  });
+
+  it("근거 칸은 번호만, 일반 상식은 그대로 본다", () => {
+    assert.equal(evidenceRef("P: 상세 문구"), "P");
+    assert.equal(evidenceRef(" K1 소듐디엔에이"), "K1");
+    assert.equal(evidenceRef("일반 상식 — 각질은 자연스럽게 떨어진다"), COMMON_KNOWLEDGE_REF);
+  });
+
+  it("장면 근거에 일반 상식을 쓸 수 있다", () => {
+    const scenes = goodScenes();
+    scenes[5] = { ...scenes[5], evidence: [COMMON_KNOWLEDGE_REF] };
+    assert.equal(problems(board(scenes)).some((p) => p.includes("받은 자료에 없다")), false);
+    scenes[5] = { ...scenes[5], evidence: ["K9"] };
+    assert.equal(problems(board(scenes)).some((p) => p.includes("근거 K9는 받은 자료에 없다")), true);
   });
 
   it("점검 글에 카드와 차이가 들어간다", () => {
