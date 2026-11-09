@@ -1,6 +1,10 @@
-/** 자동 영상의 가독성 보정이 구매한 자막 모션을 우회해서는 안 된다. */
-export function selectCaptionRenderer(source: "auto" | "shoot", skillAvailable: boolean): "motion" | "basic" {
-  if (skillAvailable) return "motion";
-  if (source === "auto") throw new Error("자막 모션 스킬을 불러오지 못했어요. 기본 자막으로 바꾸지 않고 생성을 중단해요.");
-  return "basic";
+/**
+ * 자막 모션 스킬을 쓸 수 있으면 모션 자막, 아니면 기본 자막으로 만든다.
+ * AI 자동 영상도 실패로 멈추지 않고 기본 자막(읽기 보정)으로 만들고 경고를 남긴다(사용자 결정 2026-11-09).
+ * 경고가 있으면 사람 확인 없는 자동 발행은 멈춘다.
+ */
+export function selectCaptionRenderer(skillAvailable: boolean): "motion" | "basic" {
+  return skillAvailable ? "motion" : "basic";
 }
+
+export const CAPTION_FALLBACK_WARNING = "자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요.";

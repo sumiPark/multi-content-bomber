@@ -12,7 +12,7 @@ import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
 import { hookZone, normalizeLook, readableCaptions, readableLook, readableRows, type CutZones, type Look } from "@/lib/shoot/video-kit/caption-style";
-import { selectCaptionRenderer } from "@/lib/shoot/video-kit/caption-renderer";
+import { CAPTION_FALLBACK_WARNING, selectCaptionRenderer } from "@/lib/shoot/video-kit/caption-renderer";
 import { inspectAndRepairVideo, type VideoQuality, type VideoReview } from "@/lib/shoot/video-kit/quality";
 import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
 import { blockRows, captionSkillDir, designCaptions, isMotionEffect, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
@@ -515,7 +515,9 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   warnings.push(...plan.warnings);
   const readable = input.source === "auto";
   const skillDir = captionSkillDir();
-  const renderer = selectCaptionRenderer(input.source ?? "shoot", !!skillDir);
+  const renderer = selectCaptionRenderer(!!skillDir);
+  // 직접 촬영은 예전처럼 조용히 기본 자막으로 만든다. 자동 영상은 경고를 남겨 자동 발행을 멈춘다
+  if (renderer === "basic" && readable) warnings.push(`${CAPTION_FALLBACK_WARNING} (스킬 파일을 받지 못함)`);
   const look = normalizeLook(plan.look);
 
   // 2. 음성 → 시각표
@@ -601,7 +603,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     tl = { ...tl, graphics: tl.graphics.filter((g) => g.type !== "end_card"), captions: tl.captions.map((c, i) => i === tl.captions.length - 1 ? { ...c, end: tl.duration } : c) };
   }
   const behind = makeBehindWord(look, tl, allClips, baseVideo, project, workDir);
-  writeProject(project, tl, { look, zones, behind });
+  writeProject(project, tl, { look, zones, behind, readable });
 
   // 5. 프레임 검수 — 표적을 벗어난 표시는 빼고, 나머지는 사람에게 넘긴다
   const qa = await qaFrames(version, project, tl, workDir);
@@ -610,7 +612,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   if (!input.reviewFinal) warnings.push(...qa.issues);
   if (qa.drop.size) {
     tl = { ...tl, graphics: tl.graphics.filter((g) => !qa.drop.has(g.id) || (g.type !== "ring" && g.type !== "arrow")) };
-    writeProject(project, tl, { look, zones, behind });
+    writeProject(project, tl, { look, zones, behind, readable });
   }
 
   // 자막 시작과 말 시작의 차이를 잰다. 받아쓰기가 없으면 재지 않는다
@@ -658,9 +660,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       }
       writeProject(project, tl, { look, zones, behind, noCaptions: true, fonts: videoFonts, readable });
     } catch (e) {
-      if (readable) throw new Error(`자막 모션 디자인 실패: ${e instanceof Error ? e.message : e}`);
       design = null;
-      warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+      warnings.push(`${CAPTION_FALLBACK_WARNING} (${e instanceof Error ? e.message : e})`.slice(0, 300));
     }
   }
   // 읽기 보정 여부와 자막 렌더러 선택은 별개다. 모션 사용 시 기본 자막을 다시 쓰지 않는다.
@@ -681,11 +682,10 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       const blocks = motionBlocks(tl, zones, design);
       final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, workDir, blocks });
     } catch (e) {
-      if (readable) throw new Error(`자막 모션 렌더 실패: ${e instanceof Error ? e.message : e}`);
       console.warn("[video-kit] 자막 모션 실패, 기본 자막으로 다시 렌더:", e instanceof Error ? e.message : e);
-      warnings.push(`자막 모션 스킬을 쓰지 못해 기본 자막으로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+      warnings.push(`${CAPTION_FALLBACK_WARNING} (${e instanceof Error ? e.message : e})`.slice(0, 300));
       design = null;
-      writeProject(project, tl, { look, zones, behind: null, fonts: videoFonts });
+      writeProject(project, tl, { look, zones, behind: null, fonts: videoFonts, readable });
       hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
     }
   }
@@ -716,7 +716,6 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
         });
         const repaired = { ...tl, graphics: [] };
         const useMotion = !!design && !!skillDir;
-        if (readable && !useMotion) throw new Error("자막 모션을 유지할 수 없어 자동 수정을 중단해요.");
         finalLook = useMotion ? look : readableLook(look);
         writeProject(project, repaired, { look: finalLook, zones: repairZones, behind: null, fonts: videoFonts, noCaptions: useMotion, readable: readable || !useMotion });
         const out = join(workDir, `readable-${attempt}.mp4`);

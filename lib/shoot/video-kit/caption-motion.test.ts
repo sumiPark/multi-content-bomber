@@ -33,9 +33,9 @@ const trialCues = [
 const hook: SkillBlock = { start: 0, end: 2.634, zone: "top", fx: "39", highlight: "이름", rows: [{ text: "비타민, 이름이 달라요", role: "key" }] };
 
 test("자동 콘텐츠도 설치된 자막 모션을 사용한다", () => {
-  assert.equal(selectCaptionRenderer("auto", true), "motion");
-  assert.equal(selectCaptionRenderer("shoot", true), "motion");
-  assert.throws(() => selectCaptionRenderer("auto", false), /기본 자막으로 바꾸지/);
+  assert.equal(selectCaptionRenderer(true), "motion");
+  // 스킬을 못 쓰면 자동 영상도 실패 대신 기본 자막(경고는 파이프라인이 남긴다)
+  assert.equal(selectCaptionRenderer(false), "basic");
   assert.equal(isMotionEffect("39"), true);
   assert.equal(isMotionEffect("cut"), false);
   assert.equal(isMotionEffect("unknown"), false);
