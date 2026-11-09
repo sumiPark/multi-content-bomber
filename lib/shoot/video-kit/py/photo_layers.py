@@ -1,7 +1,7 @@
 # 제품 사진 한 장을 움직일 레이어로 나눈다. 포장 글자가 휘지 않게 레이어는 통째로만 움직이고, 깊이맵으로 픽셀을 밀지 않는다.
 # 배경 제거: rembg isnet-general-use. 깊이: Depth Anything V2 Small(Apache-2.0)의 ONNX. 다른 크기는 비상업 라이선스라 쓰지 않는다.
 # 흐린 복제 배경은 쓰지 않는다(2026-11-05 사용자 결정). 제품을 오려 코드로 만든 깨끗한 배경에 띄우거나, 제품이 많이 잘리지 않는 만큼 세로로 채운다.
-# 출력 모드 float(제품을 띄움) / aligned(제품과 배경 분리) / depth(먼 쪽 · 가까운 쪽) / push(사진 전체) / unfit(제품이 잘려 쓰지 않음, 레이어 없음).
+# 출력 모드 float(제품을 띄움) / aligned(제품과 배경 분리) / depth(먼 쪽 · 가까운 쪽) / push(사진 전체) / letter(넓은 사진 전체 + 위아래 단색).
 import json
 import os
 import sys
@@ -178,7 +178,18 @@ def main():
         soft = s > 2.4
         layers.append(layer("whole", out_dir, whole, l, t, "whole"))
     if not layers:
-        mode = "unfit"
+        # 세로로 채우면 제품이 잘리는 넓은 사진: 사진 전체를 가로 폭에 맞춰 넣고 위아래는 단색으로 채운다(2026-11-10 사용자 결정).
+        # 움직이는 이미지와 같은 방식으로, 사진 평균색을 어둡게 눌러 바탕으로 쓴다. 흐린 복제 배경은 쓰지 않는다
+        mode = "letter"
+        base = np.clip(rgb.reshape(-1, 3).mean(axis=0) * 0.28, 0, 255)
+        bw, bh = round(W * 1.12), round(H * 1.12)
+        bg = Image.new("RGB", (bw, bh), tuple(int(v) for v in base))
+        layers.append(layer("bg", out_dir, bg, (W - bw) / 2, (H - bh) / 2, "bg"))
+        # 카메라가 조금 움직여도 사진 끝이 화면 밖으로 나가지 않게 여유를 둔다
+        s = min(W * 0.94 / im.width, H * 0.8 / im.height)
+        soft = s > 2.4
+        shot = im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS)
+        layers.append(layer("fg", out_dir, shot, (W - shot.width) / 2, (H - shot.height) / 2, "fg"))
     # fit: 세로로 채웠을 때 제품이 화면보다 얼마나 큰지(1보다 크면 잘린다). 기준을 맞출 때 본다
     over = 0.0
     if box:

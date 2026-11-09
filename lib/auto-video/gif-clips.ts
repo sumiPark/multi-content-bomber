@@ -269,6 +269,24 @@ function dominantColor(file: string, c: { x: number; y: number; w: number; h: nu
   return `0x${dark(b[0])}${dark(b[1])}${dark(b[2])}`;
 }
 
+/**
+ * 영상에 실제로 나올 구역 · 구간만 담은 프레임 묶음. 장면표 검수가 원본 전체를 보고 화면에 안 나오는 글자를 문제 삼지 않게 한다.
+ * 구역은 gifClip과 같은 방법(글자 띠를 피해 옮긴 경계)으로 정한다. 실패하면 null.
+ */
+export function shownGifSheet(asset: GifAsset, crop: GifCrop, workDir: string): string | null {
+  try {
+    const range = gifRange(asset.seconds, crop);
+    const c = avoidTextCuts(readGifFrames(asset, range), asset, cropPixels(asset, crop));
+    const sheet = join(workDir, "gifs", `${asset.id}-shown.jpg`);
+    const rate = Math.max(0.2, (SHEET_FRAMES / Math.max(0.5, range.length)) * 0.98).toFixed(3);
+    ffmpeg(["-y", "-v", "error", "-ss", range.start.toFixed(2), "-t", range.length.toFixed(2), "-i", asset.file, "-vf", `crop=${c.w}:${c.h}:${c.x}:${c.y},fps=${rate},scale=${THUMB_W}:-2,tile=${SHEET_FRAMES}x1`, "-frames:v", "1", "-q:v", "4", sheet]);
+    return sheet;
+  } catch (e) {
+    console.warn(`  움직이는 이미지 검수용 묶음 실패(${asset.id}):`, e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 /** 자른 구역 · 구간을 세로 영상 컷으로 만든다. 한 번 재생한 뒤 마지막 장면을 유지한다. */
 export function gifClip(asset: GifAsset, crop: GifCrop, workDir: string): { file: string; soft: boolean } {
   const range = gifRange(asset.seconds, crop);

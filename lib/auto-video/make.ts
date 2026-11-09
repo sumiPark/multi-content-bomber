@@ -11,11 +11,11 @@ import { loadVideoKnowledge } from "@/lib/agents/knowledge";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
 // LENGTH_TOLERANCE: 음성으로 잰 길이의 허용 오차(초). 합성 결과의 작은 차이로 칸을 멈추지 않고, 장면표 글자 수 점검도 같은 여유를 둔다
-import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, LENGTH_TOLERANCE, MIN_AUTO_HOOK_SCORE, MIN_INTEREST, charRange, firstViewerTest, motionTexts, rankAngles, realMaterialCount, repairEdgeVisuals, repairOverflow, repeatLimit, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeAngles, writeSceneVisuals, writeStoryboard, type Storyboard, type StoryAngle } from "@/lib/agents/storyboard";
+import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, LENGTH_TOLERANCE, MIN_AUTO_HOOK_SCORE, MIN_INTEREST, charRange, firstViewerTest, motionTexts, rankAngles, realMaterialCount, screenAngles, repairEdgeVisuals, repairOverflow, repeatLimit, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeAngles, writeSceneVisuals, writeStoryboard, type Storyboard, type StoryAngle } from "@/lib/agents/storyboard";
 import { hookEvidenceProblems, rejectIncompatiblePhrases } from "@/lib/auto-video/hook-evidence";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
-import { gifClip, isAnimatedGif, isGif, prepareGifAssets } from "@/lib/auto-video/gif-clips";
+import { gifClip, isAnimatedGif, isGif, prepareGifAssets, shownGifSheet } from "@/lib/auto-video/gif-clips";
 import { stockClip } from "@/lib/auto-video/stock";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
@@ -34,7 +34,6 @@ import type { createServiceClient } from "@/lib/supabase/service";
 
 // 제품을 띄우는 컷은 가로 약 2.4배까지 키워도 볼 만하다. 그보다 작으면 흐리다
 const MIN_NATIVE = 400;
-const MIN_MATERIALS = 2;
 const MAX_DETAIL_FILES = 40;
 // 완성본을 볼 때 쓰는 자막 프레임 수. 긴 영상은 자막이 많아 전부 보내지 않는다
 const MAX_REVIEW_FRAMES = 30;
@@ -219,7 +218,8 @@ export async function makeAutoVideo(input: {
   // 재료 판단: 원본 해상도가 낮으면 후보에서 뺀다. 세로 영상에서 흐려진다
   const sharp = candidates.filter((c) => Math.min(c.native_w ?? c.w, (c.native_h ?? c.h) * 1.4) >= MIN_NATIVE);
   console.log(`  화질 통과 사진 ${sharp.length}개 / ${candidates.length}개`);
-  if (sharp.length + gifs.length + archive.length < MIN_MATERIALS) throw new StopError(`쓸 수 있는 이미지가 ${sharp.length + gifs.length + archive.length}개뿐이에요. 제품이 잘 보이는 사진이 더 필요해요.`);
+  // 실물 소재가 적거나 없어도 멈추지 않는다. 0개면 스톡 · 도식 · AI 이미지로 만들고, 1개면 1장면만 요구한다(사용자 결정 2026-11-09 · 11-10)
+  if (!sharp.length && !gifs.length && !archive.length) console.log("  쓸 수 있는 실물 소재가 없어 스톡 · 도식 · AI 이미지로 만든다");
   const sharpIds = new Set(sharp.map((c) => c.id));
   const sheets = (blocks?.sheets ?? []).map((f) => imageDataUrl(f));
   const gifSheets = gifs.map((g) => imageDataUrl(g.sheet));
@@ -298,6 +298,13 @@ export async function makeAutoVideo(input: {
     add(ranked.tokens);
     angleOrder = ranked.order;
     angleScores = ranked.scores;
+    // 우리에게 불리한 정보 · 뻔한 사용법 · 이미 아는 내용이 주제인 각도는 상품을 아는 눈으로 한 번 더 걸러 뺀다. 전부 걸리면 순서만 그대로 둔다
+    const screened = await screenAngles(angles, facts);
+    add(screened.tokens);
+    for (const r of screened.rejected) console.log(`  각도 제외 [${angles[r.index].situation}] ${r.reason}`);
+    const kept = angleOrder.filter((i) => !screened.rejected.some((r) => r.index === i));
+    if (kept.length) angleOrder = kept;
+    else console.log("  모든 각도가 주제 기준에 걸려 순위대로 쓴다");
     angleOrder.forEach((i) => console.log(`  각도 ${angleScores[i]}점 [${angles[i].situation}] ${angles[i].hook_line}`));
   }
 
@@ -365,14 +372,15 @@ export async function makeAutoVideo(input: {
     // 설명 화면 · AI 이미지 · 스톡은 후보 번호가 없어 장면 순서로 번호를 붙인다. AI 이미지는 visual 장면에만 얹는다
     const scenes = board.scenes.map((s, i) => (s.source === "motion" ? { ...s, source_id: `m${i}` } : s.source === "visual" ? { ...s, source_id: `v${i}` } : s.source === "stock" ? { ...s, source_id: `s${i}` } : s));
     board = repairEdgeVisuals({ ...board, scenes, visuals: board.visuals.filter((v) => scenes[v.beat]?.source === "visual") });
-    // 세로 화면에서 제품이 많이 잘리는 사진과, 제품이 아닌데 오려야 하는 사진(손 · 사용 장면)은 쓰지 않는다. 후보에서 빼고 다시 쓰게 한다
+    // 제품이 아닌데 오려야 하는 사진(손 · 사용 장면)은 쓰지 않는다. 후보에서 빼고 다시 쓰게 한다.
+    // 세로로 채우면 제품이 잘리는 넓은 사진은 빼지 않고 사진 전체 + 위아래 단색(letter)으로 쓴다(2026-11-10 사용자 결정)
     const dropped: string[] = [];
     for (const s of board.scenes) {
       if (s.source !== "photo" || !sharpIds.has(s.source_id)) continue;
       const meta = board.photos.find((p) => p.id === s.source_id);
       const mode = meta && trimmedLayers(meta.id, meta.trim_top, meta.trim_bottom)?.mode;
-      if (meta && (mode === "unfit" || (mode === "float" && meta.kind !== "product"))) {
-        console.log(`  ${meta.id} 사진은 세로 화면에 맞지 않아 후보에서 뺌 (${mode}, ${meta.kind})`);
+      if (meta && mode === "float" && meta.kind !== "product") {
+        console.log(`  ${meta.id} 사진은 제품이 아닌데 오려야 해서 후보에서 뺌 (${mode}, ${meta.kind})`);
         sharpIds.delete(meta.id);
         dropped.push(meta.id);
       }
@@ -381,7 +389,7 @@ export async function makeAutoVideo(input: {
     if (dropped.length && photoRetries > 0) {
       photoRetries--;
       attempt--;
-      retry = retryWith(board, [...left, `${dropped.join(", ")} 사진은 세로 화면에 맞지 않아 쓸 수 없다. 다른 후보나 설명 화면(motion)으로 바꾼다`]);
+      retry = retryWith(board, [...left, `${dropped.join(", ")} 사진은 제품이 아닌데 오려야 해서 쓸 수 없다. 다른 후보나 설명 화면(motion)으로 바꾼다`]);
       continue;
     }
     // 같은 소재를 너무 많이 쓴 장면 · 넘치는 설명 화면은 다시 쓰게 하지 않고 AI 이미지로 바꾼다
@@ -421,7 +429,14 @@ export async function makeAutoVideo(input: {
         check = await boardCheck();
         add(check.tokens);
       }
-      review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...gifSheets], fixedTexts: fixedTexts(), style });
+      // 움직이는 이미지는 장면표가 고른 구역 · 구간만 보여 준다. 원본 전체를 보면 화면에 안 나오는 글자까지 문제로 잡는다
+      const usedGifs = new Set(board.scenes.filter((s) => s.source === "gif").map((s) => s.source_id));
+      const reviewGifSheets = gifs.map((g, i) => {
+        const crop = usedGifs.has(g.id) ? board!.gifs.find((x) => x.id === g.id) : undefined;
+        const shown = crop && shownGifSheet(g, crop, workDir);
+        return shown ? imageDataUrl(shown) : gifSheets[i];
+      });
+      review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...reviewGifSheets], fixedTexts: fixedTexts(), style });
       add(review.tokens);
     } catch (e) {
       // 점검 답이 깨지면 이 장면표는 점검을 못 받은 것으로 보고 버린다. 고칠 목록은 앞 회차 그대로 다시 쓴다
@@ -432,7 +447,7 @@ export async function makeAutoVideo(input: {
       continue;
     }
     const blockingNow = blockingIssues(check.issues).map((i) => i.detail);
-    left = [...code, ...blockingNow, ...review.problems, ...review.unsuitable_phrases.map((p) => `${p.kind}: ${p.reason}`)];
+    left = [...code, ...blockingNow, ...review.problems, ...review.unsuitable_phrases.map((p) => `${p.kind}: ${p.reason}`), ...(review.topicProblem ? [`주제를 바꾼다: ${review.topicProblem}`] : [])];
     // 재미 · 후킹 점수는 다시 쓰게 하는 이유로만 쓴다. 마지막까지 낮으면 멈추지 않고 사람이 볼 경고로 남긴다
     const soft: string[] = [];
     if (review.interest < MIN_INTEREST) soft.push(`재미 점수 ${review.interest}점이다. 끝까지 볼 이유가 약하다. ${review.boringParts.join(" / ")}`.trim());
@@ -449,13 +464,14 @@ export async function makeAutoVideo(input: {
     if (!left.length && (!soft.length || attempt === MAX_BOARD_TRIES - 1)) break;
     rejectIncompatiblePhrases(phrases, [...review.unsuitable_phrases, ...code.filter((p) => p.includes("제형을 보라고")).map((reason) => ({ kind: "hook" as const, reason }))]);
     dropFailedPhrases(phrases, blockingIssues(check.issues));
-    // 재미가 낮으면 문장을 고치지 않고 다음 각도로 새로 쓴다
-    if (review.interest < MIN_INTEREST && !left.length && anglePos < angleOrder.length - 1) {
+    // 주제 자체가 걸리거나(불리한 정보 · 뻔한 사용법 · 이미 아는 내용) 재미가 낮으면 문장을 고치지 않고 다음 각도로 새로 쓴다.
+    // 주제 문제는 다른 문제가 남아 있어도 바꾼다. 같은 주제로 문장만 고쳐서는 풀리지 않는다
+    if ((review.topicProblem || (review.interest < MIN_INTEREST && !left.length)) && anglePos < angleOrder.length - 1) {
       anglePos++;
       retry = null;
       // 각도가 바뀌면 앞 각도의 지적은 맞지 않을 수 있어 비운다
       history = [];
-      console.log(`  재미가 낮아 다음 각도로 바꾼다: ${angles[angleOrder[anglePos]].hook_line}`);
+      console.log(`  ${review.topicProblem ? "주제가 맞지 않아" : "재미가 낮아"} 다음 각도로 바꾼다: ${angles[angleOrder[anglePos]].hook_line}`);
       continue;
     }
     retry = retryWith(board, [...left, ...soft]);

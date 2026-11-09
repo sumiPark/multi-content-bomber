@@ -76,7 +76,7 @@ export interface PhotoLayers {
   layers: LayerInfo[];
 }
 
-/** 사진을 레이어로 나눈다. mode가 unfit이면 세로 화면에서 제품이 잘리는 사진이라 쓰지 않는다. */
+/** 사진을 레이어로 나눈다. 세로로 채우면 제품이 잘리는 넓은 사진은 mode가 letter(사진 전체 + 위아래 단색)다. */
 export function photoLayers(photo: string, workDir: string, name: string): PhotoLayers {
   const res = runVisionTool<PhotoLayers>("photo_layers.py", [photo, join(workDir, name, "layers")]);
   if (!res) throw new Error(`사진을 나누지 못했어요 (${name})`);
