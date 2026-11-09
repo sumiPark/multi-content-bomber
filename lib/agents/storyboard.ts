@@ -239,6 +239,14 @@ function motionEmpty(m: MotionSpec | null): boolean {
   return !m || (m.kind === "steps" && !m.items.some((t) => t.trim())) || (m.kind === "big_fact" && !m.big.trim()) || (m.kind === "compare" && !m.left_value.trim() && !m.right_values.some((t) => t.trim())) || (m.kind === "count" && !m.number_to);
 }
 
+/**
+ * 목록 도식(steps)은 항목이 2~4개여야 한다(스키마). 빈 문자열 항목은 그리지 않으니 세지 않는다.
+ * 항목이 1개면 체크 표시 하나만 떠 있는 빈 화면이 돼서, 비어 있지는 않아도 장면표 에이전트가 고치게 한다.
+ */
+function stepsTooFew(m: MotionSpec | null): boolean {
+  return m?.kind === "steps" && m.items.filter((t) => t.trim()).length === 1;
+}
+
 export async function writeStoryboard(ctx: StoryboardContext): Promise<AgentResult<Storyboard>> {
   const f = ctx.facts;
   const kit = editKit();
@@ -385,6 +393,7 @@ export function storyboardProblems(b: Storyboard, archiveIds: string[], fixedHoo
     if (s.source === "motion" && i === b.scenes.length - 1) out.push("마지막 장면은 설명 화면으로 쓰지 않는다");
     if (s.source === "archive" && !archiveIds.includes(s.source_id)) out.push(`${i}번 장면의 ${s.source_id}는 없는 자사 촬영 컷이다`);
     if (s.source === "motion" && motionEmpty(s.motion)) out.push(`${i}번 장면에 도식 값이 없다`);
+    if (s.source === "motion" && stepsTooFew(s.motion)) out.push(`${i}번 장면의 목록 도식(steps) 항목이 1개다. 항목을 2~4개로 쓰거나 다른 도식 · 소재로 바꾼다`);
     if (s.source === "motion" && i === 0) out.push("첫 장면은 설명 화면으로 쓰지 않는다");
     uses.set(s.source_id, (uses.get(s.source_id) ?? 0) + 1);
     if (i > 0 && s.source_id && b.scenes[i - 1].source_id === s.source_id) out.push(`${i}번 장면이 앞 장면과 같은 이미지다`);

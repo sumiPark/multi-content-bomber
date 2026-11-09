@@ -730,14 +730,15 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     quality = inspected.quality;
     warnings.push(...quality.attempts.at(-1)!.issues.map((i) => `${i.at.toFixed(1)}초 ${i.detail}`));
   }
-  // 컷마다 가운데 프레임이 거의 한 색이면 빈 화면으로 본다
+  // 컷마다 여러 시점(25 · 50 · 75%)을 보고, 한 시점이라도 거의 한 색이거나 위아래 단색 띠 때문에 그림이 작으면 빈 화면으로 본다.
+  // 경고로만 남긴다(발행을 막지 않는다)
   for (const cut of tl.cuts) {
-    const res = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-ss", ((cut.start + cut.end) / 2).toFixed(3), "-i", final, "-frames:v", "1", "-vf", "scale=64:64,format=gray", "-f", "rawvideo", "-"], { maxBuffer: 1024 * 1024 });
-    if (res.status !== 0 || !res.stdout?.length) continue;
-    const px = [...res.stdout];
-    const mean = px.reduce((a, b) => a + b, 0) / px.length;
-    const spread = Math.sqrt(px.reduce((a, b) => a + (b - mean) ** 2, 0) / px.length);
-    if (spread < 12) warnings.push(`${cut.start.toFixed(1)}~${cut.end.toFixed(1)}초 화면이 거의 한 색이에요. 빈 화면처럼 보일 수 있어요.`);
+    const times = BLANK_POINTS.map((p) => cut.start + (cut.end - cut.start) * p);
+    // 거의 한 색: 자막 · 그래픽까지 얹은 완성본
+    const flat = grayFrames(final, times, 64, 64)?.some(nearlyFlat) ?? false;
+    // 단색 띠: 자막이 띠 위에 얹히면 띠가 끊겨 보이므로 컷만 이은 바탕 영상에서 잰다
+    const small = !flat && (grayFrames(baseVideo, times, BAR_W, BAR_H, true)?.some((px) => pictureShare(px, BAR_W, BAR_H) < MIN_PICTURE_SHARE) ?? false);
+    if (flat || small) warnings.push(`${cut.start.toFixed(1)}~${cut.end.toFixed(1)}초 화면이 거의 한 색이에요. 빈 화면처럼 보일 수 있어요.`);
   }
   const coverClip = clips.find((c) => c.no === plan.thumbnail.clip) ?? clips[0];
   let cover: string | null = null;
@@ -769,6 +770,55 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     quality,
     captionMode: design ? "motion" : "basic",
   };
+}
+
+// 빈 화면 검사. 컷 가운데 한 장만 보면 도식 항목이 늦게 나오거나 움직이는 이미지가 끝난 뒤의 빈 화면을 놓친다
+const BLANK_POINTS = [0.25, 0.5, 0.75];
+// 64×64 회색 화면의 밝기 편차가 이보다 작으면 거의 한 색이다
+const BLANK_SPREAD = 12;
+// 단색 띠를 잴 때의 크기. 세로를 촘촘히 봐야 띠 경계가 정확하다
+const BAR_W = 64;
+const BAR_H = 128;
+// 줄 안의 밝기 편차가 이보다 작고 맨 끝 줄과 밝기가 같으면 채운 띠다. 사진 · AI 그림의 민 바탕은 결이 있어 대개 이보다 크다
+const BAR_ROW_SPREAD = 2;
+const BAR_ROW_SHIFT = 3;
+// 위아래 띠를 걷어 낸 그림 높이가 화면의 이 비율보다 작으면 빈 화면처럼 보인다
+// (2026-11-09 시험: 가로로 긴 움직이는 이미지를 폭에 맞춘 컷 0.37, 위가 민 바탕인 AI 그림 0.55 · 일반 컷 0.67~1)
+const MIN_PICTURE_SHARE = 0.45;
+
+/** 여러 시각의 회색 프레임(w×h)을 한 번에 뽑는다. area는 화소 평균으로 줄인다(띠 경계용). 실패하면 null. */
+function grayFrames(video: string, times: number[], w: number, h: number, area = false): Uint8Array[] | null {
+  const graph = `${times.map((_, n) => `[${n}:v]scale=${w}:${h}${area ? ":flags=area" : ""},format=gray[g${n}]`).join(";")};${times.map((_, n) => `[g${n}]`).join("")}${times.length > 1 ? `vstack=inputs=${times.length}` : "null"}`;
+  const res = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", ...times.flatMap((t) => ["-ss", Math.max(0, t).toFixed(3), "-i", video]), "-filter_complex", graph, "-frames:v", "1", "-f", "rawvideo", "-"], { maxBuffer: 4 * 1024 * 1024 });
+  if (res.status !== 0 || !res.stdout || res.stdout.length < w * h * times.length) return null;
+  return times.map((_, n) => new Uint8Array(res.stdout.subarray(n * w * h, (n + 1) * w * h)));
+}
+
+/** 화면 전체 밝기 편차가 작으면 거의 한 색이다. */
+export function nearlyFlat(px: Uint8Array): boolean {
+  if (!px.length) return false;
+  const mean = px.reduce((a, b) => a + b, 0) / px.length;
+  const spread = Math.sqrt(px.reduce((a, b) => a + (b - mean) ** 2, 0) / px.length);
+  return spread < BLANK_SPREAD;
+}
+
+/** 위 · 아래 끝에서 이어지는 단색 띠를 걷어 낸 그림 높이의 비율(0~1). w×h 회색 화소. */
+export function pictureShare(px: Uint8Array, w: number, h: number): number {
+  if (px.length < w * h || !h) return 1;
+  const rows = Array.from({ length: h }, (_, y) => {
+    const row = px.subarray(y * w, (y + 1) * w);
+    const mean = row.reduce((a, b) => a + b, 0) / w;
+    return { mean, spread: Math.sqrt(row.reduce((a, b) => a + (b - mean) ** 2, 0) / w) };
+  });
+  const band = (from: number, step: number) => {
+    let n = 0;
+    for (let y = from; y >= 0 && y < h && rows[y].spread < BAR_ROW_SPREAD && Math.abs(rows[y].mean - rows[from].mean) < BAR_ROW_SHIFT; y += step) n++;
+    return n;
+  };
+  const top = band(0, 1);
+  // 화면 전체가 한 색이면 위에서 이미 다 걷힌다
+  const bottom = top >= h ? 0 : band(h - 1, -1);
+  return Math.max(0, 1 - (top + bottom) / h);
 }
 
 /** 기본 편집에서 쓰던 정보로 촬영본을 읽는다. */

@@ -254,3 +254,25 @@ describe("움직이는 이미지 자르기", () => {
     assert.equal(c.y, 0);
   });
 });
+
+describe("설명 화면 값 점검", () => {
+  const steps = (items: string[]) => ({ kind: "steps", title: "", left_label: "", right_label: "", left_value: "", right_values: [], number_to: 0, unit: "", end_text: "", items, big: "", accent: "#E04E08" }) as Storyboard["scenes"][number]["motion"];
+  const withSteps = (items: string[]) => {
+    const scenes = goodScenes();
+    scenes[3] = { ...scenes[3], source: "motion", source_id: "", motion: steps(items) };
+    return problems({ ...goodBoard(), scenes });
+  };
+
+  it("목록 도식 항목이 1개면 장면표 에이전트가 고치게 잡는다", () => {
+    assert.equal(withSteps(["발효"]).some((p) => p.includes("3번 장면의 목록 도식(steps) 항목이 1개")), true);
+    // 빈 문자열 항목은 그리지 않으니 세지 않는다
+    assert.equal(withSteps(["발효", "  "]).some((p) => p.includes("항목이 1개")), true);
+  });
+
+  it("항목이 2개 이상이면 통과하고, 모두 비면 값이 없다고 잡는다", () => {
+    assert.equal(withSteps(["발효", "비타민 B12"]).some((p) => p.includes("3번 장면")), false);
+    const empty = withSteps(["", " "]);
+    assert.equal(empty.some((p) => p.includes("3번 장면에 도식 값이 없다")), true);
+    assert.equal(empty.some((p) => p.includes("항목이 1개")), false);
+  });
+});

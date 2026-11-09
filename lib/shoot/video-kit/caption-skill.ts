@@ -8,7 +8,7 @@ import { conceptBlock } from "@/lib/agents/concept";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
-import { readableRows, ZONE_BOX, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
+import { readableAccent, readableRows, rgbLuminance, ZONE_BOX, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import { chosenFonts, FONT_PAIRING_RULES, fontChoiceLines, fontWeight, loadSkillFonts, type SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
 import type { TimedCaption } from "@/lib/shoot/video-kit/timeline";
 import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
@@ -33,6 +33,9 @@ const ROW_GAP = 18;
 // 자막 자리의 평균 밝기(0~255)가 이보다 높으면 어두운 글자를 쓴다
 const BRIGHT = 150;
 const DARK_TEXT = "#1B1F27";
+// 스킬에 넘기는 기본 글자색과 강조색. 강조색은 자막마다 실제 배경과 대비를 재서 명도만 고친다(readableAccent)
+const TEXT = "#FFFFFF";
+const ACCENT = "#FFD23F";
 
 export function captionSkillDir(): string | null {
   const dir = process.env.CAPTION_SKILL_DIR || join(homedir(), ".claude", "skills", "caption-motion-seqc");
@@ -143,8 +146,8 @@ export interface SubtitleFonts {
 // 굵기를 넘기지 않으면 같은 글꼴이 자막에선 가늘고 도식에선 굵게 나와 서로 다른 글꼴처럼 보인다.
 const keyWeightOf = (fonts: SubtitleFonts) => (fonts.keyWeight ? { weight: fonts.keyWeight } : {});
 
-/** AI가 나눈 줄이 자막과 글자가 다르면 쓰지 않고 자막 전체를 큰 줄 하나로 둔다. */
-function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, fonts: SubtitleFonts) {
+/** AI가 나눈 줄이 자막과 글자가 다르면 쓰지 않고 자막 전체를 큰 줄 하나로 둔다. accent는 이 자막 배경에 맞춘 강조색(재지 못하면 null). */
+function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, fonts: SubtitleFonts, accent: string | null) {
   const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
   const rows = usable ? line.rows : readableRows(c.text).map((text) => ({ text, role: "key" as const }));
   const delays = rowDelays(c, rows.map((r) => r.text));
@@ -152,7 +155,8 @@ function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefine
     text: r.text.trim(),
     fx: r.role === "key" ? (line?.fx && ALLOWED_FX.has(line.fx) ? line.fx : fx(last ? design.finish_fx : design.key_fx)) : fx(design.small_fx),
     size: r.role === "key" ? keySize(r.text.trim()) : fonts.smallSize,
-    ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts), ...(bright ? {} : { tone: "hi" }) } : {}),
+    // 강조어 줄은 이 자막 배경에 맞춘 강조색으로. 재지 못한 자막은 전체 강조색(tone hi = style.accent)
+    ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts), ...(bright ? {} : accent ? { color: accent } : { tone: "hi" }) } : {}),
     // 밝은 배경에서는 흰 글자와 노란 강조색이 안 읽혀 어두운 글자와 밝은 그림자로 바꾼다
     ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
     ...(i > 0 ? { gapPx: ROW_GAP } : {}),
@@ -225,9 +229,26 @@ function blockLine(b: SkillBlock, bright: boolean, fonts: SubtitleFonts) {
   };
 }
 
+/** 자막 · 블록 자리 배경의 밝은 쪽 휘도(accentBackground). 강조색 대비를 잴 때 쓴다. 재지 못하면 null. */
+export interface AccentBackgrounds {
+  captions?: (number | null)[];
+  blocks?: (number | null)[];
+}
+
 /** 편집 결과의 시각 · 글자를 그대로 쓰는 자막 파일 내용. */
-export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, brightness: (number | null)[] = [], blocks: SkillBlock[] = [], blockBrightness: (number | null)[] = [], fonts: SubtitleFonts = { key: "그리운 코코초이툰", small: "온글잎 박다현체", smallSize: SMALL_SIZE }) {
+export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, brightness: (number | null)[] = [], blocks: SkillBlock[] = [], blockBrightness: (number | null)[] = [], fonts: SubtitleFonts = { key: "그리운 코코초이툰", small: "온글잎 박다현체", smallSize: SMALL_SIZE }, backgrounds: AccentBackgrounds = {}) {
   const byNo = new Map(design.lines.map((l) => [l.no, l]));
+  // 흰 글자를 쓰는 자막만 강조색을 쓴다. 밝은 배경 자막은 강조어 줄도 어두운 글자라 재지 않는다
+  const captionAccent = (i: number) => {
+    const bg = backgrounds.captions?.[i];
+    return (brightness[i] ?? 0) > BRIGHT || bg == null ? null : readableAccent(ACCENT, bg, TEXT);
+  };
+  // 후킹 · 끝 화면의 강조 낱말(*…*)은 스킬이 style.accent 하나로 그린다. 흰 글자 블록 중 가장 밝은 배경에 맞춘다
+  const blockBgs = blocks.flatMap((_, i) => {
+    const bg = backgrounds.blocks?.[i];
+    return (blockBrightness[i] ?? 0) > BRIGHT || bg == null ? [] : [bg];
+  });
+  const accent = blockBgs.length ? readableAccent(ACCENT, Math.max(...blockBgs), TEXT) : ACCENT;
   // 작은 줄은 스킬 기본 굵기(본문 800)가 아니라 고른 글꼴의 보통 굵기로. 굵기가 여럿인 글꼴이 작은 줄에서 강조어보다 굵어지지 않게 한다
   const smallWeight = fonts.smallWeight ? { weight: fonts.smallWeight, subWeight: fonts.smallWeight } : {};
   return {
@@ -239,11 +260,11 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
     // 글자 색은 스킬 기본값을 쓴다. look 색은 글자 상자가 있을 때 고른 값이라 그대로 쓰면 빨간 배경에 초록 글자처럼 나온다
     // 강조어 줄은 keyFont, 나머지 줄은 font. subFont까지 같게 해 한 영상에 글꼴을 두 개만 쓴다
-    style: { font: fonts.small, subFont: fonts.small, keyFont: fonts.key, ...smallWeight, size: fonts.smallSize, color: "#FFFFFF", accent: "#FFD23F", glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 880 },
+    style: { font: fonts.small, subFont: fonts.small, keyFont: fonts.key, ...smallWeight, size: fonts.smallSize, color: TEXT, accent, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 880 },
     lines: [...blocks.map((b, i) => blockLine(b, (blockBrightness[i] ?? 0) > BRIGHT, fonts)), ...captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
-      const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT, fonts);
+      const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT, fonts, captionAccent(i));
       const keyRow = rows.findIndex((r) => "key" in r);
       return {
         t0: Number(c.start.toFixed(3)),
@@ -266,11 +287,39 @@ export function readableBrightness(pixels: Uint8Array): number | null {
   return spread > 35 ? null : mean;
 }
 
-function zoneBrightness(video: string, captions: TimedCaption[], zones: Zone[]): (number | null)[] {
+/** 자막 자리 잘라 내기. 기본 글자색(밝기)과 강조색(대비)을 같은 자리에서 잰다. */
+const zoneCrop = (zone: Zone | undefined) => {
+  const box = ZONE_BOX[zone ?? "lower"];
+  return `crop=960:${box.height}:60:${box.top},scale=16:16`;
+};
+
+function zoneBrightness(video: string, captions: Pick<TimedCaption, "start" | "end">[], zones: Zone[]): (number | null)[] {
   return captions.map((c, i) => {
-    const box = ZONE_BOX[zones[i] ?? "lower"];
-    const res = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-ss", ((c.start + c.end) / 2).toFixed(3), "-i", video, "-frames:v", "1", "-vf", `crop=960:${box.height}:60:${box.top},scale=16:16,format=gray`, "-f", "rawvideo", "-"], { maxBuffer: 1024 * 1024 });
+    const res = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", "-ss", ((c.start + c.end) / 2).toFixed(3), "-i", video, "-frames:v", "1", "-vf", `${zoneCrop(zones[i])},format=gray`, "-f", "rawvideo", "-"], { maxBuffer: 1024 * 1024 });
     return res.status === 0 && res.stdout?.length ? readableBrightness(res.stdout) : null;
+  });
+}
+
+// 강조색 대비는 자막 자리 배경의 밝은 쪽(밝기 순 상위 4분의 1 지점)과 잰다. 흰 펌프와 붉은 배경이 섞이면 평균은
+// 어둡게 나오지만 글자 일부는 밝은 쪽 위에 놓인다(2026-11-09 시험 영상 37초)
+const ACCENT_BG_QUANTILE = 0.75;
+// 한 자막 안에서도 컷이 바뀌거나 화면이 움직이므로 구간의 25 · 50 · 75% 세 장을 본다
+const ACCENT_BG_POINTS = [0.25, 0.5, 0.75];
+
+/** rgb24 화소들의 상대 휘도 중 밝은 쪽 4분의 1 지점(0~1). 화소가 없으면 null. */
+export function accentBackground(rgb: Uint8Array): number | null {
+  const count = Math.floor(rgb.length / 3);
+  if (!count) return null;
+  const lum = Array.from({ length: count }, (_, i) => rgbLuminance(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2])).sort((a, b) => a - b);
+  return lum[Math.min(count - 1, Math.floor(ACCENT_BG_QUANTILE * count))];
+}
+
+function zoneAccentBackground(video: string, spans: Pick<TimedCaption, "start" | "end">[], zones: Zone[]): (number | null)[] {
+  return spans.map((c, i) => {
+    const at = ACCENT_BG_POINTS.map((p) => c.start + (c.end - c.start) * p);
+    const graph = `${at.map((_, n) => `[${n}:v]${zoneCrop(zones[i])}[z${n}]`).join(";")};${at.map((_, n) => `[z${n}]`).join("")}${at.length > 1 ? `vstack=inputs=${at.length},` : ""}format=rgb24`;
+    const res = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", ...at.flatMap((t) => ["-ss", t.toFixed(3), "-i", video]), "-filter_complex", graph, "-frames:v", "1", "-f", "rawvideo", "-"], { maxBuffer: 1024 * 1024 });
+    return res.status === 0 && res.stdout?.length ? accentBackground(res.stdout) : null;
   });
 }
 
@@ -294,9 +343,12 @@ export function prepareCaptionFile(input: CaptionOverlayInput): string {
   mkdirSync(work, { recursive: true });
   const file = join(work, `${input.name ?? "subs"}.json`);
   const blocks = input.blocks ?? [];
-  const blockBrightness = zoneBrightness(input.video, blocks.map((b) => ({ id: "", text: "", emphasis: [], beat: 0, start: b.start, end: Math.min(b.end, b.start + 1) })), blocks.map((b) => b.zone));
+  const blockSpans = blocks.map((b) => ({ start: b.start, end: Math.min(b.end, b.start + 1) }));
+  const blockZones = blocks.map((b) => b.zone);
+  const blockBrightness = zoneBrightness(input.video, blockSpans, blockZones);
   const brightness = zoneBrightness(input.video, input.captions, input.zones);
-  writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, brightness, blocks, blockBrightness, pickSubtitleFonts(loadSkillFonts(input.dir), input.design))));
+  const backgrounds: AccentBackgrounds = { captions: zoneAccentBackground(input.video, input.captions, input.zones), blocks: zoneAccentBackground(input.video, blockSpans, blockZones) };
+  writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, brightness, blocks, blockBrightness, pickSubtitleFonts(loadSkillFonts(input.dir), input.design), backgrounds)));
   return file;
 }
 

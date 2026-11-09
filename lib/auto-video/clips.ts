@@ -111,40 +111,132 @@ function title(text: string): string {
 const BASE_CSS = `#bgd { position: absolute; inset: 0; background: #17181A; }
 #ttl { position: absolute; left: 80px; right: 80px; top: 640px; text-align: center; color: #C9CDD1; font-weight: 600; font-size: 50px; }`;
 
-function compareHtml(m: MotionSpec, accent: string): { css: string; body: string; script: string; shot: string } {
+/** 글자 폭(em). 한글 · 한자는 1em, 영문 · 숫자 · 공백은 그보다 좁다. */
+const textEm = (t: string) => [...t].reduce((n, ch) => n + (/[ᄀ-ᇿ㄰-㆏가-힯一-鿿]/.test(ch) ? 1 : 0.62), 0);
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+// 비교 도식 반쪽 칸(860px 카드의 절반)에서 글자가 쓸 수 있는 가로 폭. 칸 양옆에 28px씩 여백을 둔다
+const COMPARE_HALF_TEXT = 430 - 28 * 2;
+// 이 길이 이상인 장면은 예전 속도(카드 0.5초 · 왼쪽 값 1.2초 · 오른쪽 첫 값 1.4초)로 연다. 더 짧으면 그만큼 당긴다
+const COMPARE_FULL_SECONDS = 5;
+// 오른쪽 마지막 값이 나오는 시각은 장면 길이의 이 비율 안. 값이 많아 읽을 틈이 모자라면 MAX 비율까지 늘린다
+const COMPARE_RESULT_SHARE = 0.45;
+const COMPARE_MAX_SHARE = 0.6;
+// 오른쪽 값 하나가 바뀌기 전에 보이는 최소 시간
+const COMPARE_MIN_GAP = 0.3;
+// 값이 튀어 들어오는 움직임 길이
+const POP = 0.22;
+
+/**
+ * 비교 도식의 글자 크기 · 등장 시각.
+ * 예전에는 오른쪽 값이 장면 길이와 상관없이 2.4~5.8초에 바뀌어, 2~4초짜리 장면에서는 바뀌기 전에 장면이 끝났다.
+ * 글자도 반쪽 430px 칸에 104px 고정 · overflow:hidden이라 6자 값("사이아노코발")이 잘렸다.
+ * 이제 오른쪽 마지막 값이 장면 앞쪽 45%(값이 많으면 60%) 안에 나와 장면 대부분 동안 비교 결과가 보이고,
+ * 글자는 가장 긴 값 · 이름이 반쪽 칸에 한 줄로 들어가는 만큼만 키운다.
+ */
+export function compareLayout(
+  texts: { labels: string[]; values: string[] },
+  count: number,
+  seconds: number,
+): { valueFont: number; valueTop: number; valueWrap: boolean; labelFont: number; labelTop: number; labelWrap: boolean; cardDur: number; divAt: number; divDur: number; left: number; first: number; changes: number[]; fillAt: number; fillDur: number } {
+  const fit = (list: string[], max: number, min: number) => {
+    const widest = Math.max(1, ...list.map((t) => textEm(t.trim())));
+    const size = Math.floor(COMPARE_HALF_TEXT / widest);
+    // 가장 작은 크기로도 한 줄에 안 들어가면 자르지 않고 줄을 바꾼다
+    return { font: clamp(size, min, max), wrap: size < min };
+  };
+  const value = fit(texts.values, 104, 44);
+  const label = fit(texts.labels, 50, 30);
+  // 글자가 작아져도 예전 글자 줄의 가운데 높이를 지킨다
+  const valueTop = Math.round(220 + (104 - value.font) * 0.6);
+  const labelTop = Math.round(110 + (50 - label.font) * 0.6);
+
+  const s = clamp(seconds / COMPARE_FULL_SECONDS, 0.35, 1);
+  const left = 1.2 * s;
+  const first = 1.4 * s;
+  const n = Math.max(1, count);
+  let last = first;
+  if (n > 1) {
+    const target = Math.max(first + COMPARE_MIN_GAP, Math.min(5.8, seconds * COMPARE_RESULT_SHARE));
+    const need = first + COMPARE_MIN_GAP * (n - 1);
+    last = Math.max(target, Math.min(need, seconds * COMPARE_MAX_SHARE));
+  }
+  const changes = Array.from({ length: n - 1 }, (_, i) => first + ((last - first) * (i + 1)) / (n - 1));
+  return {
+    valueFont: value.font,
+    valueTop,
+    valueWrap: value.wrap,
+    labelFont: label.font,
+    labelTop,
+    labelWrap: label.wrap,
+    cardDur: 0.5 * s,
+    divAt: 0.5 * s,
+    divDur: 0.5 * s,
+    left,
+    first,
+    changes,
+    fillAt: first,
+    fillDur: Math.max(0.5, last - first + POP),
+  };
+}
+
+const wrapCss = (wrap: boolean) => (wrap ? "white-space: normal; word-break: keep-all; overflow-wrap: anywhere;" : "white-space: nowrap;");
+
+function compareHtml(m: MotionSpec, accent: string, seconds: number): { css: string; body: string; script: string; shot: string } {
   const values = (m.right_values.length ? m.right_values : [m.left_value]).slice(0, 5);
+  const lay = compareLayout({ labels: [m.left_label, m.right_label], values: [m.left_value, ...values] }, values.length, seconds);
   const nums = values.map((v, i) => `<div class="num rv" id="r${i}">${esc(v)}</div>`).join("");
   const css = `${BASE_CSS}
 #card { position: absolute; left: 110px; top: 720px; width: 860px; height: 560px; border-radius: 36px; overflow: hidden; background: #2A2D30; box-shadow: 0 40px 90px rgba(0,0,0,.55); }
 .half { position: absolute; top: 0; bottom: 0; width: 50%; }
 #left { left: 0; background: #3C4247; } #right { right: 0; background: ${accent}; opacity: .3; }
 #div { position: absolute; left: 427px; top: 0; width: 6px; height: 100%; background: #fff; transform-origin: 50% 0; }
-.lab { position: absolute; top: 110px; width: 50%; text-align: center; color: #fff; font-weight: 600; font-size: 50px; }
-.num { position: absolute; top: 220px; width: 50%; text-align: center; color: #fff; font-weight: 800; font-size: 104px; letter-spacing: -.03em; opacity: 0; }
+.lab { position: absolute; top: ${lay.labelTop}px; width: 50%; padding: 0 28px; text-align: center; color: #fff; font-weight: 600; font-size: ${lay.labelFont}px; ${wrapCss(lay.labelWrap)} }
+.num { position: absolute; top: ${lay.valueTop}px; width: 50%; padding: 0 28px; text-align: center; color: #fff; font-weight: 800; font-size: ${lay.valueFont}px; letter-spacing: -.03em; opacity: 0; ${wrapCss(lay.valueWrap)} }
 .rv { left: 50%; }`;
   const body = `<div id="bgd"></div>${title(m.title)}<div id="card"><div id="left" class="half"></div><div id="right" class="half"></div><div id="div"></div>
 <div class="lab" style="left:0">${esc(m.left_label)}</div><div class="lab" style="right:0">${esc(m.right_label)}</div>
 <div class="num" id="lv" style="left:0">${esc(m.left_value)}</div>${nums}</div>`;
-  const step = values.length > 1 ? 3.4 / (values.length - 1) : 0;
-  const steps = values
-    .slice(1)
-    .map((_, i) => {
-      const at = 2.4 + step * (i + 1);
-      return `tl.set("#r${i}", { opacity: 0 }, ${at.toFixed(2)}); tl.fromTo("#r${i + 1}", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: .22, ease: "back.out(2)" }, ${at.toFixed(2)});`;
-    })
+  const steps = lay.changes
+    .map((at, i) => `tl.set("#r${i}", { opacity: 0 }, ${at.toFixed(2)}); tl.fromTo("#r${i + 1}", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: ${POP}, ease: "back.out(2)" }, ${at.toFixed(2)});`)
     .join("\n");
-  const script = `tl.fromTo("#card", { y: 60, opacity: 0, scale: .94 }, { y: 0, opacity: 1, scale: 1, duration: .5, ease: "power3.out" }, 0);
-tl.fromTo("#div", { scaleY: 0 }, { scaleY: 1, duration: .5, ease: "power2.inOut" }, .5);
-tl.fromTo("#lv", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: .25, ease: "back.out(2)" }, 1.2);
-tl.fromTo("#r0", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: .25, ease: "back.out(2)" }, 1.4);
+  // 장면이 짧으면 카드 · 가운데 선 · 값이 그만큼 빨리 나온다
+  const script = `tl.fromTo("#card", { y: 60, opacity: 0, scale: .94 }, { y: 0, opacity: 1, scale: 1, duration: ${lay.cardDur.toFixed(2)}, ease: "power3.out" }, 0);
+tl.fromTo("#div", { scaleY: 0 }, { scaleY: 1, duration: ${lay.divDur.toFixed(2)}, ease: "power2.inOut" }, ${lay.divAt.toFixed(2)});
+tl.fromTo("#lv", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: .25, ease: "back.out(2)" }, ${lay.left.toFixed(2)});
+tl.fromTo("#r0", { opacity: 0, scale: 1.25 }, { opacity: 1, scale: 1, duration: .25, ease: "back.out(2)" }, ${lay.first.toFixed(2)});
 ${steps}
-tl.to("#right", { opacity: .95, duration: ${Math.max(1, step * Math.max(1, values.length - 1)).toFixed(2)}, ease: "none" }, 2.4);`;
-  return { css, body, script, shot: `비교 도식: 왼쪽 ${m.left_label} ${m.left_value}, 오른쪽 ${m.right_label}이 ${values.join(" → ")} 차례로 바뀐다(2.4~5.8초)` };
+tl.to("#right", { opacity: .95, duration: ${lay.fillDur.toFixed(2)}, ease: "none" }, ${lay.fillAt.toFixed(2)});`;
+  const lastAt = lay.changes.length ? lay.changes[lay.changes.length - 1] : lay.first;
+  return { css, body, script, shot: `비교 도식: 왼쪽 ${m.left_label} ${m.left_value}, 오른쪽 ${m.right_label}이 ${values.join(" → ")} 차례로 바뀐다(${lay.first.toFixed(1)}~${lastAt.toFixed(1)}초)` };
+}
+
+// 숫자 도식: 끝 글자가 없으면 숫자가 장면 앞 50% 안에 다 차오르고, 끝 글자가 있으면 35% 안에 다 차오른 뒤 끝 글자로 넘어간다
+const COUNT_SHARE = 0.5;
+const COUNT_SHARE_WITH_END = 0.35;
+const COUNT_MIN_RUN = 0.5;
+
+/**
+ * 숫자 도식의 등장 시각.
+ * 예전에는 차오르는 시간을 (장면 길이 - 0.8초)로 잡아 숫자가 장면 끝 0.3초 전에야 다 찼고,
+ * 끝 글자는 그보다 0.4초 뒤에 나와 4초 이하 장면에서는 장면이 끝난 뒤에 나왔다.
+ * 이제 숫자는 장면 앞쪽에서 다 차고, 끝 글자도 장면 앞 60%쯤 안에 나와 남은 시간 동안 결과가 보인다.
+ */
+export function countTimes(seconds: number, hasEnd: boolean): { ringDur: number; start: number; run: number; fadeAt: number; endAt: number; breatheAt: number } {
+  const start = clamp(seconds * 0.1, 0.2, 0.5);
+  const ringDur = clamp(seconds * 0.12, 0.25, 0.45);
+  const run = clamp(seconds * (hasEnd ? COUNT_SHARE_WITH_END : COUNT_SHARE) - start, COUNT_MIN_RUN, hasEnd ? 3 : 4);
+  const done = start + run;
+  // 다 찬 숫자를 잠깐 보여 준 뒤 끝 글자로 바꾼다
+  const hold = clamp(seconds * 0.08, 0.2, 0.5);
+  const fadeAt = done + hold;
+  return { ringDur, start, run, fadeAt, endAt: fadeAt + 0.2, breatheAt: done };
 }
 
 function countHtml(m: MotionSpec, accent: string, seconds: number): { css: string; body: string; script: string; shot: string } {
-  // 장면이 짧으면 그 안에 숫자가 다 차오르게 한다
-  const run = Math.max(1, Math.min(4, seconds - 0.8));
+  // 장면이 짧아도 숫자와 끝 글자가 장면 안에서 다 나오고, 남은 시간 동안 보인다
+  const t = countTimes(seconds, Boolean(m.end_text.trim()));
+  const run = t.run;
   const r = 300;
   const circ = (2 * Math.PI * r).toFixed(1);
   const to = m.number_to;
@@ -159,16 +251,16 @@ function countHtml(m: MotionSpec, accent: string, seconds: number): { css: strin
   const body = `<div id="bgd"></div>${title(m.title)}<div id="ring"><svg width="700" height="700"><circle id="track" cx="350" cy="350" r="${r}"/><circle id="arc" cx="350" cy="350" r="${r}"/></svg></div>
 <div id="count">0</div><div id="unit">${esc(m.unit)}</div>${m.end_text.trim() ? `<div id="endt">${esc(m.end_text.trim())}</div>` : ""}`;
   const endMotion = m.end_text.trim()
-    ? `tl.to("#count", { opacity: 0, y: -30, duration: .25 }, ${(run + 0.7).toFixed(2)}); tl.to("#unit", { opacity: 0, duration: .2 }, ${(run + 0.7).toFixed(2)});
-tl.fromTo("#endt", { opacity: 0, scale: .8 }, { opacity: 1, scale: 1, duration: .35, ease: "back.out(2)" }, ${(run + 0.9).toFixed(2)});`
+    ? `tl.to("#count", { opacity: 0, y: -30, duration: .25 }, ${t.fadeAt.toFixed(2)}); tl.to("#unit", { opacity: 0, duration: .2 }, ${t.fadeAt.toFixed(2)});
+tl.fromTo("#endt", { opacity: 0, scale: .8 }, { opacity: 1, scale: 1, duration: .35, ease: "back.out(2)" }, ${t.endAt.toFixed(2)});`
     : "";
   const script = `const num = { v: 0 }; const el = document.getElementById("count");
-tl.fromTo("#ring", { scale: .86, opacity: 0 }, { scale: 1, opacity: 1, duration: .45, ease: "power3.out" }, 0);
-tl.to("#arc", { strokeDashoffset: 0, duration: ${run.toFixed(2)}, ease: "none" }, .5);
-tl.fromTo(num, { v: 0 }, { v: ${to}, duration: ${run.toFixed(2)}, ease: "none", onUpdate: () => { el.textContent = String(Math.floor(num.v + 0.0001)); } }, .5);
+tl.fromTo("#ring", { scale: .86, opacity: 0 }, { scale: 1, opacity: 1, duration: ${t.ringDur.toFixed(2)}, ease: "power3.out" }, 0);
+tl.to("#arc", { strokeDashoffset: 0, duration: ${run.toFixed(2)}, ease: "none" }, ${t.start.toFixed(2)});
+tl.fromTo(num, { v: 0 }, { v: ${to}, duration: ${run.toFixed(2)}, ease: "none", onUpdate: () => { el.textContent = String(Math.floor(num.v + 0.0001)); } }, ${t.start.toFixed(2)});
 ${endMotion}
-tl.to("#ring", { scale: 1.04, duration: 2.2, ease: "none" }, ${(run + 1.8).toFixed(2)});`;
-  return { css, body, script, shot: `숫자 도식: 고리가 차며 0에서 ${to}${m.unit}까지 올라간다(0.5~${(run + 0.5).toFixed(1)}초)${m.end_text.trim() ? `, ${(run + 0.9).toFixed(1)}초에 "${m.end_text.trim()}" 글자가 나온다` : ""}` };
+tl.to("#ring", { scale: 1.04, duration: 2.2, ease: "none" }, ${t.breatheAt.toFixed(2)});`;
+  return { css, body, script, shot: `숫자 도식: 고리가 차며 0에서 ${to}${m.unit}까지 올라간다(${t.start.toFixed(1)}~${(t.start + run).toFixed(1)}초)${m.end_text.trim() ? `, ${t.endAt.toFixed(1)}초에 "${m.end_text.trim()}" 글자가 나온다` : ""}` };
 }
 
 // 목록 도식의 글자 영역(가로)과, 자막 자리 위에서 목록 묶음을 세울 세로 중심
@@ -176,9 +268,6 @@ const STEPS_WIDTH = 900;
 const STEPS_CENTER_Y = 880;
 // 마지막 항목이 나오는 시각은 장면 길이의 이 비율 안. 나머지 시간에는 목록 전체가 보인다
 const STEPS_REVEAL_SHARE = 0.3;
-
-/** 글자 폭(em). 한글 · 한자는 1em, 영문 · 숫자 · 공백은 그보다 좁다. */
-const textEm = (t: string) => [...t].reduce((n, ch) => n + (/[ᄀ-ᇿ㄰-㆏가-힯一-鿿]/.test(ch) ? 1 : 0.62), 0);
 
 /**
  * 목록 도식의 크기 · 자리 · 등장 시각.
@@ -254,7 +343,7 @@ export function motionClip(input: MotionSpec, workDir: string, name: string, opt
   const m: MotionSpec = input.kind === "count" && !(Number.isInteger(input.number_to) && input.number_to > 0) ? { ...input, kind: "big_fact", big: String(input.number_to) } : input;
   // 도식 바탕이 어두워서 어두운 강조색은 읽히지 않는다. 색 계열은 두고 밝힌다
   const accent = readableAccent(hex(m.accent, "#E04E08"));
-  const built = m.kind === "compare" ? compareHtml(m, accent) : m.kind === "count" ? countHtml(m, accent, seconds) : m.kind === "steps" ? stepsHtml(m, accent, seconds) : bigHtml(m, accent);
+  const built = m.kind === "compare" ? compareHtml(m, accent, seconds) : m.kind === "count" ? countHtml(m, accent, seconds) : m.kind === "steps" ? stepsHtml(m, accent, seconds) : bigHtml(m, accent);
   const dir = join(workDir, name);
   mkdirSync(dir, { recursive: true });
   // 검은 화면이 이어지지 않게 바탕을 강조색 계열로 물들인다

@@ -470,9 +470,12 @@ export async function makeAutoVideo(input: {
     const no = s.source === "motion" ? (s.motion ? motionClipOf(s.motion, i, want) : null) : s.source === "visual" ? (fallbackPhoto ? clipOf(fallbackPhoto, "photo") : null) : clipOf(s.source_id, s.source);
     if (!no) throw new Error(`${s.source_id} 이미지를 만들지 못했어요`);
     const seconds = clips[no - 1].duration;
-    const from = Math.min(used.get(s.source_id) ?? 0, Math.max(0, seconds - want));
+    // 설명 화면은 장면마다 새로 만든 컷이라 늘 0초부터 쓴다(등장 움직임이 빠지지 않게).
+    // AI 이미지 장면은 대신 쓰는 사진의 기록을 이어 쓴다. 둘 다 source_id가 비어 있어 키를 따로 잡는다
+    const key = s.source === "motion" ? null : s.source === "visual" ? fallbackPhoto : s.source_id;
+    const from = key ? Math.min(used.get(key) ?? 0, Math.max(0, seconds - want)) : 0;
     const to = Math.min(seconds, from + want);
-    used.set(s.source_id, to);
+    if (key) used.set(key, to);
     beats.push({
       mode: "tts",
       tts: s.tts,

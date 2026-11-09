@@ -112,18 +112,33 @@ const ROW_FRAMES = 3;
 
 /** 프레임 한 장(rgb24)의 x0~x1 열에서 줄마다 단색 비율과 글자 획 여부를 잰다. 속도를 위해 열은 2px마다 본다. */
 export function gifRows(rgb: Uint8Array, w: number, h: number, x0: number, x1: number): GifRow[] {
+  return lineStats(rgb, w, h, "row", x0, x1);
+}
+
+/**
+ * 프레임 한 장(rgb24)의 y0~y1 줄에서 열마다 단색 비율과 글자 획 여부를 잰다. 줄은 2px마다 본다.
+ * 가로 글자 줄을 세로로 지나가는 열은 바탕 · 획이 번갈아 나와 밝기가 자주 바뀐다. 줄 단위 측정과 같은 기준이다.
+ */
+export function gifCols(rgb: Uint8Array, w: number, h: number, y0: number, y1: number): GifRow[] {
+  return lineStats(rgb, w, h, "col", y0, y1);
+}
+
+/** row: 줄마다 from~to 열을 본다. col: 열마다 from~to 줄을 본다. */
+function lineStats(rgb: Uint8Array, w: number, h: number, along: "row" | "col", fromAt: number, toAt: number): GifRow[] {
   const counts = new Uint16Array(21 * 21 * 21);
   const touched: number[] = [];
   const out: GifRow[] = [];
-  const from = Math.max(0, Math.min(w - 1, x0));
-  const to = Math.max(from + 1, Math.min(w, x1));
-  for (let y = 0; y < h; y++) {
+  const lines = along === "row" ? h : w;
+  const span = along === "row" ? w : h;
+  const from = Math.max(0, Math.min(span - 1, fromAt));
+  const to = Math.max(from + 1, Math.min(span, toAt));
+  for (let line = 0; line < lines; line++) {
     let n = 0;
     let best = 0;
     let edges = 0;
     let prev = -1;
-    for (let x = from; x < to; x += 2) {
-      const i = (y * w + x) * 3;
+    for (let p = from; p < to; p += 2) {
+      const i = (along === "row" ? line * w + p : p * w + line) * 3;
       const k = Math.floor(rgb[i] / 12) * 441 + Math.floor(rgb[i + 1] / 12) * 21 + Math.floor(rgb[i + 2] / 12);
       if (counts[k] === 0) touched.push(k);
       counts[k]++;
@@ -166,43 +181,62 @@ function spansOf(mask: boolean[], gap: number): Span[] {
 }
 
 /**
- * 자른 구역의 위 · 아래 경계가 글자 띠 안에 걸리면 경계를 옮긴다.
+ * 한 축(세로면 줄, 가로면 열)에서 자른 구역의 두 경계 [start, start+size)가 글자 띠 안에 걸리면 경계를 옮긴다.
  * ① 띠를 통째로 뺀다(장면표가 글자를 피해 잡으려던 뜻). ② 빼면 남는 화면이 너무 작으면, 경계가 지나가던 글자 줄을 통째로 넣는다.
+ * 옮길 일이 없으면 null.
+ */
+function shiftEdges(lines: GifRow[], start: number, size: number): { start: number; end: number } | null {
+  if (lines.length < start + size) return null;
+  const bands = spansOf(lines.map((r) => r.flat >= BAND_FLAT), 4);
+  const texts = spansOf(lines.map((r) => r.text), 6);
+  const keep = Math.max(MIN_CROP, size * KEEP_SHARE);
+  // 띠 안에서 [from, to) 구역에 들어오는 글자가 있나
+  const textIn = (band: Span, from: number, to: number) => texts.some((l) => l.start < Math.min(band.end, to) && l.end > Math.max(band.start, from));
+  const cutText = (at: number) => texts.find((l) => l.start < at && at < l.end);
+  let lo = start;
+  let hi = start + size;
+  const loBand = bands.find((b) => b.start < lo && lo < b.end);
+  if (loBand && textIn(loBand, lo, hi)) {
+    if (hi - loBand.end >= keep) lo = loBand.end;
+    else {
+      const t = cutText(lo);
+      if (t) lo = Math.max(0, t.start - 2);
+    }
+  }
+  const hiBand = bands.find((b) => b.start < hi && hi < b.end);
+  if (hiBand && textIn(hiBand, lo, hi)) {
+    if (hiBand.start - lo >= keep) hi = hiBand.start;
+    else {
+      const t = cutText(hi);
+      if (t) hi = Math.min(lines.length, t.end + 2);
+    }
+  }
+  return lo === start && hi === start + size ? null : { start: lo, end: hi };
+}
+
+const evenSize = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
+
+/**
+ * 자른 구역의 위 · 아래 경계가 글자 띠 안에 걸리면 경계를 옮긴다.
  * 어느 쪽이든 글자 줄을 가로로 반쯤 자르지 않는다. 경계가 띠에 걸리지 않으면 그대로 둔다.
  */
 export function avoidTextCut(rows: GifRow[], c: Box): Box {
-  if (rows.length < c.y + c.h) return c;
-  const bands = spansOf(rows.map((r) => r.flat >= BAND_FLAT), 4);
-  const lines = spansOf(rows.map((r) => r.text), 6);
-  const even = (n: number) => Math.max(2, Math.floor(n / 2) * 2);
-  const keep = Math.max(MIN_CROP, c.h * KEEP_SHARE);
-  // 띠 안에서 [from, to) 구역에 들어오는 글자 줄이 있나
-  const textIn = (band: Span, from: number, to: number) => lines.some((l) => l.start < Math.min(band.end, to) && l.end > Math.max(band.start, from));
-  const cutLine = (at: number) => lines.find((l) => l.start < at && at < l.end);
-  let top = c.y;
-  let bottom = c.y + c.h;
-  const topBand = bands.find((b) => b.start < top && top < b.end);
-  if (topBand && textIn(topBand, top, bottom)) {
-    if (bottom - topBand.end >= keep) top = topBand.end;
-    else {
-      const line = cutLine(top);
-      if (line) top = Math.max(0, line.start - 2);
-    }
-  }
-  const bottomBand = bands.find((b) => b.start < bottom && bottom < b.end);
-  if (bottomBand && textIn(bottomBand, top, bottom)) {
-    if (bottomBand.start - top >= keep) bottom = bottomBand.start;
-    else {
-      const line = cutLine(bottom);
-      if (line) bottom = Math.min(rows.length, line.end + 2);
-    }
-  }
-  if (top === c.y && bottom === c.y + c.h) return c;
-  return { x: c.x, y: top, w: c.w, h: even(bottom - top) };
+  const moved = shiftEdges(rows, c.y, c.h);
+  return moved ? { x: c.x, y: moved.start, w: c.w, h: evenSize(moved.end - moved.start) } : c;
 }
 
-/** 쓸 구간에서 프레임 몇 장을 원본 크기로 읽어 자른 열의 줄 정보를 낸다. 읽지 못하면 null(자르기를 그대로 쓴다). */
-function readGifRows(asset: GifAsset, range: { start: number; length: number }, c: Box): GifRow[] | null {
+/**
+ * 자른 구역의 왼쪽 · 오른쪽 경계가 글자 띠 안에 걸리면 경계를 옮긴다. avoidTextCut과 같은 원리를 열 단위로 한다.
+ * 상세페이지에서 사진 옆에 붙은 설명 글 칸을 경계가 세로로 지나가면 글자가 반쪽만 들어간다.
+ * 그 칸을 통째로 빼거나, 빼면 너무 좁아질 때는 지나가던 낱말을 통째로 넣는다.
+ */
+export function avoidSideCut(cols: GifRow[], c: Box): Box {
+  const moved = shiftEdges(cols, c.x, c.w);
+  return moved ? { x: moved.start, y: c.y, w: evenSize(moved.end - moved.start), h: c.h } : c;
+}
+
+/** 쓸 구간에서 프레임 몇 장을 원본 크기(rgb24)로 읽는다. 읽지 못하면 null(자르기를 그대로 쓴다). */
+function readGifFrames(asset: GifAsset, range: { start: number; length: number }): Uint8Array[] | null {
   if (asset.w < 2 || asset.h < 2) return null;
   const size = asset.w * asset.h * 3;
   const ffmpegBin = process.env.FFMPEG_PATH || "ffmpeg";
@@ -210,9 +244,19 @@ function readGifRows(asset: GifAsset, range: { start: number; length: number }, 
   const r = spawnSync(ffmpegBin, ["-nostdin", "-v", "error", "-ss", range.start.toFixed(2), "-t", range.length.toFixed(2), "-i", asset.file, "-vf", `fps=${rate}`, "-frames:v", String(ROW_FRAMES), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], { maxBuffer: size * (ROW_FRAMES + 1) });
   const b = r.stdout as Buffer | null;
   if (r.status !== 0 || !b || b.length < size) return null;
-  const frames: GifRow[][] = [];
-  for (let at = 0; at + size <= b.length; at += size) frames.push(gifRows(b.subarray(at, at + size), asset.w, asset.h, c.x, c.x + c.w));
-  return mergeGifRows(frames);
+  const frames: Uint8Array[] = [];
+  for (let at = 0; at + size <= b.length; at += size) frames.push(b.subarray(at, at + size));
+  return frames;
+}
+
+/**
+ * 고른 구역의 네 경계가 글자를 자르지 않게 옮긴다. 위 · 아래를 먼저 고친 뒤, 고친 줄 범위에서 열을 재서 왼쪽 · 오른쪽을 고친다.
+ * 프레임이 없으면(원본을 못 읽으면) 고른 구역 그대로.
+ */
+export function avoidTextCuts(frames: Uint8Array[] | null, size: { w: number; h: number }, asked: Box): Box {
+  if (!frames?.length) return asked;
+  const vertical = avoidTextCut(mergeGifRows(frames.map((f) => gifRows(f, size.w, size.h, asked.x, asked.x + asked.w))), asked);
+  return avoidSideCut(mergeGifRows(frames.map((f) => gifCols(f, size.w, size.h, vertical.y, vertical.y + vertical.h))), vertical);
 }
 
 function dominantColor(file: string, c: { x: number; y: number; w: number; h: number }): string {
@@ -229,9 +273,8 @@ function dominantColor(file: string, c: { x: number; y: number; w: number; h: nu
 export function gifClip(asset: GifAsset, crop: GifCrop, workDir: string): { file: string; soft: boolean } {
   const range = gifRange(asset.seconds, crop);
   const asked = cropPixels(asset, crop);
-  // 경계가 글자 띠를 지나가면 띠 밖으로 옮긴다. 원본을 못 읽으면 고른 구역 그대로 쓴다
-  const rows = readGifRows(asset, range, asked);
-  const c = rows ? avoidTextCut(rows, asked) : asked;
+  // 위 · 아래 · 왼쪽 · 오른쪽 경계가 글자 띠를 지나가면 띠 밖으로 옮긴다. 원본을 못 읽으면 고른 구역 그대로 쓴다
+  const c = avoidTextCuts(readGifFrames(asset, range), asset, asked);
   const scale = Math.min(FRAME_W / c.w, FRAME_H / c.h);
   const w = Math.floor((c.w * scale) / 2) * 2;
   const h = Math.floor((c.h * scale) / 2) * 2;
