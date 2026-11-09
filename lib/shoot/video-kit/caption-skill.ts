@@ -9,7 +9,7 @@ import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import { readableRows, ZONE_BOX, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
-import { chosenFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
+import { chosenFonts, FONT_PAIRING_RULES, fontChoiceLines, fontWeight, loadSkillFonts, type SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
 import type { TimedCaption } from "@/lib/shoot/video-kit/timeline";
 import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 
@@ -91,13 +91,14 @@ export async function designCaptions(input: {
 - 자막마다 한 컷짜리 포스터처럼 만든다. 곁들이는 말은 작은 줄, 핵심 낱말은 큰 줄로 나눈다. 글자를 바꾸거나 빼거나 더하지 않는다. 짧은 자막은 key 한 줄이어도 된다.
 - 먼저 그림의 제품과 장면, 상품 설명, 계정 설정을 보고 이 영상에 어울리는 대표 모션 하나를 고른다. 차분한 고급 제품에 튀는 모션을, 발랄한 먹거리에 무거운 모션을 쓰지 않는다.
 - 글꼴도 이 영상의 제품 · 장면 · 말의 내용 · 계정 분위기에 맞게 고른다. 큰 강조어 줄 글꼴 하나와 작은 줄 글꼴 하나만 쓴다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.
+${FONT_PAIRING_RULES.map((r) => `- ${r}`).join("\n")}
 - 자막의 기본은 대표 모션이다. 말의 내용과 뚜렷하게 맞는 줄만 fx로 바꾼다: 궁금증 · 숫자 · 성분 이름 · 주의 · 반전처럼 내용이 분명한 줄이다. 바꾸는 줄은 전체의 3분의 1 이내로 두고, 효과 설명의 "어울리는 문구"를 참고한다.
 - 감정 효과의 뜻: sway 여유 · 기분 좋음, shiver 긴장 · 주의, heartbeat 설렘, tilt 궁금함, hop 놀람, droop 아쉬움, impact 강한 한마디. 그 감정이 말에 있을 때만 쓴다.
 쓸 수 있는 효과:
 ${effectNotes(input.dir)}
 감정 효과: ${EMOTION_FX.join(", ")}
-쓸 수 있는 글꼴(이름 · 종류 · 인상):
-${loadSkillFonts(input.dir).map((f) => `- ${f.name} · ${f.role} · ${f.look}`).join("\n")}${conceptBlock("이 계정의 말투 · 분위기", input.tone, "효과 세기와 글꼴에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", input.styleText, "자막 움직임과 글꼴에 맞으면 반영한다.")}`,
+쓸 수 있는 글꼴(이름 · 종류 · 인상 · 굵기):
+${fontChoiceLines(loadSkillFonts(input.dir))}${conceptBlock("이 계정의 말투 · 분위기", input.tone, "효과 세기와 글꼴에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", input.styleText, "자막 움직임과 글꼴에 맞으면 반영한다.")}`,
       },
       {
         role: "user",
@@ -129,19 +130,53 @@ function fx(value: string): string {
   return ALLOWED_FX.has(value) ? value : "cut";
 }
 
+/** 스킬에 넘기는 글꼴. 굵기가 null이면 지정하지 않는다(한 굵기뿐인 글꼴). */
+export interface SubtitleFonts {
+  key: string;
+  small: string;
+  smallSize: number;
+  keyWeight?: number | null;
+  smallWeight?: number | null;
+}
+
+// 스킬은 강조어 줄(key) 굵기를 따로 받지 않으면 400으로 그린다(subs.cjs). 도식 · 끝 화면은 같은 글꼴의 가장 굵은 파일을 쓰므로,
+// 굵기를 넘기지 않으면 같은 글꼴이 자막에선 가늘고 도식에선 굵게 나와 서로 다른 글꼴처럼 보인다.
+const keyWeightOf = (fonts: SubtitleFonts) => (fonts.keyWeight ? { weight: fonts.keyWeight } : {});
+
 /** AI가 나눈 줄이 자막과 글자가 다르면 쓰지 않고 자막 전체를 큰 줄 하나로 둔다. */
-function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, smallSize: number) {
+function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, fonts: SubtitleFonts) {
   const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
   const rows = usable ? line.rows : readableRows(c.text).map((text) => ({ text, role: "key" as const }));
+  const delays = rowDelays(c, rows.map((r) => r.text));
   return rows.map((r, i) => ({
     text: r.text.trim(),
     fx: r.role === "key" ? (line?.fx && ALLOWED_FX.has(line.fx) ? line.fx : fx(last ? design.finish_fx : design.key_fx)) : fx(design.small_fx),
-    size: r.role === "key" ? keySize(r.text.trim()) : smallSize,
-    ...(r.role === "key" ? { key: true, ...(bright ? {} : { tone: "hi" }) } : {}),
+    size: r.role === "key" ? keySize(r.text.trim()) : fonts.smallSize,
+    ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts), ...(bright ? {} : { tone: "hi" }) } : {}),
     // 밝은 배경에서는 흰 글자와 노란 강조색이 안 읽혀 어두운 글자와 밝은 그림자로 바꾼다
     ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
     ...(i > 0 ? { gapPx: ROW_GAP } : {}),
+    ...(delays[i] ? { delay: delays[i] } : {}),
   }));
+}
+
+// 두 줄 짝의 아랫줄이 나오기 전에 남길 최소 간격과, 나온 뒤 읽을 최소 시간(초)
+const MIN_ROW_DELAY = 0.2;
+const MIN_ROW_SHOW = 0.5;
+
+/**
+ * 두 줄 짝은 줄마다 그 말을 하는 시각에 나오게 한다(스킬 안내 「줄마다 말 시각에 맞춰 delay」).
+ * 주지 않으면 두 줄이 자막 시작에 함께 나오고, 짧은 등장 하나가 끝나면 자막이 멈춘 채로 남는다.
+ * 줄 안의 말 시각은 모르므로 글자 수 비율로 나눈다(caption-style의 낱말 등장과 같은 방식). 너무 짧으면 함께 나온다.
+ */
+export function rowDelays(c: Pick<TimedCaption, "start" | "end">, rows: string[]): number[] {
+  const out = rows.map(() => 0);
+  if (rows.length !== 2) return out;
+  const span = c.end - c.start;
+  const total = squash(rows.join("")).length;
+  const lead = Math.min((span * squash(rows[0]).length) / Math.max(total, 1), span - MIN_ROW_SHOW);
+  if (lead >= MIN_ROW_DELAY) out[1] = Number(lead.toFixed(2));
+  return out;
 }
 
 /** 후킹 글자 · 끝 화면 · 표지처럼 말 자막이 아닌 글자. 글자를 바꾸지 않고 줄만 나눈다. */
@@ -170,7 +205,7 @@ export function blockRows(text: string, role: "key" | "small" = "key", chars = 1
   return out.map((t) => ({ text: t, role }));
 }
 
-function blockLine(b: SkillBlock, bright: boolean, smallSize: number) {
+function blockLine(b: SkillBlock, bright: boolean, fonts: SubtitleFonts) {
   const box = ZONE_BOX[b.zone];
   return {
     t0: Number(b.start.toFixed(3)),
@@ -181,8 +216,8 @@ function blockLine(b: SkillBlock, bright: boolean, smallSize: number) {
       return {
         text: marked,
         fx: r.role === "key" ? fx(b.fx) : "cut",
-        size: r.role === "key" ? keySize(r.text) : smallSize,
-        ...(r.role === "key" ? { key: true } : {}),
+        size: r.role === "key" ? keySize(r.text) : fonts.smallSize,
+        ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts) } : {}),
         ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
         ...(i > 0 ? { gapPx: ROW_GAP } : {}),
       };
@@ -191,28 +226,32 @@ function blockLine(b: SkillBlock, bright: boolean, smallSize: number) {
 }
 
 /** 편집 결과의 시각 · 글자를 그대로 쓰는 자막 파일 내용. */
-export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, brightness: (number | null)[] = [], blocks: SkillBlock[] = [], blockBrightness: (number | null)[] = [], fonts: { key: string; small: string; smallSize: number } = { key: "그리운 코코초이툰", small: "온글잎 박다현체", smallSize: SMALL_SIZE }) {
+export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, brightness: (number | null)[] = [], blocks: SkillBlock[] = [], blockBrightness: (number | null)[] = [], fonts: SubtitleFonts = { key: "그리운 코코초이툰", small: "온글잎 박다현체", smallSize: SMALL_SIZE }) {
   const byNo = new Map(design.lines.map((l) => [l.no, l]));
+  // 작은 줄은 스킬 기본 굵기(본문 800)가 아니라 고른 글꼴의 보통 굵기로. 굵기가 여럿인 글꼴이 작은 줄에서 강조어보다 굵어지지 않게 한다
+  const smallWeight = fonts.smallWeight ? { weight: fonts.smallWeight, subWeight: fonts.smallWeight } : {};
   return {
     video,
     size: "9:16",
-    // 등장이 끝나기 전에 말이 지나가지 않게 효과를 빠르게 돌린다
-    speed: 1.6,
+    // 효과 속도는 스킬의 자동 속도에 맡긴다(speed를 주지 않음 = 1배). 스킬이 줄마다 다음 컷 · 자막 끝까지 남은 시간을 재서
+    // 등장이 그 앞쪽에서 끝나게 속도를 올린다. 여기서 배수를 또 주면 두 배수가 곱해져(예: 1.6 × 2.2 = 3.5배) 등장이 0.1~0.3초로 끝나
+    // 글자가 움찔하고 멈춘 것처럼 보인다(2026-11-09 시험 영상 첫 자막 2.80~2.87초).
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
     // 글자 색은 스킬 기본값을 쓴다. look 색은 글자 상자가 있을 때 고른 값이라 그대로 쓰면 빨간 배경에 초록 글자처럼 나온다
     // 강조어 줄은 keyFont, 나머지 줄은 font. subFont까지 같게 해 한 영상에 글꼴을 두 개만 쓴다
-    style: { font: fonts.small, subFont: fonts.small, keyFont: fonts.key, size: fonts.smallSize, color: "#FFFFFF", accent: "#FFD23F", glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 880 },
-    lines: [...blocks.map((b, i) => blockLine(b, (blockBrightness[i] ?? 0) > BRIGHT, fonts.smallSize)), ...captions.map((c, i) => {
+    style: { font: fonts.small, subFont: fonts.small, keyFont: fonts.key, ...smallWeight, size: fonts.smallSize, color: "#FFFFFF", accent: "#FFD23F", glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 880 },
+    lines: [...blocks.map((b, i) => blockLine(b, (blockBrightness[i] ?? 0) > BRIGHT, fonts)), ...captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
-      const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT, fonts.smallSize);
+      const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT, fonts);
       const keyRow = rows.findIndex((r) => "key" in r);
       return {
         t0: Number(c.start.toFixed(3)),
         t1: Number(c.end.toFixed(3)),
         cy: box.top + Math.round(box.height / 2),
         rows,
-        ...(line?.spark && keyRow >= 0 ? { deco: [{ type: "spark", items: [{ row: keyRow, corner: "tr", s: 44 }] }] } : {}),
+        // 반짝이는 강조어 줄이 나온 뒤에 붙인다(스킬 기본: 자막 시작 0.15초 뒤)
+        ...(line?.spark && keyRow >= 0 ? { deco: [{ type: "spark", at: Number(((rows[keyRow].delay ?? 0) + 0.15).toFixed(2)), items: [{ row: keyRow, corner: "tr", s: 44 }] }] } : {}),
       };
     })].sort((a, b) => a.t0 - b.t0),
   };
@@ -235,6 +274,18 @@ function zoneBrightness(video: string, captions: TimedCaption[], zones: Zone[]):
   });
 }
 
+/** 고른 짝을 스킬에 넘길 이름 · 크기 · 굵기로. 굵기는 도식 · 끝 화면(downloadVideoFonts)과 같은 값이다. */
+export function pickSubtitleFonts(list: SkillFont[], design: Pick<CaptionDesign, "key_font" | "small_font">): SubtitleFonts {
+  const picked = chosenFonts(list, design);
+  return {
+    key: picked.key.name,
+    small: picked.small.name,
+    smallSize: picked.small.role === "손글씨" ? SMALL_SIZE : PLAIN_SMALL_SIZE,
+    keyWeight: fontWeight(picked.key, true),
+    smallWeight: fontWeight(picked.small, false),
+  };
+}
+
 export interface CaptionOverlayInput { dir: string; video: string; captions: TimedCaption[]; zones: Zone[]; design: CaptionDesign; workDir: string; blocks?: SkillBlock[]; name?: string }
 
 /** 프로덕션 렌더와 미리보기가 같은 모션·글꼴·시각 파일을 쓴다. */
@@ -245,8 +296,7 @@ export function prepareCaptionFile(input: CaptionOverlayInput): string {
   const blocks = input.blocks ?? [];
   const blockBrightness = zoneBrightness(input.video, blocks.map((b) => ({ id: "", text: "", emphasis: [], beat: 0, start: b.start, end: Math.min(b.end, b.start + 1) })), blocks.map((b) => b.zone));
   const brightness = zoneBrightness(input.video, input.captions, input.zones);
-  const picked = chosenFonts(loadSkillFonts(input.dir), input.design);
-  writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, brightness, blocks, blockBrightness, { key: picked.key.name, small: picked.small.name, smallSize: picked.small.role === "손글씨" ? SMALL_SIZE : PLAIN_SMALL_SIZE })));
+  writeFileSync(file, JSON.stringify(buildSubtitleFile(input.video, input.captions, input.zones, input.design, brightness, blocks, blockBrightness, pickSubtitleFonts(loadSkillFonts(input.dir), input.design))));
   return file;
 }
 

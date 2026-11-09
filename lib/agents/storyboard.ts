@@ -12,7 +12,7 @@ import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { lookSchema } from "@/lib/shoot/video-kit/caption-style";
-import type { SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
+import { FONT_PAIRING_RULES, fontChoiceLines, type SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { VideoIssue } from "@/lib/shoot/video-kit/quality";
 
@@ -308,7 +308,7 @@ ${bullets(kit.caption_rules)}
 ${bullets(kit.tts_rules)}
 
 글자 디자인(look):
-${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의 제품 · 말의 내용 · 계정 분위기에 맞게 강조어 글꼴(key_font)과 작은 줄 글꼴(small_font)을 아래에서 하나씩 고른다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.\n${ctx.fontChoices.map((x) => `- ${x.name} · ${x.role} · ${x.look}`).join("\n")}` : ""}${visualRules(f.kind, ctx.visualLibrary ?? [], LONG_VISUALS)}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "무엇을 말할지와 흐름에 반영한다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글자 디자인 · 음악에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "장면 고르기에 반영한다.")}${ctx.phraseBlock ?? ""}${ctx.angle ? `\n\n이 영상의 각도(이미 정해졌다. 이 질문과 흐름으로 쓰고 다른 소재로 새지 않는다. story_type · one_thing도 이 값을 쓴다):\n- 방식: ${ctx.angle.story_type}\n- 첫 문장: ${ctx.angle.hook_line}\n- 얻어 갈 한 가지: ${ctx.angle.one_thing}\n- 답: ${ctx.angle.answer}\n- 흐름: ${ctx.angle.beats.join(" → ")}` : ""}`;
+${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의 제품 · 말의 내용 · 계정 분위기에 맞게 강조어 글꼴(key_font)과 작은 줄 글꼴(small_font)을 아래에서 하나씩 고른다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.\n${FONT_PAIRING_RULES.map((r) => `- ${r}`).join("\n")}\n${fontChoiceLines(ctx.fontChoices)}` : ""}${visualRules(f.kind, ctx.visualLibrary ?? [], LONG_VISUALS)}${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "무엇을 말할지와 흐름에 반영한다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글자 디자인 · 음악에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", ctx.videoStyle, "장면 고르기에 반영한다.")}${ctx.phraseBlock ?? ""}${ctx.angle ? `\n\n이 영상의 각도(이미 정해졌다. 이 질문과 흐름으로 쓰고 다른 소재로 새지 않는다. story_type · one_thing도 이 값을 쓴다):\n- 방식: ${ctx.angle.story_type}\n- 첫 문장: ${ctx.angle.hook_line}\n- 얻어 갈 한 가지: ${ctx.angle.one_thing}\n- 답: ${ctx.angle.answer}\n- 흐름: ${ctx.angle.beats.join(" → ")}` : ""}`;
   const gifs = ctx.gifs ?? [];
   const user = `상세페이지 원문(상품 사실은 이 안에서만 쓴다. "원료적 특성에 한함" 같은 단서가 붙은 내용은 말로 읽지 않고 표현을 낮춰 쓴다):\n${f.sourceText}\n\n${knowledgeBlock(ctx.knowledge)}\n\n쓸 수 있는 사진 후보(가로x세로): ${ctx.candidates.map((c) => `${c.id} ${c.w}x${c.h}`).join(", ")}
 그림은 후보를 번호와 함께 모은 것이다. 위 목록에 없는 번호는 화질이 낮거나 세로 화면에서 제품이 잘려 쓰지 않는다.${gifs.length ? `\n\n움직이는 이미지(사진 묶음 다음 그림부터 차례로, 그림마다 왼쪽부터 시간 순서로 프레임 6개):\n${gifs.map((g) => `${g.id} 원본 ${g.w}x${g.h}, ${g.seconds.toFixed(1)}초`).join("\n")}` : ""}${ctx.archive.length ? `\n\n자사 촬영 컷(소리 없음, 순서대로 마지막 ${ctx.archive.length}장의 그림이 컷마다 프레임 3개):\n${ctx.archive.map((a) => `${a.id} ${a.seconds.toFixed(1)}초 — ${a.what}`).join("\n")}` : ""}${
