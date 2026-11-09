@@ -50,10 +50,8 @@ export interface ScriptContext {
   slotTime: string;
   facts: ProductFacts;
   rules: ContentRule[];
-  // 계정 컨셉(0038)
-  concept?: string | null;
-  tone?: string | null;
-  videoStyle?: string | null;
+  // 계정 설정의 "바꾸고 싶은 점"(0052) — 예전의 컨셉 · 말투 · 영상 스타일을 합친 한 칸
+  notes?: string | null;
   // 사람이 고정한 첫 · 마지막 문구 안내 (fixed-phrases.ts)
   phraseBlock?: string;
   // 점검에서 걸려 다시 쓰는 경우의 지적 사항
@@ -160,7 +158,7 @@ function systemPrompt(ctx: ScriptContext): string {
 - 재고 · 품절 · 할인 · 배송 같은 판매 상태는 말하지 않는다(올라갈 때 바뀔 수 있다). 가격은 상품 사실의 price만.
 - 인사 · 자기소개 · "오늘은 ~ 소개해 드릴게요"로 시작하지 않는다. 최고 · 유일 · 100% 같은 단정을 쓰지 않는다.
 - 화면 문구는 한 카드 12자 안팎. visual에는 실제 상품 이미지로 보여 줄 수 있는 장면만(병 · 제형 · 포장 · 단면 · 사용 장면).
-- 말투는 짧고 자연스러운 구어체. 번역투 · 상투어 · 같은 어미 반복을 피한다.${conceptBlock("이 계정의 AI 자동 업로드 컨셉", ctx.concept, "훅 · 내용을 이 방향에 맞춘다.")}${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "내레이션과 캡션의 말투를 이것에 맞춘다.")}${conceptBlock("이 계정의 영상 생성 스타일", ctx.videoStyle, "모든 비트의 visual을 이 스타일로 쓴다(빛 · 배경 · 구도 · 움직임).")}${ctx.phraseBlock ?? ""}`;
+- 말투는 짧고 자연스러운 구어체. 번역투 · 상투어 · 같은 어미 반복을 피한다.${conceptBlock("이 계정에서 바꾸고 싶은 점", ctx.notes, "훅 · 내용 · 내레이션과 캡션의 말투 · 비트의 visual에 반영한다.")}${ctx.phraseBlock ?? ""}`;
 }
 
 export async function writeScript(ctx: ScriptContext, opts: { log: boolean }): Promise<AgentResult<ScriptOutput>> {
@@ -178,6 +176,6 @@ export async function writeScript(ctx: ScriptContext, opts: { log: boolean }): P
     service: opts.log ? ctx.service : null,
     readService: ctx.service,
     planId: ctx.planId,
-    input: { product: ctx.facts.name, slotTime: ctx.slotTime, fixRequests: ctx.fixRequests ?? [], concept: ctx.concept ?? null, tone: ctx.tone ?? null, videoStyle: ctx.videoStyle ?? null },
+    input: { product: ctx.facts.name, slotTime: ctx.slotTime, fixRequests: ctx.fixRequests ?? [], notes: ctx.notes ?? null },
   });
 }

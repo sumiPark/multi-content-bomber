@@ -1,13 +1,14 @@
 import { zodResponseFormat } from "openai/helpers/zod";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
+import { scriptStyleOf, type ScriptStyle } from "@/lib/agents/script-style";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import { voiceIdOf } from "@/lib/shoot/voices";
 import { DEFAULT_EDIT_STYLE, editStyleResultSchema, parseEditStyle, type EditStyle, type EditStyleResult } from "@/lib/shoot/edit-style";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 계정 컨셉(0038) — 계정마다 사람이 적어 둔 방향을 에이전트 · 편집 워커가 읽는 곳.
-// 비어 있으면 프롬프트와 편집이 예전과 같다. 영상 생성을 붙일 때도 여기서 autoVideoStyle을 읽는다.
+// 비어 있으면 프롬프트와 편집이 예전과 같다. AI 자동 쪽은 대본 방식 · 바꾸고 싶은 점(autoNotes)만 읽는다(0052).
 
 type Service = ReturnType<typeof createServiceClient>;
 
@@ -17,12 +18,12 @@ export interface AccountConcept {
   shootRole: string | null;
   // 직접 촬영 음성(0044) — true면 찍을 때 말한 소리, 기본은 AI 음성. 영상 방향과 별개다
   shootLiveVoice: boolean;
-  // AI 자동 업로드 (완전 자동)
-  autoConcept: string;
+  // AI 자동 업로드 (완전 자동) — 0052부터 대본 방식 + 바꾸고 싶은 점 한 칸 + 고정 문구.
+  // 옛 컨셉 · 말투 · 영상 스타일 칸은 0052가 autoNotes로 옮겼고 여기서는 읽지 않는다
+  autoScriptStyle: ScriptStyle;
+  autoNotes: string;
   autoHooks: string[];
   autoEndings: string[];
-  autoTone: string;
-  autoVideoStyle: string;
   // 목소리(0047) — 방식별로 따로. 비면 기본 목소리
   autoVoiceId: string | null;
   shootVoiceId: string | null;
@@ -39,11 +40,10 @@ const EMPTY: AccountConcept = {
   autoRole: null,
   shootRole: null,
   shootLiveVoice: false,
-  autoConcept: "",
+  autoScriptStyle: "KNOWLEDGE",
+  autoNotes: "",
   autoHooks: [],
   autoEndings: [],
-  autoTone: "",
-  autoVideoStyle: "",
   autoVoiceId: null,
   shootVoiceId: null,
   shootConcept: "",
@@ -58,7 +58,7 @@ const EMPTY: AccountConcept = {
 export async function loadAccountConcept(service: Service, accountId: string): Promise<AccountConcept> {
   const { data, error } = await service
     .from("account_concepts")
-    .select("auto_role_focus, shoot_role_focus, shoot_voice_mode, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, auto_voice_id, shoot_voice_id, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params")
+    .select("auto_role_focus, shoot_role_focus, shoot_voice_mode, auto_script_style, auto_notes, auto_hooks, auto_endings, auto_voice_id, shoot_voice_id, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params")
     .eq("social_account_id", accountId)
     .maybeSingle();
   if (error) console.warn(`[concept] 읽기 실패(${accountId}): ${error.message}`);
@@ -67,11 +67,10 @@ export async function loadAccountConcept(service: Service, accountId: string): P
     autoRole: data.auto_role_focus,
     shootRole: data.shoot_role_focus,
     shootLiveVoice: data.shoot_voice_mode === "LIVE",
-    autoConcept: data.auto_concept,
+    autoScriptStyle: scriptStyleOf(data.auto_script_style),
+    autoNotes: data.auto_notes,
     autoHooks: data.auto_hooks,
     autoEndings: data.auto_endings,
-    autoTone: data.auto_tone,
-    autoVideoStyle: data.auto_video_style,
     autoVoiceId: voiceIdOf(data.auto_voice_id),
     shootVoiceId: voiceIdOf(data.shoot_voice_id),
     shootConcept: data.shoot_concept,

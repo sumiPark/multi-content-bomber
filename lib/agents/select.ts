@@ -26,7 +26,7 @@ export interface SelectContext {
   slotTimes: string[];
   // 편성표 칸 주제 (slot_time → 주제, 0031). 사람이 정한 것만 들어 있다.
   slotTopics?: Record<string, string>;
-  // 계정 컨셉(0038) — AI 자동 칸은 auto_concept, 직접 촬영 칸은 shoot_concept
+  // 계정 컨셉(0038) — AI 자동 칸은 auto_notes(0052, 바꾸고 싶은 점), 직접 촬영 칸은 shoot_concept
   concept?: string | null;
   // 이번 실행에서 앞 계정이 이미 고른 상품 (아직 DB에 없을 수 있어 따로 넘긴다)
   alsoBlocked: Set<string>;

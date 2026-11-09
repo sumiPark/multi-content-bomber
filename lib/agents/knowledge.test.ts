@@ -256,6 +256,45 @@ describe("설명 영상 장면표 점검", () => {
   });
 });
 
+describe("이야기형 장면표 점검", () => {
+  const story = (b: Storyboard) => storyboardProblems(b, [], false, { knowledge, charLimits: limits, style: "STORY" });
+  // 상품 구간에 "그래서 저희는"이 있고 마지막이 탄생 한 줄인 장면표
+  const storyBoard = () => {
+    const scenes = goodScenes();
+    scenes[16] = { ...scenes[16], say: "그래서 저희는 8종을 섞었어요" };
+    scenes[24] = { ...scenes[24], say: "그렇게 나온 게 퍼스트겔이에요" };
+    return { ...goodBoard(), scenes };
+  };
+
+  it("이야기형은 \"저희\"를 우리 차이 밖에서도 쓰고, 상품 이름을 뒤에서 처음 말해도 된다", () => {
+    const b = storyBoard();
+    b.scenes[18] = { ...b.scenes[18], say: "저희가 직접 골랐어요" };
+    const out = story({ ...b, product_first_scene: 24 });
+    assert.equal(out.some((p) => p.includes("판매자 목소리") || p.includes("40% 안쪽")), false);
+    assert.deepEqual(out, []);
+  });
+
+  it("이야기형인데 저희가 한 선택을 말하는 상품 장면이 없으면 다시 쓰게 한다", () => {
+    assert.equal(story(goodBoard()).some((p) => p.includes("그래서 저희는")), true);
+  });
+
+  it("이야기형의 첫 장면은 질문이고 \"저희\"로 시작하지 않는다", () => {
+    const b = storyBoard();
+    b.scenes[0] = { ...b.scenes[0], say: "저희는 세수부터 생각했어요" };
+    assert.equal(story(b).some((p) => p.includes("첫 장면은 시청자에게 묻는 질문")), true);
+  });
+
+  it("탄생 한 줄(takeaway)은 마지막 장면 하나만 쓴다", () => {
+    const b = storyBoard();
+    b.scenes[10] = { ...b.scenes[10], part: "takeaway" };
+    assert.equal(story(b).some((p) => p.includes("마지막 장면 하나만")), true);
+  });
+
+  it("기본 방식은 예전 점검 그대로다", () => {
+    assert.deepEqual(problems(goodBoard()), storyboardProblems(goodBoard(), [], false, { knowledge, charLimits: limits, style: "KNOWLEDGE" }));
+  });
+});
+
 describe("상식 카드 찾기", () => {
   it("주제나 찾을 낱말이 상품 자료에 있으면 맞다", () => {
     assert.equal(cardMatches({ topic: "PDRN", terms: ["소듐디엔에이"] }, "성분소듐디엔에이글리세린"), true);

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { blockingIssues, checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
+import { scriptStyleOf, type ScriptStyle } from "@/lib/agents/script-style";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
 import { LONG_VISUALS, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, phraseNotes, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
@@ -191,10 +192,13 @@ export async function makeAutoVideo(input: {
   const { service, planId, account, productId, rules, workDir } = input;
   const facts = await loadProductFacts(service, productId);
   if (facts.stockStatus !== "available") throw new StopError(`지금 판매 중이 아닌 상품이에요 (${facts.stockStatus})`);
-  // 저장하지 않는 시험에서만 지금 계정 설정의 컨셉 · 스타일 · 고정 문구를 빼고 새 구조를 본다. 말투 · 목소리는 그대로 둔다
+  // 저장하지 않는 시험에서만 지금 계정 설정의 바꾸고 싶은 점 · 고정 문구를 빼고 새 구조를 본다. 대본 방식 · 목소리는 그대로 둔다
   const ignoreSaved = input.dryRun && process.env.TEST_IGNORE_SAVED_CONCEPT === "1";
-  const concept: AccountConcept = ignoreSaved ? { ...input.concept, autoConcept: "", autoVideoStyle: "", autoHooks: [], autoEndings: [] } : input.concept;
-  if (ignoreSaved) console.log("  (시험) 저장된 컨셉 · 영상 스타일 · 고정 문구 제외");
+  const concept: AccountConcept = ignoreSaved ? { ...input.concept, autoNotes: "", autoHooks: [], autoEndings: [] } : input.concept;
+  if (ignoreSaved) console.log("  (시험) 저장된 바꾸고 싶은 점 · 고정 문구 제외");
+  // 시험에서만 대본 방식을 바꿔 본다(TEST_SCRIPT_STYLE=STORY). 저장된 설정은 그대로다
+  const style: ScriptStyle = input.dryRun && process.env.TEST_SCRIPT_STYLE?.trim() ? scriptStyleOf(process.env.TEST_SCRIPT_STYLE.trim()) : concept.autoScriptStyle;
+  console.log(`  대본 방식: ${style === "STORY" ? "이야기형" : "상식 · 상품 연결형"}`);
   const { data: product } = await service.from("products").select("detail_image_urls, represent_image_url").eq("id", productId).maybeSingle();
 
   // 1. 상세페이지에서 사진 구간만 잘라 후보로
@@ -290,7 +294,7 @@ export async function makeAutoVideo(input: {
   const savedBoard = input.dryRun ? input.savedBoard : undefined;
   if (savedBoard) console.log("  (시험) 저장된 장면표로 바로 영상을 만든다");
   if (!phrases.hooks.length && !savedBoard) {
-    const written = await writeAngles({ accountName: account, facts, knowledge });
+    const written = await writeAngles({ accountName: account, facts, knowledge, style });
     add(written.tokens);
     angles = written.angles;
     const ranked = await rankAngles(angles);
@@ -336,9 +340,8 @@ export async function makeAutoVideo(input: {
       knowledge,
       charLimits,
       angle: angles.length ? angles[angleOrder[anglePos]] : null,
-      concept: concept.autoConcept,
-      tone: concept.autoTone,
-      videoStyle: concept.autoVideoStyle,
+      style,
+      notes: concept.autoNotes,
       phraseBlock: fixedPhraseBlock(phrases),
       visualLibrary,
       fontChoices,
@@ -405,10 +408,10 @@ export async function makeAutoVideo(input: {
         console.warn(`  바꾼 장면의 AI 이미지 설명을 쓰지 못했어요: ${e instanceof Error ? e.message : e}`);
       }
     }
-    const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0, { knowledge, charLimits }), ...hookEvidenceProblems(board, archive)];
+    const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0, { knowledge, charLimits, style }), ...hookEvidenceProblems(board, archive)];
     // 길이는 글자 수로 storyboardProblems가 재고, 완성본의 실제 길이를 다시 잰다.
     const estimated = board.scenes.reduce((n, s) => n + squash(s.tts).length, 0) / speechRate;
-    const boardCheck = () => checkScript(boardAsScript(board!), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999], longBeatSeconds: LONG_BEAT_SECONDS });
+    const boardCheck = () => checkScript(boardAsScript(board!), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999], longBeatSeconds: LONG_BEAT_SECONDS, scriptStyle: style });
     let check: Awaited<ReturnType<typeof checkScript>>;
     let review: Awaited<ReturnType<typeof reviewStoryboard>>;
     try {
@@ -422,7 +425,7 @@ export async function makeAutoVideo(input: {
         check = await boardCheck();
         add(check.tokens);
       }
-      review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...gifSheets], fixedTexts: fixedTexts() });
+      review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...gifSheets], fixedTexts: fixedTexts(), style });
       add(review.tokens);
     } catch (e) {
       // 점검 답이 깨지면 이 장면표는 점검을 못 받은 것으로 보고 버린다. 고칠 목록은 앞 회차 그대로 다시 쓴다
@@ -637,8 +640,8 @@ export async function makeAutoVideo(input: {
     clips,
     source: "auto",
     reusePlan: plan,
-    tone: concept.autoTone,
-    editStyleText: concept.autoVideoStyle,
+    // 바꾸고 싶은 점 한 칸에 말투 · 분위기 · 영상 스타일이 같이 들어 있어 말투 칸으로 한 번만 넘긴다(같은 글을 두 번 넣지 않는다)
+    tone: concept.autoNotes,
     voiceId: concept.autoVoiceId,
     fonts: pickedFonts ? { key_font: pickedFonts.key.name, small_font: pickedFonts.small.name } : undefined,
     visualPolicy,
@@ -674,7 +677,7 @@ export async function makeAutoVideo(input: {
     facts,
     rules,
     account,
-    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts(), knowledge, longBeatSeconds: LONG_BEAT_SECONDS, lengthRange: [AUTO_SECONDS[0] - LENGTH_TOLERANCE, AUTO_SECONDS[1] + LENGTH_TOLERANCE] },
+    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts(), knowledge, longBeatSeconds: LONG_BEAT_SECONDS, lengthRange: [AUTO_SECONDS[0] - LENGTH_TOLERANCE, AUTO_SECONDS[1] + LENGTH_TOLERANCE], scriptStyle: style },
   );
   // 처음 보는 사람 시험 — 상품 자료 없이 영상만 보고 답하게 한다. 멈추지 않고 사람이 볼 경고로 남긴다
   let firstViewer: Awaited<ReturnType<typeof firstViewerTest>> | null = null;
@@ -682,7 +685,7 @@ export async function makeAutoVideo(input: {
     const every = Math.max(0.5, kit.seconds / 24);
     const sheetFile = join(workDir, "first-viewer.jpg");
     ffmpeg(["-y", "-v", "error", "-i", kit.final, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
-    firstViewer = await firstViewerTest({ sheet: imageDataUrl(sheetFile), lines: board.scenes.map((s) => s.say), hasDifference: knowledge.differences.length > 0 });
+    firstViewer = await firstViewerTest({ sheet: imageDataUrl(sheetFile), lines: board.scenes.map((s) => s.say), hasDifference: knowledge.differences.length > 0, style });
     add(firstViewer.tokens);
     if (firstViewer.gaps.length) warnings.push(`처음 보는 사람 시험: 영상만 보고 알기 어려운 항목이 있어요. (${firstViewer.gaps.join(", ")})`);
   } catch (e) {

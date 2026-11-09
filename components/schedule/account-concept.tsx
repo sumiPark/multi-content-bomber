@@ -1,8 +1,9 @@
 "use client";
 
-import { DEFAULT_VOICE_TITLE, VOICE_CHOICES } from "@/lib/shoot/voices";
 import { useState } from "react";
 import { Save } from "lucide-react";
+import { SCRIPT_STYLE_CHOICES } from "@/lib/agents/script-style";
+import { DEFAULT_VOICE_TITLE, VOICE_CHOICES } from "@/lib/shoot/voices";
 import { saveAutoConceptAction, saveShootConceptAction } from "@/app/(dashboard)/schedule/actions";
 import { useScheduleRun } from "@/components/schedule/slot-rule-cell";
 import { Button } from "@/components/ui/button";
@@ -17,11 +18,12 @@ export interface ConceptCardData {
   accountId: string;
   name: string;
   autoRole: string;
-  autoConcept: string;
+  // 대본 방식(0052) — KNOWLEDGE(상식 · 상품 연결형, 기본) · STORY(이야기형)
+  autoScriptStyle: string;
+  // 바꾸고 싶은 점(0052) — 옛 컨셉 · 말투 · 영상 스타일을 합친 한 칸
+  autoNotes: string;
   autoHooks: string;
   autoEndings: string;
-  autoTone: string;
-  autoVideoStyle: string;
   // 목소리 — 방식별로 따로. 빈 값은 기본 목소리
   autoVoiceId: string;
   shootVoiceId: string;
@@ -40,9 +42,9 @@ export interface ConceptCardData {
 }
 
 type Role = "" | "PRODUCT" | "PERSON";
-type AutoKey = "autoRole" | "autoConcept" | "autoHooks" | "autoEndings" | "autoTone" | "autoVideoStyle" | "autoVoiceId";
+type AutoKey = "autoRole" | "autoScriptStyle" | "autoNotes" | "autoHooks" | "autoEndings" | "autoVoiceId";
 type ShootKey = "shootRole" | "shootVoice" | "shootVoiceId" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
-const AUTO_KEYS: AutoKey[] = ["autoRole", "autoConcept", "autoHooks", "autoEndings", "autoTone", "autoVideoStyle", "autoVoiceId"];
+const AUTO_KEYS: AutoKey[] = ["autoRole", "autoScriptStyle", "autoNotes", "autoHooks", "autoEndings", "autoVoiceId"];
 const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootVoice", "shootVoiceId", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
 
 function Field({
@@ -138,6 +140,28 @@ function RoleField({ value, help, onChange, disabled }: { value: string; help: s
   );
 }
 
+function ScriptStyleField({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
+  const picked = SCRIPT_STYLE_CHOICES.find((c) => c.value === value) ?? SCRIPT_STYLE_CHOICES[0];
+  return (
+    <label className="block space-y-1">
+      <span className="text-sm font-semibold text-ink-2">대본 방식</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+      >
+        {SCRIPT_STYLE_CHOICES.map((c) => (
+          <option key={c.value} value={c.value}>
+            {c.label}
+          </option>
+        ))}
+      </select>
+      <span className="block text-xs text-muted-foreground">{picked.help} 금지 표현 · 근거 없는 숫자 · 지어낸 후기를 막는 규칙은 어느 방식이든 같아요.</span>
+    </label>
+  );
+}
+
 const PHRASE_HELP = "한 줄에 문구 하나, 10개까지. {상품}처럼 중괄호 안은 AI가 채우고 나머지 글자는 그대로 나가요. 음성과 화면 문구에 똑같이 들어가요.";
 
 export function AccountConceptCard({ data, canManage, mode, top, hideName }: { data: ConceptCardData; canManage: boolean; mode: "auto" | "shoot"; top?: React.ReactNode; hideName?: boolean }) {
@@ -154,11 +178,10 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
         ? saveAutoConceptAction({
             accountId: data.accountId,
             autoRole: form.autoRole as Role,
-            autoConcept: form.autoConcept,
+            autoScriptStyle: form.autoScriptStyle === "STORY" ? "STORY" : "KNOWLEDGE",
+            autoNotes: form.autoNotes,
             autoHooks: form.autoHooks,
             autoEndings: form.autoEndings,
-            autoTone: form.autoTone,
-            autoVideoStyle: form.autoVideoStyle,
             autoVoiceId: form.autoVoiceId,
           })
         : saveShootConceptAction({
@@ -181,21 +204,29 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
 
       {mode === "auto" ? (
         <>
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-3">
             <RoleField {...bind("autoRole")} help="AI가 만드는 영상의 장면과 말투 방향이에요. 직접 촬영과는 따로 정해요." />
             <VoicePickField {...bind("autoVoiceId")} help="AI 자동 콘텐츠의 내레이션 목소리예요. 직접 촬영과는 따로 정해요." />
+            <ScriptStyleField {...bind("autoScriptStyle")} />
           </div>
+          <Field
+            {...bind("autoNotes")}
+            label="바꾸고 싶은 점"
+            rows={4}
+            max={3000}
+            help="말투 · 분위기, 화면 · 소재, 다룰 내용 등 바꾸고 싶은 점을 자유롭게 적어요. 상품을 고르고 대본 · 장면 · 자막 디자인을 정할 때 AI가 참고해요."
+            placeholder={"친구에게 알려 주듯 편한 존댓말로 짧게 끊어서.\n밝은 자연광, 나무 식탁 위 클로즈업.\n가격보다 맛 표현 위주로."}
+          />
           <div className="grid gap-4 lg:grid-cols-2">
             <Field {...bind("autoHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 고를 때 이것만 보세요\n이거 모르고 사면 손해예요"} />
-            <Field {...bind("autoEndings")} label="마지막 문구" rows={3} max={2000} help="영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"저장해 두고 살 때 꺼내 보세요"} />
-            <Field {...bind("autoTone")} label="말투 · 분위기" help="내레이션 · 캡션과 자막 디자인 · 음악 분위기에 반영돼요." placeholder={"친구에게 알려 주듯 편한 존댓말, 짧게 끊어서."} />
             <Field
-              {...bind("autoVideoStyle")}
-              label="영상 생성 스타일"
-              help="대본의 장면 설명, 소재 선택, 자막 디자인, 음악에 반영돼요."
-              placeholder={"밝은 자연광, 나무 식탁 위 클로즈업, 카메라는 천천히. 사람 얼굴은 나오지 않게."}
+              {...bind("autoEndings")}
+              label="마지막 문구"
+              rows={3}
+              max={2000}
+              help={form.autoScriptStyle === "STORY" ? "영상 끝에 나가요. 이야기형은 비워 두면 \"그렇게 나온 게 ○○예요\" 같은 한 줄로 끝나고, 적으면 이 문구로 바뀌어요." : "영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요."}
+              placeholder={"저장해 두고 살 때 꺼내 보세요"}
             />
-            <Field {...bind("autoConcept")} label="컨셉 · 자유 메모" help="상품을 고르고 대본을 쓸 때 AI가 참고해요." placeholder={"20대 후반 직장인이 보는 계정. 가격보다 맛 표현 위주로."} />
           </div>
         </>
       ) : (

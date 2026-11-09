@@ -5,6 +5,7 @@ import { checkCaption, checkTone, scoreHooks, timeScript } from "@/lib/agents/ko
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
 import type { ScriptOutput } from "@/lib/agents/script";
+import { STORY_CHECK_RULE, type ScriptStyle } from "@/lib/agents/script-style";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import { checkText, type ContentRule } from "@/lib/rules/check";
@@ -64,6 +65,8 @@ export interface CheckOptions {
   knowledge?: VideoKnowledge;
   // 이 초를 넘는 비트를 잡는다. 없으면 4.5초. 긴 설명 영상은 한 문장이 조금 더 길 수 있다
   longBeatSeconds?: number;
+  // AI 자동 대본 방식(0052). 이야기형이면 브랜드가 "저희"로 말하는 문장을 다르게 본다
+  scriptStyle?: ScriptStyle;
 }
 
 // 훅 채점 축 이름(.claude/skills/ig-reel-ko/hookscore_ko.py CHECK_KO와 같다)
@@ -157,7 +160,11 @@ ${
   촬영으로 확인할 수 없는 체험(장기간 사용 결과 · 효과 체감 · "먹고 나서 속이 편해졌어요")과 지어낸 고객 후기는 fabricated.`
             : `- 실제 사람이 써 본 것처럼 꾸민 1인칭 체험("써 봤는데", "제 피부가"), 지어낸 인물 이야기("제 친구가", "어떤 고객님이"), 지어낸 고객 후기는 fabricated. 이 영상은 AI가 만들고 사람이 써 본 적이 없다.
 - 시청자에게 상황을 묻는 2인칭 문장("~할 때 있죠?", "~하면 늘 ~하잖아요")은 체험을 지어낸 것이 아니다. 다만 "많은 분들이 ~해요"처럼 사실로 말하면 근거가 있어야 한다.
-- 판매자 목소리("저희는 고를 때 ○○를 봐요")는 확정된 우리 차이에 있는 내용이면 체험을 지어낸 것이 아니다. 확정된 우리 차이에 없는 판매자 이야기는 unsupported.`
+${
+                opts.scriptStyle === "STORY"
+                  ? STORY_CHECK_RULE
+                  : `- 판매자 목소리("저희는 고를 때 ○○를 봐요")는 확정된 우리 차이에 있는 내용이면 체험을 지어낸 것이 아니다. 확정된 우리 차이에 없는 판매자 이야기는 unsupported.`
+              }`
         }
 - 애매하면 통과시키지 말고 적는다.`,
       },

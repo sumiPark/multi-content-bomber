@@ -78,7 +78,7 @@ async function main() {
       const result = await selectProducts(
         {
           service,
-          concept: [concept.autoConcept, concept.autoTone && `말투 · 분위기: ${concept.autoTone}`].filter(Boolean).join("\n"),
+          concept: concept.autoNotes,
           accountId: st.social_account_id,
           accountName: acc.display_name ?? "",
           roleFocus: concept.autoRole,

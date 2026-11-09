@@ -67,8 +67,8 @@ async function main() {
     const acc = plan.social_accounts?.display_name ?? "";
     const label = `@${acc} ${plan.slot_date} ${plan.slot_time}`;
     const concept = await loadAccountConcept(service, plan.social_account_id);
-    // 시험(--dry-run)에서만 말투를 바꿔 설정 반영을 본다. 저장하지 않는다
-    if (dryRun && process.env.TEST_AUTO_TONE?.trim()) concept.autoTone = process.env.TEST_AUTO_TONE.trim();
+    // 시험(--dry-run)에서만 바꾸고 싶은 점을 바꿔 설정 반영을 본다. 저장하지 않는다
+    if (dryRun && process.env.TEST_AUTO_NOTES?.trim()) concept.autoNotes = process.env.TEST_AUTO_NOTES.trim();
     // 시험(--dry-run)에서만 설정 초안을 넣어 본다. 저장하지 않는다
     if (dryRun && process.env.TEST_AUTO_SETTINGS?.trim()) Object.assign(concept, JSON.parse(process.env.TEST_AUTO_SETTINGS) as Partial<typeof concept>);
     const prev = (plan.video ?? {}) as AutoVideo;

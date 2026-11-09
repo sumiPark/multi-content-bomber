@@ -19,7 +19,9 @@ export type Database = {
           auto_concept: string
           auto_endings: string[]
           auto_hooks: string[]
+          auto_notes: string
           auto_role_focus: string | null
+          auto_script_style: string
           auto_tone: string
           auto_video_style: string
           auto_voice_id: string | null
@@ -41,7 +43,9 @@ export type Database = {
           auto_concept?: string
           auto_endings?: string[]
           auto_hooks?: string[]
+          auto_notes?: string
           auto_role_focus?: string | null
+          auto_script_style?: string
           auto_tone?: string
           auto_video_style?: string
           auto_voice_id?: string | null
@@ -63,7 +67,9 @@ export type Database = {
           auto_concept?: string
           auto_endings?: string[]
           auto_hooks?: string[]
+          auto_notes?: string
           auto_role_focus?: string | null
+          auto_script_style?: string
           auto_tone?: string
           auto_video_style?: string
           auto_voice_id?: string | null
