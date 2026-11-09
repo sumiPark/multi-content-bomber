@@ -171,18 +171,56 @@ tl.to("#ring", { scale: 1.04, duration: 2.2, ease: "none" }, ${(run + 1.8).toFix
   return { css, body, script, shot: `숫자 도식: 고리가 차며 0에서 ${to}${m.unit}까지 올라간다(0.5~${(run + 0.5).toFixed(1)}초)${m.end_text.trim() ? `, ${(run + 0.9).toFixed(1)}초에 "${m.end_text.trim()}" 글자가 나온다` : ""}` };
 }
 
+// 목록 도식의 글자 영역(가로)과, 자막 자리 위에서 목록 묶음을 세울 세로 중심
+const STEPS_WIDTH = 900;
+const STEPS_CENTER_Y = 880;
+// 마지막 항목이 나오는 시각은 장면 길이의 이 비율 안. 나머지 시간에는 목록 전체가 보인다
+const STEPS_REVEAL_SHARE = 0.3;
+
+/** 글자 폭(em). 한글 · 한자는 1em, 영문 · 숫자 · 공백은 그보다 좁다. */
+const textEm = (t: string) => [...t].reduce((n, ch) => n + (/[ᄀ-ᇿ㄰-㆏가-힯一-鿿]/.test(ch) ? 1 : 0.62), 0);
+
+/**
+ * 목록 도식의 크기 · 자리 · 등장 시각.
+ * 예전에는 항목을 장면 길이 전체에 고르게 흩어 마지막 항목이 장면 중간쯤(2개면 정확히 가운데)에야 나왔고,
+ * 글자도 항목 수와 상관없이 66px · 왼쪽 정렬이라 항목이 적으면 화면 대부분이 비었다
+ * (2026-11-09 시험: 8.1~10.5초 · 15.1~16.9초 "거의 한 색" — 가운데 프레임에 항목 하나와 작은 제목만 있었다).
+ * 이제 모든 항목이 장면 앞쪽 30%(최대 2.2초) 안에 나오고, 항목이 적을수록 글자를 키워 목록 묶음을 화면 가운데에 세운다.
+ */
+export function stepsLayout(items: string[], seconds: number): { font: number; icon: number; rowGap: number; top: number; titleTop: number; times: number[] } {
+  const n = Math.max(1, items.length);
+  const base = n <= 2 ? 96 : n === 3 ? 84 : 72;
+  const gapX = 32;
+  // 가장 긴 항목이 한 줄에 들어가는 만큼만 키운다
+  const widest = Math.max(1, ...items.map(textEm));
+  const font = Math.max(56, Math.min(base, Math.floor((STEPS_WIDTH - Math.round(base * 1.4) - gapX) / widest)));
+  const icon = Math.round(font * 1.4);
+  const rowGap = Math.round(font * 0.5);
+  const listH = n * icon + (n - 1) * rowGap;
+  const titleH = 50 + 56;
+  const top = Math.round(STEPS_CENTER_Y - (listH + titleH) / 2 + titleH);
+  const first = 0.2;
+  const last = Math.max(first, Math.min(2.2, Math.max(0.5, seconds * STEPS_REVEAL_SHARE)));
+  const times = items.map((_, i) => (items.length > 1 ? first + ((last - first) * i) / (items.length - 1) : first));
+  return { font, icon, rowGap, top, titleTop: top - titleH, times };
+}
+
 function stepsHtml(m: MotionSpec, accent: string, seconds: number): { css: string; body: string; script: string; shot: string } {
-  const items = m.items.slice(0, 4);
-  const check = '<svg viewBox="0 0 24 24" width="58" height="58" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  const items = m.items.map((t) => t.trim()).filter(Boolean).slice(0, 4);
+  const lay = stepsLayout(items, seconds);
+  const mark = Math.round(lay.icon * 0.6);
+  const check = `<svg viewBox="0 0 24 24" width="${mark}" height="${mark}" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+  // 목록 묶음은 화면 가운데, 항목끼리는 체크 표시가 한 줄로 서게 왼쪽을 맞춘다
   const css = `${BASE_CSS}
-#list { position: absolute; left: 90px; right: 90px; top: 730px; }
-.it { display: flex; align-items: center; gap: 30px; margin-bottom: 36px; color: #fff; font-weight: 800; font-size: 66px; letter-spacing: -.03em; opacity: 0; }
-.ic { flex: none; width: 96px; height: 96px; border-radius: 50%; background: ${accent}; display: flex; align-items: center; justify-content: center; }`;
-  const body = `<div id="bgd"></div>${title(m.title)}<div id="list">${items.map((t, i) => `<div class="it" id="i${i}"><span class="ic">${check}</span><span>${esc(t)}</span></div>`).join("")}</div>`;
-  // 장면이 짧아도 항목이 다 나오게 한다
-  const gap = Math.max(0.3, Math.min(6, seconds) - 0.8) / Math.max(1, items.length);
-  const script = items.map((_, i) => `tl.fromTo("#i${i}", { opacity: 0, x: -50 }, { opacity: 1, x: 0, duration: .34, ease: "power3.out" }, ${(0.4 + gap * i).toFixed(2)});`).join("\n");
-  return { css, body, script, shot: `목록 도식: ${items.map((t, i) => `${(0.4 + gap * i).toFixed(1)}초 "${t}"`).join(", ")}` };
+#ttl { top: ${lay.titleTop}px; }
+#list { position: absolute; left: 0; right: 0; top: ${lay.top}px; display: flex; justify-content: center; }
+#rows { display: flex; flex-direction: column; align-items: flex-start; gap: ${lay.rowGap}px; max-width: ${STEPS_WIDTH}px; }
+.it { display: flex; align-items: center; gap: 32px; color: #fff; font-weight: 800; font-size: ${lay.font}px; line-height: 1.15; letter-spacing: -.03em; opacity: 0; }
+.ic { flex: none; width: ${lay.icon}px; height: ${lay.icon}px; border-radius: 50%; background: ${accent}; display: flex; align-items: center; justify-content: center; }`;
+  const body = `<div id="bgd"></div>${title(m.title)}<div id="list"><div id="rows">${items.map((t, i) => `<div class="it" id="i${i}"><span class="ic">${check}</span><span>${esc(t)}</span></div>`).join("")}</div></div>`;
+  // 장면이 짧아도 항목이 앞쪽에 다 나와, 장면 대부분 동안 목록 전체가 보인다
+  const script = items.map((_, i) => `tl.fromTo("#i${i}", { opacity: 0, x: -50 }, { opacity: 1, x: 0, duration: .3, ease: "power3.out" }, ${lay.times[i].toFixed(2)});`).join("\n");
+  return { css, body, script, shot: `목록 도식: ${items.map((t, i) => `${lay.times[i].toFixed(1)}초 "${t}"`).join(", ")}` };
 }
 
 function bigHtml(m: MotionSpec, accent: string): { css: string; body: string; script: string; shot: string } {
