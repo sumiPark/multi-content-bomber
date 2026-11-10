@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cardMatches, factsHaystack } from "@/lib/agents/knowledge";
+import { cardMatches, factsHaystack, loadVideoKnowledge } from "@/lib/agents/knowledge";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
@@ -150,6 +150,42 @@ export async function quoteOnPage(url: string, quote: string): Promise<boolean> 
 export const cleanStatement = (t: string) => t.replace(/\s*\(?\[[^\]]*\]\([^)]*\)\)?/g, "").replace(/\s+/g, " ").trim();
 
 const cleanUrl = (u: string) => u.replace(/([?&])utm_source=openai(&|$)/, (_, a: string, b: string) => (b ? a : "")).replace(/[?&]$/, "");
+
+/** 이 상품으로 최근 REDRAFT_DAYS일 안에 초안을 만든 적이 있는지 */
+export async function draftedRecently(service: Service, productIds: string[]): Promise<Set<string>> {
+  if (!productIds.length) return new Set();
+  const since = new Date(Date.now() - REDRAFT_DAYS * 86_400_000).toISOString();
+  const { data, error } = await service.from("knowledge_cards").select("product_id").in("product_id", productIds).gte("created_at", since);
+  if (error) throw new Error(`최근 상식 초안을 조회하지 못했어요: ${error.message}`);
+  return new Set((data ?? []).map((d) => d.product_id).filter((x): x is string => !!x));
+}
+
+export interface TopUpResult {
+  /** 찾기 전 이 상품에 맞는 카드 수 */
+  had: number;
+  /** 웹 검색을 했는지. 카드가 충분하거나 최근에 찾았으면 하지 않는다 */
+  drafted: boolean;
+  saved: { cards: number; differences: number };
+  dropped: string[];
+  tokens: { input: number; output: number };
+}
+
+/**
+ * 상식 카드를 보강한다. 상품 제안 직후(worker/draft-knowledge.ts)와 영상 장면표를 쓰기 직전(lib/auto-video/make.ts)에 부른다.
+ * 맞는 카드가 ENOUGH_CARDS개 이상이거나 최근 REDRAFT_DAYS일 안에 이 상품으로 찾았으면 검색하지 않는다(force면 그래도 찾는다).
+ */
+export async function topUpKnowledge(service: Service, organizationId: string, facts: ProductFacts, opts: { force?: boolean } = {}): Promise<TopUpResult> {
+  const none = { cards: 0, differences: 0 };
+  // 다른 상품으로 찾은 같은 상품군 카드도 이 상품에 붙는다. 우리 차이는 초안까지 보고 이미 있으면 다시 찾지 않는다
+  const have = await loadVideoKnowledge(service, organizationId, facts, { includeDrafts: true });
+  if (!opts.force && (have.cards.length >= ENOUGH_CARDS || (await draftedRecently(service, [facts.id])).has(facts.id))) {
+    return { had: have.cards.length, drafted: false, saved: none, dropped: [], tokens: { input: 0, output: 0 } };
+  }
+  const { draft, tokens } = await draftKnowledge(facts, { cardTopics: have.cards.map((c) => c.topic), hasDifferences: have.differences.length > 0 });
+  const { draft: kept, dropped } = keepMatchingCards(draft, facts);
+  const saved = await saveKnowledgeDraft(service, organizationId, facts, kept);
+  return { had: have.cards.length, drafted: true, saved, dropped, tokens };
+}
 
 /** 초안을 DRAFT로 저장한다. 이미 있는 문장은 사람이 정한 상태를 건드리지 않는다. */
 export async function saveKnowledgeDraft(service: Service, organizationId: string, facts: ProductFacts, draft: KnowledgeDraft): Promise<{ cards: number; differences: number }> {

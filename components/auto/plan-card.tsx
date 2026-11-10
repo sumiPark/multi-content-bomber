@@ -15,6 +15,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
+import type { UsedEvidence } from "@/lib/agents/knowledge";
 
 // B 칸 하나 — 제안 상품 · 이유 · 대안. 컨펌 / 대안으로 바꿔 컨펌 / 건너뛰기.
 
@@ -48,6 +49,8 @@ export interface PlanCardData {
   jobStatus: string | null;
   // 저장된 장면표가 있는지 (0054). 없으면 화면만 다시 만들 수 없다
   hasStoryboard: boolean;
+  // 이 영상이 쓴 근거 (저장된 장면표 기준). 장면표가 없으면 null
+  evidence: UsedEvidence | null;
   // 완성본 (서명 주소)
   video: { url: string; seconds: number | null; reading: string | null; music: { title?: string; creator?: string; license?: string; landing?: string } | null } | null;
 }
@@ -224,6 +227,8 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
         </details>
       )}
 
+      {plan.evidence && <EvidenceList evidence={plan.evidence} />}
+
       {canManage && plan.pastSlot && (plan.status === "PROPOSED" || plan.status === "CONFIRMED") && (
         <p className="rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">
           올릴 시각이 지나 바꿀 수 없어요.{" "}
@@ -283,6 +288,57 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
         <p>건너뛰면 되돌릴 수 없어요. 이 칸은 그날 비게 돼요.</p>
       </ConfirmDialog>
     </div>
+  );
+}
+
+// 장면 번호 표기 — 대본 목록과 같게 첫 장면은 "훅"
+const sceneLabel = (scenes: number[]) => scenes.map((i) => (i === 0 ? "훅" : String(i))).join(" · ");
+
+/** 이 영상이 쓴 근거. 승인 전 초안 카드를 썼으면 요약 줄에 표시해 사람이 출처를 보고 확인하게 한다 */
+function EvidenceList({ evidence }: { evidence: UsedEvidence }) {
+  const drafts = evidence.cards.filter((c) => !c.approved).length;
+  const parts = [
+    evidence.cards.length ? `상식 카드 ${evidence.cards.length}개` : null,
+    evidence.differences.length ? `우리 차이 ${evidence.differences.length}개` : null,
+    evidence.productScenes ? `상품 자료 ${evidence.productScenes}장면` : null,
+    evidence.commonScenes ? `일반 상식 ${evidence.commonScenes}장면` : null,
+  ].filter(Boolean);
+  return (
+    <details className="rounded-md border px-3 py-2 text-xs">
+      <summary className="cursor-pointer font-semibold">
+        쓴 근거{parts.length ? ` — ${parts.join(" · ")}` : " — 없음"}
+        {drafts > 0 && <span className="ml-1 font-normal text-warn">(승인 전 초안 {drafts}개 포함)</span>}
+      </summary>
+      {(evidence.cards.length > 0 || evidence.differences.length > 0) && (
+        <ul className="mt-2 space-y-2">
+          {evidence.cards.map((c) => (
+            <li key={c.id} className="space-y-0.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant={c.approved ? "ok" : "outline"}>{c.approved ? "승인" : "초안"}</Badge>
+                <span className="font-medium">{c.topic}</span>
+                <span className="text-muted-foreground">장면 {sceneLabel(c.scenes)}</span>
+              </div>
+              <p>{c.statement}</p>
+              <a href={c.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground">
+                {c.sourceTitle} <ExternalLink className="size-3" />
+              </a>
+            </li>
+          ))}
+          {evidence.differences.map((d) => (
+            <li key={d.id} className="space-y-0.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge variant="ok">확정한 차이</Badge>
+                <span className="text-muted-foreground">장면 {sceneLabel(d.scenes)}</span>
+              </div>
+              <p>
+                {d.difference} <span className="text-muted-foreground">(비교 대상: {d.compareTo})</span>
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-muted-foreground">장면표를 쓸 때의 상태예요. 그 뒤에 승인한 카드는 &quot;대본부터 다시&quot;로 만들면 반영돼요.</p>
+    </details>
   );
 }
 

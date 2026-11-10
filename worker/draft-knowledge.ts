@@ -1,11 +1,10 @@
 import "./load-env";
-import { loadVideoKnowledge } from "@/lib/agents/knowledge";
-import { ENOUGH_CARDS, REDRAFT_DAYS, draftKnowledge, keepMatchingCards, saveKnowledgeDraft } from "@/lib/agents/knowledge-draft";
+import { draftedRecently, topUpKnowledge } from "@/lib/agents/knowledge-draft";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import { kstDate } from "@/lib/automation/time";
 import { createServiceClient } from "@/lib/supabase/service";
 
-// 상식 카드 · 우리 차이 초안 워커. 초안만 만들고, 영상에는 사람이 승인한 뒤에 들어간다.
+// 상식 카드 · 우리 차이 초안 워커. 상품 제안(b-plan)이 끝나면 돈다. 영상 장면표를 쓰기 직전에도 같은 확인을 한 번 더 한다(lib/auto-video/make.ts).
 //   기본: 다가오는 AI 자동 칸의 상품 중 맞는 카드가 ENOUGH_CARDS개 미만인 상품(최근 REDRAFT_DAYS일 안에 찾은 상품은 뺀다)
 //   --product <id> [--org <id>]: 그 상품만 다시 찾는다(이미 있는 문장은 그대로 둔다)
 
@@ -46,17 +45,9 @@ async function main() {
       seen.add(p.product_id);
       targets.push({ productId: p.product_id, organizationId: p.organization_id });
     }
-    // 최근에 찾은 상품은 카드가 적어도 다시 찾지 않는다(찾을 자료가 적은 상품을 매번 다시 찾지 않게)
-    const ids = targets.map((t) => t.productId);
-    const since = new Date(Date.now() - REDRAFT_DAYS * 86_400_000).toISOString();
-    const { data: recent, error: recentError } = await service
-      .from("knowledge_cards")
-      .select("product_id")
-      .in("product_id", ids.length ? ids : ["00000000-0000-0000-0000-000000000000"])
-      .gte("created_at", since);
-    if (recentError) throw new Error(recentError.message);
-    const recentlyDrafted = new Set((recent ?? []).map((d) => d.product_id));
-    targets.splice(0, targets.length, ...targets.filter((t) => !recentlyDrafted.has(t.productId)));
+    // 최근에 찾은 상품은 카드가 적어도 다시 찾지 않는다(찾을 자료가 적은 상품을 매번 다시 찾지 않게). 상품 자료를 읽기 전에 미리 뺀다
+    const recent = await draftedRecently(service, targets.map((t) => t.productId));
+    targets.splice(0, targets.length, ...targets.filter((t) => !recent.has(t.productId)));
   }
 
   let failed = 0;
@@ -65,15 +56,11 @@ async function main() {
     if (drafted >= MAX_PRODUCTS) break;
     try {
       const facts = await loadProductFacts(service, t.productId);
-      // 다른 상품으로 찾은 같은 상품군 카드도 이 상품에 붙는다. 맞는 카드가 충분하면 찾지 않는다
-      const have = await loadVideoKnowledge(service, t.organizationId, facts, { includeDrafts: true });
-      if (!onlyProduct && have.cards.length >= ENOUGH_CARDS) continue;
+      const r = await topUpKnowledge(service, t.organizationId, facts, { force: !!onlyProduct });
+      if (!r.drafted) continue;
       drafted++;
-      const { draft, tokens } = await draftKnowledge(facts, { cardTopics: have.cards.map((c) => c.topic), hasDifferences: have.differences.length > 0 });
-      const { draft: kept, dropped } = keepMatchingCards(draft, facts);
-      if (dropped.length) console.log(`[knowledge] ${facts.name}: 상품 자료에 낱말이 없어 뺀 카드 ${dropped.join(", ")}`);
-      const saved = await saveKnowledgeDraft(service, t.organizationId, facts, kept);
-      console.log(`[knowledge] ${facts.name}: 있던 카드 ${have.cards.length}개 + 상식 ${saved.cards}개 · 차이 ${saved.differences}개 저장 (토큰 ${tokens.input}+${tokens.output})`);
+      if (r.dropped.length) console.log(`[knowledge] ${facts.name}: 상품 자료에 낱말이 없어 뺀 카드 ${r.dropped.join(", ")}`);
+      console.log(`[knowledge] ${facts.name}: 있던 카드 ${r.had}개 + 상식 ${r.saved.cards}개 · 차이 ${r.saved.differences}개 저장 (토큰 ${r.tokens.input}+${r.tokens.output})`);
     } catch (e) {
       failed++;
       console.error(`[knowledge] ${t.productId} 실패:`, e instanceof Error ? e.message : e);

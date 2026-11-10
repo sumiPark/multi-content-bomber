@@ -7,6 +7,7 @@ import { LONG_VISUALS, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, phraseNotes, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
 import { editKit, scoreHooks } from "@/lib/agents/ko-skills";
 import { loadVideoKnowledge, type VideoKnowledge } from "@/lib/agents/knowledge";
+import { topUpKnowledge } from "@/lib/agents/knowledge-draft";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
 // LENGTH_TOLERANCE: 음성으로 잰 길이의 허용 오차(초). 합성 결과의 작은 차이로 칸을 멈추지 않고, 장면표 글자 수 점검도 같은 여유를 둔다
@@ -311,6 +312,16 @@ export async function makeAutoVideo(input: {
   // 우리 차이는 사람이 확정한 것만 쓰고, 초안은 저장하지 않는 시험에서만 명시적으로 켠다.
   // 저장된 장면표로 만들 때는 장면표를 쓸 때의 근거를 그대로 쓴다(K번호가 같은 카드를 가리키게)
   const includeDrafts = input.dryRun && process.env.TEST_USE_DRAFT_KNOWLEDGE === "1";
+  // 장면표를 새로 쓸 때만 상식 카드를 한 번 더 확인한다. 제안 직후 초안이 실패했거나 그 뒤 상품 자료가 바뀌었을 수 있다.
+  // 저장하지 않는 시험에서는 건너뛰고, 실패해도 있는 근거로 만든다
+  if (!keep && !fileBoard && !input.dryRun) {
+    try {
+      const top = await topUpKnowledge(service, input.organizationId, facts);
+      if (top.drafted) console.log(`  상식 카드 보강: 있던 ${top.had}개 + 새 초안 ${top.saved.cards}개 (토큰 ${top.tokens.input}+${top.tokens.output})`);
+    } catch (e) {
+      console.log(`  상식 카드 보강 실패 — 있는 근거로 만든다: ${e instanceof Error ? e.message : e}`);
+    }
+  }
   const knowledge = keep?.knowledge ?? (await loadVideoKnowledge(service, input.organizationId, facts, { includeDrafts }));
   console.log(`  근거: 상식 카드 ${knowledge.cards.length}개 · 우리 차이 ${knowledge.differences.length}개${keep ? " (저장된 장면표의 근거)" : includeDrafts ? " (시험: 초안 포함)" : ""}`);
   const visualPolicy: VisualPolicy = { ...LONG_VISUALS, evidence: knowledge.cards.map((c) => c.statement).join(" ") };

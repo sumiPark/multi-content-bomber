@@ -5,6 +5,7 @@ import { ConfirmAllButton, PlanCard, type PlanCardData } from "@/components/auto
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { usedEvidence, type VideoKnowledge } from "@/lib/agents/knowledge";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { loadTrackTimes } from "@/lib/schedule/track-times";
 import { CONFIRM_NOTICE_HOURS, isPastSlot } from "@/lib/automation/deadline";
@@ -69,7 +70,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
 
   const { data: plans } = await supabase
     .from("content_plans")
-    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, error, script, check_result, video, board_at:storyboard->>writtenAt, publish_jobs(status), social_accounts(display_name)")
+    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, error, script, check_result, video, board_at:storyboard->>writtenAt, board_scenes:storyboard->board->scenes, board_knowledge:storyboard->knowledge, publish_jobs(status), social_accounts(display_name)")
     .eq("slot_date", slotDate)
     .eq("track", "B")
     .order("slot_time", { ascending: true });
@@ -139,6 +140,8 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       issues: ((p.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),
       jobStatus: p.publish_jobs?.status ?? null,
       hasStoryboard: !!p.board_at,
+      // 장면표를 쓸 때 받은 근거 중 실제로 쓴 것 — 승인 · 초안을 나눠 보여 준다
+      evidence: Array.isArray(p.board_scenes) && p.board_knowledge ? usedEvidence(p.board_scenes as { evidence?: string[] }[], p.board_knowledge as unknown as VideoKnowledge) : null,
       video: (() => {
         const v = p.video as { path?: string; seconds?: number; plan?: { look?: { reading?: string } }; sounds?: { music?: string | null; musicSource?: { title?: string; creator?: string; license?: string; landing?: string } | null } } | null;
         const url = v?.path ? signed.get(v.path) : undefined;
