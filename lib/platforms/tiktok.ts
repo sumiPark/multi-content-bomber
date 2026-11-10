@@ -1,4 +1,5 @@
 import "./server-guard";
+import type { Json } from "@/types/database";
 import {
   MediaError,
   PublishError,
@@ -237,6 +238,17 @@ export const tiktok: PlatformAdapter = {
         `TikTok publish는 동영상만 지원합니다 (received: ${ctx.mediaType}). 이미지 게시는 별도 PHOTO 엔드포인트 필요.`,
       );
     }
+    // 0. 이전 시도가 영상 업로드까지 끝냈으면 새로 올리지 않고 그 publish_id의 상태만 이어서 본다.
+    //    업로드가 끝나면 TikTok이 알아서 처리 · 게시를 진행하므로, 폴링만 끊긴 것을 처음부터 다시
+    //    올리면 같은 영상이 두 번 올라간다. (캡션이 그 사이 바뀌어도 이미 올라간 쪽이 게시된다.)
+    const resumed = parseTikTokResume(ctx.resumeState, ctx.contentId);
+    if (resumed) {
+      console.log(
+        `[tiktok] 이전 시도 업로드 이어받음 (publish_id=${resumed.publishId}, 업로드 ${resumed.uploadedAt}) — 상태만 확인`,
+      );
+      return await finishTikTokPublish(ctx, resumed.publishId, accessToken);
+    }
+
     const signedUrl = ctx.mediaSignedUrls[0];
     if (!signedUrl) {
       throw new MediaError("TikTok publish: 미디어 서명 URL이 비어있습니다");
@@ -313,19 +325,17 @@ export const tiktok: PlatformAdapter = {
       );
     }
 
-    // 4. 상태 폴링
-    const finalStatus = await pollTikTokStatus(publishId, accessToken);
+    // 3-2. 업로드가 끝났으니 publish_id를 바로 남긴다 — 이번 폴링이 끊겨도 다음 시도가 이어받는다.
+    await ctx.saveResumeState({
+      tiktok: {
+        publishId,
+        contentId: ctx.contentId,
+        uploadedAt: new Date().toISOString(),
+      },
+    });
 
-    // 5. URL 조립. publicly_available_post_id가 없으면(비공개/광고 정책 등) post_id만 반환.
-    const postId = finalStatus.publicly_available_post_id?.[0] ?? publishId;
-    const url = finalStatus.publicly_available_post_id?.[0]
-      ? `https://www.tiktok.com/video/${finalStatus.publicly_available_post_id[0]}`
-      : `https://www.tiktok.com/`;
-
-    return {
-      platformPostId: postId,
-      platformPostUrl: url,
-    };
+    // 4~5. 상태 폴링 → URL 조립
+    return await finishTikTokPublish(ctx, publishId, accessToken);
   },
 
   async refreshToken(refreshTokenPlain): Promise<RefreshedTokens> {
@@ -393,11 +403,66 @@ interface TikTokStatusData {
   uploaded_bytes?: number;
 }
 
+// 업로드가 끝난 publish_id의 상태를 끝까지 보고 결과를 만든다. 첫 시도 · 이어받은 시도 공통.
+async function finishTikTokPublish(
+  ctx: PublishContext,
+  publishId: string,
+  accessToken: string,
+): Promise<PublishResult> {
+  let finalStatus: TikTokStatusData;
+  try {
+    finalStatus = await pollTikTokStatus(publishId, accessToken, ctx.deadlineAt);
+  } catch (err) {
+    // TikTok이 처리 실패로 끝낸 업로드는 이어받을 게 없다 — 다음 시도는 처음부터 다시 올린다.
+    // (폴링 타임아웃 · 네트워크 오류는 이어받기 상태를 그대로 둔다.)
+    if (err instanceof TikTokProcessingFailed) await ctx.saveResumeState(null);
+    throw err;
+  }
+
+  // publicly_available_post_id가 없으면(비공개/광고 정책 등) publish_id만 반환.
+  const postId = finalStatus.publicly_available_post_id?.[0] ?? publishId;
+  const url = finalStatus.publicly_available_post_id?.[0]
+    ? `https://www.tiktok.com/video/${finalStatus.publicly_available_post_id[0]}`
+    : `https://www.tiktok.com/`;
+
+  return {
+    platformPostId: postId,
+    platformPostUrl: url,
+  };
+}
+
+// 이전 시도가 남긴 업로드 상태. 같은 콘텐츠의 것이 아니면 버린다.
+function parseTikTokResume(
+  raw: Json | null,
+  contentId: string,
+): { publishId: string; uploadedAt: string } | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const t = (raw as Record<string, unknown>).tiktok;
+  if (!t || typeof t !== "object" || Array.isArray(t)) return null;
+  const r = t as Record<string, unknown>;
+  if (typeof r.publishId !== "string" || !r.publishId) return null;
+  if (r.contentId !== contentId) return null;
+  return {
+    publishId: r.publishId,
+    uploadedAt: typeof r.uploadedAt === "string" ? r.uploadedAt : "?",
+  };
+}
+
+// TikTok이 FAILED로 끝낸 업로드. 일반 PublishError와 구분해 이어받기 상태를 지운다.
+class TikTokProcessingFailed extends PublishError {}
+
 async function pollTikTokStatus(
   publishId: string,
   accessToken: string,
+  deadlineAt: number | null,
 ): Promise<TikTokStatusData> {
   for (let i = 0; i < POLL_MAX_ATTEMPTS; i++) {
+    // run 시간 예산을 넘기기 전에 내려놓는다 — 다음 시도가 이 publish_id를 이어서 본다.
+    if (deadlineAt !== null && Date.now() + POLL_INTERVAL_MS > deadlineAt) {
+      throw new PublishError(
+        `TikTok 상태 확인 중 이번 실행 시간이 끝남 (publish_id=${publishId}) — 다음 시도가 이어서 확인`,
+      );
+    }
     const resp = (await callTikTokApi(STATUS_FETCH_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -412,7 +477,7 @@ async function pollTikTokStatus(
         // 발행은 아니지만 워커가 더 할 일은 없으므로 성공으로 처리.
         return data;
       case "FAILED":
-        throw new PublishError(
+        throw new TikTokProcessingFailed(
           `TikTok publish FAILED: ${data.fail_reason ?? "(no reason)"}`,
         );
       case "PROCESSING_DOWNLOAD":
@@ -422,6 +487,6 @@ async function pollTikTokStatus(
     }
   }
   throw new PublishError(
-    `TikTok 상태 폴링 타임아웃 (${POLL_MAX_ATTEMPTS}회 * ${POLL_INTERVAL_MS}ms)`,
+    `TikTok 상태 폴링 타임아웃 (${POLL_MAX_ATTEMPTS}회 * ${POLL_INTERVAL_MS}ms, publish_id=${publishId}) — 다음 시도가 이어서 확인`,
   );
 }

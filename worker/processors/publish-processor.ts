@@ -12,6 +12,7 @@ import {
   type PublishContext,
   type RefreshedTokens,
 } from "@/lib/platforms";
+import { warnIfError } from "@/lib/supabase/result";
 import { mediaItemKinds } from "@/lib/upload/media-kind";
 import type { Json } from "@/types/database";
 
@@ -141,57 +142,35 @@ export async function processClaimedPublishJob(
   // 어댑터가 이어받기 상태를 남기면 SUCCESS 뒤에 지워준다. claim 시점 값이 있었거나
   // 이번 시도에서 새로 저장했을 때만 — 그 외엔 불필요한 UPDATE(및 0015 미적용 경고)를 피한다.
   let hasResumeState = row.resume_state != null;
-  const persistResumeState = async (state: Json) => {
+  const persistResumeState = async (state: Json | null) => {
     hasResumeState = true;
     await saveResumeState(supabase, publishJobId, state);
   };
 
+  // 이전 시도가 게시까지 끝내고 SUCCESS 기록만 못 했으면(멈춘 PROCESSING 회수로 다시 잡힘)
+  // 다시 올리지 않고 기록만 마친다. 판매 상태 확인도 건너뛴다 — 이미 올라간 게시물이다.
+  const alreadyPublished = parsePublishedMarker(row.resume_state);
+
+  let result: { platformPostId: string; platformPostUrl: string };
+  let successNote: string | undefined;
   try {
-    // 2.5 편성 칸(content_plans)에서 예약된 발행이면 올리기 직전 판매 상태 · 가격을 다시 확인한다(5-4).
-    //     판매 중이 아니거나 캡션 가격이 다르면 재시도 없이 FAILED — 칸은 BLOCKED(멈춤)로 대시보드에 뜬다.
-    //     사람이 콘텐츠 생성에서 만든 발행은 확인 없이 예전 그대로.
-    const gate = await prepublishCheck(supabase, row);
-    if (!gate.ok) throw new PublishError(gate.reason, { permanent: true });
-
-    // 3. social_accounts + contents 조회 → 어댑터로 게시
-    const result = await runPublish(supabase, row, deadlineAt, persistResumeState);
-
-    // 4. SUCCESS 마킹
-    const successHistory: StatusHistoryEntry[] = [
-      ...processingHistory,
-      { status: "SUCCESS", timestamp: nowIso(), ...(gate.note ? { message: gate.note } : {}) },
-    ];
-
-    const { error: successError } = await supabase
-      .from("publish_jobs")
-      .update({
-        status: "SUCCESS",
-        completed_at: nowIso(),
-        platform_post_id: result.platformPostId,
-        platform_post_url: result.platformPostUrl,
-        status_history: successHistory,
-        updated_at: nowIso(),
-        last_error: null,
-      })
-      .eq("id", publishJobId);
-
-    if (successError) {
-      // DB는 실패했지만 외부 게시는 이미 성공한 상태. 워커 로그로 남기고
-      // 다음 단계(데이터 정합성 cron)에서 sweep하도록 둔다.
-      console.error(
-        `[publish-processor] SUCCESS update 실패 (외부 게시는 완료): ${successError.message}`,
+    if (alreadyPublished) {
+      console.warn(
+        `[publish-processor] 이전 시도에서 게시 완료(post=${alreadyPublished.platformPostId}, ${alreadyPublished.at}) — 다시 올리지 않고 SUCCESS만 기록 (job=${publishJobId})`,
       );
-    } else if (hasResumeState) {
-      // 이어받기 상태 정리. SUCCESS 업데이트와 분리한 이유: 0015 미적용 DB에서 컬럼
-      // 없음으로 SUCCESS 기록까지 같이 실패하면 stale 회수 → 재발행(중복 게시)이 난다.
-      await saveResumeState(supabase, publishJobId, null);
-    }
+      result = alreadyPublished;
+      successNote = "이전 시도에서 게시 완료 — 기록만 다시 저장";
+    } else {
+      // 2.5 편성 칸(content_plans)에서 예약된 발행이면 올리기 직전 판매 상태 · 가격을 다시 확인한다(5-4).
+      //     판매 중이 아니거나 캡션 가격이 다르면 재시도 없이 FAILED — 칸은 BLOCKED(멈춤)로 대시보드에 뜬다.
+      //     사람이 콘텐츠 생성에서 만든 발행은 확인 없이 예전 그대로.
+      const gate = await prepublishCheck(supabase, row);
+      if (!gate.ok) throw new PublishError(gate.reason, { permanent: true });
+      successNote = gate.note ?? undefined;
 
-    if (row.series_id) {
-      await recordSeriesEpisode(supabase, row, result);
+      // 3. social_accounts + contents 조회 → 어댑터로 게시
+      result = await runPublish(supabase, row, deadlineAt, persistResumeState);
     }
-
-    return { ok: true, ...result };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const isLastAttempt =
@@ -202,10 +181,13 @@ export async function processClaimedPublishJob(
     // 토큰 만료 / revoke는 계정 자체가 죽은 상태 — 같은 토큰으로 재시도 의미 없음.
     // social_accounts.is_active=false로 마킹해 UI/스케줄러가 재시도 안 하게.
     if (err instanceof TokenExpiredError) {
-      await supabase
-        .from("social_accounts")
-        .update({ is_active: false, updated_at: nowIso() })
-        .eq("id", row.social_account_id);
+      warnIfError(
+        await supabase
+          .from("social_accounts")
+          .update({ is_active: false, updated_at: nowIso() })
+          .eq("id", row.social_account_id),
+        `계정 비활성 표시 (account=${row.social_account_id})`,
+      );
     }
 
     // 재시도 간격 — 바로 다시 잡히면 같은 run 안에서 몇 초 만에 3번을 다 써서, 한도 초과 같은 잠깐의 오류도
@@ -222,21 +204,123 @@ export async function processClaimedPublishJob(
       },
     ];
 
-    await supabase
-      .from("publish_jobs")
-      .update({
-        status: nextStatus,
-        last_error: errorMsg,
-        status_history: failureHistory,
-        updated_at: nowIso(),
-        ...(retryAt ? { scheduled_for: retryAt.toISOString() } : {}),
-        ...(isLastAttempt ? { completed_at: nowIso() } : {}),
-      })
-      .eq("id", publishJobId);
+    // 이 기록이 실패하면 job은 PROCESSING으로 남고, claim RPC가 15분 뒤 회수해 다시 시도한다
+    // (게시 전 실패라 중복 게시는 없다). 로그만 남긴다.
+    warnIfError(
+      await supabase
+        .from("publish_jobs")
+        .update({
+          status: nextStatus,
+          last_error: errorMsg,
+          status_history: failureHistory,
+          updated_at: nowIso(),
+          ...(retryAt ? { scheduled_for: retryAt.toISOString() } : {}),
+          ...(isLastAttempt ? { completed_at: nowIso() } : {}),
+        })
+        .eq("id", publishJobId),
+      `${nextStatus} 기록 (job=${publishJobId})`,
+    );
 
     // status는 위에서 이미 RETRYING/FAILED로 기록됨. 호출측(process-due)이 job별로
     // catch해 로그만 남긴다 — 재시도는 RETRYING row를 다음 sweep이 다시 claim.
     throw err;
+  }
+
+  // ── 여기부터는 플랫폼 게시가 끝난 뒤다. 무엇이 실패해도 위 catch(RETRYING → 재게시)로
+  //    보내지 않는다. 예전엔 SUCCESS 기록 실패를 로그만 남겨 job이 PROCESSING으로 남았고,
+  //    15분 뒤 회수된 job이 같은 영상을 한 번 더 올렸다.
+
+  // 4-1. 게시 완료 표시 — SUCCESS 기록이 끝내 실패해도, 다시 잡힌 시도가 이걸 보고 재게시를 건너뛴다.
+  if (!alreadyPublished) {
+    const marker: PublishedMarker = { ...result, at: nowIso() };
+    hasResumeState = true;
+    await saveResumeState(supabase, publishJobId, { published: { ...marker } });
+  }
+
+  // 4-2. SUCCESS 기록 — 잠깐의 DB 오류는 간격을 늘려 다시 시도한다(약 2분).
+  const successHistory: StatusHistoryEntry[] = [
+    ...processingHistory,
+    { status: "SUCCESS", timestamp: nowIso(), ...(successNote ? { message: successNote } : {}) },
+  ];
+  const successSaved = await retryDbWrite(`SUCCESS 기록 (job=${publishJobId})`, () =>
+    supabase
+      .from("publish_jobs")
+      .update({
+        status: "SUCCESS",
+        completed_at: nowIso(),
+        platform_post_id: result.platformPostId,
+        platform_post_url: result.platformPostUrl,
+        status_history: successHistory,
+        updated_at: nowIso(),
+        last_error: null,
+      })
+      .eq("id", publishJobId),
+  );
+
+  if (!successSaved) {
+    // 게시는 끝났는데 기록을 못 남겼다. 게시 완료 표시가 저장됐으면 15분 뒤 회수된 시도가
+    // 다시 올리지 않고 기록만 마친다. 표시도 저장 못 했으면 중복 게시가 날 수 있어 크게 남긴다.
+    console.error(
+      `[publish-processor] ⚠️ SUCCESS 기록 실패 — 외부 게시는 완료 (job=${publishJobId}, post=${result.platformPostId}, url=${result.platformPostUrl}). 재게시 방지 표시로 다음 회수 때 기록만 다시 시도`,
+    );
+  } else if (hasResumeState) {
+    // 이어받기 상태 · 게시 완료 표시 정리. SUCCESS 업데이트와 분리한 이유: 0015 미적용 DB에서
+    // 컬럼 없음으로 SUCCESS 기록까지 같이 실패하지 않게.
+    await saveResumeState(supabase, publishJobId, null);
+  }
+
+  if (row.series_id && !alreadyPublished) {
+    await recordSeriesEpisode(supabase, row, result);
+  }
+
+  return { ok: true, ...result };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 게시 완료 표시 (resume_state.published). 어댑터의 이어받기 상태 자리를 같이 쓴다 —
+// 게시가 끝난 뒤엔 어댑터 상태가 더는 필요 없다.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PublishedMarker {
+  platformPostId: string;
+  platformPostUrl: string;
+  at: string;
+}
+
+function parsePublishedMarker(raw: Json | null | undefined): PublishedMarker | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const p = (raw as Record<string, unknown>).published;
+  if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+  const m = p as Record<string, unknown>;
+  if (typeof m.platformPostId !== "string" || !m.platformPostId) return null;
+  return {
+    platformPostId: m.platformPostId,
+    platformPostUrl: typeof m.platformPostUrl === "string" ? m.platformPostUrl : "",
+    at: typeof m.at === "string" ? m.at : "?",
+  };
+}
+
+// 게시 뒤 기록처럼 꼭 남아야 하는 쓰기를 1 · 3 · 10 · 30 · 60초 간격으로 다시 시도한다.
+async function retryDbWrite(
+  what: string,
+  write: () => PromiseLike<{ error: { message: string } | null }>,
+): Promise<boolean> {
+  const delays = [1_000, 3_000, 10_000, 30_000, 60_000];
+  for (let i = 0; ; i++) {
+    let message: string;
+    try {
+      const { error } = await write();
+      if (!error) return true;
+      message = error.message;
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    if (i >= delays.length) {
+      console.error(`[publish-processor] ${what} 실패 (${i + 1}회 시도): ${message}`);
+      return false;
+    }
+    console.warn(`[publish-processor] ${what} 실패, ${delays[i] / 1000}초 뒤 다시 시도: ${message}`);
+    await new Promise((r) => setTimeout(r, delays[i]));
   }
 }
 
