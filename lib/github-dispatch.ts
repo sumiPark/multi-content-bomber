@@ -19,7 +19,7 @@ export const METRICS_DISPATCH_EVENT = "collect-metrics";
 // 상품 수집 · 상세 이미지 분석 워크플로(.github/workflows/products.yml).
 export const PRODUCTS_DISPATCH_EVENT = "collect-products";
 // 직접 촬영 콘텐츠 워크플로(.github/workflows/a-plan.yml) — 기획안 후보 · 컷 리스트.
-// AI 자동 업로드 — 상품 제안(빈 칸만) + 확인된 칸 대본 쓰기(b-plan.yml)
+// AI 자동 업로드 — 상품 제안(빈 칸만, b-plan.yml). 확인된 칸의 장면표 · 영상은 auto-video.yml
 export const AUTO_PLAN_DISPATCH_EVENT = "plan-b";
 export const SHOOT_PLAN_DISPATCH_EVENT = "plan-a";
 export const SHOTLIST_DISPATCH_EVENT = "a-shotlist";
@@ -85,17 +85,12 @@ export async function triggerShotlistRun(reason: string): Promise<void> {
 }
 
 /** 직접 촬영 편집 — "다 올렸어요" · "고친 문구로 다시 편집" 직후. 편집은 FFmpeg라 Actions에서만. */
-/** AI 자동 업로드 대본 다시 쓰기 — 점검에 걸린 칸을 사람이 고쳐 다시 확인했을 때. */
-export async function triggerAutoScriptRun(reason: string): Promise<void> {
-  await dispatch(AUTO_PLAN_DISPATCH_EVENT, reason);
-}
-
 /** AI 자동 상품 제안 — 칸 · 계정을 새로 넣은 직후. 내일 칸 중 비어 있는 칸만 채운다(같은 워크플로). */
 export async function triggerAutoPlanRun(reason: string): Promise<void> {
   await dispatch(AUTO_PLAN_DISPATCH_EVENT, reason);
 }
 
-/** AI 자동 콘텐츠 영상 워커를 깨운다(다시 만들기). */
+/** AI 자동 콘텐츠 영상 워커를 깨운다 — 상품 확인 직후(장면표부터) · 다시 만들기. 같은 칸은 워커가 making_since로 한 번만 집는다. */
 export async function triggerAutoVideoRun(reason: string): Promise<void> {
   await dispatch("auto-video", reason);
 }

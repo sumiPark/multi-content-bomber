@@ -752,6 +752,9 @@ export type Database = {
           proposal: Json
           publish_job_id: string | null
           script: Json | null
+          making_since: string | null
+          redo: Json | null
+          storyboard: Json | null
           slot_date: string | null
           slot_time: string | null
           social_account_id: string
@@ -783,6 +786,9 @@ export type Database = {
           proposal?: Json
           publish_job_id?: string | null
           script?: Json | null
+          making_since?: string | null
+          redo?: Json | null
+          storyboard?: Json | null
           slot_date?: string | null
           slot_time?: string | null
           social_account_id: string
@@ -814,6 +820,9 @@ export type Database = {
           proposal?: Json
           publish_job_id?: string | null
           script?: Json | null
+          making_since?: string | null
+          redo?: Json | null
+          storyboard?: Json | null
           slot_date?: string | null
           slot_time?: string | null
           social_account_id?: string

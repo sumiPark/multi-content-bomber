@@ -46,14 +46,30 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   const canManage = profile.role === "ADMIN" || profile.role === "MANAGER";
 
   const tomorrow = kstDate(1);
-  const slotDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : tomorrow;
   const supabase = await getServerSupabase();
+  // 날짜와 상관없이 사람이 볼 칸: 완성본 확인 대기(RENDERED) · 멈춘 칸(BLOCKED) · 시각이 지났는데 아직 만드는 칸.
+  // 날짜를 고르지 않고 들어오면 그런 칸이 있는 가장 이른 날을 먼저 연다(없으면 내일)
+  const { data: attentionRows } = await supabase
+    .from("content_plans")
+    .select("slot_date, slot_time, status")
+    .eq("track", "B")
+    .in("status", ["RENDERED", "BLOCKED", "CONFIRMED", "SCRIPTED"])
+    .gte("slot_date", kstDate(-14))
+    .order("slot_date", { ascending: true })
+    .limit(200);
+  const attention = new Map<string, number>();
+  for (const r of attentionRows ?? []) {
+    const d = r.slot_date as string;
+    const late = (r.status === "CONFIRMED" || r.status === "SCRIPTED") && isPastSlot(d, r.slot_time as string);
+    if (r.status === "RENDERED" || r.status === "BLOCKED" || late) attention.set(d, (attention.get(d) ?? 0) + 1);
+  }
+  const slotDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : ([...attention.keys()][0] ?? tomorrow);
   // 안내 문구의 칸 시각 — 자동 콘텐츠 설정에서 바뀐다
   const times = await loadTrackTimes(supabase);
 
   const { data: plans } = await supabase
     .from("content_plans")
-    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, error, script, check_result, video, publish_jobs(status), social_accounts(display_name)")
+    .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, error, script, check_result, video, board_at:storyboard->>writtenAt, publish_jobs(status), social_accounts(display_name)")
     .eq("slot_date", slotDate)
     .eq("track", "B")
     .order("slot_time", { ascending: true });
@@ -122,6 +138,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       script: summarizeScript(p.script),
       issues: ((p.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),
       jobStatus: p.publish_jobs?.status ?? null,
+      hasStoryboard: !!p.board_at,
       video: (() => {
         const v = p.video as { path?: string; seconds?: number; plan?: { look?: { reading?: string } }; sounds?: { music?: string | null; musicSource?: { title?: string; creator?: string; license?: string; landing?: string } | null } } | null;
         const url = v?.path ? signed.get(v.path) : undefined;
@@ -136,7 +153,8 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
     (p) => p.status === "PROPOSED" && !isPastSlot(slotDate, p.slot_time as string),
   ).length;
   // 상품 제안은 내일 칸까지만 만든다 — 모레 탭은 늘 비어 있어 뺐다(주소로 다른 날짜를 열면 그 날짜도 탭에 보인다)
-  const dates = [kstDate(0), tomorrow, ...(slotDate > tomorrow || slotDate < kstDate(0) ? [slotDate] : [])];
+  // 오늘 · 내일 + 볼 칸이 남은 날 + 주소로 연 날
+  const dates = [...new Set([...attention.keys(), kstDate(0), tomorrow, slotDate])].sort();
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
@@ -154,7 +172,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
         {canManage && proposed > 0 && <ConfirmAllButton slotDate={slotDate} count={proposed} />}
       </header>
 
-      <nav className="flex gap-2">
+      <nav className="flex flex-wrap gap-2">
         {dates.map((d) => (
           <Link
             key={d}
@@ -162,6 +180,7 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
             className={cn(buttonVariants({ variant: d === slotDate ? "default" : "outline", size: "sm" }))}
           >
             {d === kstDate(0) ? "오늘" : d === tomorrow ? "내일" : ""} {d.slice(5)}
+            {attention.get(d) ? <Badge variant={d === slotDate ? "secondary" : "default"}>확인 {attention.get(d)}</Badge> : null}
           </Link>
         ))}
       </nav>

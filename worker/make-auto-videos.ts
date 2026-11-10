@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { markArchiveUsed } from "@/lib/auto-video/archive";
 import { loadAccountConcept } from "@/lib/agents/concept";
-import { BoardOnlyDone, makeAutoVideo, StopError } from "@/lib/auto-video/make";
+import { scoreHooks } from "@/lib/agents/ko-skills";
+import { BoardOnlyDone, makeAutoVideo, StopError, type RedoRequest, type SavedStoryboard } from "@/lib/auto-video/make";
 import { scheduleAutoVideo, type AutoVideo } from "@/lib/auto-video/publish";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
@@ -15,13 +16,16 @@ import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI 자동 콘텐츠 영상 워커 — 대본까지 끝난(SCRIPTED) 칸의 소재를 만들고 편집 키트로 완성본을 만든다.
-//   상세페이지 사진 찾기 → 소재 에이전트 → 사진 · 도식 · 스톡 컷 → 편집 키트(직접 촬영과 같은 코드) → 최종 점검.
+// AI 자동 콘텐츠 영상 워커 — 상품을 확인한(CONFIRMED) 칸은 장면표(대본)를 먼저 쓰고 저장한 뒤(SCRIPTED, 0054 storyboard)
+//   그 장면표로 완성본을 만든다. 장면표가 저장된 칸(SCRIPTED)은 장면표 단계를 건너뛰고 영상만 만든다(끊긴 실행 이어 만들기).
+//   상세페이지 사진 찾기 → 장면표 → 사진 · 도식 · 스톡 컷 → 편집 키트(직접 촬영과 같은 코드) → 최종 점검.
+//   같은 칸은 making_since 조건부 UPDATE로 한 실행만 집는다.
 //   참고 내용은 자동 콘텐츠 설정(auto_*)만 읽는다. 직접 촬영의 shoot_* 값은 읽지 않는다.
 //   통과하면 RENDERED. AUTO_VIDEO_PUBLISH=1이고 사람이 볼 경고가 없을 때만 바로 발행 대기열로 간다.
 //
 // 옵션: --dry-run (DB에 안 쓰고 결과 파일 위치만 출력) · --plan <id> (그 칸만)
 //       --board-only (--dry-run과 함께: 대본 · 장면표까지만 만들고 영상은 만들지 않는다. --out에 storyboard-review.json)
+//       --saved-board (--dry-run과 함께: 칸에 저장된 장면표로 영상만 만든다. 없으면 장면표부터)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MAX_ATTEMPTS = 2;
@@ -52,11 +56,12 @@ async function main() {
 
   let q = service
     .from("content_plans")
-    .select("id, organization_id, social_account_id, slot_date, slot_time, status, product_id, script, video, social_accounts(display_name)")
+    .select("id, organization_id, social_account_id, slot_date, slot_time, status, product_id, script, video, storyboard, redo, making_since, social_accounts(display_name)")
     .eq("track", "B")
     .order("slot_date")
     .order("slot_time");
-  q = onlyPlan ? q.eq("id", onlyPlan) : q.eq("status", "SCRIPTED");
+  // 확인한 칸(장면표부터)과 장면표가 저장된 칸(영상만). 장면표가 없는 옛 SCRIPTED 칸은 예전처럼 처음부터 만든다
+  q = onlyPlan ? q.eq("id", onlyPlan) : q.in("status", ["CONFIRMED", "SCRIPTED"]);
   const { data: plans, error } = await q;
   if (error) throw new Error(error.message);
   if (!plans?.length) {
@@ -71,28 +76,46 @@ async function main() {
     // 시험(--dry-run)도 저장된 자동 콘텐츠 설정 그대로 만든다. 실제 생성과 같은 결과를 봐야 해서 덮어쓰기 입력을 두지 않는다(2026-11-10)
     const concept = await loadAccountConcept(service, plan.social_account_id);
     const prev = (plan.video ?? {}) as AutoVideo;
+    const redo = (plan.redo ?? null) as RedoRequest | null;
+    const storedBoard = (plan.storyboard as { version?: number } | null)?.version === 1 ? (plan.storyboard as unknown as SavedStoryboard) : null;
+    const status = plan.status as "CONFIRMED" | "SCRIPTED";
     // 확인한 칸은 시각이 지나도 만든다(끝나는 즉시 올라간다). 그제 이전 칸은 사람이 다시 만들라고 했을 때만 만든다
-    if (!onlyPlan && !prev.remake && (plan.slot_date as string) < kstDate(-1)) {
+    if (!onlyPlan && !prev.remake && !redo && (plan.slot_date as string) < kstDate(-1)) {
       // 실패해도 다음 실행이 같은 조건으로 다시 막는다 — 실행 전체를 멈추지 않게 경고만
-      if (!dryRun) warnIfError(await service.from("content_plans").update({ status: "BLOCKED", note: "올릴 시각이 오래 지나 만들지 않았어요. 필요하면 다시 만들어 주세요." }).eq("id", plan.id).eq("status", "SCRIPTED"), `칸 막기 (plan=${plan.id})`);
+      if (!dryRun) warnIfError(await service.from("content_plans").update({ status: "BLOCKED", note: "올릴 시각이 오래 지나 만들지 않았어요. 필요하면 다시 만들어 주세요." }).eq("id", plan.id).eq("status", status), `칸 막기 (plan=${plan.id})`);
       continue;
     }
     // 다른 실행이 만드는 중이면 건너뛴다. 오래됐으면 끊긴 것으로 보고 다시 만든다
     if (!onlyPlan && prev.state === "making" && prev.startedAt && Date.now() - Date.parse(prev.startedAt) < STALE_MS) continue;
     const attempts = (prev.attempts ?? 0) + 1;
-    if (!dryRun && plan.status !== "SCRIPTED") {
-      console.log(`[auto-video] ${label} — 대본 완료 상태가 아니라 건너뜀 (${plan.status})`);
+    if (!dryRun && status !== "SCRIPTED" && status !== "CONFIRMED") {
+      console.log(`[auto-video] ${label} — 확인 · 대본 완료 상태가 아니라 건너뜀 (${plan.status})`);
       continue;
     }
     if (!onlyPlan && attempts > MAX_ATTEMPTS) {
       // 만드는 도중 끊긴 칸이 "만드는 중"으로 남지 않게 사람에게 넘긴다
-      if (!dryRun) warnIfError(await service.from("content_plans").update({ status: "BLOCKED", note: "영상을 만들다 여러 번 끊겼어요. 다시 만들어 주세요." }).eq("id", plan.id).eq("status", "SCRIPTED"), `칸 막기 (plan=${plan.id})`);
+      if (!dryRun) warnIfError(await service.from("content_plans").update({ status: "BLOCKED", note: "영상을 만들다 여러 번 끊겼어요. 다시 만들어 주세요.", making_since: null }).eq("id", plan.id).eq("status", status), `칸 막기 (plan=${plan.id})`);
       continue;
     }
+    // 이 칸을 집는다. 다른 실행(확인 버튼 · 정기 실행 · 다시 만들기)이 먼저 집었으면 0행이라 건너뛴다.
     // "만드는 중" · 시도 횟수를 못 남기면 유료 생성이 횟수 제한 없이 반복될 수 있어 이 칸은 건너뛴다
-    if (!dryRun && !warnIfError(await service.from("content_plans").update({ video: { state: "making", startedAt: new Date().toISOString(), attempts } as unknown as Json, error: null }).eq("id", plan.id).eq("status", "SCRIPTED"), `만드는 중 표시 (plan=${plan.id})`)) {
-      process.exitCode = 1;
-      continue;
+    if (!dryRun) {
+      const startedAt = new Date().toISOString();
+      const claim = await service
+        .from("content_plans")
+        .update({ making_since: startedAt, video: { ...(prev.remake ? { remake: true } : {}), state: "making", startedAt, attempts } as unknown as Json, error: null })
+        .eq("id", plan.id)
+        .eq("status", status)
+        .or(`making_since.is.null,making_since.lt.${new Date(Date.now() - STALE_MS).toISOString()}`)
+        .select("id");
+      if (!warnIfError(claim, `만드는 중 표시 (plan=${plan.id})`)) {
+        process.exitCode = 1;
+        continue;
+      }
+      if (!claim.data?.length) {
+        console.log(`[auto-video] ${label} — 다른 실행이 만드는 중이라 건너뜀`);
+        continue;
+      }
     }
 
     const workDir = join(tmpdir(), `auto-video-${plan.id}`);
@@ -115,6 +138,25 @@ async function main() {
         // 시험에서만: --board <storyboard-review.json> 으로 저장된 장면표부터 영상을 만든다
         savedBoard: dryRun && arg(argv, "--board") ? JSON.parse(readFileSync(arg(argv, "--board")!, "utf8")).board : undefined,
         boardOnly: dryRun && argv.includes("--board-only"),
+        // 시험은 장면표 품질을 보려고 돌리는 경우가 많아 저장된 장면표를 쓰지 않는다. --saved-board면 실제처럼 이어 만든다
+        saved: dryRun && !argv.includes("--saved-board") ? null : storedBoard,
+        redo,
+        // 새로 확정한 장면표를 영상보다 먼저 저장한다(SCRIPTED). 확인 화면에 대본이 바로 보이고, 끊기면 다음 실행이 이어 만든다
+        onBoard: async (board, script) => {
+          if (dryRun) return;
+          const hookScores = scoreHooks(script.hooks.map((h) => h.spoken));
+          const withScores = { ...script, hooks: script.hooks.map((h, i) => ({ ...h, score: hookScores[i]?.score ?? null })) };
+          const { data: rows, error: e } = await service
+            .from("content_plans")
+            .update({ status: "SCRIPTED", storyboard: board as unknown as Json, script: withScores as unknown as Json, redo: null, check_result: null, note: null })
+            .eq("id", plan.id)
+            .in("status", ["CONFIRMED", "SCRIPTED"])
+            .eq("product_id", plan.product_id!)
+            .select("id");
+          if (e) throw new Error(`장면표 저장 실패: ${e.message}`);
+          if (!rows?.length) throw new PlanChanged();
+          console.log("  장면표 저장 (SCRIPTED)");
+        },
       });
       const { kit, check, blocking } = made;
       const seconds = Math.round((Date.now() - t0) / 1000);
@@ -170,6 +212,8 @@ async function main() {
           status: passed ? "RENDERED" : "BLOCKED",
           video: video as unknown as Json,
           script: made.script as unknown as Json,
+          making_since: null,
+          redo: null,
           check_result: { ...check, issues, passed, checkedAt: new Date().toISOString() } as unknown as Json,
           error: null,
           note: passed ? null : `완성본 점검에 걸림: ${check.issues.find((i) => i.kind !== "tone")?.detail ?? blocking[0] ?? ""}`.slice(0, 300),
@@ -210,6 +254,12 @@ async function main() {
         console.log(r.ok ? `  발행 대기열에 넣음 (${r.scheduledFor})` : `  발행 대기열 실패: ${r.error}`);
       }
     } catch (err) {
+      // 장면표를 쓰는 사이 사람이 건너뛰었거나 다른 상품으로 바꿨으면 아무것도 저장하지 않는다
+      if (err instanceof PlanChanged) {
+        console.log(`[auto-video] ${label} 쓰는 사이 칸이 바뀌어(건너뜀 · 다른 상품) 저장하지 않음`);
+        if (!dryRun) warnIfError(await service.from("content_plans").update({ making_since: null }).eq("id", plan.id), `집은 표시 풀기 (plan=${plan.id})`);
+        continue;
+      }
       // 대본만 시험: 장면표까지 만들고 멈춘 건 실패가 아니다. 남은 문제가 있을 때만 실패로 본다
       if (err instanceof BoardOnlyDone) {
         console.log(`[auto-video] ${label} ${err.message} · ${Math.round((Date.now() - t0) / 1000)}초`);
@@ -240,10 +290,11 @@ async function main() {
             .update({
               ...(stop ? { status: "BLOCKED", note: `영상을 만들지 못했어요: ${message}`.slice(0, 300) } : {}),
               error: message.slice(0, 500),
-              video: { state: "done", attempts } as unknown as Json,
+              making_since: null,
+              video: { ...(prev.remake ? { remake: true } : {}), state: "done", attempts } as unknown as Json,
             })
             .eq("id", plan.id)
-            .eq("status", "SCRIPTED"),
+            .in("status", ["CONFIRMED", "SCRIPTED"]),
           `칸 실패 기록 (plan=${plan.id})`,
         );
       }
@@ -252,6 +303,9 @@ async function main() {
     }
   }
 }
+
+/** 장면표를 쓰는 사이 칸이 건너뛰어졌거나 다른 상품으로 바뀌었다 */
+class PlanChanged extends Error {}
 
 main()
   .then(() => process.exit(process.exitCode ?? 0))

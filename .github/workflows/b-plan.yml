@@ -1,7 +1,7 @@
 name: b-plan
 
-# AI 자동 업로드 워커 — 상품 선정 에이전트(1)가 내일 칸 상품을 제안하고(plan-b-slots.ts),
-# 사람이 확인한 칸은 기획 · 글 에이전트(2)가 대본을 쓰고 점검 에이전트(4)가 검사한다(write-b-scripts.ts).
+# AI 자동 업로드 워커 — 상품 선정 에이전트(1)가 내일 칸 상품을 제안한다(plan-b-slots.ts).
+# 사람이 확인한 칸의 장면표(대본) · 영상은 auto-video 워크플로가 만든다(make-auto-videos.ts, 0054). 확인 버튼이 바로 깨운다.
 # 사람은 AI 자동 업로드 화면에서 올릴 시각까지 확인(2시간 전에 알림). 시각이 지나도록 확인이 없으면 건너뛴다.
 on:
   schedule:
@@ -33,16 +33,6 @@ jobs:
       - run: npm ci
       - name: Plan tomorrow's B slots
         run: npm run worker:plan-b
-        env:
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          AGENT_MODEL: ${{ vars.AGENT_MODEL }}
-      # 확인된 칸의 대본 · 캡션 쓰기 + 점검 (worker/write-b-scripts.ts).
-      # 한국어 채점 스크립트(.claude/skills/ig-*-ko)가 파이썬이라 러너의 python3를 쓴다.
-      - name: Write scripts for confirmed slots
-        if: ${{ !cancelled() }}
-        run: npm run worker:b-script
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

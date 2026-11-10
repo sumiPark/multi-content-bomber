@@ -5,6 +5,7 @@ import type { getServerSupabase } from "@/lib/auth";
 
 // 대시보드 — 놓치면 안 되는 경고 + 업로드 예정(2026-11-04 사용자 결정으로 할 일 칸 · 하루 칸 표는 뺐다).
 //   경고: 멈춤(AI 자동 칸, 직접 촬영 편집 실패), 올리기 2시간 전 상품 확인, 계정 연결 끊김. 발행 실패는 위쪽 실패 줄이 따로 알린다.
+//   완성본 확인 대기 · 멈춤 · 시각이 지났는데 아직 만드는 칸은 날짜가 지나도 남긴다(최근 14일, 2026-11-10 1차).
 //   예정: 앞으로 7일의 AI 자동 칸 + 콘텐츠 생성에서 예약한 건.
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>;
@@ -22,6 +23,8 @@ export interface DashboardAlerts {
 }
 
 const HORIZON_DAYS = 7;
+// 지난 칸을 얼마나 거슬러 올라가 남길지
+const LOOKBACK_DAYS = 14;
 const HOUR = 3_600_000;
 
 function hoursLeft(ms: number): string {
@@ -31,6 +34,7 @@ function hoursLeft(ms: number): string {
 
 function dayName(date: string, today: string): string {
   if (date === today) return "오늘";
+  if (date === addDays(today, -1)) return "어제";
   if (date === addDays(today, 1)) return "내일";
   if (date === addDays(today, 2)) return "모레";
   return `${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))}`;
@@ -45,7 +49,7 @@ export async function loadDashboardAlerts(supabase: Supabase, now = Date.now()):
       .from("content_plans")
       .select("id, social_account_id, slot_date, slot_time, status, note, error, publish_jobs(status), social_accounts(display_name)")
       .eq("track", "B")
-      .gte("slot_date", today)
+      .gte("slot_date", addDays(today, -LOOKBACK_DAYS))
       .lte("slot_date", horizon),
     supabase.from("track_settings").select("social_account_id, shoot_enabled, social_accounts(display_name, is_active, disconnected_at)"),
     supabase.from("slot_rules").select("social_account_id").eq("track", "B").eq("active", true),
@@ -58,10 +62,16 @@ export async function loadDashboardAlerts(supabase: Supabase, now = Date.now()):
   for (const p of plans ?? []) {
     const date = p.slot_date as string;
     const time = p.slot_time as string;
-    if (isPastSlot(date, time, 0, now)) continue;
+    const past = isPastSlot(date, time, 0, now);
     const st = cellStatus({ status: p.status, jobStatus: p.publish_jobs?.status ?? null }, { date, time, active: true }, now);
     const name = `@${p.social_accounts?.display_name ?? ""} ${dayName(date, today)} ${time}`;
-    if (st.task === "confirm") {
+    // 지난 칸은 사람이 볼 것만 남긴다: 멈춤 · 완성본 확인 대기 · 시각이 지났는데 아직 만드는 칸
+    if (past && !(p.status === "BLOCKED" || p.status === "RENDERED" || p.status === "CONFIRMED" || p.status === "SCRIPTED")) continue;
+    if (!p.publish_jobs?.status && p.status === "RENDERED") {
+      atRisk.push({ key: p.id, label: `${name} — 완성본 확인 대기`, reason: past ? "올릴 시각이 지났어요. 확인하면 바로 올라가요" : "보고 올리거나 다시 만들어 주세요", href: st.href });
+    } else if (past && (p.status === "CONFIRMED" || p.status === "SCRIPTED")) {
+      atRisk.push({ key: p.id, label: `${name} — ${st.label}`, reason: p.error ?? "올릴 시각이 지났어요. 만들어지면 확인 화면에 올라와요", href: st.href });
+    } else if (st.task === "confirm") {
       // 올리기 2시간 전부터 알린다. 올릴 시각까지 확인이 없으면 그 칸은 건너뛴다
       if (isConfirmDue(date, time, now)) atRisk.push({ key: p.id, label: `${name} — 상품 확인 전`, reason: `올릴 시각까지 ${hoursLeft(Date.parse(kstToIso(date, time)) - now)}, 안 하면 이 칸은 건너뛰어요`, href: st.href });
     } else if (st.tone === "risk" && st.label !== "발행 실패") {

@@ -16,7 +16,6 @@
     "worker:products": "tsx worker/collect-products.ts",
     "worker:analyze": "tsx worker/analyze-products.ts",
     "worker:plan-b": "tsx worker/plan-b-slots.ts",
-    "worker:b-script": "tsx worker/write-b-scripts.ts",
     "worker:plan-a": "tsx worker/plan-a-slots.ts",
     "worker:a-shotlist": "tsx worker/write-a-shotlists.ts",
     "worker:shoot-edit": "tsx worker/edit-shoots.ts",

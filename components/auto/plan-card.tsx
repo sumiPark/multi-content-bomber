@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Check, ExternalLink, RotateCcw, SkipForward } from "lucide-react";
+import { Check, ExternalLink, FileText, RotateCcw, SkipForward } from "lucide-react";
 import {
   confirmAllAction,
   confirmPlanAction,
@@ -12,6 +12,7 @@ import { won } from "@/components/products/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
@@ -45,13 +46,15 @@ export interface PlanCardData {
   issues: string[];
   // 발행 작업 상태 (예약된 칸)
   jobStatus: string | null;
+  // 저장된 장면표가 있는지 (0054). 없으면 화면만 다시 만들 수 없다
+  hasStoryboard: boolean;
   // 완성본 (서명 주소)
   video: { url: string; seconds: number | null; reading: string | null; music: { title?: string; creator?: string; license?: string; landing?: string } | null } | null;
 }
 
 const STATUS: Record<string, { label: string; variant: "default" | "secondary" | "outline" | "destructive" | "ok" }> = {
   PROPOSED: { label: "확인 대기", variant: "default" },
-  CONFIRMED: { label: "확인됨 · 대본 대기", variant: "secondary" },
+  CONFIRMED: { label: "확인됨 · 대본 쓰는 중", variant: "secondary" },
   SCRIPTED: { label: "대본 완료 · 영상 만드는 중", variant: "secondary" },
   RENDERED: { label: "완성 · 확인 대기", variant: "default" },
   BLOCKED: { label: "점검에 걸림", variant: "destructive" },
@@ -93,6 +96,9 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
   const editable = canManage && !plan.pastSlot && (blocked || plan.status === "PROPOSED" || plan.status === "CONFIRMED");
   const soldOut = !!plan.product && plan.product.stock !== "available";
   const [askSkip, setAskSkip] = useState(false);
+  // 다시 만들기: 화면만(말 · 후킹 · 캡션 유지) / 대본부터. 메모는 이 칸에만 반영한다
+  const [redo, setRedo] = useState<"visual" | "script" | null>(null);
+  const [memo, setMemo] = useState("");
   const s = (plan.jobStatus && JOB_STATUS[plan.jobStatus]) || STATUS[plan.status] || { label: plan.status, variant: "outline" as const };
   const canRemake = canManage && (plan.status === "RENDERED" || plan.status === "BLOCKED") && (!!plan.video || !!plan.script);
 
@@ -149,14 +155,47 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
               <Check className="size-4" /> 이대로 올리기
             </Button>
           )}
-          <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => remakeVideoAction({ planId: plan.id }), "영상을 다시 만들어요.")}>
-            <RotateCcw className="size-4" /> 영상 다시 만들기
+          <Button size="sm" variant={redo === "visual" ? "secondary" : "outline"} disabled={isPending || !plan.hasStoryboard} title={plan.hasStoryboard ? undefined : "저장된 장면표가 없는 칸이에요"} onClick={() => setRedo(redo === "visual" ? null : "visual")}>
+            <RotateCcw className="size-4" /> 화면만 다시
+          </Button>
+          <Button size="sm" variant={redo === "script" ? "secondary" : "outline"} disabled={isPending} onClick={() => setRedo(redo === "script" ? null : "script")}>
+            <FileText className="size-4" /> 대본부터 다시
           </Button>
           {(plan.status === "RENDERED" || plan.pastSlot) && (
             <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setAskSkip(true)}>
               <SkipForward className="size-4" /> 이 칸 건너뛰기
             </Button>
           )}
+        </div>
+      )}
+
+      {canRemake && redo && (
+        <div className="space-y-2 rounded-md border px-3 py-2">
+          <p className="text-xs text-muted-foreground">
+            {redo === "visual" ? "후킹 · 말 · 캡션은 그대로 두고 화면 소재만 다시 골라요." : "장면표(대본)부터 새로 써요. 후킹 · 말 · 캡션도 바뀌어요."} 메모는 이 영상에만 반영해요.
+          </p>
+          <Textarea value={memo} onChange={(e) => setMemo(e.target.value)} maxLength={500} rows={2} placeholder={redo === "visual" ? "예: 같은 사진이 너무 많이 나와요" : "예: 성분 설명보다 먹는 상황 위주로"} />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              disabled={isPending}
+              onClick={() =>
+                run(async () => {
+                  const r = await remakeVideoAction({ planId: plan.id, kind: redo, memo: memo.trim() || undefined });
+                  if (r.ok) {
+                    setRedo(null);
+                    setMemo("");
+                  }
+                  return r;
+                }, redo === "visual" ? "화면만 다시 만들어요." : "대본부터 다시 만들어요.")
+              }
+            >
+              다시 만들기
+            </Button>
+            <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setRedo(null)}>
+              취소
+            </Button>
+          </div>
         </div>
       )}
 

@@ -184,17 +184,22 @@ export interface ArchiveChoice {
 }
 
 /** 소재 에이전트에게 보여 줄 컷. 같은 컷이 며칠 사이 반복되지 않게 최근에 쓴 컷은 뺀다. 저장 전이거나 받기에 실패하면 빈 목록이다. */
-export async function loadArchiveChoices(service: Service, organizationId: string, productId: string, workDir: string): Promise<ArchiveChoice[]> {
+/**
+ * 장면표에 줄 자사 촬영 컷 후보. only(저장된 장면표의 번호 → 행 id)를 주면 그 행만 같은 번호로 다시 받는다.
+ * 번호(a1 · a2)는 실행마다 매기는 번호라, 저장된 장면표로 영상을 만들 때는 저장한 번호를 그대로 써야 한다(0054).
+ */
+export async function loadArchiveChoices(service: Service, organizationId: string, productId: string, workDir: string, only?: Record<string, string>): Promise<ArchiveChoice[]> {
   const since = new Date(Date.now() - REUSE_DAYS * DAY_MS).toISOString();
-  const { data, error } = await service
-    .from("shoot_archive_clips")
-    .select("id, path, what, seconds")
-    .eq("organization_id", organizationId)
-    .eq("product_id", productId)
-    .or(`last_used_at.is.null,last_used_at.lt.${since}`)
-    .order("use_count", { ascending: true })
-    .order("created_at", { ascending: false })
-    .limit(OFFER_COUNT);
+  const savedIds = only ? Object.entries(only) : null;
+  if (savedIds && !savedIds.length) return [];
+  const base = service.from("shoot_archive_clips").select("id, path, what, seconds").eq("organization_id", organizationId).eq("product_id", productId);
+  const { data, error } = await (savedIds
+    ? base.in("id", savedIds.map(([, rowId]) => rowId))
+    : base
+        .or(`last_used_at.is.null,last_used_at.lt.${since}`)
+        .order("use_count", { ascending: true })
+        .order("created_at", { ascending: false })
+        .limit(OFFER_COUNT));
   if (error) {
     console.warn(`  아카이브 조회 실패: ${error.message}`);
     return [];
@@ -206,7 +211,7 @@ export async function loadArchiveChoices(service: Service, organizationId: strin
     try {
       const { data: blob, error: dlErr } = await service.storage.from(BUCKET).download(row.path);
       if (dlErr || !blob) throw new Error(dlErr?.message ?? "빈 파일");
-      const id = `a${out.length + 1}`;
+      const id = savedIds?.find(([, rowId]) => rowId === row.id)?.[0] ?? `a${out.length + 1}`;
       const file = join(dir, `${id}.mp4`);
       writeFileSync(file, Buffer.from(await blob.arrayBuffer()));
       const seconds = Number(row.seconds);

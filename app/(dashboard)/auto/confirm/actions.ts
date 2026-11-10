@@ -5,10 +5,12 @@ import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { isPastSlot } from "@/lib/automation/deadline";
 import { releaseOldPublish, scheduleAutoVideo } from "@/lib/auto-video/publish";
-import { triggerAutoScriptRun, triggerAutoVideoRun } from "@/lib/github-dispatch";
+import { triggerAutoVideoRun } from "@/lib/github-dispatch";
+import type { Json } from "@/types/database";
 import { createServiceClient } from "@/lib/supabase/service";
 
-// AI 자동 업로드 상품 확인 (0028 content_plans). 사람은 상품만 확인하고, 이후 대본 · 점검은 자동(영상 · 게시는 준비 중).
+// AI 자동 업로드 상품 확인 (0028 content_plans). 사람은 상품만 확인하고, 확인하면 영상 워커를 바로 깨워
+// 장면표(대본) → 영상까지 자동으로 만든다(0054). 같은 칸은 워커가 making_since로 한 실행만 집어 여러 번 눌러도 겹치지 않는다.
 // 올릴 시각까지 확인할 수 있다. 그 2시간 전에 화면에서 알리고, 시각이 지나도록 확인이 없으면 건너뛴다(lib/automation/deadline.ts).
 // 점검에 걸려 멈춘 칸(BLOCKED)은 마감이 지나도 올릴 시각 전까지 다시 쓰기 · 다른 상품으로 바꾸기 · 건너뛰기를 할 수 있다.
 
@@ -102,8 +104,8 @@ export async function confirmPlanAction(input: z.infer<typeof confirmSchema>): P
       product_changed: plan.product_changed || nextProduct !== plan.product_id,
       confirmed_by: auth.userId,
       confirmed_at: new Date().toISOString(),
-      // 멈춘 칸을 다시 쓰면 예전 대본 · 점검 결과는 지운다
-      ...(fixing ? { script: null, check_result: null, note: null, error: null, video: null } : {}),
+      // 멈춘 칸을 다시 쓰면 예전 대본 · 장면표 · 점검 결과는 지운다
+      ...(fixing ? { script: null, storyboard: null, redo: null, making_since: null, check_result: null, note: null, error: null, video: null } : {}),
     })
     .eq("id", plan.id)
     .eq("status", plan.status)
@@ -111,8 +113,8 @@ export async function confirmPlanAction(input: z.infer<typeof confirmSchema>): P
   if (error) return { ok: false, error: error.message };
   if (!updated?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
   if (staleFiles.length) await service.storage.from("media").remove(staleFiles);
-  // 멈춘 칸은 시간이 없을 수 있어 바로 다시 쓴다(실패해도 다음 정기 실행이 집어 간다)
-  if (fixing) await triggerAutoScriptRun(`rewrite ${plan.id}`).catch((e) => console.error("[auto] 대본 트리거 실패:", e));
+  // 확인하면 바로 장면표 · 영상을 만들기 시작한다(실패해도 매시 정기 실행이 집어 간다)
+  await triggerAutoVideoRun(`${fixing ? "rewrite" : "confirm"} ${plan.id}`).catch((e) => console.error("[auto] 영상 트리거 실패:", e));
   revalidatePath("/auto/confirm");
   return { ok: true };
 }
@@ -135,9 +137,20 @@ export async function approveVideoAction(input: z.infer<typeof idSchema>): Promi
   return { ok: true };
 }
 
-/** 완성본이 마음에 들지 않을 때 대본은 두고 영상만 다시 만든다. */
-export async function remakeVideoAction(input: z.infer<typeof idSchema>): Promise<ConfirmResult> {
-  const parsed = idSchema.safeParse(input);
+const remakeSchema = z.object({
+  planId: z.string().uuid(),
+  // visual = 화면만 다시(말 · 후킹 · 캡션 유지), script = 대본부터 다시(메모 반영)
+  kind: z.enum(["visual", "script"]),
+  memo: z.string().trim().max(500).optional(),
+});
+
+/**
+ * 완성본이 마음에 들지 않을 때 다시 만든다. 메모는 이 칸에만 적용한다(계정 설정은 바꾸지 않는다).
+ *   화면만 다시: 저장된 장면표의 말 · 후킹 · 캡션은 그대로 두고 화면 소재만 다시 고른다.
+ *   대본부터 다시: 장면표를 버리고 메모를 반영해 처음부터 쓴다.
+ */
+export async function remakeVideoAction(input: z.infer<typeof remakeSchema>): Promise<ConfirmResult> {
+  const parsed = remakeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
   const auth = await authorize();
   if (!auth.ok) return auth;
@@ -145,15 +158,24 @@ export async function remakeVideoAction(input: z.infer<typeof idSchema>): Promis
   const plan = await loadPlan(service, parsed.data.planId, auth.orgId);
   if (!plan) return { ok: false, error: "칸을 찾을 수 없습니다." };
   if (plan.status !== "RENDERED" && plan.status !== "BLOCKED") return { ok: false, error: "완성본이 있거나 멈춘 칸만 다시 만들 수 있어요." };
-  const { data: row } = await service.from("content_plans").select("script, video").eq("id", plan.id).maybeSingle();
-  if (!row?.script) return { ok: false, error: "대본이 없어요. 먼저 대본을 다시 써 주세요." };
-  const old = (row.video ?? {}) as { path?: string; thumbnail?: string };
+  const { kind, memo } = parsed.data;
+  const { data: row } = await service.from("content_plans").select("script, video, storyboard").eq("id", plan.id).maybeSingle();
+  if (kind === "visual" && !row?.storyboard) return { ok: false, error: "저장된 장면표가 없는 칸이에요. '대본부터 다시'로 만들어 주세요." };
+  const old = (row?.video ?? {}) as { path?: string; thumbnail?: string };
   const released = await releaseOldPublish(service, plan.id);
   if (!released.ok) return released;
   const { data: moved, error } = await service
     .from("content_plans")
-    // remake: 오래된 칸이어도 사람이 다시 만들라고 했으니 워커가 만든다
-    .update({ status: "SCRIPTED", video: { remake: true }, check_result: null, note: null, error: null })
+    // remake · redo: 오래된 칸이어도 사람이 다시 만들라고 했으니 워커가 만든다
+    .update({
+      ...(kind === "visual" ? { status: "SCRIPTED" } : { status: "CONFIRMED", storyboard: null, script: null }),
+      redo: { kind, ...(memo ? { memo } : {}), at: new Date().toISOString() } as Json,
+      video: { remake: true },
+      making_since: null,
+      check_result: null,
+      note: null,
+      error: null,
+    })
     .eq("id", plan.id)
     .eq("status", plan.status)
     .select("id");
@@ -223,6 +245,7 @@ export async function confirmAllAction(input: z.infer<typeof dateSchema>): Promi
     .in("id", ids)
     .eq("status", "PROPOSED");
   if (upErr) return { ok: false, error: upErr.message };
+  await triggerAutoVideoRun(`confirm-all ${parsed.data.slotDate}`).catch((e) => console.error("[auto] 영상 트리거 실패:", e));
   revalidatePath("/auto/confirm");
   return { ok: true, count: ids.length, soldOut };
 }

@@ -1,12 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { blockingIssues, checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
 import { LONG_VISUALS, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, phraseNotes, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
 import { editKit, scoreHooks } from "@/lib/agents/ko-skills";
-import { loadVideoKnowledge } from "@/lib/agents/knowledge";
+import { loadVideoKnowledge, type VideoKnowledge } from "@/lib/agents/knowledge";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
 // LENGTH_TOLERANCE: 음성으로 잰 길이의 허용 오차(초). 합성 결과의 작은 차이로 칸을 멈추지 않고, 장면표 글자 수 점검도 같은 여유를 둔다
@@ -159,10 +159,63 @@ async function measureSpeechRate(voiceId: string | null | undefined, workDir: st
 interface Candidate {
   id: string;
   file: string;
+  /** 몇 번째 상세 이미지에서 잘랐는지(photo_blocks.py의 입력 순서)와 자른 위치 */
+  image?: number;
+  x?: number;
+  y?: number;
   w: number;
   h: number;
   native_w?: number;
   native_h?: number;
+}
+
+/**
+ * 저장된 장면표 (0054 content_plans.storyboard). 상품을 확인하면 장면표를 먼저 쓰고 이걸 저장한 뒤 영상을 만든다.
+ * 소재 번호(p1 · g1 · a1)와 근거 번호(K1 · D1)는 실행마다 새로 매기는 번호라, 장면표와 함께 그 원본을 남긴다.
+ */
+export interface SavedStoryboard {
+  version: 1;
+  board: Storyboard;
+  /** 장면표를 쓸 때 준 근거. 다시 만들 때 새로 읽지 않고 이걸 쓴다(K번호가 같은 카드를 가리키게) */
+  knowledge: VideoKnowledge;
+  speechRate: number;
+  phrases: Omit<PhraseState, "tokens">;
+  /** 소재 번호 → 원본(상세 이미지 주소 + 자른 위치 · 움직이는 이미지 주소 · 자사 촬영 행 id) */
+  assets: { photos: Record<string, string>; gifs: Record<string, string>; archive: Record<string, string> };
+  /** 장면표 단계에서 남은 사람 확인용 의견 */
+  warnings: string[];
+  writtenAt: string;
+}
+
+/** 다시 만들기 요청 (0054 content_plans.redo). visual = 말 · 후킹 · 캡션은 두고 화면 소재만, script = 메모를 반영해 장면표부터 */
+export interface RedoRequest {
+  kind: "visual" | "script";
+  memo?: string;
+  at?: string;
+}
+
+/** 저장된 장면표가 쓰는 소재 번호 가운데 이번 실행에서 다른 원본을 가리키는 것 */
+function staleAssets(saved: SavedStoryboard, now: SavedStoryboard["assets"]): string[] {
+  const b = saved.board;
+  const ids = new Set([
+    ...b.scenes.filter((s) => s.source === "photo" || s.source === "gif" || s.source === "archive").map((s) => s.source_id),
+    ...b.photos.filter((p) => p.usable).map((p) => p.id),
+    ...b.gifs.filter((g) => g.usable).map((g) => g.id),
+  ]);
+  const all = { ...saved.assets.photos, ...saved.assets.gifs, ...saved.assets.archive };
+  const cur: Record<string, string> = { ...now.photos, ...now.gifs, ...now.archive };
+  return [...ids].filter((id) => all[id] !== undefined && cur[id] !== all[id]);
+}
+
+/** 화면만 다시: 새 장면표에 먼저 쓴 장면표의 말 · 후킹 · 캡션을 그대로 덮는다. 장면 수가 다르면 null */
+function lockWords(board: Storyboard, words: Storyboard): Storyboard | null {
+  if (board.scenes.length !== words.scenes.length) return null;
+  return {
+    ...board,
+    hook: words.hook,
+    caption: words.caption,
+    scenes: board.scenes.map((s, i) => ({ ...s, part: words.scenes[i].part, say: words.scenes[i].say, tts: words.scenes[i].tts, captions: words.scenes[i].captions, emphasis: words.scenes[i].emphasis })),
+  };
 }
 
 function trimPhoto(c: Candidate, top: number, bottom: number, workDir: string): string {
@@ -191,6 +244,12 @@ export async function makeAutoVideo(input: {
   savedBoard?: Storyboard;
   /** 시험(--dry-run)에서만: 장면표(대본)까지 만들고 영상은 만들지 않는다. 결과는 workDir의 storyboard-review.json */
   boardOnly?: boolean;
+  /** 저장된 장면표(0054). 소재 번호가 그대로면 장면표 단계를 건너뛰고 이 장면표 · 근거로 영상만 만든다 */
+  saved?: SavedStoryboard | null;
+  /** 사람이 누른 다시 만들기. visual이면 saved의 말을 두고 소재만 다시 고르고, script면 saved를 버리고 메모를 반영해 새로 쓴다 */
+  redo?: RedoRequest | null;
+  /** 장면표를 새로 확정하면 영상을 만들기 전에 부른다. 워커가 저장하고 SCRIPTED로 바꾼다. 저장하지 못하면 throw해 영상을 만들지 않는다 */
+  onBoard?: (saved: SavedStoryboard, script: ScriptOutput & { fixed?: unknown }) => Promise<void>;
 }) {
   const { service, planId, account, productId, rules, workDir } = input;
   const facts = await loadProductFacts(service, productId);
@@ -213,9 +272,31 @@ export async function makeAutoVideo(input: {
   const candidates = blocks?.candidates ?? [];
   console.log(`  사진 후보 ${candidates.length}개`);
 
-  const archive = await loadArchiveChoices(service, input.organizationId, productId, workDir);
+  // 대본부터 다시면 저장된 장면표를 쓰지 않는다
+  let keep = input.redo?.kind === "script" ? null : (input.saved ?? null);
+  const archive = await loadArchiveChoices(service, input.organizationId, productId, workDir, keep?.assets.archive);
   if (archive.length) console.log(`  자사 촬영 컷 ${archive.length}개`);
   const archiveIds = archive.map((a) => a.id);
+
+  // 소재 번호의 원본. 저장된 장면표를 다시 쓸 때 같은 소재인지 대조한다
+  const detailUrls = [...new Set(urls)].slice(0, MAX_DETAIL_FILES);
+  const urlOf = (file: string | undefined) => (file ? (detailUrls[Number(/^d(\d+)/.exec(basename(file))?.[1] ?? -1)] ?? basename(file)) : "");
+  const assets: SavedStoryboard["assets"] = {
+    photos: Object.fromEntries(candidates.map((c) => [c.id, `${urlOf(images[c.image ?? -1])}#${c.x},${c.y},${c.w},${c.h}`])),
+    gifs: Object.fromEntries(gifs.map((g) => [g.id, urlOf(g.file)])),
+    archive: Object.fromEntries(archive.map((a) => [a.id, a.rowId])),
+  };
+  if (keep) {
+    const stale = staleAssets(keep, assets);
+    if (stale.length) {
+      console.log(`  저장된 장면표의 소재 ${stale.join(", ")}가 지금 상세페이지 · 촬영 컷과 달라 장면표부터 다시 쓴다`);
+      keep = null;
+    }
+  }
+  // 저장된 장면표로 영상만 만드는지. 화면만 다시는 말을 두고 장면표 단계를 다시 돈다
+  const lockedWords = keep && input.redo?.kind === "visual" ? keep.board : null;
+  const fileBoard = input.dryRun ? input.savedBoard : undefined;
+  const reuseBoard = fileBoard ?? (keep && !lockedWords ? keep.board : undefined);
 
   // 재료 판단: 원본 해상도가 낮으면 후보에서 뺀다. 세로 영상에서 흐려진다
   const sharp = candidates.filter((c) => Math.min(c.native_w ?? c.w, (c.native_h ?? c.h) * 1.4) >= MIN_NATIVE);
@@ -226,40 +307,53 @@ export async function makeAutoVideo(input: {
   const sheets = (blocks?.sheets ?? []).map((f) => imageDataUrl(f));
   const gifSheets = gifs.map((g) => imageDataUrl(g.sheet));
 
-  // 상식 카드와 우리 차이. 사람이 승인한 것만 쓴다. 초안은 저장하지 않는 시험에서만 명시적으로 켠다
+  // 상식 카드와 우리 차이를 읽는다(lib/agents/knowledge.ts). 상식 카드는 승인된 카드가 먼저이고 초안도 함께 읽는다.
+  // 우리 차이는 사람이 확정한 것만 쓰고, 초안은 저장하지 않는 시험에서만 명시적으로 켠다.
+  // 저장된 장면표로 만들 때는 장면표를 쓸 때의 근거를 그대로 쓴다(K번호가 같은 카드를 가리키게)
   const includeDrafts = input.dryRun && process.env.TEST_USE_DRAFT_KNOWLEDGE === "1";
-  const knowledge = await loadVideoKnowledge(service, input.organizationId, facts, { includeDrafts });
-  console.log(`  근거: 상식 카드 ${knowledge.cards.length}개 · 우리 차이 ${knowledge.differences.length}개${includeDrafts ? " (시험: 초안 포함)" : ""}`);
+  const knowledge = keep?.knowledge ?? (await loadVideoKnowledge(service, input.organizationId, facts, { includeDrafts }));
+  console.log(`  근거: 상식 카드 ${knowledge.cards.length}개 · 우리 차이 ${knowledge.differences.length}개${keep ? " (저장된 장면표의 근거)" : includeDrafts ? " (시험: 초안 포함)" : ""}`);
   const visualPolicy: VisualPolicy = { ...LONG_VISUALS, evidence: knowledge.cards.map((c) => c.statement).join(" ") };
 
   // 대본 분량을 이 목소리의 실제 말 속도에 맞춘다
-  const speechRate = await measureSpeechRate(concept.autoVoiceId, workDir);
+  const speechRate = keep?.speechRate ?? (await measureSpeechRate(concept.autoVoiceId, workDir));
   const charLimits = charRange(speechRate);
   console.log(`  말 속도 초당 ${speechRate.toFixed(1)}자 → 대본 ${charLimits[0]}~${charLimits[1]}자`);
 
-  // 저장한 후킹 · 마지막 문구는 장면표에 그대로 쓴다
+  // 저장한 후킹 · 마지막 문구는 장면표에 그대로 쓴다. 저장된 장면표가 있으면 그때 고른 문구를 그대로 쓴다
   const hasPhrases = concept.autoHooks.length > 0 || concept.autoEndings.length > 0;
-  const phrases = await preparePhrases({
-    facts,
-    rules,
-    hooks: concept.autoHooks,
-    endings: concept.autoEndings,
-    recent: hasPhrases ? await recentTemplates(service, input.accountId, "B", kstDate(-14)) : [],
-  });
+  const phrases: PhraseState = keep
+    ? { ...structuredClone(keep.phrases), tokens: { input: 0, output: 0 } }
+    : await preparePhrases({
+        facts,
+        rules,
+        hooks: concept.autoHooks,
+        endings: concept.autoEndings,
+        recent: hasPhrases ? await recentTemplates(service, input.accountId, "B", kstDate(-14)) : [],
+      });
   let tokens = { input: phrases.tokens.input, output: phrases.tokens.output };
   const add = (t: { input: number; output: number }) => {
     tokens = { input: tokens.input + t.input, output: tokens.output + t.output };
   };
-  const materialCheck = await reviewHookMaterials({ hooks: phrases.hooks.map((h) => h.text), sheets: [...sheets, ...gifSheets], archive: archive.map((a) => a.what), facts });
-  add(materialCheck.tokens);
-  const rejectedHooks = new Map(materialCheck.rejected.map((r) => [r.index, r.why]));
-  phrases.hooks = phrases.hooks.filter((h, i) => {
-    const why = rejectedHooks.get(i);
-    if (!why) return true;
-    phrases.rejected.push({ kind: "hook", template: h.template, why, afterCheck: true });
-    console.log(`  소재와 맞지 않는 후킹 제외: ${h.text} — ${why}`);
-    return false;
-  });
+  if (!keep) {
+    const materialCheck = await reviewHookMaterials({ hooks: phrases.hooks.map((h) => h.text), sheets: [...sheets, ...gifSheets], archive: archive.map((a) => a.what), facts });
+    add(materialCheck.tokens);
+    const rejectedHooks = new Map(materialCheck.rejected.map((r) => [r.index, r.why]));
+    phrases.hooks = phrases.hooks.filter((h, i) => {
+      const why = rejectedHooks.get(i);
+      if (!why) return true;
+      phrases.rejected.push({ kind: "hook", template: h.template, why, afterCheck: true });
+      console.log(`  소재와 맞지 않는 후킹 제외: ${h.text} — ${why}`);
+      return false;
+    });
+  }
+  // 사람이 다시 만들기에 남긴 메모 · 화면만 다시 조건. 이 칸에만 적용한다
+  const memo = input.redo?.memo?.trim();
+  const redoNote = [
+    lockedWords ? "이번에는 화면만 다시 만든다. 먼저 쓴 장면표의 장면 수와 각 장면의 말(say · tts · captions) · 후킹 · 캡션은 글자 그대로 두고, 화면 소재(source · source_id · motion · visuals · graphics)만 다시 고른다. 먼저 쓴 장면표와 다른 소재를 우선한다." : "",
+    memo ? `이 영상에만 적용할 사람 메모: ${memo}` : "",
+  ].filter(Boolean).join("\n");
+  const boardNotesInput = [concept.autoNotes, redoNote].filter(Boolean).join("\n\n");
 
   const visualLibrary = await loadVisualLibrary(service);
 
@@ -290,9 +384,11 @@ export async function makeAutoVideo(input: {
   let angleOrder: number[] = [];
   let angleScores: number[] = [];
   let anglePos = 0;
-  const savedBoard = input.dryRun ? input.savedBoard : undefined;
-  if (savedBoard) console.log("  (시험) 저장된 장면표로 바로 영상을 만든다");
-  if (!phrases.hooks.length && !savedBoard) {
+  const savedBoard = reuseBoard;
+  if (savedBoard) console.log(fileBoard ? "  (시험) 저장된 장면표로 바로 영상을 만든다" : "  저장된 장면표로 영상을 만든다(장면표 단계 건너뜀)");
+  if (lockedWords) console.log("  화면만 다시: 말 · 후킹 · 캡션은 그대로 두고 소재만 다시 고른다");
+  // 화면만 다시는 주제 · 말을 바꾸지 않으니 각도를 새로 내지 않는다
+  if (!phrases.hooks.length && !savedBoard && !lockedWords) {
     // 주제 · 첫 문장은 성과가 높았던 같은 상품군 릴스에서 가져온다(2026-11-10). 못 읽으면 참고 없이 쓴다
     const loaded = await loadReelReferences(service, input.accountId).catch((e) => {
       console.warn("  참고 릴스를 조회하지 못했어요:", e instanceof Error ? e.message : e);
@@ -345,7 +441,10 @@ export async function makeAutoVideo(input: {
 
   // 2. 장면표: 쓰고, 코드 · 시청자 눈 · 광고 규칙으로 보고, 걸리면 고쳐 쓴다
   let board: Storyboard | null = savedBoard ?? null;
-  let retry: { board: Storyboard; problems: string[]; earlier?: string[] } | null = null;
+  // 화면만 다시는 먼저 쓴 장면표를 고칠 대상으로 넘기고 시작한다
+  let retry: { board: Storyboard; problems: string[]; earlier?: string[] } | null = lockedWords
+    ? { board: lockedWords, problems: ["사람이 화면만 다시 만들어 달라고 했다. 말 · 후킹 · 캡션은 그대로 두고 소재를 다시 고른다", ...(memo ? [memo] : [])] }
+    : null;
   let left: string[] = [];
   const storyboardReviews: unknown[] = [];
   let boardNotes: string[] = [];
@@ -378,7 +477,7 @@ export async function makeAutoVideo(input: {
       knowledge,
       charLimits,
       angle: angles.length ? angles[angleOrder[anglePos]] : null,
-      notes: concept.autoNotes,
+      notes: boardNotesInput,
       phraseBlock: fixedPhraseBlock(phrases),
       visualLibrary,
       fontChoices,
@@ -403,6 +502,17 @@ export async function makeAutoVideo(input: {
       continue;
     }
     board = applyFixedPhrases(res.output, phrases);
+    if (lockedWords) {
+      // 화면만 다시: 말은 코드로 먼저 쓴 장면표 그대로 되돌린다. 장면 수가 바뀌면 되돌릴 수 없어 다시 쓴다
+      const locked = lockWords(board, lockedWords);
+      if (!locked) {
+        storyboardReviews.push({ attempt: attempt + 1, problems: [`장면 수가 ${lockedWords.scenes.length}개에서 ${board.scenes.length}개로 바뀜`] });
+        console.log(`  장면표 ${attempt + 1}번째: 화면만 다시인데 장면 수가 바뀌어 다시 쓴다`);
+        retry = { board: lockedWords, problems: [`장면 수를 ${lockedWords.scenes.length}개 그대로 두고 각 장면의 말을 바꾸지 않는다. 화면 소재만 다시 고른다`] };
+        continue;
+      }
+      board = locked;
+    }
     // 설명 화면 · AI 이미지 · 스톡은 후보 번호가 없어 장면 순서로 번호를 붙인다. AI 이미지는 visual 장면에만 얹는다
     const scenes = board.scenes.map((s, i) => (s.source === "motion" ? { ...s, source_id: `m${i}` } : s.source === "visual" ? { ...s, source_id: `v${i}` } : s.source === "stock" ? { ...s, source_id: `s${i}` } : s));
     board = repairEdgeVisuals({ ...board, scenes, visuals: board.visuals.filter((v) => scenes[v.beat]?.source === "visual") });
@@ -530,6 +640,17 @@ export async function makeAutoVideo(input: {
     throw new BoardOnlyDone(left);
   }
   if (left.length) throw new StopError(`장면표를 ${MAX_BOARD_TRIES}번 고친 뒤에도 해결되지 않았어요: ${left.join(" / ")}`);
+  // 장면표 단계에서 남은 사람 확인용 의견. 저장된 장면표로 만들면 그때 남긴 의견을 그대로 쓴다
+  const boardWarnings = savedBoard && keep ? keep.warnings : [...softLeft, ...boardNotes.map((n) => `장면표 의견: ${n}`)].map((n) => n.slice(0, 300));
+  // 새로 확정한 장면표는 영상을 만들기 전에 저장한다. 영상 단계에서 끊기면 다음 실행이 이 장면표로 이어 만든다
+  if (!savedBoard && input.onBoard) {
+    const { tokens: _t, ...phraseRecord } = phrases;
+    void _t;
+    await input.onBoard(
+      { version: 1, board, knowledge, speechRate, phrases: phraseRecord, assets, warnings: boardWarnings, writtenAt: new Date().toISOString() },
+      { ...boardAsScript(board), ...(hasPhrases ? { fixed: fixedRecord(phrases) } : {}) },
+    );
+  }
 
   // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
   // AI가 고른 글꼴을 자막 · 설명 화면이 함께 쓴다. 못 받으면 설명 화면만 대체 글꼴로 만든다
@@ -539,7 +660,7 @@ export async function makeAutoVideo(input: {
   let motionFonts: VideoFonts | undefined;
   const clips: KitClip[] = [];
   const sources: unknown[] = [];
-  const warnings: string[] = [...softLeft, ...boardNotes.map((n) => `장면표 의견: ${n}`)].map((n) => n.slice(0, 300));
+  const warnings: string[] = [...boardWarnings];
   if (pickedFonts && finalBoard.scenes.some((s) => s.source === "motion")) {
     try {
       motionFonts = await downloadVideoFonts(pickedFonts, workDir);
