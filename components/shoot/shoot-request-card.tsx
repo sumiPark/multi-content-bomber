@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { ArrowDown, ArrowUp, CheckCircle2, ExternalLink, Save, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, ExternalLink, RotateCcw, Save, Trash2, Upload } from "lucide-react";
 import { Upload as TusUpload } from "tus-js-client";
-import { addClipAction, finishUploadAction, moveClipAction, removeClipAction, saveBriefAction, type ShootResult } from "@/app/(dashboard)/shoot/actions";
+import { addClipAction, finishUploadAction, moveClipAction, remakeShotlistAction, removeClipAction, saveBriefAction, type ShootResult } from "@/app/(dashboard)/shoot/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { REQUEST_STATUS } from "@/lib/shoot/request-data";
@@ -27,6 +28,10 @@ export interface ShootRequestCardData {
   product: { name: string; url: string; image: string | null } | null;
   // 이 상품으로 하고 싶은 말(human_brief)
   brief: string | null;
+  // 추천 대본을 쓴 뒤에 하고 싶은 말이 바뀌었는지
+  briefChanged: boolean;
+  // 촬영 가이드를 다시 쓰는 중인지
+  remaking: boolean;
   hook: { spoken: string; onScreen: string; score: number | null } | null;
   // 사람이 넣은 첫 화면 후킹 · 표지 글자 — 비면 편집 에이전트가 만든다
   planId: string;
@@ -117,6 +122,7 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
         </div>
       )}
       {open ? <BriefField planId={request.planId} brief={request.brief ?? ""} /> : request.brief && <p className="text-xs">하고 싶은 말: {request.brief}</p>}
+      {open && <GuideRemake request={request} />}
       {request.hook && (
         <p className="rounded-md bg-muted/40 px-3 py-2 text-sm">
           첫 장면: <b>{request.hook.spoken}</b>
@@ -194,6 +200,49 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
       )}
       {error && <p className="text-xs text-risk">{error}</p>}
     </article>
+  );
+}
+
+/**
+ * 하고 싶은 말을 고쳐도 추천 대본은 자동으로 바뀌지 않는다(편집에는 바뀐 말이 반영된다).
+ * 추천 대본까지 바꾸고 싶으면 "촬영 가이드 다시 만들기" — 촬영본을 올리기 전에만 된다.
+ */
+function GuideRemake({ request }: { request: ShootRequestCardData }) {
+  const { isPending, error, run } = useRun();
+  const [ask, setAsk] = useState(false);
+  if (request.remaking) {
+    return <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">촬영 가이드를 다시 쓰는 중이에요. 보통 몇 분 안에 끝나고 화면이 저절로 새로 고쳐져요.</p>;
+  }
+  const canRemake = request.clips.length === 0;
+  return (
+    <div className="space-y-1.5">
+      {request.briefChanged && (
+        <p className="rounded-md border border-warn/40 px-3 py-2 text-xs text-warn">
+          하고 싶은 말이 추천 대본을 쓴 뒤에 바뀌었어요. 다음 편집에 반영돼요. 추천 대본은 그대로예요.
+        </p>
+      )}
+      {canRemake ? (
+        <Button size="sm" variant="outline" disabled={isPending} onClick={() => setAsk(true)}>
+          <RotateCcw className="size-4" /> 촬영 가이드 다시 만들기
+        </Button>
+      ) : (
+        request.briefChanged && <p className="text-xs text-muted-foreground">촬영본을 올린 뒤라 촬영 가이드는 다시 만들 수 없어요.</p>
+      )}
+      {error && <p className="text-xs text-risk">{error}</p>}
+      <ConfirmDialog
+        open={ask}
+        title="촬영 가이드를 다시 만들까요?"
+        confirmLabel="다시 만들기"
+        pending={isPending}
+        onClose={() => setAsk(false)}
+        onConfirm={() => {
+          setAsk(false);
+          run(() => remakeShotlistAction({ requestId: request.id }), "촬영 가이드를 다시 쓰기 시작했어요.");
+        }}
+      >
+        <p>지금 하고 싶은 말로 추천 대본 · 캡션을 새로 써요. 직접 적은 첫 장면 · 표지 문구는 그대로 둬요.</p>
+      </ConfirmDialog>
+    </div>
   );
 }
 

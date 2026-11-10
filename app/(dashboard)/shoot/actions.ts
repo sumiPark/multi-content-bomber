@@ -478,6 +478,46 @@ export async function saveBriefAction(input: z.infer<typeof briefSchema>): Promi
   return { ok: true };
 }
 
+const remakeShotlistSchema = z.object({ requestId: z.string().uuid() });
+
+/**
+ * 촬영 가이드 다시 만들기 — 바뀐 하고 싶은 말로 추천 대본(컷 목록)을 다시 쓴다. 하고 싶은 말을 고쳐도 자동으로 다시 쓰지 않는다.
+ * 컷 목록 워커가 촬영 요청을 새로 쓰며 촬영본 · 편집본을 비우므로, 촬영본을 올리기 전(OPEN · 촬영본 0개)에만 된다.
+ * 기획을 CONFIRMED로 돌리면 워커(write-a-shotlists)가 다시 집는다. 사람이 적은 후킹 · 표지 문구는 워커가 그대로 둔다.
+ */
+export async function remakeShotlistAction(input: z.infer<typeof remakeShotlistSchema>): Promise<ShootResult> {
+  const parsed = remakeShotlistSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data: request, error: reqErr } = await service
+    .from("shoot_requests")
+    .select("id, status, clips, plan_id")
+    .eq("id", parsed.data.requestId)
+    .eq("organization_id", auth.orgId)
+    .maybeSingle();
+  if (reqErr) return { ok: false, error: reqErr.message };
+  if (!request) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
+  if (request.status !== "OPEN" || ((request.clips ?? []) as unknown[]).length > 0) {
+    return { ok: false, error: "촬영본을 올린 뒤에는 촬영 가이드를 다시 만들 수 없어요. 하고 싶은 말은 편집할 때 반영돼요." };
+  }
+  const { data: moved, error } = await service
+    .from("content_plans")
+    .update({ status: "CONFIRMED", note: null, error: null })
+    .eq("id", request.plan_id)
+    .eq("organization_id", auth.orgId)
+    .eq("track", "A")
+    .eq("status", "SCRIPTED")
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!moved?.length) return { ok: false, error: "이미 다시 만드는 중이거나 촬영 대기가 아닌 기획이에요." };
+  // 실패해도 다음 05시 실행이 집어 간다 — 즉시성만 손해
+  await triggerShotlistRun(`plan ${request.plan_id}`).catch((e) => console.error("[shoot] 컷 리스트 트리거 실패:", e));
+  revalidateShoot();
+  return { ok: true };
+}
+
 const finishSchema = z.object({ requestId: z.string().uuid() });
 
 /** 다 올렸어요 → 편집 대기. 촬영본이 하나 이상 있으면 된다. */

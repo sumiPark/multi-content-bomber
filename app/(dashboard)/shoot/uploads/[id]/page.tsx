@@ -27,7 +27,7 @@ export default async function ShootUploadDetailPage({ params }: { params: Promis
 
   return (
     <main className="space-y-4 p-4 sm:p-6">
-      <AutoRefresh active={card.status === "UPLOADED" || card.status === "EDITING"} />
+      <AutoRefresh active={card.status === "UPLOADED" || card.status === "EDITING" || card.remaking} />
       <Link href="/shoot/uploads" className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
         <ChevronLeft className="size-4" /> 촬영 · 올리기 목록
       </Link>

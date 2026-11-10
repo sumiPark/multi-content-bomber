@@ -23,6 +23,8 @@ type SavedShotlist = {
   fixed?: { hook?: unknown; notes?: string[] };
   human?: { hook?: string | null; thumbnail?: string | null };
   thumbnail?: { title?: string };
+  /** 컷 목록을 쓸 때의 하고 싶은 말(2026-11-10부터 저장). 없으면 예전 기록이라 비교하지 않는다 */
+  brief?: string | null;
 };
 type Proposal = { ideas?: { title?: string }[]; chosen?: number | null };
 
@@ -34,6 +36,7 @@ export interface RequestRow {
   error: string | null;
   content_plans: {
     id: string;
+    status: string;
     proposal: Json;
     human_brief: string | null;
     script: Json | null;
@@ -60,6 +63,10 @@ export function toRequestCard(r: RequestRow, liveVoice: boolean): ShootRequestCa
     ideaTitle: ideaTitleOf(plan.proposal),
     product: plan.products ? { name: plan.products.name, url: plan.products.url, image: plan.products.represent_image_url } : null,
     brief: plan.human_brief,
+    // 추천 대본을 쓴 뒤에 하고 싶은 말이 바뀌었는지 — 추천 대본은 그대로고 편집에는 바뀐 말이 반영된다
+    briefChanged: script.brief !== undefined && (script.brief ?? "").trim() !== (plan.human_brief ?? "").trim(),
+    // 촬영 가이드를 다시 쓰는 중(기획이 CONFIRMED로 돌아감)
+    remaking: plan.status === "CONFIRMED",
     hook: hook ? { spoken: hook.spoken, onScreen: hook.on_screen, score: hook.score ?? null } : null,
     planId: plan.id,
     humanHook: script.human?.hook ?? "",

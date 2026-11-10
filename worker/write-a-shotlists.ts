@@ -54,7 +54,7 @@ async function main() {
 
   let q = service
     .from("content_plans")
-    .select("id, organization_id, social_account_id, status, product_id, proposal, human_brief, social_accounts(display_name, role_focus, role_note)")
+    .select("id, organization_id, social_account_id, status, product_id, proposal, human_brief, script, social_accounts(display_name, role_focus, role_note)")
     .eq("track", "A")
     .order("confirmed_at");
   q = onlyPlan ? q.eq("id", onlyPlan) : q.eq("status", "CONFIRMED");
@@ -70,6 +70,24 @@ async function main() {
     const acc = plan.social_accounts;
     const label = `@${acc?.display_name} ${plan.id.slice(0, 8)}`;
     try {
+      // "촬영 가이드 다시 만들기"(shoot/actions.ts remakeShotlistAction)로 다시 쓸 때, 그사이 촬영본이 올라왔으면 컷 목록을 덮지 않는다.
+      // 아래 upsert는 촬영본(clips) · 편집본까지 비우기 때문이다. 이전 컷 목록 그대로 촬영 대기로 돌려놓는다
+      if (!dryRun) {
+        const { data: existing, error: exErr } = await service.from("shoot_requests").select("clips").eq("plan_id", plan.id).maybeSingle();
+        if (exErr) throw new Error(`촬영 요청 조회 실패: ${exErr.message}`);
+        if (existing && ((existing.clips ?? []) as unknown[]).length > 0) {
+          console.log(`[a-shotlist] ${label} — 촬영본이 이미 있어 촬영 가이드를 바꾸지 않음`);
+          mustOk(
+            await service
+              .from("content_plans")
+              .update({ status: "SCRIPTED", note: "촬영본이 먼저 올라와 촬영 가이드를 바꾸지 않았어요. 하고 싶은 말은 편집할 때 반영돼요." })
+              .eq("id", plan.id)
+              .eq("status", "CONFIRMED"),
+            `촬영 대기로 되돌리기 (plan=${plan.id})`,
+          );
+          continue;
+        }
+      }
       const facts = await loadProductFacts(service, plan.product_id);
       if (facts.stockStatus !== "available") {
         console.log(`[a-shotlist] ${label} ${facts.name} — 판매 중이 아니라 멈춤 (${facts.stockStatus})`);
@@ -148,10 +166,15 @@ async function main() {
       if (!shotlist || !check) continue;
 
       const hookScores = scoreHooks(shotlist.hooks.map((h) => h.spoken));
+      // 다시 쓸 때도 사람이 적은 후킹 · 표지 문구(script.human)는 그대로 둔다
+      const prevHuman = (plan.script as { human?: unknown } | null)?.human;
       const saved = {
         ...shotlist,
         hooks: shotlist.hooks.map((h, i) => ({ ...h, score: hookScores[i]?.score ?? null })),
         ...(hasPhrases ? { fixed: fixedRecord(phrases) } : {}),
+        ...(prevHuman ? { human: prevHuman } : {}),
+        // 이 컷 목록을 쓸 때의 하고 싶은 말 — 그 뒤에 바뀌면 촬영 화면에 "편집에 반영됨"을 보여 준다
+        brief: plan.human_brief ?? null,
       };
 
       console.log(`  훅: ${shotlist.hooks[shotlist.chosen_hook]?.spoken}`);

@@ -28,7 +28,7 @@ export default async function ShootUploadsPage({ searchParams }: { searchParams:
     .select(REQUEST_SELECT)
     .in("status", ["OPEN", "UPLOADED", "EDITING", "EDITED", "FAILED"])
     // 올린 뒤의 기획은 완성본 받기에서 본다
-    .in("content_plans.status", ["SCRIPTED", "SHOT", "RENDERED"])
+    .in("content_plans.status", ["CONFIRMED", "SCRIPTED", "SHOT", "RENDERED"])
     .order("created_at", { ascending: true });
 
   const rows = (data ?? [])
