@@ -8,8 +8,10 @@ import { isShopAsset, type ShopCode } from "@/lib/products/shops";
 //   1650px 타일(1500px 간격, 150px 겹침). 파트 하나 = AI 호출 1회, 호출당 타일 최대 8장.
 // 겹치는 이유: 경계에 걸친 글줄이 잘려 양쪽 다 못 읽는 일을 막는다.
 
-const DOWNLOAD_TIMEOUT_MS = 20_000;
-const MAX_BYTES = 15 * 1024 * 1024;
+// 움직이는 GIF는 장면이 수백 장이라 파일이 수십 MB가 되지만, 분석은 첫 장면만 쓴다(아래 page: 0).
+// 그래서 15MB에서 막지 않고 넉넉히 받는다 — 실측 56MB GIF가 있었다(2026-11-10 오늘과일 식품).
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+const MAX_BYTES = 120 * 1024 * 1024;
 const TARGET_WIDTH = 1000;
 const PART_HEIGHT = 12_000;
 const TILE_HEIGHT = 1650;
