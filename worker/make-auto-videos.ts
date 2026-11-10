@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { markArchiveUsed } from "@/lib/auto-video/archive";
 import { loadAccountConcept } from "@/lib/agents/concept";
-import { makeAutoVideo, StopError } from "@/lib/auto-video/make";
+import { BoardOnlyDone, makeAutoVideo, StopError } from "@/lib/auto-video/make";
 import { scheduleAutoVideo, type AutoVideo } from "@/lib/auto-video/publish";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
@@ -20,6 +20,7 @@ import type { Json } from "@/types/database";
 //   통과하면 RENDERED. AUTO_VIDEO_PUBLISH=1이고 사람이 볼 경고가 없을 때만 바로 발행 대기열로 간다.
 //
 // 옵션: --dry-run (DB에 안 쓰고 결과 파일 위치만 출력) · --plan <id> (그 칸만)
+//       --board-only (--dry-run과 함께: 대본 · 장면표까지만 만들고 영상은 만들지 않는다. --out에 storyboard-review.json)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MAX_ATTEMPTS = 2;
@@ -107,6 +108,7 @@ async function main() {
         workDir,
         // 시험에서만: --board <storyboard-review.json> 으로 저장된 장면표부터 영상을 만든다
         savedBoard: dryRun && arg(argv, "--board") ? JSON.parse(readFileSync(arg(argv, "--board")!, "utf8")).board : undefined,
+        boardOnly: dryRun && argv.includes("--board-only"),
       });
       const { kit, check, blocking } = made;
       const seconds = Math.round((Date.now() - t0) / 1000);
@@ -194,6 +196,17 @@ async function main() {
         console.log(r.ok ? `  발행 대기열에 넣음 (${r.scheduledFor})` : `  발행 대기열 실패: ${r.error}`);
       }
     } catch (err) {
+      // 대본만 시험: 장면표까지 만들고 멈춘 건 실패가 아니다. 남은 문제가 있을 때만 실패로 본다
+      if (err instanceof BoardOnlyDone) {
+        console.log(`[auto-video] ${label} ${err.message} · ${Math.round((Date.now() - t0) / 1000)}초`);
+        const out = arg(argv, "--out");
+        if (out) {
+          mkdirSync(out, { recursive: true });
+          try { copyFileSync(join(workDir, "storyboard-review.json"), join(out, `${plan.id}-storyboard-review.json`)); } catch { /* 기록 없음 */ }
+        }
+        if (err.left.length) process.exitCode = 1;
+        continue;
+      }
       process.exitCode = 1;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[auto-video] ${label} 실패: ${message}`);

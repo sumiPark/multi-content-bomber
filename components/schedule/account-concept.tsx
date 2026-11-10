@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Save } from "lucide-react";
-import { SCRIPT_STYLE_CHOICES } from "@/lib/agents/script-style";
 import { DEFAULT_VOICE_TITLE, VOICE_CHOICES } from "@/lib/shoot/voices";
 import { saveAutoConceptAction, saveShootConceptAction } from "@/app/(dashboard)/schedule/actions";
 import { useScheduleRun } from "@/components/schedule/slot-rule-cell";
@@ -17,8 +16,6 @@ import { Textarea } from "@/components/ui/textarea";
 export interface ConceptCardData {
   accountId: string;
   name: string;
-  // 대본 방식(0052) — KNOWLEDGE(상식 · 상품 연결형, 기본) · STORY(이야기형)
-  autoScriptStyle: string;
   // 바꾸고 싶은 점(0052) — 옛 컨셉 · 말투 · 영상 스타일을 합친 한 칸
   autoNotes: string;
   autoHooks: string;
@@ -41,10 +38,10 @@ export interface ConceptCardData {
 }
 
 type Role = "" | "PRODUCT" | "PERSON";
-// AI 자동에는 영상 방향이 없다(2026-11-10). 직접 촬영만 영상 방향을 정한다
-type AutoKey = "autoScriptStyle" | "autoNotes" | "autoHooks" | "autoEndings" | "autoVoiceId";
+// AI 자동에는 영상 방향 · 대본 방식이 없다(2026-11-10). 직접 촬영만 영상 방향을 정한다
+type AutoKey = "autoNotes" | "autoHooks" | "autoEndings" | "autoVoiceId";
 type ShootKey = "shootRole" | "shootVoice" | "shootVoiceId" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
-const AUTO_KEYS: AutoKey[] = ["autoScriptStyle", "autoNotes", "autoHooks", "autoEndings", "autoVoiceId"];
+const AUTO_KEYS: AutoKey[] = ["autoNotes", "autoHooks", "autoEndings", "autoVoiceId"];
 const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootVoice", "shootVoiceId", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
 
 function Field({
@@ -140,28 +137,6 @@ function RoleField({ value, help, onChange, disabled }: { value: string; help: s
   );
 }
 
-function ScriptStyleField({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled: boolean }) {
-  const picked = SCRIPT_STYLE_CHOICES.find((c) => c.value === value) ?? SCRIPT_STYLE_CHOICES[0];
-  return (
-    <label className="block space-y-1">
-      <span className="text-sm font-semibold text-ink-2">대본 방식</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className="block h-9 w-full rounded-md border border-input bg-card px-2.5 text-sm focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
-      >
-        {SCRIPT_STYLE_CHOICES.map((c) => (
-          <option key={c.value} value={c.value}>
-            {c.label}
-          </option>
-        ))}
-      </select>
-      <span className="block text-xs text-muted-foreground">{picked.help} 금지 표현 · 근거 없는 숫자 · 지어낸 후기를 막는 규칙은 어느 방식이든 같아요.</span>
-    </label>
-  );
-}
-
 const PHRASE_HELP = "한 줄에 문구 하나, 10개까지. {상품}처럼 중괄호 안은 AI가 채우고 나머지 글자는 그대로 나가요. 음성과 화면 문구에 똑같이 들어가요.";
 
 export function AccountConceptCard({ data, canManage, mode, top, hideName }: { data: ConceptCardData; canManage: boolean; mode: "auto" | "shoot"; top?: React.ReactNode; hideName?: boolean }) {
@@ -177,7 +152,6 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
       mode === "auto"
         ? saveAutoConceptAction({
             accountId: data.accountId,
-            autoScriptStyle: form.autoScriptStyle === "STORY" ? "STORY" : "KNOWLEDGE",
             autoNotes: form.autoNotes,
             autoHooks: form.autoHooks,
             autoEndings: form.autoEndings,
@@ -205,7 +179,6 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
         <>
           <div className="grid gap-4 lg:grid-cols-2">
             <VoicePickField {...bind("autoVoiceId")} help="AI 자동 콘텐츠의 내레이션 목소리예요. 직접 촬영과는 따로 정해요." />
-            <ScriptStyleField {...bind("autoScriptStyle")} />
           </div>
           <Field
             {...bind("autoNotes")}
@@ -222,7 +195,7 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
               label="마지막 문구"
               rows={3}
               max={2000}
-              help={form.autoScriptStyle === "STORY" ? "영상 끝에 나가요. 이야기형은 비워 두면 \"그렇게 나온 게 ○○예요\" 같은 한 줄로 끝나고, 적으면 이 문구로 바뀌어요." : "영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요."}
+              help="영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요."
               placeholder={"저장해 두고 살 때 꺼내 보세요"}
             />
           </div>

@@ -2,7 +2,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { blockingIssues, checkScript } from "@/lib/agents/check";
 import type { AccountConcept } from "@/lib/agents/concept";
-import type { ScriptStyle } from "@/lib/agents/script-style";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
 import { LONG_VISUALS, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { dropFailedPhrases, fixedPhraseBlock, fixedRecord, phraseNotes, preparePhrases, recentTemplates, type PhraseState } from "@/lib/agents/fixed-phrases";
@@ -12,6 +11,7 @@ import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
 // LENGTH_TOLERANCE: 음성으로 잰 길이의 허용 오차(초). 합성 결과의 작은 차이로 칸을 멈추지 않고, 장면표 글자 수 점검도 같은 여유를 둔다
 import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, LENGTH_TOLERANCE, MIN_AUTO_HOOK_SCORE, MIN_INTEREST, charRange, firstViewerTest, motionTexts, rankAngles, realMaterialCount, screenAngles, repairEdgeVisuals, repairOverflow, repeatLimit, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeAngles, writeSceneVisuals, writeStoryboard, type Storyboard, type StoryAngle } from "@/lib/agents/storyboard";
+import { EMPTY_REFERENCES, loadReelReferences } from "@/lib/agents/reel-references";
 import { hookEvidenceProblems, rejectIncompatiblePhrases } from "@/lib/auto-video/hook-evidence";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
@@ -187,14 +187,14 @@ export async function makeAutoVideo(input: {
   workDir: string;
   /** 시험(--dry-run)에서만: 저장해 둔 장면표로 바로 영상을 만든다. 각도 · 장면표 쓰기를 건너뛴다 */
   savedBoard?: Storyboard;
+  /** 시험(--dry-run)에서만: 장면표(대본)까지 만들고 영상은 만들지 않는다. 결과는 workDir의 storyboard-review.json */
+  boardOnly?: boolean;
 }) {
   const { service, planId, account, productId, rules, workDir } = input;
   const facts = await loadProductFacts(service, productId);
   if (facts.stockStatus !== "available") throw new StopError(`지금 판매 중이 아닌 상품이에요 (${facts.stockStatus})`);
   // 시험(--dry-run)도 저장된 계정 설정을 그대로 읽는다. 시험만 다르게 만드는 덮어쓰기를 두지 않는다(2026-11-10)
   const concept: AccountConcept = input.concept;
-  const style: ScriptStyle = concept.autoScriptStyle;
-  console.log(`  대본 방식: ${style === "STORY" ? "이야기형" : "상식 · 상품 연결형"}`);
   const { data: product } = await service.from("products").select("detail_image_urls, represent_image_url").eq("id", productId).maybeSingle();
 
   // 1. 상세페이지에서 사진 구간만 잘라 후보로
@@ -291,7 +291,13 @@ export async function makeAutoVideo(input: {
   const savedBoard = input.dryRun ? input.savedBoard : undefined;
   if (savedBoard) console.log("  (시험) 저장된 장면표로 바로 영상을 만든다");
   if (!phrases.hooks.length && !savedBoard) {
-    const written = await writeAngles({ accountName: account, facts, knowledge, style });
+    // 상식형은 주제 · 첫 문장을 성과가 높았던 릴스에서 가져온다(2026-11-10). 못 읽으면 참고 없이 쓴다
+    const references = await loadReelReferences(service, input.accountId).catch((e) => {
+      console.warn("  참고 릴스를 조회하지 못했어요:", e instanceof Error ? e.message : e);
+      return EMPTY_REFERENCES;
+    });
+    console.log(`  참고 릴스: 다른 계정 ${references.benchmark.length}개 · 우리 계정 ${references.own.length}개 · 분석 요약 ${references.insights.length}줄`);
+    const written = await writeAngles({ accountName: account, facts, knowledge, references });
     add(written.tokens);
     angles = written.angles;
     const ranked = await rankAngles(angles);
@@ -305,7 +311,7 @@ export async function makeAutoVideo(input: {
     const kept = angleOrder.filter((i) => !screened.rejected.some((r) => r.index === i));
     if (kept.length) angleOrder = kept;
     else console.log("  모든 각도가 주제 기준에 걸려 순위대로 쓴다");
-    angleOrder.forEach((i) => console.log(`  각도 ${angleScores[i]}점 [${angles[i].situation}] ${angles[i].hook_line}`));
+    angleOrder.forEach((i) => console.log(`  각도 ${angleScores[i]}점 [${angles[i].situation}] ${angles[i].hook_line}${angles[i].reference ? ` (참고: ${angles[i].reference})` : ""}`));
   }
 
   // 2. 장면표: 쓰고, 코드 · 시청자 눈 · 광고 규칙으로 보고, 걸리면 고쳐 쓴다
@@ -343,7 +349,6 @@ export async function makeAutoVideo(input: {
       knowledge,
       charLimits,
       angle: angles.length ? angles[angleOrder[anglePos]] : null,
-      style,
       notes: concept.autoNotes,
       phraseBlock: fixedPhraseBlock(phrases),
       visualLibrary,
@@ -412,10 +417,10 @@ export async function makeAutoVideo(input: {
         console.warn(`  바꾼 장면의 AI 이미지 설명을 쓰지 못했어요: ${e instanceof Error ? e.message : e}`);
       }
     }
-    const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0, { knowledge, charLimits, style }), ...hookEvidenceProblems(board, archive)];
+    const code = [...storyboardProblems(board, archiveIds, phrases.hooks.length > 0, { knowledge, charLimits }), ...hookEvidenceProblems(board, archive)];
     // 길이는 글자 수로 storyboardProblems가 재고, 완성본의 실제 길이를 다시 잰다.
     const estimated = board.scenes.reduce((n, s) => n + squash(s.tts).length, 0) / speechRate;
-    const boardCheck = () => checkScript(boardAsScript(board!), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999], longBeatSeconds: LONG_BEAT_SECONDS, scriptStyle: style });
+    const boardCheck = () => checkScript(boardAsScript(board!), facts, rules, account, { fixedHook: true, fixedTexts: fixedTexts(), knowledge, seconds: estimated, lengthRange: [0, 999], longBeatSeconds: LONG_BEAT_SECONDS });
     let check: Awaited<ReturnType<typeof checkScript>>;
     let review: Awaited<ReturnType<typeof reviewStoryboard>>;
     try {
@@ -436,7 +441,7 @@ export async function makeAutoVideo(input: {
         const shown = crop && shownGifSheet(g, crop, workDir);
         return shown ? imageDataUrl(shown) : gifSheets[i];
       });
-      review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...reviewGifSheets], fixedTexts: fixedTexts(), style });
+      review = await reviewStoryboard({ board, facts, knowledge, sheets: [...sheets, ...reviewGifSheets], fixedTexts: fixedTexts() });
       add(review.tokens);
     } catch (e) {
       // 점검 답이 깨지면 이 장면표는 점검을 못 받은 것으로 보고 버린다. 고칠 목록은 앞 회차 그대로 다시 쓴다
@@ -488,6 +493,13 @@ export async function makeAutoVideo(input: {
   }
   if (!board) throw new Error("장면표를 만들지 못했어요");
   writeFileSync(join(workDir, "storyboard-review.json"), JSON.stringify({ angles: angleOrder.map((i) => ({ score: angleScores[i], ...angles[i] })), attempts: storyboardReviews, phrases: fixedRecord(phrases), board, left }, null, 2));
+  if (input.dryRun && input.boardOnly) {
+    console.log(`  (대본만) 후킹: ${board.hook.spoken} | 화면 글자: ${board.hook.on_screen}`);
+    board.scenes.forEach((s, i) => console.log(`  (대본만) ${i}. [${s.part} · ${s.source}] ${s.say}`));
+    for (const p of left) console.log(`  (대본만) ✗ ${p}`);
+    for (const p of softLeft) console.log(`  (대본만) ! ${p}`);
+    throw new BoardOnlyDone(left);
+  }
   if (left.length) throw new StopError(`장면표를 ${MAX_BOARD_TRIES}번 고친 뒤에도 해결되지 않았어요: ${left.join(" / ")}`);
 
   // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
@@ -689,7 +701,7 @@ export async function makeAutoVideo(input: {
     facts,
     rules,
     account,
-    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts(), knowledge, longBeatSeconds: LONG_BEAT_SECONDS, lengthRange: [AUTO_SECONDS[0] - LENGTH_TOLERANCE, AUTO_SECONDS[1] + LENGTH_TOLERANCE], scriptStyle: style },
+    { track: "B", seconds: kit.seconds, fixedHook: true, fixedTexts: fixedTexts(), knowledge, longBeatSeconds: LONG_BEAT_SECONDS, lengthRange: [AUTO_SECONDS[0] - LENGTH_TOLERANCE, AUTO_SECONDS[1] + LENGTH_TOLERANCE] },
   );
   // 처음 보는 사람 시험 — 상품 자료 없이 영상만 보고 답하게 한다. 멈추지 않고 사람이 볼 경고로 남긴다
   let firstViewer: Awaited<ReturnType<typeof firstViewerTest>> | null = null;
@@ -697,7 +709,7 @@ export async function makeAutoVideo(input: {
     const every = Math.max(0.5, kit.seconds / 24);
     const sheetFile = join(workDir, "first-viewer.jpg");
     ffmpeg(["-y", "-v", "error", "-i", kit.final, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
-    firstViewer = await firstViewerTest({ sheet: imageDataUrl(sheetFile), lines: board.scenes.map((s) => s.say), hasDifference: knowledge.differences.length > 0, style });
+    firstViewer = await firstViewerTest({ sheet: imageDataUrl(sheetFile), lines: board.scenes.map((s) => s.say), hasDifference: knowledge.differences.length > 0 });
     add(firstViewer.tokens);
     if (firstViewer.gaps.length) warnings.push(`처음 보는 사람 시험: 영상만 보고 알기 어려운 항목이 있어요. (${firstViewer.gaps.join(", ")})`);
   } catch (e) {
@@ -715,3 +727,9 @@ export async function makeAutoVideo(input: {
 }
 
 export class StopError extends Error {}
+/** 시험(--dry-run --board-only)에서 장면표까지 만들고 멈췄다는 표시. left = 고친 뒤에도 남은 문제 */
+export class BoardOnlyDone extends Error {
+  constructor(readonly left: string[]) {
+    super(left.length ? `대본만: 남은 문제 ${left.length}건` : "대본만: 통과");
+  }
+}

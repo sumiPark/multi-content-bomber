@@ -134,10 +134,6 @@ describe("설명 영상 장면표 점검", () => {
     assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("되풀이")), true);
   });
 
-  it("상품 이름이 너무 늦게 나오면 잡는다", () => {
-    assert.equal(problems({ ...goodBoard(), product_first_scene: 20 }).some((p) => p.includes("40% 안쪽")), true);
-  });
-
   it("확정된 차이가 없으면 우리 차이 장면을 쓰지 못한다", () => {
     const out = problems(goodBoard(), { ...knowledge, differences: [] });
     assert.equal(out.some((p) => p.includes("difference 장면을 쓰지 않는다")), true);
@@ -163,28 +159,30 @@ describe("설명 영상 장면표 점검", () => {
     assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("K9")), true);
   });
 
-  it("마지막 장면이 기억할 기준이 아니면 잡는다", () => {
+  it("상식형은 마지막 기준 한 줄을 요구하지 않는다(2026-11-10)", () => {
     const scenes = goodScenes();
     scenes[24] = { ...scenes[24], part: "product", evidence: ["P"] };
-    assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("takeaway")), true);
+    assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("takeaway")), false);
   });
 
-  it("첫 장면은 상황이어야 하고, AI 이미지(생활 장면)를 쓸 수 있다", () => {
+  it("첫 장면은 후킹(situation)이어야 하고, AI 이미지(생활 장면)를 쓸 수 있다", () => {
     const scenes = goodScenes();
     scenes[0] = { ...scenes[0], source: "visual", source_id: "v0" };
     const visuals = [...goodBoard().visuals, { beat: 0, key: "s", subject: "", evidence: "", prompt: "p", motion: "solid" as const }];
     assert.equal(problems({ ...goodBoard(), scenes, visuals }).some((p) => p.includes("AI 이미지")), false);
     assert.equal(repairEdgeVisuals({ ...goodBoard(), scenes, visuals }).scenes[0].source, "visual");
     scenes[0] = { ...scenes[0], part: "knowledge", evidence: ["K1"] };
-    assert.equal(problems({ ...goodBoard(), scenes, visuals }).some((p) => p.includes("상황(situation)으로 시작")), true);
+    assert.equal(problems({ ...goodBoard(), scenes, visuals }).some((p) => p.includes("후킹(situation)으로 시작")), true);
   });
 
-  it("고민 장면이 없거나 상품 뒤에 오면 잡는다", () => {
+  it("상식형은 장면 순서를 정하지 않고, 상품 장면이 있는지만 본다(2026-11-10)", () => {
     const none = goodScenes().map((s) => (s.part === "worry" ? { ...s, part: "knowledge" as const } : s));
-    assert.equal(problems({ ...goodBoard(), scenes: none }).some((p) => p.includes("고민(worry) 장면이 없다")), true);
+    assert.equal(problems({ ...goodBoard(), scenes: none }).some((p) => p.includes("worry")), false);
     const late = goodScenes();
     late[21] = { ...late[21], part: "worry", evidence: [] };
-    assert.equal(problems({ ...goodBoard(), scenes: late }).some((p) => p.includes("product) 장면보다 앞에")), true);
+    assert.equal(problems({ ...goodBoard(), scenes: late }).some((p) => p.includes("product) 장면보다 앞에")), false);
+    const noProduct = goodScenes().map((s) => (s.part === "product" ? { ...s, part: "knowledge" as const } : s));
+    assert.equal(problems({ ...goodBoard(), scenes: noProduct }).some((p) => p.includes("우리 상품(product) 장면이 없다")), true);
   });
 
   it("스톡 영상은 개수 · 구간 제한 없이 쓰고, 검색어만 확인한다", () => {
@@ -247,51 +245,12 @@ describe("설명 영상 장면표 점검", () => {
     assert.equal(problems({ ...goodBoard(), scenes: short(222 - 192 - 30) }).some((p) => p.includes("자로 쓴다")), true);
   });
 
-  it("판매자 목소리(저희)는 우리 차이 장면에서만 쓴다", () => {
+  it("판매자 목소리(저희)는 어느 장면에서나 쓰고, 상품 이름을 뒤에서 처음 말해도 된다(2026-11-10)", () => {
     const scenes = goodScenes();
     scenes[21] = { ...scenes[21], say: "저희는 고를 때 거품 밀도를 봐요" };
-    assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("판매자 목소리")), false);
     scenes[18] = { ...scenes[18], say: "저희가 직접 골랐어요" };
-    assert.equal(problems({ ...goodBoard(), scenes }).some((p) => p.includes("18번 장면에서 판매자 목소리")), true);
-  });
-});
-
-describe("이야기형 장면표 점검", () => {
-  const story = (b: Storyboard) => storyboardProblems(b, [], false, { knowledge, charLimits: limits, style: "STORY" });
-  // 상품 구간에 "그래서 저희는"이 있고 마지막이 탄생 한 줄인 장면표
-  const storyBoard = () => {
-    const scenes = goodScenes();
-    scenes[16] = { ...scenes[16], say: "그래서 저희는 8종을 섞었어요" };
-    scenes[24] = { ...scenes[24], say: "그렇게 나온 게 퍼스트겔이에요" };
-    return { ...goodBoard(), scenes };
-  };
-
-  it("이야기형은 \"저희\"를 우리 차이 밖에서도 쓰고, 상품 이름을 뒤에서 처음 말해도 된다", () => {
-    const b = storyBoard();
-    b.scenes[18] = { ...b.scenes[18], say: "저희가 직접 골랐어요" };
-    const out = story({ ...b, product_first_scene: 24 });
+    const out = problems({ ...goodBoard(), scenes, product_first_scene: 24 });
     assert.equal(out.some((p) => p.includes("판매자 목소리") || p.includes("40% 안쪽")), false);
-    assert.deepEqual(out, []);
-  });
-
-  it("이야기형인데 저희가 한 선택을 말하는 상품 장면이 없으면 다시 쓰게 한다", () => {
-    assert.equal(story(goodBoard()).some((p) => p.includes("그래서 저희는")), true);
-  });
-
-  it("이야기형의 첫 장면은 질문이고 \"저희\"로 시작하지 않는다", () => {
-    const b = storyBoard();
-    b.scenes[0] = { ...b.scenes[0], say: "저희는 세수부터 생각했어요" };
-    assert.equal(story(b).some((p) => p.includes("첫 장면은 시청자에게 묻는 질문")), true);
-  });
-
-  it("탄생 한 줄(takeaway)은 마지막 장면 하나만 쓴다", () => {
-    const b = storyBoard();
-    b.scenes[10] = { ...b.scenes[10], part: "takeaway" };
-    assert.equal(story(b).some((p) => p.includes("마지막 장면 하나만")), true);
-  });
-
-  it("기본 방식은 예전 점검 그대로다", () => {
-    assert.deepEqual(problems(goodBoard()), storyboardProblems(goodBoard(), [], false, { knowledge, charLimits: limits, style: "KNOWLEDGE" }));
   });
 });
 

@@ -1,16 +1,14 @@
 import type { ConceptCardData } from "@/components/schedule/account-concept";
-import { scriptStyleOf } from "@/lib/agents/script-style";
 import { describeEditStyle, parseEditStyle } from "@/lib/shoot/edit-style";
 import type { Tables } from "@/types/database";
 
 // 영상 참고 내용 카드에 넘길 값 — 자동 콘텐츠 설정과 촬영 설정이 같이 쓴다. 카드는 자기 방식의 값만 보여 주고 저장한다.
 
 export const CONCEPT_SELECT =
-  "social_account_id, auto_script_style, auto_notes, auto_hooks, auto_endings, auto_voice_id, shoot_voice_id, shoot_role_focus, shoot_voice_mode, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at";
+  "social_account_id, auto_notes, auto_hooks, auto_endings, auto_voice_id, shoot_voice_id, shoot_role_focus, shoot_voice_mode, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at";
 
 export type ConceptRow = Pick<
   Tables<"account_concepts">,
-  | "auto_script_style"
   | "auto_notes"
   | "auto_hooks"
   | "auto_endings"
@@ -37,7 +35,6 @@ export function conceptCardData(input: { accountId: string; name: string; row: C
   return {
     accountId: input.accountId,
     name: input.name,
-    autoScriptStyle: scriptStyleOf(c?.auto_script_style),
     autoNotes: c?.auto_notes ?? "",
     autoHooks: (c?.auto_hooks ?? []).join("\n"),
     autoEndings: (c?.auto_endings ?? []).join("\n"),
@@ -62,7 +59,6 @@ export function savedConceptItems(c: ConceptRow | null | undefined, mode: "auto"
   const items =
     mode === "auto"
       ? [
-          c.auto_script_style === "STORY" ? "이야기형" : null,
           c.auto_hooks?.length ? `후킹 문구 ${c.auto_hooks.length}개` : null,
           c.auto_endings?.length ? `마지막 문구 ${c.auto_endings.length}개` : null,
           c.auto_notes?.trim() ? "바꾸고 싶은 점" : null,
