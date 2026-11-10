@@ -336,7 +336,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
                   </Button>
                 </div>
                 <ul className="divide-y text-sm">
-                  {[...(files.final ? [{ ...files.final, label: "완성본" }] : []), ...(files.thumbnail ? [{ ...files.thumbnail, label: "표지" }] : []), ...files.clips.map((c) => ({ ...c, label: `${c.cut}번 컷 원본` }))].map((f: ShootFile & { label: string }) => (
+                  {[...(files.final ? [{ ...files.final, label: "완성본" }] : []), ...(files.thumbnail ? [{ ...files.thumbnail, label: "표지" }] : []), ...files.clips.map((c) => ({ ...c, label: `${c.cut}번 촬영본` }))].map((f: ShootFile & { label: string }) => (
                     <li key={f.name} className="flex items-center justify-between gap-3 py-1.5">
                       <span className="min-w-0 truncate">
                         {f.label} {f.size != null && <span className="text-xs text-muted-foreground tabular-nums">{fileSize(f.size)}</span>}

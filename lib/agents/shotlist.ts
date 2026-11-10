@@ -76,9 +76,11 @@ function systemPrompt(ctx: ShotlistContext): string {
   const f = ctx.facts;
   const person = ctx.roleFocus === "PERSON";
   const focus = person ? (ctx.liveVoice ? "사람 중심(사람이 나와 말하고 쓰는 모습)" : "사람 중심(사람이 나와 쓰는 모습, 말은 하지 않고 AI 음성이 읽는다)") : ctx.roleFocus === "PRODUCT" ? "상품 중심(손 · 제형 · 구성 클로즈업, 얼굴 없이)" : "미정";
+  // 하고 싶은 말(human_brief)은 목록 기획을 골랐을 때도 넣을 수 있다(2026-11-10) — 기획보다 먼저 따른다
+  const briefLine = ctx.brief ? ` 관리자가 하고 싶은 말: "${ctx.brief}" — 뜻은 그대로 두고 가장 먼저 반영한다. 고른 기획과 흐름(주제 · 순서 · 강조점 · 마지막 말)이 다르면 하고 싶은 말의 흐름으로 컷을 짜고, 기획은 거기에 맞는 부분만 쓴다. 광고 문구 규칙에 어긋나거나 상품 사실에 없는 효능은 맞는 말로 고쳐 쓴다.` : "";
   const what = ctx.idea
-    ? `고른 기획: "${ctx.idea.title}" (${ctx.idea.format}) — ${ctx.idea.concept}`
-    : `사람이 상품을 직접 골랐다.${ctx.brief ? ` 메모: "${ctx.brief}" — 이 메모를 가장 먼저 반영한다.` : " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
+    ? `고른 기획: "${ctx.idea.title}" (${ctx.idea.format}) — ${ctx.idea.concept}${briefLine}`
+    : `사람이 상품을 직접 골랐다.${briefLine || " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
   const kit = editKit();
   return `너는 인스타그램 @${ctx.accountName}의 릴스 촬영 감독 겸 대본 작가다. 사람이 휴대폰으로 컷 리스트대로 찍어 올리면 AI 편집자가 원본을 보고 컷 · 음성 · 자막 · 그래픽 · 효과음을 넣어 완성한다.
 계정 역할: ${focus}${ctx.roleNote ? ` — ${ctx.roleNote}` : ""}

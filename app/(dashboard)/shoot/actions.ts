@@ -15,7 +15,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
 // 직접 촬영 콘텐츠(0030 · 0042). 계정별 기획 목록에서 고르거나 원하는 상품을 추가 → 컷 리스트(워커) →
-// 컷마다 촬영본을 올리고 "다 올렸어요" → 자동 편집 → 완성본 · 다시 편집용 파일 받기 → 사람이 직접 올리고 "올렸어요" + 릴스 연결.
+// 찍은 촬영본을 개수 · 순서 상관없이 올리고 "다 올렸어요" → 자동 편집(컷 리스트는 추천 대본으로만 쓴다) → 완성본 · 다시 편집용 파일 받기 → 사람이 직접 올리고 "올렸어요" + 릴스 연결.
 // 자동 예약은 없다. 고르기 · 추가 · 새로 고침은 ADMIN · MANAGER, 촬영본 올리기 · 받기 · 올렸어요는 조직 누구나.
 
 export type ShootResult = { ok: true } | { ok: false; error: string; warning?: boolean };
@@ -59,9 +59,12 @@ function revalidateShoot() {
   revalidatePath("/shoot/review");
 }
 
-const chooseSchema = z.object({ planId: z.string().uuid(), force: z.boolean().optional() });
+const chooseSchema = z.object({ planId: z.string().uuid(), brief: z.string().trim().max(300).nullable().optional(), force: z.boolean().optional() });
 
-/** 목록의 기획으로 찍기 — 컷 리스트를 쓰게 한다. 다른 계정과 겹치거나 최근에 쓴 상품이면 경고 뒤 진행(force). */
+/**
+ * 목록의 기획으로 찍기 — 컷 리스트를 쓰게 한다. 다른 계정과 겹치거나 최근에 쓴 상품이면 경고 뒤 진행(force).
+ * brief = 이 상품으로 하고 싶은 말(human_brief). 추천 대본과 편집 에이전트가 가장 먼저 따른다.
+ */
 export async function chooseIdeaAction(input: z.infer<typeof chooseSchema>): Promise<ShootResult> {
   const parsed = chooseSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -85,7 +88,15 @@ export async function chooseIdeaAction(input: z.infer<typeof chooseSchema>): Pro
   const proposal = { ...((plan.proposal ?? {}) as Record<string, unknown>), chosen: 0 };
   const { data: moved, error } = await service
     .from("content_plans")
-    .update({ status: "CONFIRMED", proposal: proposal as unknown as Json, note: null, error: null, confirmed_by: auth.userId, confirmed_at: new Date().toISOString() })
+    .update({
+      status: "CONFIRMED",
+      proposal: proposal as unknown as Json,
+      ...(parsed.data.brief !== undefined ? { human_brief: parsed.data.brief || null } : {}),
+      note: null,
+      error: null,
+      confirmed_by: auth.userId,
+      confirmed_at: new Date().toISOString(),
+    })
     .eq("id", plan.id)
     .eq("status", "PROPOSED")
     .select("id");
@@ -271,8 +282,31 @@ export async function skipShootAction(input: z.infer<typeof idSchema>): Promise<
 
 // ─── 촬영 · 올리기 ────────────────────────────────────────────────────────────
 
-type Cut = { no: number; done?: boolean; skipped?: boolean } & Record<string, unknown>;
-type Clip = { cut: number; path: string; name: string; size: number; type: string; uploaded_at: string; uploaded_by: string };
+/**
+ * 촬영본(shoot_requests.clips). cut = 촬영본 순서 번호(1부터). 예전엔 컷마다 하나씩 올려 컷 번호와 같았다.
+ * free = 컷과 상관없이 올린 촬영본(2026-11-10~). 없으면 예전 방식이라 같은 번호 컷의 설명을 편집 힌트로 쓴다.
+ * on_screen_override · subtitle_override = 완성본 받기에서 사람이 고친 화면 문구 · 자막.
+ */
+type Clip = {
+  cut: number;
+  path: string;
+  name: string;
+  size: number;
+  type: string;
+  uploaded_at: string;
+  uploaded_by: string;
+  free?: boolean;
+  on_screen_override?: string | null;
+  subtitle_override?: string | null;
+};
+
+// 한 촬영 요청에 올릴 수 있는 촬영본 수 — 편집 에이전트가 프레임을 한 번에 보는 양에 맞춘다
+const MAX_CLIPS = 20;
+
+/** 순서대로 1부터 다시 매긴다. 번호가 바뀌면 예전 컷과의 짝이 깨지니 모두 free로 둔다. */
+function renumber(clips: Clip[]): Clip[] {
+  return clips.map((c, i) => ({ ...c, cut: i + 1, free: true }));
+}
 
 async function loadRequest(service: Service, requestId: string, orgId: string) {
   const { data } = await service
@@ -302,6 +336,8 @@ async function updateRequestJson(
     if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없어요. 기획이 바뀌었을 수 있으니 새로 고쳐 주세요." };
     const r = mutate(req);
     if (typeof r === "string") return { ok: false, error: r };
+    // 바꿀 것이 없으면(이미 등록 · 이미 지움 · 끝 칸에서 옮기기) 저장하지 않는다
+    if (!Object.keys(r.patch).length) return { ok: true };
     const { data, error } = await service
       .from("shoot_requests")
       .update(r.patch)
@@ -317,69 +353,20 @@ async function updateRequestJson(
   return { ok: false, error: "다른 컷 저장과 겹쳤어요. 잠시 뒤 다시 해 주세요." };
 }
 
-const cutSchema = z.object({ requestId: z.string().uuid(), no: z.number().int().min(1).max(20), done: z.boolean() });
-
-/** 찍은 컷 체크. */
-export async function toggleCutAction(input: z.infer<typeof cutSchema>): Promise<ShootResult> {
-  const parsed = cutSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
-  const auth = await authorize("shoot");
-  if (!auth.ok) return auth;
-  const service = createServiceClient();
-  const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
-    const cuts = ((req.cuts ?? []) as Cut[]).map((c) => (c.no === parsed.data.no ? { ...c, done: parsed.data.done } : c));
-    return { patch: { cuts: cuts as unknown as Json } };
-  });
-  if (!r.ok) return r;
-  revalidatePath("/shoot/uploads");
-  return { ok: true };
-}
-
-const skipCutSchema = z.object({ requestId: z.string().uuid(), no: z.number().int().min(1).max(20), skipped: z.boolean() });
-
-/**
- * 못 찍는 컷 빼기 / 되돌리기. 예전엔 한 컷이라도 못 찍으면 "다 올렸어요"를 못 눌러 칸 전체가 멈췄다(2026-11-04).
- * 찍는 사람이 현장에서 판단하니 촬영 권한으로 되고, 뺀 컷은 완성본 받기에 표시돼 사람이 본다.
- */
-export async function skipCutAction(input: z.infer<typeof skipCutSchema>): Promise<ShootResult> {
-  const parsed = skipCutSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
-  const auth = await authorize("shoot");
-  if (!auth.ok) return auth;
-  const service = createServiceClient();
-  const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
-    if (req.status !== "OPEN") return "이미 편집으로 넘어간 촬영 요청입니다.";
-    const cuts = (req.cuts ?? []) as Cut[];
-    if (parsed.data.skipped && !cuts.some((c) => c.no !== parsed.data.no && !c.skipped)) return "컷을 모두 뺄 수는 없어요. 찍지 못하면 촬영 기획 고르기에서 이 기획을 빼 주세요.";
-    const clips = (req.clips ?? []) as Clip[];
-    const old = parsed.data.skipped ? clips.filter((c) => c.cut === parsed.data.no) : [];
-    return {
-      patch: {
-        cuts: cuts.map((c) => (c.no === parsed.data.no ? { ...c, skipped: parsed.data.skipped, done: false } : c)) as unknown as Json,
-        ...(old.length ? { clips: clips.filter((c) => c.cut !== parsed.data.no) as unknown as Json } : {}),
-      },
-      after: async () => {
-        if (old.length) await service.storage.from("media").remove(old.map((c) => c.path));
-      },
-    };
-  });
-  if (!r.ok) return r;
-  revalidatePath("/shoot/uploads");
-  return { ok: true };
-}
-
 const MAX_CLIP_BYTES = 1024 * 1024 * 1024; // media 버킷 한도(0014)와 같게
 
 const clipSchema = z.object({
   requestId: z.string().uuid(),
-  cut: z.number().int().min(1).max(20),
   path: z.string().min(1).max(300),
   name: z.string().max(200),
   size: z.number().int().min(1).max(MAX_CLIP_BYTES),
   type: z.string().max(100),
 });
 
-/** 컷 촬영본 등록 — 브라우저가 media 버킷에 올린 뒤 부른다. 같은 컷에 다시 올리면 이전 파일은 지운다. */
+/**
+ * 촬영본 등록 — 브라우저가 media 버킷에 올린 뒤 부른다. 컷과 상관없이 맨 뒤에 붙는다(2026-11-10).
+ * 예전엔 컷마다 하나씩 올려야 해 컷 리스트대로 못 찍으면 편집을 못 했다. 같은 파일을 두 번 등록하면 한 번만 남긴다.
+ */
 export async function addClipAction(input: z.infer<typeof clipSchema>): Promise<ShootResult> {
   const parsed = clipSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -389,38 +376,32 @@ export async function addClipAction(input: z.infer<typeof clipSchema>): Promise<
   const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
     if (req.status !== "OPEN") return "이미 편집으로 넘어간 촬영 요청입니다.";
     if (!parsed.data.path.startsWith(`${auth.orgId}/${auth.userId}/shoot/${req.id}/`)) return "잘못된 파일 경로";
-    const cuts = (req.cuts ?? []) as Cut[];
-    if (!cuts.some((c) => c.no === parsed.data.cut)) return "없는 컷입니다.";
-    const clips = (req.clips ?? []) as Clip[];
-    const old = clips.filter((c) => c.cut === parsed.data.cut && c.path !== parsed.data.path);
+    const clips = ((req.clips ?? []) as Clip[]).slice().sort((a, b) => a.cut - b.cut);
+    if (clips.some((c) => c.path === parsed.data.path)) return { patch: {} };
+    if (clips.length >= MAX_CLIPS) return `촬영본은 ${MAX_CLIPS}개까지 올릴 수 있어요. 안 쓸 촬영본을 지워 주세요.`;
     const next: Clip[] = [
-      ...clips.filter((c) => c.cut !== parsed.data.cut),
+      ...clips,
       {
-        cut: parsed.data.cut,
+        cut: (clips.at(-1)?.cut ?? 0) + 1,
         path: parsed.data.path,
         name: parsed.data.name,
         size: parsed.data.size,
         type: parsed.data.type,
         uploaded_at: new Date().toISOString(),
         uploaded_by: auth.userId,
+        free: true,
       },
-    ].sort((a, b) => a.cut - b.cut);
-    const nextCuts = cuts.map((c) => (c.no === parsed.data.cut ? { ...c, done: true, skipped: false } : c));
-    return {
-      patch: { clips: next as unknown as Json, cuts: nextCuts as unknown as Json },
-      // 같은 컷의 예전 촬영본은 저장이 된 뒤에만 지운다
-      after: async () => {
-        if (old.length) await service.storage.from("media").remove(old.map((c) => c.path));
-      },
-    };
+    ];
+    return { patch: { clips: next as unknown as Json } };
   });
   if (!r.ok) return r;
   revalidatePath("/shoot/uploads");
   return { ok: true };
 }
 
-const removeSchema = z.object({ requestId: z.string().uuid(), cut: z.number().int().min(1).max(20) });
+const removeSchema = z.object({ requestId: z.string().uuid(), path: z.string().min(1).max(300) });
 
+/** 촬영본 지우기 — 남은 촬영본 번호를 1부터 다시 매긴다. */
 export async function removeClipAction(input: z.infer<typeof removeSchema>): Promise<ShootResult> {
   const parsed = removeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -429,14 +410,14 @@ export async function removeClipAction(input: z.infer<typeof removeSchema>): Pro
   const service = createServiceClient();
   const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
     if (req.status !== "OPEN") return "이미 편집으로 넘어간 촬영 요청입니다.";
-    const clips = (req.clips ?? []) as Clip[];
-    const old = clips.filter((c) => c.cut === parsed.data.cut);
-    // 촬영본을 지우면 "찍음" 표시도 푼다(예전엔 체크가 남아 올린 수와 어긋났다)
-    const cuts = ((req.cuts ?? []) as Cut[]).map((c) => (c.no === parsed.data.cut ? { ...c, done: false } : c));
+    const clips = ((req.clips ?? []) as Clip[]).slice().sort((a, b) => a.cut - b.cut);
+    const old = clips.filter((c) => c.path === parsed.data.path);
+    if (!old.length) return { patch: {} };
     return {
-      patch: { clips: clips.filter((c) => c.cut !== parsed.data.cut) as unknown as Json, cuts: cuts as unknown as Json },
+      patch: { clips: renumber(clips.filter((c) => c.path !== parsed.data.path)) as unknown as Json },
+      // 파일은 저장이 된 뒤에만 지운다
       after: async () => {
-        if (old.length) await service.storage.from("media").remove(old.map((c) => c.path));
+        await service.storage.from("media").remove(old.map((c) => c.path));
       },
     };
   });
@@ -445,9 +426,55 @@ export async function removeClipAction(input: z.infer<typeof removeSchema>): Pro
   return { ok: true };
 }
 
+const moveSchema = z.object({ requestId: z.string().uuid(), path: z.string().min(1).max(300), dir: z.enum(["up", "down"]) });
+
+/** 촬영본 순서 바꾸기 — 한 칸 위 · 아래로. 편집은 이 순서를 기본 흐름으로 본다. */
+export async function moveClipAction(input: z.infer<typeof moveSchema>): Promise<ShootResult> {
+  const parsed = moveSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const r = await updateRequestJson(service, parsed.data.requestId, auth.orgId, (req) => {
+    if (req.status !== "OPEN") return "이미 편집으로 넘어간 촬영 요청입니다.";
+    const clips = ((req.clips ?? []) as Clip[]).slice().sort((a, b) => a.cut - b.cut);
+    const i = clips.findIndex((c) => c.path === parsed.data.path);
+    const j = parsed.data.dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= clips.length) return { patch: {} };
+    [clips[i], clips[j]] = [clips[j], clips[i]];
+    return { patch: { clips: renumber(clips) as unknown as Json } };
+  });
+  if (!r.ok) return r;
+  revalidatePath("/shoot/uploads");
+  return { ok: true };
+}
+
+const briefSchema = z.object({ planId: z.string().uuid(), brief: z.string().trim().max(300) });
+
+/** 이 상품으로 하고 싶은 말(human_brief) — 촬영 화면에서 고친다. 편집 에이전트가 추천 대본보다 먼저 따른다. */
+export async function saveBriefAction(input: z.infer<typeof briefSchema>): Promise<ShootResult> {
+  const parsed = briefSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "하고 싶은 말은 300자까지 넣을 수 있어요." };
+  const auth = await authorize("shoot");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data: moved, error } = await service
+    .from("content_plans")
+    .update({ human_brief: parsed.data.brief || null })
+    .eq("id", parsed.data.planId)
+    .eq("organization_id", auth.orgId)
+    .eq("track", "A")
+    .neq("status", "PUBLISHED")
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!moved?.length) return { ok: false, error: "기획을 찾을 수 없거나 이미 올린 기획이에요." };
+  revalidatePath("/shoot/uploads");
+  return { ok: true };
+}
+
 const finishSchema = z.object({ requestId: z.string().uuid() });
 
-/** 다 올렸어요 → 편집 대기. 뺀 컷을 뺀 컷마다 촬영본이 있어야 한다. */
+/** 다 올렸어요 → 편집 대기. 촬영본이 하나 이상 있으면 된다. */
 export async function finishUploadAction(input: z.infer<typeof finishSchema>): Promise<ShootResult> {
   const parsed = finishSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -457,12 +484,8 @@ export async function finishUploadAction(input: z.infer<typeof finishSchema>): P
   const req = await loadRequest(service, parsed.data.requestId, auth.orgId);
   if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
   if (req.status !== "OPEN") return { ok: false, error: "이미 편집으로 넘어간 촬영 요청입니다." };
-  const cuts = (req.cuts ?? []) as Cut[];
   const clips = (req.clips ?? []) as Clip[];
-  const active = cuts.filter((c) => !c.skipped);
-  if (!active.length) return { ok: false, error: "남은 컷이 없어요. 뺀 컷을 되돌려 주세요." };
-  const missing = active.filter((c) => !clips.some((k) => k.cut === c.no)).map((c) => c.no);
-  if (missing.length) return { ok: false, error: `${missing.join(", ")}번 컷 촬영본이 아직 없어요.` };
+  if (!clips.length) return { ok: false, error: "촬영본을 하나 이상 올려 주세요." };
 
   const { data: moved, error } = await service
     .from("shoot_requests")
@@ -584,15 +607,16 @@ export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise
     });
     if (failed) return { ok: false, error: failed };
   }
+  // 고친 문구는 촬영본에 남긴다 — no = 촬영본 번호(편집 결과 segments의 cut). 촬영본이 컷 수보다 많아도 빠지지 않는다
   const fix = new Map(parsed.data.cuts.map((c) => [c.no, c]));
-  const cuts = ((req.cuts ?? []) as Cut[]).map((c) => {
-    const f = fix.get(c.no);
+  const clips = ((req.clips ?? []) as Clip[]).map((c) => {
+    const f = fix.get(c.cut);
     if (!f) return c;
     return { ...c, on_screen_override: f.onScreen.trim(), ...(f.subtitle === undefined ? {} : { subtitle_override: f.subtitle.trim() }) };
   });
   const { data: moved, error } = await service
     .from("shoot_requests")
-    .update({ cuts: cuts as unknown as Json, status: "UPLOADED", error: null })
+    .update({ clips: clips as unknown as Json, status: "UPLOADED", error: null })
     .eq("id", req.id)
     .in("status", ["EDITED", "FAILED"])
     .select("id");

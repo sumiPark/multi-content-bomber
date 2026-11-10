@@ -117,7 +117,9 @@ export function ShootIdeaList({ ideas, account, canManage }: { ideas: ShootIdeaD
 function IdeaDrawer({ idea, account, canManage, onClose }: { idea: ShootIdeaData; account: string; canManage: boolean; onClose: () => void }) {
   const { isPending, error, run, warning, setWarning } = useRun();
   const ref = useRef<HTMLDialogElement>(null);
-  const chose = "골랐어요. 찍을 컷 목록을 만들고 있어요.";
+  const chose = "골랐어요. 추천 대본을 만들고 있어요.";
+  // 이 상품으로 하고 싶은 말(human_brief) — 추천 대본과 편집이 먼저 따른다. 촬영 화면에서도 고칠 수 있다
+  const [brief, setBrief] = useState("");
   useEffect(() => {
     const d = ref.current;
     if (d && !d.open) d.showModal();
@@ -180,6 +182,18 @@ function IdeaDrawer({ idea, account, canManage, onClose }: { idea: ShootIdeaData
 
         {canManage && (
           <footer className="space-y-2 border-t px-5 py-3">
+            {idea.product && (
+              <label className="block space-y-1 text-xs font-semibold">
+                하고 싶은 말 <span className="font-normal text-muted-foreground">(선택)</span>
+                <Textarea
+                  value={brief}
+                  maxLength={300}
+                  rows={2}
+                  placeholder="이 상품으로 꼭 보여 주거나 말하고 싶은 것. 비우면 대본 초안과 상품 정보로 만들어요."
+                  onChange={(e) => setBrief(e.target.value)}
+                />
+              </label>
+            )}
             {error && <p className="text-xs text-risk">{error}</p>}
             <div className="flex items-center gap-2">
               <Button
@@ -187,9 +201,9 @@ function IdeaDrawer({ idea, account, canManage, onClose }: { idea: ShootIdeaData
                 disabled={isPending || !idea.product}
                 onClick={() =>
                   run(
-                    () => chooseIdeaAction({ planId: idea.id }),
+                    () => chooseIdeaAction({ planId: idea.id, brief: brief.trim() || null }),
                     chose,
-                    () => chooseIdeaAction({ planId: idea.id, force: true }),
+                    () => chooseIdeaAction({ planId: idea.id, brief: brief.trim() || null, force: true }),
                     onClose,
                   )
                 }
@@ -263,7 +277,7 @@ export function ShootProgressRow({ plan, canManage }: { plan: ShootProgressData;
         </span>
       </div>
       {plan.title && plan.product && <p className="text-xs text-muted-foreground">{plan.product.name}</p>}
-      {plan.humanBrief && <p className="text-xs">메모: {plan.humanBrief}</p>}
+      {plan.humanBrief && <p className="text-xs">하고 싶은 말: {plan.humanBrief}</p>}
       {plan.note && <p className="text-xs text-muted-foreground">{plan.note}</p>}
       {plan.error && (
         <details className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">
@@ -402,7 +416,8 @@ function WantedProduct({ accountId, onDone }: { accountId: string; onDone: () =>
             onChange={(e) => setBrief(e.target.value)}
             maxLength={300}
             rows={2}
-            placeholder="찍고 싶은 게 있으면 적어 주세요 (예: 손등에 덜어서 제형 보여 주기). 비워 두면 AI가 정해요."
+            aria-label="하고 싶은 말"
+            placeholder="하고 싶은 말이 있으면 적어 주세요 (예: 손등에 덜어서 제형 보여 주기). 비워 두면 AI가 정해요."
           />
           <Button
             size="sm"

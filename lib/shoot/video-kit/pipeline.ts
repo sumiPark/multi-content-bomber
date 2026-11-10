@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import { writeEditPlan, type EditClipInfo, type EditPlan, type VisualPolicy } from "@/lib/agents/edit-plan";
+import { writeEditPlan, type EditClipInfo, type EditPlan, type EditPlanContext, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { editKit, editKitAsset, ttsReading } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
@@ -58,6 +58,9 @@ export interface KitInput {
   visualPolicy?: VisualPolicy;
   humanHook?: string | null;
   humanThumbnail?: string | null;
+  // 직접 촬영: 관리자가 이 상품으로 하고 싶은 말(human_brief) → 컷 리스트의 추천 대본 차례로 따른다
+  brief?: string | null;
+  recommendedScript?: EditPlanContext["recommendedScript"];
   shotlistHook?: { spoken: string; on_screen: string } | null;
   shotlistThumbnail?: { title: string; sub?: string } | null;
   fixedHook?: string | null;
@@ -480,6 +483,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       sheets,
       humanHook: input.humanHook,
       humanThumbnail: input.humanThumbnail,
+      brief: input.brief,
+      recommendedScript: input.recommendedScript,
       shotlistHook: input.shotlistHook,
       shotlistThumbnail: input.shotlistThumbnail,
       fixedHook: input.fixedHook,

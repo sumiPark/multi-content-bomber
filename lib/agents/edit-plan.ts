@@ -131,7 +131,7 @@ export const editPlanSchema = z.object({
   visuals: z.array(visualSchema).describe("AI 이미지. 없으면 빈 배열"),
   warnings: z
     .array(z.string())
-    .describe("사람이 확인할 문제만 시각과 함께: 구성품이 아닌 소품, 주의사항과 부딪히는 장면, 근거가 약한 말. 편집 과정이나 지시 사항은 쓰지 않는다. 없으면 빈 배열"),
+    .describe("사람이 확인할 문제만 시각과 함께: 구성품이 아닌 소품, 주의사항과 부딪히는 장면, 근거가 약한 말, 관리자가 쓴 말을 고친 이유. 편집 과정이나 지시 사항은 쓰지 않는다. 없으면 빈 배열"),
 });
 export type EditPlan = z.infer<typeof editPlanSchema>;
 export type EditBeat = EditPlan["beats"][number];
@@ -163,6 +163,10 @@ export interface EditPlanContext {
   // 사람이 넣은 문구(영상별) → 계정에 저장한 문구 → 컷 리스트의 훅 차례로 쓴다
   humanHook?: string | null;
   humanThumbnail?: string | null;
+  // 직접 촬영: 관리자가 이 상품으로 하고 싶은 말(human_brief). 대본 내용의 첫 기준이다
+  brief?: string | null;
+  // 직접 촬영: 컷 리스트가 쓴 추천 대본. 촬영본이 이대로 찍혔다는 보장은 없어 참고로만 쓴다
+  recommendedScript?: { shot: string; onScreen: string; narration: string }[];
   shotlistHook?: { spoken: string; on_screen: string } | null;
   shotlistThumbnail?: { title: string; sub?: string } | null;
   fixedHook?: string | null;
@@ -182,6 +186,35 @@ export interface EditPlanContext {
 
 function bullets(lines: string[]): string {
   return lines.map((l) => `- ${l}`).join("\n");
+}
+
+/**
+ * 직접 촬영의 대본 기준(2026-11-10 사용자 결정): 관리자가 하고 싶은 말 → 추천 대본 → 상품 정보 차례.
+ * 촬영본은 컷 리스트와 상관없이 올라오니 추천 대본은 보이는 장면에 맞는 말만 가져다 쓴다.
+ */
+function shootScriptBlock(ctx: EditPlanContext): string {
+  const brief = ctx.brief?.trim();
+  const script = (ctx.recommendedScript ?? []).filter((c) => c.narration || c.onScreen || c.shot);
+  const order: string[] = [];
+  if (brief)
+    order.push(
+      `관리자가 이 상품으로 하고 싶은 말: "${brief}"\n   뜻은 그대로 두고 영상 길이와 계정 말투에 맞게 다듬어 대본의 중심으로 쓴다. 광고 문구 규칙(check_rules)에 어긋나는 표현이나 get_product_facts에 근거가 없는 효능 · 사실은 맞는 말로 고쳐 쓰고, 무엇을 왜 고쳤는지 warnings에 "하고 싶은 말: "으로 시작해 남긴다.`,
+    );
+  if (script.length)
+    order.push(
+      `찍기 전에 쓴 추천 대본(참고용). 촬영본이 이 순서 · 장면대로 찍혔다는 보장이 없다. 프레임에서 실제로 보이는 장면에 맞는 말만 가져다 쓰고, 보이지 않는 장면의 말은 버린다.\n${script.map((c, i) => `   ${i + 1}) ${JSON.stringify({ shot: c.shot, on_screen: c.onScreen, narration: c.narration })}`).join("\n")}`,
+    );
+  order.push("get_product_facts의 상품 정보.");
+  // 하고 싶은 말과 추천 대본의 흐름이 다르면 하고 싶은 말을 따른다(2026-11-10 사용자 결정)
+  const conflict =
+    brief && script.length
+      ? `\n하고 싶은 말과 추천 대본의 흐름(주제 · 말하는 순서 · 강조점 · 마지막 말)이 다르면 하고 싶은 말의 흐름으로 대본을 짠다. 추천 대본은 그 흐름에 맞는 말만 빌려 쓰고, 어긋나는 줄은 장면이 보여도 버린다. 컷 리스트의 훅 · 표지 문구도 하고 싶은 말과 방향이 다르면 쓰지 않는다.`
+      : "";
+  return `
+
+대본 내용 기준 (앞의 것을 먼저 따른다):
+${order.map((o, i) => `${i + 1}. ${o}`).join("\n")}${conflict}
+촬영본 개수와 순서는 사람이 정했다. 흐름은 촬영본 순서를 기본으로 하되, 첫 컷은 가장 궁금한 장면으로 당겨도 된다. 쓸 장면이 없는 촬영본은 빼도 된다.`;
 }
 
 function systemPrompt(ctx: EditPlanContext): string {
@@ -214,7 +247,7 @@ ${bullets(ctx.scriptLines)}` : ""}${auto ? `
 - [제품컷]은 실제 제품 사진을 움직인 것이다. 사진 속 장면을 실제 사용 과정처럼 설명하지 않는다.
 - [자사 촬영]은 이 상품을 직접 찍은 짧은 실제 영상이다. 소리는 없다. 손이 나와도 누군가 써 본 후기처럼 말하지 않고, 보이는 장면을 효과의 증거처럼 말하지 않는다.
 - [코드 모션]은 설명 도식이다. 도식의 숫자가 나오는 시각에 맞춰 그 말을 하게 구간을 고른다.
-- [스톡]은 상품과 무관한 분위기 영상이다. 공감이나 상황을 말하는 문장에만 쓰고, 스톡 장면에서 상품 기능을 말하지 않는다. 어울리는 문장이 있으면 한 번은 쓴다.` : ""}
+- [스톡]은 상품과 무관한 분위기 영상이다. 공감이나 상황을 말하는 문장에만 쓰고, 스톡 장면에서 상품 기능을 말하지 않는다. 어울리는 문장이 있으면 한 번은 쓴다.` : ""}${auto ? "" : shootScriptBlock(ctx)}
 
 글자 디자인 규칙:
 ${bullets(kit.look_rules)}
@@ -293,6 +326,6 @@ export async function writeEditPlan(ctx: EditPlanContext, opts: { maxSteps?: num
     service: ctx.service,
     readService: ctx.readService,
     planId: ctx.planId ?? null,
-    input: { product: facts.name, clips: ctx.clips.length, humanHook: ctx.humanHook ?? null, humanThumbnail: ctx.humanThumbnail ?? null },
+    input: { product: facts.name, clips: ctx.clips.length, humanHook: ctx.humanHook ?? null, humanThumbnail: ctx.humanThumbnail ?? null, brief: ctx.brief ?? null },
   });
 }
