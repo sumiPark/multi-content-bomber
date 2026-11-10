@@ -12,6 +12,7 @@ import type { CaptionAccount } from "@/lib/ai/prompts";
 import { triggerPublishRun } from "@/lib/github-dispatch";
 import type { ContentRule } from "@/lib/rules/check";
 import { createServiceClient } from "@/lib/supabase/service";
+import { itemThumbs, mediaItemKinds } from "@/lib/upload/media-kind";
 import type { Json } from "@/types/database";
 
 const SIGNED_URL_TTL_SECONDS = 600;
@@ -296,6 +297,8 @@ export async function generateCaptionsAction(
         description: parsed.data.description,
         presetInstructions,
         platforms: parsed.data.platforms,
+        // analyzePaths는 mediaPaths와 같은 순서(영상 장만 첫 프레임으로 바꿈)라 원본 경로로 종류를 가른다
+        itemKinds: mediaItemKinds(parsed.data.mediaPaths),
         ...context,
       },
     ));
@@ -550,11 +553,11 @@ export async function regenerateCaptionsAction(
   let captions: Captions;
   let reviewNotes: string[];
   try {
-    const context = await loadCaptionContext(
-      supabase,
-      parsed.data.accountIds,
-      parsed.data.platforms,
-    );
+    const [context, { data: mediaRow }] = await Promise.all([
+      loadCaptionContext(supabase, parsed.data.accountIds, parsed.data.platforms),
+      // 다시 쓰기 입력엔 원본 경로가 없어 콘텐츠에서 읽는다 — 섞인 영상 장을 알려 주려고
+      supabase.from("contents").select("media_urls").eq("id", parsed.data.contentId).maybeSingle(),
+    ]);
     ({ captions, reviewNotes } = await generateCaptions(
       signed.map((s) => s.signedUrl as string),
       {
@@ -563,6 +566,7 @@ export async function regenerateCaptionsAction(
         presetInstructions,
         platforms: parsed.data.platforms,
         previousCaptions: parsed.data.previousCaptions,
+        itemKinds: mediaRow ? mediaItemKinds(mediaRow.media_urls) : undefined,
         ...context,
       },
     ));
@@ -722,6 +726,7 @@ export async function deleteContentsAction(
     const rest = { ...meta };
     delete rest.thumbnail_path;
     delete rest.cover_path;
+    delete rest.item_thumbs;
     const { data: erased, error: eraseError } = await supabase
       .from("contents")
       .update({ ai_captions: null, draft_saved_at: null, metadata: { ...rest, erased_at: new Date().toISOString() } as Json })
@@ -758,7 +763,8 @@ export async function deleteContentsAction(
 
   const pathsOf = (t: { media_urls: string[]; metadata: unknown }) => {
     const meta = (t.metadata && typeof t.metadata === "object" ? t.metadata : {}) as Record<string, unknown>;
-    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path, meta.ig_cover_path].filter((x): x is string => typeof x === "string" && !!x);
+    // item_thumbs = 사진 게시물에 섞인 영상 장의 첫 프레임(lib/upload/media-kind.ts)
+    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path, meta.ig_cover_path, ...Object.values(itemThumbs(meta))].filter((x): x is string => typeof x === "string" && !!x);
   };
   const candidatePaths = Array.from(new Set(targets.filter((t) => deletedIds.has(t.id)).flatMap(pathsOf)));
 

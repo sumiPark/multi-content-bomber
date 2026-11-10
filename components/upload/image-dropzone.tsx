@@ -3,24 +3,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDropzone, type FileRejection } from "react-dropzone";
 import { Reorder } from "framer-motion";
-import { GripVertical, ImageUp, XIcon } from "lucide-react";
+import { Film, GripVertical, ImageUp, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { isVideoFile } from "@/lib/upload/media-kind";
 import { previewUrlOf, releasePreviewUrl } from "@/lib/upload/preview-url";
 
-const ACCEPT = {
+const IMAGE_ACCEPT = {
   "image/jpeg": [".jpg", ".jpeg"],
   "image/png": [".png"],
   "image/webp": [".webp"],
 };
+// 인스타 캐러셀은 사진 · 영상을 섞을 수 있다(2026-11-10) — allowVideo일 때만 영상도 받는다.
+const VIDEO_ACCEPT = {
+  "video/mp4": [".mp4"],
+  "video/quicktime": [".mov"],
+};
 const MAX_FILES = 10;
 const MAX_SIZE = 25 * 1024 * 1024;
+// 캐러셀 안 영상은 60초까지라 300MB(인스타가 안정적으로 받는 크기)면 충분하다.
+const MAX_VIDEO_SIZE = 300 * 1024 * 1024;
 
 const REJECT_MESSAGES: Record<string, string> = {
   "file-invalid-type": "지원하지 않는 형식입니다. JPG, PNG, WEBP만 가능합니다.",
   "file-too-large": "파일이 너무 큽니다. 최대 25MB까지 업로드할 수 있습니다.",
   "too-many-files": `최대 ${MAX_FILES}장까지 업로드할 수 있습니다.`,
 };
+const VIDEO_REJECT_MESSAGES: Record<string, string> = {
+  "file-invalid-type": "지원하지 않는 형식입니다. JPG, PNG, WEBP, MP4, MOV만 가능합니다.",
+  "file-too-large": "파일이 너무 큽니다. 사진은 25MB, 영상은 300MB까지 업로드할 수 있습니다.",
+};
+
+function formatDuration(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
 
 interface SelectedImage {
   id: string;
@@ -33,13 +50,17 @@ interface ImageDropzoneProps {
   // 이미 고른 파일 — 단계를 오가며 다시 그려져도 고른 사진이 사라지지 않게(2026-11-04).
   // 처음 그릴 때만 읽는다.
   initialFiles?: File[];
+  // 영상(MP4 · MOV)도 받는다 — 인스타 캐러셀 전용(사진 · 영상 섞기).
+  allowVideo?: boolean;
 }
 
-export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
+export function ImageDropzone({ onChange, initialFiles, allowVideo = false }: ImageDropzoneProps) {
   const [files, setFiles] = useState<SelectedImage[]>(() =>
     (initialFiles ?? []).map((file) => ({ id: crypto.randomUUID(), file, previewUrl: previewUrlOf(file) })),
   );
   const [error, setError] = useState<string | null>(null);
+  // 영상 장의 길이(초) — 미리보기 영상이 메타데이터를 읽으면 채운다.
+  const [durations, setDurations] = useState<Record<string, number>>({});
   const filesRef = useRef(files);
   filesRef.current = files;
 
@@ -57,7 +78,11 @@ export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
 
       if (rejected.length > 0) {
         const reason = rejected[0].errors[0];
-        setError(REJECT_MESSAGES[reason.code] ?? reason.message);
+        setError(
+          (allowVideo ? VIDEO_REJECT_MESSAGES[reason.code] : undefined) ??
+            REJECT_MESSAGES[reason.code] ??
+            reason.message,
+        );
         return;
       }
 
@@ -75,7 +100,7 @@ export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
 
       setFiles((prev) => [...prev, ...additions]);
     },
-    [],
+    [allowVideo],
   );
 
   const removeFile = (id: string) => {
@@ -91,8 +116,15 @@ export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: ACCEPT,
-    maxSize: MAX_SIZE,
+    accept: allowVideo ? { ...IMAGE_ACCEPT, ...VIDEO_ACCEPT } : IMAGE_ACCEPT,
+    // 영상을 받을 땐 크기를 종류별로 따로 본다(사진 25MB · 영상 300MB).
+    maxSize: allowVideo ? MAX_VIDEO_SIZE : MAX_SIZE,
+    validator: allowVideo
+      ? (file) =>
+          !isVideoFile(file) && file.size > MAX_SIZE
+            ? { code: "file-too-large", message: VIDEO_REJECT_MESSAGES["file-too-large"] }
+            : null
+      : undefined,
     multiple: true,
     disabled: files.length >= MAX_FILES,
   });
@@ -118,10 +150,14 @@ export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
             ? `${MAX_FILES}장 모두 채웠습니다`
             : isDragActive
               ? "여기에 놓으세요"
-              : "이미지를 드래그하거나 클릭하여 업로드"}
+              : allowVideo
+                ? "사진 · 영상을 드래그하거나 클릭하여 업로드"
+                : "이미지를 드래그하거나 클릭하여 업로드"}
         </p>
         <p className="mt-1 text-xs text-muted-foreground">
-          JPG / PNG / WEBP · 최대 {MAX_FILES}장 · 파일당 25MB 이하
+          {allowVideo
+            ? `JPG / PNG / WEBP / MP4 / MOV · 최대 ${MAX_FILES}개 · 사진 25MB · 영상 300MB 이하`
+            : `JPG / PNG / WEBP · 최대 ${MAX_FILES}장 · 파일당 25MB 이하`}
         </p>
       </div>
 
@@ -135,7 +171,7 @@ export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">
-              선택된 이미지 ({files.length}/{MAX_FILES}) ·{" "}
+              {allowVideo ? "선택한 사진 · 영상" : "선택된 이미지"} ({files.length}/{MAX_FILES}) ·{" "}
               <span className="text-muted-foreground">
                 드래그로 순서 변경
               </span>
@@ -159,12 +195,36 @@ export function ImageDropzone({ onChange, initialFiles }: ImageDropzoneProps) {
                 whileDrag={{ scale: 1.05, zIndex: 10 }}
                 className="group relative aspect-square cursor-grab overflow-hidden rounded-md border bg-muted active:cursor-grabbing"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={item.previewUrl}
-                  alt={item.file.name}
-                  className="size-full object-cover pointer-events-none"
-                />
+                {isVideoFile(item.file) ? (
+                  <>
+                    {/* 첫 프레임을 보여 주려고 #t=0.1 — 재생은 하지 않는다 */}
+                    <video
+                      src={`${item.previewUrl}#t=0.1`}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      aria-label={item.file.name}
+                      onLoadedMetadata={(e) => {
+                        const d = e.currentTarget.duration;
+                        if (Number.isFinite(d)) {
+                          setDurations((prev) => ({ ...prev, [item.id]: d }));
+                        }
+                      }}
+                      className="size-full object-cover pointer-events-none"
+                    />
+                    <span className="absolute right-1 bottom-1 inline-flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white tabular-nums">
+                      <Film className="size-3" />
+                      {durations[item.id] !== undefined ? formatDuration(durations[item.id]) : "영상"}
+                    </span>
+                  </>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={item.previewUrl}
+                    alt={item.file.name}
+                    className="size-full object-cover pointer-events-none"
+                  />
+                )}
                 <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-xs font-medium text-white">
                   {index + 1}
                 </span>

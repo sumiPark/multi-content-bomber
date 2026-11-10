@@ -12,6 +12,7 @@ import {
   type PublishContext,
   type RefreshedTokens,
 } from "@/lib/platforms";
+import { mediaItemKinds } from "@/lib/upload/media-kind";
 import type { Json } from "@/types/database";
 
 // publish_jobs.status_history는 jsonb. 워커가 쓰는 항목 형태.
@@ -378,6 +379,7 @@ async function runPublish(
     ...buildPublishContext(content, account.platform),
     platformAccountId: account.platform_account_id,
     mediaSignedUrls,
+    mediaItemKinds: mediaItemKinds(content.media_urls),
     coverTimestampMs: cover.ms,
     coverSignedUrl,
     instagramCoverUrl,

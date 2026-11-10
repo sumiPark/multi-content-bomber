@@ -290,6 +290,15 @@ export const instagram: PlatformAdapter = {
     const caption = buildInstagramCaption(ctx);
     // 영상은 media_urls가 항상 1개(DB 제약). 2장 이상 이미지 = 캐러셀.
     const isCarousel = ctx.mediaType !== "VIDEO" && signedUrls.length > 1;
+    // 장마다 사진/영상 — 사진 게시물에도 영상이 섞일 수 있다(2026-11-10, lib/upload/media-kind.ts).
+    const itemKinds = signedUrls.map((_, i) => ctx.mediaItemKinds?.[i] ?? ctx.mediaType);
+    if (!isCarousel && ctx.mediaType === "IMAGE" && itemKinds[0] === "VIDEO") {
+      // 마법사가 막지만 DB를 직접 읽는 워커에서도 막는다 — 영상 1개를 사진으로 만들면 늘 ERROR.
+      throw new PublishError(
+        "Instagram 사진 게시물에 영상 1개만 있어요. 영상 1개는 '영상 1개(릴스)'로 올려 주세요.",
+        { permanent: true },
+      );
+    }
     const fingerprint = buildFingerprint(ctx, caption);
 
     // 0. 크기 확인 — 너무 큰 영상은 IG가 ERROR도 안 주고 컨테이너를 IN_PROGRESS에
@@ -318,6 +327,7 @@ export const instagram: PlatformAdapter = {
             ctx.platformAccountId,
             accessToken,
             signedUrls,
+            itemKinds,
             caption,
             ctx.deadlineAt,
           )
@@ -455,11 +465,14 @@ async function createMediaContainer(
 
 // 캐러셀: 자식 컨테이너 N개 → 전부 준비될 때까지 대기 → 부모 컨테이너 id 반환.
 // 자식 생성을 병렬로 던지지 않는 이유: IG는 계정 단위 호출 한도(code 4/17/32)가 빡세서
-// 10장을 동시에 쏘면 rate limit에 걸리기 쉽다. 순차 생성해도 자식은 이미지라 금방 끝난다.
+// 10장을 동시에 쏘면 rate limit에 걸리기 쉽다. 순차 생성해도 사진 자식은 금방 끝난다.
+// 영상 자식(사진 · 영상 섞인 캐러셀, 2026-11-10)은 media_type=VIDEO + video_url로 만들고,
+// IG가 인코딩하므로 릴스처럼 파일 크기에 비례해 기다린다.
 async function createCarouselContainer(
   igUserId: string,
   accessToken: string,
   signedUrls: string[],
+  itemKinds: ("IMAGE" | "VIDEO")[],
   caption: string,
   deadlineAt: number | null,
 ): Promise<string> {
@@ -474,20 +487,41 @@ async function createCarouselContainer(
     );
   }
 
-  const childIds: string[] = [];
-  for (const url of signedUrls) {
-    childIds.push(
-      await createMediaContainer(igUserId, accessToken, {
-        image_url: url,
-        is_carousel_item: "true",
-      }),
-    );
+  const children: { id: string; maxWaitMs: number }[] = [];
+  for (const [i, url] of signedUrls.entries()) {
+    if (itemKinds[i] === "VIDEO") {
+      const sizeBytes = await probeContentLength(url);
+      if (sizeBytes && sizeBytes > INSTAGRAM_MAX_VIDEO_BYTES) {
+        const mb = (n: number) => Math.round(n / (1024 * 1024));
+        throw new PublishError(
+          `Instagram 캐러셀 ${i + 1}번째 영상이 너무 큽니다 (${mb(sizeBytes)}MB, 최대 ${mb(INSTAGRAM_MAX_VIDEO_BYTES)}MB).`,
+          { permanent: true },
+        );
+      }
+      children.push({
+        id: await createMediaContainer(igUserId, accessToken, {
+          media_type: "VIDEO",
+          video_url: url,
+          is_carousel_item: "true",
+        }),
+        maxWaitMs: pollBudgetMs(sizeBytes),
+      });
+    } else {
+      children.push({
+        id: await createMediaContainer(igUserId, accessToken, {
+          image_url: url,
+          is_carousel_item: "true",
+        }),
+        maxWaitMs: CHILD_POLL_MAX_MS,
+      });
+    }
   }
+  const childIds = children.map((c) => c.id);
 
   // 자식이 FINISHED가 아닌 채로 부모를 만들면 IG가 부모 컨테이너를 ERROR로 떨군다.
-  for (const childId of childIds) {
-    await pollContainerReady(childId, accessToken, {
-      maxWaitMs: CHILD_POLL_MAX_MS,
+  for (const child of children) {
+    await pollContainerReady(child.id, accessToken, {
+      maxWaitMs: child.maxWaitMs,
       deadlineAt,
     });
   }

@@ -7,6 +7,7 @@ import {
   type ContentItem,
 } from "@/components/contents/contents-library";
 import { captionsSchema } from "@/lib/ai/caption-generator";
+import { contentThumbPath } from "@/lib/upload/media-kind";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 
 const THUMB_TTL_SECONDS = 3600;
@@ -64,13 +65,11 @@ export default async function ContentsPage() {
         parsed.data.tiktok?.caption ??
         "")
       : "";
-    // 영상은 파일 대신 첫 프레임 썸네일(metadata.thumbnail_path)을 보여준다.
-    const thumb = (c.metadata as { thumbnail_path?: unknown } | null)?.thumbnail_path;
     return {
       id: c.id,
       media_urls: c.media_urls,
-      thumb_path:
-        c.media_type === "VIDEO" && typeof thumb === "string" ? thumb : undefined,
+      // 영상은 파일 대신 첫 프레임 썸네일 — 사진 게시물의 첫 장이 영상이어도 그 첫 프레임(item_thumbs)
+      thumb_path: contentThumbPath(c),
       caption_preview: preview,
       // 목록의 시각 = 임시 저장한 시각
       updated_at: c.draft_saved_at ?? c.updated_at,

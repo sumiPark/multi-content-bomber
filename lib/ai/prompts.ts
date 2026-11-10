@@ -56,13 +56,20 @@ const OTHER_PLATFORM_PROMPTS: Record<Exclude<Platform, "INSTAGRAM">, string> = {
 - hashtags (최대 5개): caption 본문에 사용한 해시태그를 # 포함 배열로 반환. 트렌드 1~2 + 주제 2~3. 짧은 태그 (긴 태그는 caption 글자수만 잡아먹음).`,
 };
 
-function instagramPrompt(mediaType: MediaType): string {
+// mixed = 사진 게시물에 영상이 섞인 캐러셀(2026-11-10, lib/upload/media-kind.ts). 섞이지 않으면 전과 같은 문장이다.
+function instagramPrompt(mediaType: MediaType, mixed: boolean): string {
   const reel = mediaType === "VIDEO";
-  return `Instagram ${reel ? "릴스" : "사진 게시물"}
+  return `Instagram ${reel ? "릴스" : mixed ? "사진 · 영상 캐러셀" : "사진 게시물"}
 이 캡션의 일: ${
     reel
       ? "릴스는 영상이 첫 2초에 이미 후킹한다. 캡션은 두 번째 훅이 아니다. 영상과 경쟁하지 말고 요청, 그 요청이 말이 되게 하는 맥락, 사람들이 검색하는 말을 담는다."
-      : "사진은 캡션이 곧 콘텐츠다. 첫 문장이 훅이다. 구체적이고 짧게 쓰고, 문장 중간이 아니라 궁금한 자리에서 끊는다."
+      : mixed
+        ? "피드에는 첫 장과 캡션 첫 문장이 같이 보인다. 첫 문장이 훅이다. 구체적이고 짧게 쓰고, 문장 중간이 아니라 궁금한 자리에서 끊는다. 사진만 있는 게시물처럼 쓰지 않는다. 장 수 · 사진 · 영상 구성은 [게시물 구성]과 맞게 말한다."
+        : "사진은 캡션이 곧 콘텐츠다. 첫 문장이 훅이다. 구체적이고 짧게 쓰고, 문장 중간이 아니라 궁금한 자리에서 끊는다."
+  }${
+    mixed
+      ? "\n영상 장은 첫 장면 이미지만 받는다. 첫 장면에 보이지 않는 영상 속 동작 · 소리 · 말 · 결과는 설명에 없으면 쓰지 않는다. 보는 사람은 영상 전체를 보므로 캡션에 '첫 장면'이라는 말을 쓰지 않고 그냥 '영상'이라고 한다."
+      : ""
   }
 
 caption 모양 (600자 안쪽. 2200자 한도를 채우지 않는다):
@@ -113,10 +120,17 @@ function accountPrompt(accounts: CaptionAccount[]): string {
   return `\n\n[이 Instagram 캡션이 올라갈 계정]\n${list}${shared}${details}`;
 }
 
-export function buildCaptionSystemPrompt(platforms: Platform[], mediaType: MediaType, accounts: CaptionAccount[]): string {
+export function buildCaptionSystemPrompt(
+  platforms: Platform[],
+  mediaType: MediaType,
+  accounts: CaptionAccount[],
+  mixedCarousel = false,
+): string {
   const hasOtherPlatform = platforms.some((p) => p !== "INSTAGRAM");
   const guides = platforms.map((p) =>
-    p === "INSTAGRAM" ? instagramPrompt(mediaType) + accountPrompt(accounts) : OTHER_PLATFORM_PROMPTS[p],
+    p === "INSTAGRAM"
+      ? instagramPrompt(mediaType, mixedCarousel) + accountPrompt(accounts)
+      : OTHER_PLATFORM_PROMPTS[p],
   );
   return [
     COMMON_PROMPT,

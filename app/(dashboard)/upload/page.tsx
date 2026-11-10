@@ -3,6 +3,7 @@ import { UploadWizard } from "@/components/upload/wizard/upload-wizard";
 import { captionsSchema } from "@/lib/ai/caption-generator";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { parseDraftState, type WizardDraft } from "@/lib/upload/draft";
+import { itemThumbs } from "@/lib/upload/media-kind";
 
 const DRAFT_THUMB_TTL_SECONDS = 600;
 
@@ -49,7 +50,8 @@ async function loadDraft(
         ? typeof thumb === "string"
           ? [thumb]
           : []
-        : data.media_urls;
+        : // 사진 게시물에 섞인 영상 장은 첫 프레임(item_thumbs)으로 분석한다
+          data.media_urls.map((p) => itemThumbs(metadata)[p] ?? p);
   }
 
   const { data: signed } =

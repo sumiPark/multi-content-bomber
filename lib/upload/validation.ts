@@ -1,4 +1,9 @@
 import type { Platform } from "@/lib/platforms";
+import {
+  CAROUSEL_VIDEO_MAX_SEC,
+  CAROUSEL_VIDEO_MIN_SEC,
+  isVideoFile,
+} from "@/lib/upload/media-kind";
 
 export type MediaType = "IMAGE" | "VIDEO";
 
@@ -149,9 +154,47 @@ function evaluatePlatform(
     });
   }
 
+  // 사진 게시물에 섞인 영상(인스타 캐러셀, 2026-11-10). 사진만 있는 게시물은 아래 검사가 전과 같다.
+  const carouselVideos =
+    mediaType === "IMAGE" ? items.filter((i) => isVideoFile(i.file)) : [];
+  if (carouselVideos.length > 0 && items.length === 1) {
+    issues.push({
+      severity: "error",
+      platform,
+      code: "single_video_in_photo",
+      message: "영상 1개만 올리려면 '영상 1개(릴스)'를 골라 주세요. 사진 칸의 영상은 사진 · 영상을 2개 이상 묶을 때만 쓸 수 있어요.",
+    });
+  }
+  if (carouselVideos.length > 0 && platform === "INSTAGRAM") {
+    const ratios = items.map((i) => ratio(i.width, i.height));
+    const first = ratios[0];
+    if (
+      first != null &&
+      ratios.some((r) => r != null && Math.abs(r - first) > ASPECT_TOLERANCE)
+    ) {
+      issues.push({
+        severity: "warning",
+        platform,
+        code: "carousel_aspect_mixed",
+        message: `${topic} 캐러셀의 나머지 장을 첫 장 비율에 맞춰 잘라요. 비율이 다른 사진 · 영상이 있어요.`,
+      });
+    }
+    if (carouselVideos.some((v) => {
+      const r = ratio(v.width, v.height);
+      return r != null && r < 4 / 5 - ASPECT_TOLERANCE;
+    })) {
+      issues.push({
+        severity: "warning",
+        platform,
+        code: "carousel_video_tall",
+        message: `${topic} 캐러셀을 4:5보다 길게 보여 주지 않아요. 세로 영상(9:16)은 위아래가 잘릴 수 있어요.`,
+      });
+    }
+  }
+
   for (const item of items) {
-    const allowedMimes =
-      mediaType === "IMAGE" ? c.imageMimes : c.videoMimes;
+    const itemIsVideo = mediaType === "VIDEO" || isVideoFile(item.file);
+    const allowedMimes = itemIsVideo ? c.videoMimes : c.imageMimes;
     if (allowedMimes.length > 0 && !allowedMimes.includes(item.file.type)) {
       issues.push({
         severity: "error",
@@ -184,6 +227,23 @@ function evaluatePlatform(
         platform,
         code: "file_too_large",
         message: `${name} 최대 파일 크기 ${maxMB}MB를 넘어요 (${item.file.name}: ${fileMB}MB).`,
+      });
+    }
+
+    if (
+      mediaType === "IMAGE" &&
+      itemIsVideo &&
+      c.supportsImage &&
+      item.durationSeconds !== undefined &&
+      (item.durationSeconds < CAROUSEL_VIDEO_MIN_SEC ||
+        item.durationSeconds > CAROUSEL_VIDEO_MAX_SEC)
+    ) {
+      const dur = Math.round(item.durationSeconds);
+      issues.push({
+        severity: "error",
+        platform,
+        code: "carousel_video_length",
+        message: `${name} 캐러셀 안 영상은 ${CAROUSEL_VIDEO_MIN_SEC}~${CAROUSEL_VIDEO_MAX_SEC}초만 올릴 수 있어요 (${item.file.name}: ${dur}초).`,
       });
     }
 

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { PostingsPage, type DisplayStatus } from "@/components/postings/postings-page";
+import { contentThumbPath } from "@/lib/upload/media-kind";
 
 // 클라이언트에서 필터/검색/일괄 선택을 다루므로, 서버에서는 한 번에 충분히 큰
 // 윈도우(최근 90일, soft-delete 제외, 최신 200건)를 가져와 클라이언트 보드로 넘긴다.
@@ -93,16 +94,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
     );
   }
 
-  // 썸네일용 signed URL: 영상은 metadata.thumbnail_path, 이미지는 media_urls[0].
-  // 한 번에 묶어서 createSignedUrls 호출 — N+1 방지.
+  // 썸네일용 signed URL: 영상은 metadata.thumbnail_path, 이미지는 media_urls[0]
+  // (첫 장이 영상이면 그 첫 프레임, lib/upload/media-kind.ts). 한 번에 묶어서 createSignedUrls 호출 — N+1 방지.
   const thumbPaths = new Set<string>();
   for (const r of rows ?? []) {
-    const meta =
-      (r.contents.metadata as { thumbnail_path?: string } | null) ?? null;
-    const path =
-      r.contents.media_type === "VIDEO"
-        ? meta?.thumbnail_path
-        : r.contents.media_urls?.[0];
+    const path = contentThumbPath(r.contents);
     if (path) thumbPaths.add(path);
   }
   const thumbsByPath = new Map<string, string>();
@@ -117,12 +113,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
 
   // 클라이언트로 넘길 형태로 평탄화.
   const postings = (rows ?? []).map((r) => {
-    const meta =
-      (r.contents.metadata as { thumbnail_path?: string } | null) ?? null;
-    const thumbPath =
-      r.contents.media_type === "VIDEO"
-        ? meta?.thumbnail_path
-        : r.contents.media_urls?.[0];
+    const thumbPath = contentThumbPath(r.contents);
     return {
       id: r.id,
       contentId: r.content_id,

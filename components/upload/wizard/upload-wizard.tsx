@@ -47,6 +47,7 @@ import type { Captions } from "@/lib/ai/caption-generator";
 import type { Platform } from "@/lib/platforms";
 import type { WizardDraft, WizardDraftState } from "@/lib/upload/draft";
 import { uploadMedia, uploadOne } from "@/lib/storage/upload";
+import { isVideoFile } from "@/lib/upload/media-kind";
 import {
   extractImageMeta,
   extractVideoMeta,
@@ -309,6 +310,16 @@ export function UploadWizard({
         const items: MediaItem[] = await Promise.all(
           files.map(async (f) => {
             try {
+              // 사진 칸에 섞인 영상(인스타 캐러셀)은 길이까지 읽어 3~60초를 검사한다
+              if (isVideoFile(f)) {
+                const meta = await extractVideoMeta(f);
+                return {
+                  file: f,
+                  width: meta.width,
+                  height: meta.height,
+                  durationSeconds: meta.durationSeconds,
+                };
+              }
               const meta = await extractImageMeta(f);
               return { file: f, width: meta.width, height: meta.height };
             } catch {
@@ -454,9 +465,25 @@ export function UploadWizard({
       if (mediaType === "IMAGE") {
         const uploaded = await uploadMedia({ files, organizationId, userId });
         const paths = uploaded.map((u) => u.path);
+        // 섞인 영상 장은 첫 프레임을 따로 올려 AI 분석 · 썸네일에 쓴다(이미지 분석은 영상을 못 읽는다).
+        // 영상 경로 → 첫 프레임 경로는 metadata.item_thumbs(lib/upload/media-kind.ts)에 남긴다.
+        const itemThumbs: Record<string, string> = {};
+        await Promise.all(
+          files.map(async (f, i) => {
+            if (!isVideoFile(f)) return;
+            const frame = await extractFirstFrame(f);
+            const thumb = await uploadOne({
+              file: frame.blob,
+              contentType: "image/jpeg",
+              organizationId,
+              userId,
+            });
+            itemThumbs[paths[i]] = thumb.path;
+          }),
+        );
         setMediaPaths(paths);
-        setAnalyzePaths(paths);
-        setMediaMetadata({});
+        setAnalyzePaths(paths.map((p) => itemThumbs[p] ?? p));
+        setMediaMetadata(Object.keys(itemThumbs).length > 0 ? { item_thumbs: itemThumbs } : {});
       } else if (videoFile) {
         // 검증은 이미 useEffect에서 정확한 메타데이터로 끝남.
         // 여기서는 thumbnail 추출 + 업로드만.
@@ -1457,7 +1484,7 @@ function Step2Media({
           )}
         </div>
         {mediaType === "IMAGE" ? (
-          <ImageDropzone onChange={onChangeFiles} initialFiles={files} />
+          <ImageDropzone onChange={onChangeFiles} initialFiles={files} allowVideo />
         ) : (
           <VideoDropzone
             onChange={onChangeVideo}

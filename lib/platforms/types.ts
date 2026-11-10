@@ -34,6 +34,9 @@ export interface PublishContext {
   mediaType: "VIDEO" | "IMAGE";
   // Storage 단기 서명 URL 배열. 어댑터가 cURL/fetch로 가져갈 수 있는 형태.
   mediaSignedUrls: string[];
+  // mediaSignedUrls와 같은 순서로 장마다 사진/영상. 사진 게시물(IMAGE)에도 인스타 캐러셀용
+  // 영상이 섞일 수 있다(lib/upload/media-kind.ts). 없으면 mediaType으로 전부 같은 종류.
+  mediaItemKinds?: ("IMAGE" | "VIDEO")[];
   // 플랫폼별 캡션 필드를 워커가 풀어서 전달. YouTube=title/description/tags,
   // Instagram/TikTok=caption/hashtags. 불필요 필드는 null/빈 배열.
   title: string | null;

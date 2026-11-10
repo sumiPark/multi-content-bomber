@@ -4,6 +4,7 @@ import { getOpenAI, OPENAI_TEXT_MODEL } from "@/lib/openai";
 import type { Platform } from "@/lib/platforms";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
+import type { MediaItemKind } from "@/lib/upload/media-kind";
 import {
   checkInstagramCaption,
   cleanInstagramHashtags,
@@ -125,6 +126,11 @@ interface GenerateCaptionsOptions {
   instagramAccounts?: CaptionAccount[];
   /** 광고 문구 규칙(0026). 어떤 상품인지 모르니 모든 상품 공통(ALL) 규칙만 검사한다. */
   contentRules?: ContentRule[];
+  /**
+   * imageDataUrls와 같은 순서로 장마다 사진/영상. 사진 게시물에 섞인 영상(인스타 캐러셀)은
+   * 첫 프레임 이미지로 넘어오므로, 어느 장이 영상인지 알려 사진 게시물처럼 쓰지 않게 한다.
+   */
+  itemKinds?: MediaItemKind[];
 }
 
 export interface GenerateCaptionsOutput {
@@ -156,8 +162,22 @@ export async function generateCaptions(
     )
     .join(", ");
 
-  const baseInstruction =
-    imageDataUrls.length > 1
+  // 장 순서와 종류가 맞을 때만 섞인 캐러셀로 본다 — 어긋나면 잘못된 구성을 알리느니 전처럼 쓴다.
+  const kinds =
+    options.mediaType === "IMAGE" && options.itemKinds?.length === imageDataUrls.length
+      ? options.itemKinds
+      : null;
+  const mixedCarousel = !!kinds?.includes("VIDEO");
+  const videoCount = kinds?.filter((k) => k === "VIDEO").length ?? 0;
+  const composition = mixedCarousel
+    ? `[게시물 구성]\n사진 ${imageDataUrls.length - videoCount}장 · 영상 ${videoCount}개를 넘겨 보는 캐러셀\n${kinds!
+        .map((k, i) => `${i + 1}번째: ${k === "VIDEO" ? "영상(첫 장면 이미지)" : "사진"}`)
+        .join("\n")}`
+    : null;
+
+  const baseInstruction = mixedCarousel
+    ? "이 사진 · 영상들의 흐름과 관계를 분석해 위 형식으로 캡션을 생성해주세요. 영상은 첫 장면 이미지만 첨부했어요."
+    : imageDataUrls.length > 1
       ? "이 이미지들의 흐름과 관계를 분석해 위 형식으로 캡션을 생성해주세요."
       : "이 이미지를 분석해 위 형식으로 캡션을 생성해주세요.";
 
@@ -167,6 +187,7 @@ export async function generateCaptions(
     presetInstructions ? `[캡션 스타일 가이드]\n${presetInstructions}` : null,
     description ? `[사용자 입력 기본 설명]\n${description}` : null,
     `[게시 대상 플랫폼]\n${platformLabels}`,
+    composition,
     baseInstruction,
   ]
     .filter(Boolean)
@@ -181,6 +202,7 @@ export async function generateCaptions(
         platforms,
         options.mediaType,
         options.instagramAccounts ?? [],
+        mixedCarousel,
       ),
     },
     {
