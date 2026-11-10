@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 export const SCOPE_LABEL: Record<string, string> = {
   ALL: "전체",
   FRUIT: "과일",
+  FOOD: "식품",
   COSMETIC: "화장품",
   HEALTH_FOOD: "건기식",
   CLOTHING: "의류",
@@ -294,7 +295,7 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
 export function PreviewCheck() {
   const [isPending, startTransition] = useTransition();
   const [text, setText] = useState("");
-  const [kind, setKind] = useState<"FRUIT" | "COSMETIC" | "HEALTH_FOOD" | "CLOTHING">("COSMETIC");
+  const [kind, setKind] = useState<"FRUIT" | "FOOD" | "COSMETIC" | "HEALTH_FOOD" | "CLOTHING">("COSMETIC");
   const [hits, setHits] = useState<RuleHit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 

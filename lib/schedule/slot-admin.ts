@@ -15,23 +15,52 @@ type Service = ReturnType<typeof createServiceClient>;
 export const MAX_SLOTS_PER_DAY = 4;
 export const MIN_GAP_MINUTES = 120;
 
+export type StoredScope = { shop: ShopCode; kind: Exclude<ProductKind, "OTHER"> };
+
+// 계정별 "쓸 상품" 선택지. 한 선택지가 여러 (몰 · 종류)를 묶을 수 있다 — track_settings.product_scopes에는
+// 풀어서 저장하고(기획 · 검색은 (몰 · 종류)로 거른다), 화면은 선택지 단위로 보여 준다.
+//   · 오늘과일은 몰 전체(과일 · 식품 · 건강식품) — 2026-11-10 사용자 결정, 예전 "오늘과일 과일"을 대신한다
 export interface ScopeOption {
   key: string;
-  shop: ShopCode;
-  kind: Exclude<ProductKind, "OTHER">;
   label: string;
+  scopes: StoredScope[];
 }
 
 export const SCOPE_OPTIONS: ScopeOption[] = [
-  { key: "cuma:FRUIT", shop: "cuma", kind: "FRUIT", label: "오늘과일 과일" },
-  { key: "cm:HEALTH_FOOD", shop: "cm", kind: "HEALTH_FOOD", label: "쿠마마켓 식품" },
-  { key: "ru:COSMETIC", shop: "ru", kind: "COSMETIC", label: "리유 화장품" },
-  { key: "ru:HEALTH_FOOD", shop: "ru", kind: "HEALTH_FOOD", label: "리유 건강식품" },
-  { key: "ru:CLOTHING", shop: "ru", kind: "CLOTHING", label: "리유 의류" },
+  {
+    key: "cuma",
+    label: "오늘과일",
+    scopes: [
+      { shop: "cuma", kind: "FRUIT" },
+      { shop: "cuma", kind: "FOOD" },
+      { shop: "cuma", kind: "HEALTH_FOOD" },
+    ],
+  },
+  { key: "cm:HEALTH_FOOD", label: "쿠마마켓 식품", scopes: [{ shop: "cm", kind: "HEALTH_FOOD" }] },
+  { key: "ru:COSMETIC", label: "리유 화장품", scopes: [{ shop: "ru", kind: "COSMETIC" }] },
+  { key: "ru:HEALTH_FOOD", label: "리유 건강식품", scopes: [{ shop: "ru", kind: "HEALTH_FOOD" }] },
+  { key: "ru:CLOTHING", label: "리유 의류", scopes: [{ shop: "ru", kind: "CLOTHING" }] },
 ];
 
-export function scopeLabel(s: { shop: string; kind: string }): string {
-  return SCOPE_OPTIONS.find((o) => o.shop === s.shop && o.kind === s.kind)?.label ?? `${s.shop} ${s.kind}`;
+const sameScope = (a: { shop: string; kind: string }, b: { shop: string; kind: string }) => a.shop === b.shop && a.kind === b.kind;
+
+/** 고른 선택지 → 저장할 (몰 · 종류) 목록. */
+export function scopesOfKeys(keys: string[]): StoredScope[] {
+  return SCOPE_OPTIONS.filter((o) => keys.includes(o.key)).flatMap((o) => o.scopes);
+}
+
+/** 저장된 (몰 · 종류) → 화면 선택지 키. 하나라도 겹치면 그 선택지를 고른 것으로 본다(예전 "cuma:FRUIT"만 저장된 계정 포함). */
+export function scopeKeysOf(raw: unknown): string[] {
+  const stored = (Array.isArray(raw) ? raw : []) as { shop: string; kind: string }[];
+  return SCOPE_OPTIONS.filter((o) => o.scopes.some((s) => stored.some((x) => sameScope(s, x)))).map((o) => o.key);
+}
+
+/** 저장된 (몰 · 종류) → 화면 라벨(선택지 단위로 한 번씩). */
+export function scopeLabelsOf(raw: unknown): string[] {
+  const stored = (Array.isArray(raw) ? raw : []) as { shop: string; kind: string }[];
+  const labels = SCOPE_OPTIONS.filter((o) => o.scopes.some((s) => stored.some((x) => sameScope(s, x)))).map((o) => o.label);
+  const unknown = stored.filter((x) => !SCOPE_OPTIONS.some((o) => o.scopes.some((s) => sameScope(s, x)))).map((x) => `${x.shop} ${x.kind}`);
+  return [...labels, ...unknown];
 }
 
 /**

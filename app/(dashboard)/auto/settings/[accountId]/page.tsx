@@ -5,7 +5,7 @@ import { AccountConceptCard } from "@/components/schedule/account-concept";
 import { AccountScheduleCard } from "@/components/schedule/account-schedule";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { CONCEPT_SELECT, conceptCardData, type ConceptRow } from "@/lib/schedule/concept-data";
-import { MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS } from "@/lib/schedule/slot-admin";
+import { MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, scopeKeysOf } from "@/lib/schedule/slot-admin";
 
 // 자동 콘텐츠 설정 상세 — 계정 하나의 쓸 상품 · 하루 칸과 AI 자동 영상의 참고 내용(영상 방향 · 후킹 문구 · 말투 · 영상 스타일 · 메모).
 
@@ -31,7 +31,7 @@ export default async function AutoSettingsDetailPage({ params }: { params: Promi
   if (!setting || !acc || acc.disconnected_at || (setting.shoot_enabled && !rules?.length)) redirect("/auto/settings");
 
   const name = acc.display_name ?? "";
-  const scopes = ((setting.product_scopes ?? []) as { shop: string; kind: string }[]).map((x) => `${x.shop}:${x.kind}`);
+  const scopes = scopeKeysOf(setting.product_scopes);
 
   return (
     <main className="space-y-4 p-4 sm:p-6">

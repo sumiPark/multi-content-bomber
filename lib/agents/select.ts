@@ -148,7 +148,7 @@ export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: { 
     description:
       "이 계정이 쓸 수 있는 상품 후보 (판매 중 · 분석 완료 · 최근 사용 안 함 · 다른 계정과 겹치지 않는 것만). 판매량 · 후기 수 많은 순.",
     input: z.object({
-      kind: z.enum(["FRUIT", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]).nullable().describe("종류로 좁히기, 전체면 null"),
+      kind: z.enum(["FRUIT", "FOOD", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]).nullable().describe("종류로 좁히기, 전체면 null"),
       limit: z.number().int().min(5).max(60).describe("최대 개수 (보통 30)"),
     }),
     async run(args) {

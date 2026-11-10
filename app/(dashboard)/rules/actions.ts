@@ -22,7 +22,7 @@ async function authorize(): Promise<{ ok: true; userId: string } | { ok: false; 
   return { ok: true, userId: user.id };
 }
 
-const SCOPES = ["ALL", "FRUIT", "COSMETIC", "HEALTH_FOOD", "CLOTHING"] as const;
+const SCOPES = ["ALL", "FRUIT", "FOOD", "COSMETIC", "HEALTH_FOOD", "CLOTHING"] as const;
 
 const ruleSchema = z
   .object({
@@ -129,7 +129,7 @@ export async function removeClaimAction(input: z.infer<typeof idSchema>): Promis
 
 const previewSchema = z.object({
   text: z.string().max(5000),
-  kind: z.enum(["FRUIT", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]),
+  kind: z.enum(["FRUIT", "FOOD", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]),
 });
 
 /** 미리 검사 — 문장을 넣으면 지금 켜진 규칙으로 검사해 걸린 것을 돌려준다. */

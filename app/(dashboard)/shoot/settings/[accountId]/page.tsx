@@ -5,7 +5,7 @@ import { AccountConceptCard } from "@/components/schedule/account-concept";
 import { ShootAccountHeader } from "@/components/shoot/shoot-settings";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { CONCEPT_SELECT, conceptCardData, type ConceptRow } from "@/lib/schedule/concept-data";
-import { SCOPE_OPTIONS } from "@/lib/schedule/slot-admin";
+import { SCOPE_OPTIONS, scopeKeysOf } from "@/lib/schedule/slot-admin";
 
 // 촬영 설정 상세 — 계정 하나의 쓸 상품과 직접 촬영 컨셉(후킹 문구 · 마지막 문구 · 말투 · 편집 스타일 · 메모)을 고친다.
 
@@ -30,7 +30,7 @@ export default async function ShootSettingsDetailPage({ params }: { params: Prom
   if (!setting?.shoot_enabled || !acc || acc.disconnected_at) redirect("/shoot/settings");
 
   const name = acc.display_name ?? "";
-  const scopes = ((setting.product_scopes ?? []) as { shop: string; kind: string }[]).map((x) => `${x.shop}:${x.kind}`);
+  const scopes = scopeKeysOf(setting.product_scopes);
 
   return (
     <main className="space-y-4 p-4 sm:p-6">

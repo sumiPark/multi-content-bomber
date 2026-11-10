@@ -8,10 +8,10 @@ import type { McpServer, McpTool } from "./server";
 // 모두 읽기 전용. 제외(excluded)한 상품은 보여 주지 않는다.
 
 const SHOP_ENUM = z.enum(["cuma", "cm", "ru"]);
-const KIND_ENUM = z.enum(["FRUIT", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]);
+const KIND_ENUM = z.enum(["FRUIT", "FOOD", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]);
 const SOURCE_TEXT_LIMIT = 8000;
 
-const INSTRUCTIONS = `MCB 상품 카탈로그 MCP입니다. 오늘과일(과일) · 쿠마마켓(식품/건기식) · 리유코스메틱(화장품 · 건강식품 · 의류) 상품과,
+const INSTRUCTIONS = `MCB 상품 카탈로그 MCP입니다. 오늘과일(과일 · 채소 · 수산 · 축산 · 식품) · 쿠마마켓(식품/건기식) · 리유코스메틱(화장품 · 건강식품 · 의류) 상품과,
 상세페이지(이미지)를 AI가 읽어 만든 요약을 읽기 전용으로 제공합니다. 인스타 릴스 · 캡션 제작용입니다.
 권장 순서: search_products로 후보 찾기 → get_products로 상세(근거 인용 · 원문 · 확정 심의 문구) 확인 → get_rules로 표현 규칙 확인.
 콘텐츠 작성 원칙:
@@ -38,7 +38,7 @@ const searchProducts: McpTool = {
   input: z.object({
     query: z.string().max(100).default("").describe("검색어 (비우면 최근 상품)"),
     shop: SHOP_ENUM.optional().describe("cuma=오늘과일, cm=쿠마마켓, ru=리유코스메틱"),
-    kind: KIND_ENUM.optional().describe("FRUIT 과일 · COSMETIC 화장품 · HEALTH_FOOD 건기식 · CLOTHING 의류"),
+    kind: KIND_ENUM.optional().describe("FRUIT 과일 · FOOD 식품(채소 · 수산 · 축산 · 가공식품) · COSMETIC 화장품 · HEALTH_FOOD 건기식 · CLOTHING 의류"),
     includeOutOfStock: z.boolean().default(false).describe("일시 품절 · 판매 중지 포함"),
     limit: z.number().int().min(1).max(50).default(20),
   }),

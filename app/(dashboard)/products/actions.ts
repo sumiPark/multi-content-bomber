@@ -181,7 +181,7 @@ const categorySchema = z.object({
   shopCode: z.enum(["cuma", "cm", "ru"]),
   categoryId: z.number().int(),
   collect: z.boolean(),
-  kind: z.enum(["FRUIT", "COSMETIC", "HEALTH_FOOD", "CLOTHING", "OTHER"]).nullable(),
+  kind: z.enum(["FRUIT", "FOOD", "COSMETIC", "HEALTH_FOOD", "CLOTHING", "OTHER"]).nullable(),
 });
 
 /** 수집 카테고리 켜고 끄기 · 종류 바꾸기 — 다음 수집부터 반영된다. 종류가 바뀐 상품은 그때 다시 분석한다(판매 중인 것만). */

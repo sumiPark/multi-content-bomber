@@ -30,9 +30,10 @@ export interface ReviewClaim {
 // 종류별 세부 항목 라벨 (lib/products/analysis/analyze.ts의 스키마와 같은 키)
 const DETAIL_LABEL: Record<string, string> = {
   origin: "산지",
-  variety: "품종",
+  variety: "품종 · 종류",
   weightOrCount: "중량 · 구성",
   sizeGrade: "크기 · 등급",
+  preparation: "손질 · 가공",
   sweetness: "당도",
   taste: "맛 · 식감",
   storage: "보관",

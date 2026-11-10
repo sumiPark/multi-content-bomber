@@ -3,7 +3,8 @@
 // 있지만, 워커가 DB 없이 --dry-run으로도 돌 수 있게 코드에 같은 값을 둔다.
 
 export type ShopCode = "cuma" | "cm" | "ru";
-export type ProductKind = "FRUIT" | "COSMETIC" | "HEALTH_FOOD" | "CLOTHING" | "OTHER";
+// FOOD(식품) = 오늘과일의 채소 · 수산 · 축산 · 식품 (2026-11-10 — 오늘과일 전체 카테고리 수집)
+export type ProductKind = "FRUIT" | "FOOD" | "COSMETIC" | "HEALTH_FOOD" | "CLOTHING" | "OTHER";
 
 export interface ShopConfig {
   code: ShopCode;
@@ -37,6 +38,7 @@ export const SHOP_CODES = Object.keys(SHOPS) as ShopCode[];
 
 export const KIND_LABEL: Record<ProductKind, string> = {
   FRUIT: "과일",
+  FOOD: "식품",
   COSMETIC: "화장품",
   HEALTH_FOOD: "건기식",
   CLOTHING: "의류",
@@ -44,14 +46,23 @@ export const KIND_LABEL: Record<ProductKind, string> = {
 };
 
 // 카테고리를 처음 발견했을 때의 기본값 (2026-11-03 사용자 확정). 이후엔 상품 화면에서 바꾼 값을 유지한다.
-//   @fruit_cuma  → 오늘과일 과일
+//   @fruit_cuma  → 오늘과일 전체 (2026-11-10: 과일만이 아니라 채소 · 수산 · 축산 · 식품까지)
 //   @joongdi     → 리유 화장품 + 건기식(쿠마마켓 식품 · 리유 건강식품)
 //   @jjoonb      → 리유 화장품
 //   @jior_joong  → 리유 의류 (라이프스타일 > 의류)
+// 오늘과일은 몰 전체를 모으되(새 최상위 카테고리도 자동 수집), 과일 외는 식품 종류로 분석한다.
 // 쿠마마켓 "식품"은 하위 분류가 없어 일반 식품이 섞인다 — 건기식인지는 분석이 판정한다.
 // 이름으로 맞추는 이유: 카테고리 id는 몰마다 따로 매겨져 의미를 알기 어렵고, 이름이 사람이 확인한 기준이다.
 const DEFAULT_RULES: Record<ShopCode, { name: string; kind: ProductKind }[]> = {
-  cuma: [{ name: "과일", kind: "FRUIT" }],
+  cuma: [
+    { name: "과일", kind: "FRUIT" },
+    { name: "채소", kind: "FOOD" },
+    { name: "수산", kind: "FOOD" },
+    { name: "축산", kind: "FOOD" },
+    { name: "식품", kind: "FOOD" },
+    // 식품 > 건강식품 — 건기식 표기가 있는지는 분석이 판정한다(없으면 일반 식품으로 쓴다)
+    { name: "건강식품", kind: "HEALTH_FOOD" },
+  ],
   cm: [{ name: "식품", kind: "HEALTH_FOOD" }],
   ru: [
     { name: "클렌저", kind: "COSMETIC" },
@@ -78,7 +89,9 @@ export function defaultCategoryRule(
 ): { collect: boolean; kind: ProductKind | null } {
   const rule = DEFAULT_RULES[shop].find((r) => r.name === name.trim());
   if (rule) return { collect: true, kind: rule.kind };
-  return parent ?? { collect: false, kind: null };
+  if (parent) return parent;
+  // 오늘과일은 몰 전체를 쓴다 — 나중에 생긴 최상위 카테고리도 식품으로 모은다
+  return shop === "cuma" ? { collect: true, kind: "FOOD" } : { collect: false, kind: null };
 }
 
 // 상세 이미지가 이 몰의 이 상품 자산인지 — 엉뚱한 외부 URL을 내려받아 AI에 보내지 않게.

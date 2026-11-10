@@ -4,7 +4,7 @@ import { SettingsList } from "@/components/shoot/settings-list";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { CONCEPT_SELECT, roleLabel, savedConceptItems, type ConceptRow } from "@/lib/schedule/concept-data";
-import { MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, scopeLabel } from "@/lib/schedule/slot-admin";
+import { MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, scopeLabelsOf } from "@/lib/schedule/slot-admin";
 
 // 자동 콘텐츠 설정 목록 — AI가 영상까지 자동으로 만드는 계정. 줄을 누르면 상세(/auto/settings/[accountId])에서 고친다.
 // 직접 촬영(촬영 설정)과 영상 참고 내용이 섞이지 않는다. 쓸 상품만 함께 쓴다(2026-11-04 사용자 결정).
@@ -41,7 +41,7 @@ export default async function AutoSettingsPage() {
         name: s.social_accounts!.display_name ?? "",
         role: roleLabel(c?.auto_role_focus),
         meta: on.length ? `하루 ${on.length}칸 · ${on.map((r) => r.slot_time).join(" · ")}` : "켜진 칸 없음",
-        scopeLabels: ((s.product_scopes ?? []) as { shop: string; kind: string }[]).map(scopeLabel),
+        scopeLabels: scopeLabelsOf(s.product_scopes),
         saved: savedConceptItems(c, "auto"),
       };
     })

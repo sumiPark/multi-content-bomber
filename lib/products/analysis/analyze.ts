@@ -6,7 +6,7 @@ import type { ImagePart } from "./images";
 
 // 상세페이지 분석 — 2단계로 나눈다 (리유 분석 프로젝트와 같은 구조).
 //   1. 이미지(파트)마다: 보이는 글자를 원문 그대로 받아 적고, 눈에 띄는 사실을 뽑는다
-//   2. 상품마다: 1의 원문을 모아 종류별(과일 · 화장품 · 건기식 · 의류) 요약을 만든다
+//   2. 상품마다: 1의 원문을 모아 종류별(과일 · 식품 · 화장품 · 건기식 · 의류) 요약을 만든다
 // 2에서 AI가 쓴 근거 문장(quote)은 1의 원문에 실제로 있는지 코드가 다시 확인하고, 없으면 버린다
 // (rejected). 상세페이지에 없는 효능을 지어내는 것을 막는 핵심 장치다.
 
@@ -144,6 +144,20 @@ const SUMMARY_SCHEMAS = {
       packaging: n.describe("포장 · 선물 구성"),
     }),
   }),
+  FOOD: z.object({
+    ...commonFields,
+    details: z.object({
+      origin: n.describe("원산지 · 산지"),
+      variety: n.describe("품종 · 부위 · 종류 (예: 한우 암소 살치, 세네갈 갈치)"),
+      weightOrCount: n.describe("중량 · 개수 구성"),
+      sizeGrade: n.describe("크기 · 등급 (예: 1+등급, 특대)"),
+      preparation: n.describe("손질 · 가공 · 보관 상태 (예: 손질 완료, 반건조, 냉동). 원문 기준"),
+      taste: n.describe("맛 · 식감 묘사 (원문 기준)"),
+      storage: n.describe("보관법"),
+      season: n.describe("제철 · 수확 · 조업 시기"),
+      packaging: n.describe("포장 · 선물 구성"),
+    }),
+  }),
   COSMETIC: z.object({
     ...commonFields,
     details: z.object({
@@ -190,6 +204,7 @@ export type ProductSummary = z.infer<(typeof SUMMARY_SCHEMAS)[SummaryKind]>;
 
 const KIND_MATCH_RULE: Record<SummaryKind, string> = {
   FRUIT: "isKindMatch: 과일(생과 · 과일 가공품 포함) 상품이면 true.",
+  FOOD: "isKindMatch: 먹는 식품(채소 · 수산물 · 축산물 · 가공식품 · 음료 등)이면 true (주방용품 · 기기 등 식품이 아니면 false).",
   COSMETIC: "isKindMatch: 화장품이면 true (기기 · 소품 · 식품이면 false).",
   HEALTH_FOOD:
     "isKindMatch: 원문에 '건강기능식품' 표기나 인증 마크 문구가 있을 때만 true. 일반 식품 · 기타가공품이면 false — 그때 functionalClaims는 빈 배열.",
@@ -198,6 +213,7 @@ const KIND_MATCH_RULE: Record<SummaryKind, string> = {
 
 const AD_RULES: Record<SummaryKind, string> = {
   FRUIT: "산지 · 당도 · 크기는 원문에 적힌 대로만. '최고', '무조건' 같은 단정 표현은 옮기지 않는다.",
+  FOOD: "원산지 · 등급 · 중량은 원문에 적힌 대로만. 일반 식품이라 질병 예방 · 치료나 건강 기능(면역, 혈행 등) 효과를 쓰지 않는다. '최고', '무조건' 같은 단정 표현은 옮기지 않는다.",
   COSMETIC:
     "화장품 표시 · 광고 기준: 질병 치료 · 예방, 의약품으로 오인될 표현(치료, 완치, 염증 개선, 재생)을 쓰지 않는다. 기능성 표기 없는 미백 · 주름 · 자외선 차단 주장 금지. 원료의 특성과 제품의 효과를 구분한다. 최상급 · 절대 표현 금지.",
   HEALTH_FOOD:

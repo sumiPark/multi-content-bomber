@@ -14,6 +14,7 @@ import {
   futurePlans,
   movePlans,
   SCOPE_OPTIONS,
+  scopesOfKeys,
   validateSlots,
 } from "@/lib/schedule/slot-admin";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -43,7 +44,7 @@ const trackSchema = z.literal("B");
 const scopesSchema = z.array(z.enum(SCOPE_OPTIONS.map((o) => o.key) as [string, ...string[]])).min(1, "쓸 상품을 하나 이상 골라 주세요.");
 
 function scopesJson(keys: string[]): Json {
-  return SCOPE_OPTIONS.filter((o) => keys.includes(o.key)).map((o) => ({ shop: o.shop, kind: o.kind })) as unknown as Json;
+  return scopesOfKeys(keys) as unknown as Json;
 }
 
 async function accountRules(service: Service, accountId: string) {

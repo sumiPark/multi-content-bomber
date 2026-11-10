@@ -4,7 +4,7 @@ import { ShootAddAccount } from "@/components/shoot/shoot-settings";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { CONCEPT_SELECT, roleLabel, savedConceptItems, type ConceptRow } from "@/lib/schedule/concept-data";
-import { SCOPE_OPTIONS, scopeLabel } from "@/lib/schedule/slot-admin";
+import { SCOPE_OPTIONS, scopeKeysOf, scopeLabelsOf } from "@/lib/schedule/slot-admin";
 
 // 촬영 설정 목록 — 직접 촬영 기획을 만들 계정(관리자 · 매니저가 추가)을 짧은 줄로 보여 주고, 줄을 누르면 상세(/shoot/settings/[accountId])에서 고친다.
 // AI 자동의 참고 내용은 자동 콘텐츠 설정에 따로 있어 섞이지 않는다. 쓸 상품만 함께 쓴다(2026-11-04 사용자 결정).
@@ -26,7 +26,6 @@ export default async function ShootSettingsPage() {
     supabase.from("content_plans").select("social_account_id").eq("track", "A").eq("status", "PROPOSED"),
   ]);
 
-  const scopesOf = (raw: unknown) => (raw ?? []) as { shop: string; kind: string }[];
   const conceptOf = new Map((conceptRows ?? []).map((c) => [c.social_account_id, c as unknown as ConceptRow]));
   const settingOf = new Map((settings ?? []).map((s) => [s.social_account_id, s]));
   const ideaCount = new Map<string, number>();
@@ -42,7 +41,7 @@ export default async function ShootSettingsPage() {
         name: acc.display_name ?? "",
         role: roleLabel(c?.shoot_role_focus),
         meta: `기획 ${ideaCount.get(s.social_account_id) ?? 0}개`,
-        scopeLabels: scopesOf(s.product_scopes).map(scopeLabel),
+        scopeLabels: scopeLabelsOf(s.product_scopes),
         saved: savedConceptItems(c, "shoot"),
       };
     })
@@ -50,7 +49,7 @@ export default async function ShootSettingsPage() {
 
   const candidates = (igAccounts ?? [])
     .filter((a) => !settingOf.get(a.id)?.shoot_enabled)
-    .map((a) => ({ id: a.id, name: a.display_name ?? "", scopes: scopesOf(settingOf.get(a.id)?.product_scopes).map((x) => `${x.shop}:${x.kind}`) }));
+    .map((a) => ({ id: a.id, name: a.display_name ?? "", scopes: scopeKeysOf(settingOf.get(a.id)?.product_scopes) }));
 
   return (
     <main className="space-y-6 p-4 sm:p-6">
