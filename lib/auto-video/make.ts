@@ -11,7 +11,7 @@ import { loadProductFacts } from "@/lib/agents/product-facts";
 import type { ScriptOutput } from "@/lib/agents/script";
 // LENGTH_TOLERANCE: 음성으로 잰 길이의 허용 오차(초). 합성 결과의 작은 차이로 칸을 멈추지 않고, 장면표 글자 수 점검도 같은 여유를 둔다
 import { AUTO_SECONDS, DEFAULT_SPEECH_RATE, LENGTH_TOLERANCE, MIN_AUTO_HOOK_SCORE, MIN_INTEREST, charRange, firstViewerTest, motionTexts, rankAngles, realMaterialCount, screenAngles, repairEdgeVisuals, repairOverflow, repeatLimit, reviewFinalFrames, reviewHookMaterials, reviewStoryboard, storyboardProblems, writeAngles, writeSceneVisuals, writeStoryboard, type Storyboard, type StoryAngle } from "@/lib/agents/storyboard";
-import { EMPTY_REFERENCES, loadReelReferences } from "@/lib/agents/reel-references";
+import { EMPTY_REFERENCES, loadReelReferences, pickSameCategory } from "@/lib/agents/reel-references";
 import { hookEvidenceProblems, rejectIncompatiblePhrases } from "@/lib/auto-video/hook-evidence";
 import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
@@ -39,6 +39,8 @@ const MAX_DETAIL_FILES = 40;
 const MAX_REVIEW_FRAMES = 30;
 const CALIBRATION_TEXT = "처음 듣는 사람도 알아듣게 천천히 설명해 볼게요. 이름이 낯설어도 뜻을 알면 고르기 쉬워져요.";
 const MAX_BOARD_TRIES = 4;
+// 각도를 다시 내는 최대 회차(처음 포함). 거르고 남은 각도가 모두 MIN_INTEREST 미만일 때만 다시 낸다
+const MAX_ANGLE_ROUNDS = 3;
 const LONG_BEAT_SECONDS = 6.5;
 const CAPTION_CHARS = 16;
 
@@ -291,27 +293,54 @@ export async function makeAutoVideo(input: {
   const savedBoard = input.dryRun ? input.savedBoard : undefined;
   if (savedBoard) console.log("  (시험) 저장된 장면표로 바로 영상을 만든다");
   if (!phrases.hooks.length && !savedBoard) {
-    // 주제 · 첫 문장은 성과가 높았던 릴스에서 가져온다(2026-11-10). 못 읽으면 참고 없이 쓴다
-    const references = await loadReelReferences(service, input.accountId).catch((e) => {
+    // 주제 · 첫 문장은 성과가 높았던 같은 상품군 릴스에서 가져온다(2026-11-10). 못 읽으면 참고 없이 쓴다
+    const loaded = await loadReelReferences(service, input.accountId).catch((e) => {
       console.warn("  참고 릴스를 조회하지 못했어요:", e instanceof Error ? e.message : e);
       return EMPTY_REFERENCES;
     });
-    console.log(`  참고 릴스: 다른 계정 ${references.benchmark.length}개 · 우리 계정 ${references.own.length}개 · 분석 요약 ${references.insights.length}줄`);
-    const written = await writeAngles({ accountName: account, facts, knowledge, references });
-    add(written.tokens);
-    angles = written.angles;
-    const ranked = await rankAngles(angles);
-    add(ranked.tokens);
-    angleOrder = ranked.order;
-    angleScores = ranked.scores;
-    // 우리에게 불리한 정보 · 뻔한 사용법 · 이미 아는 내용이 주제인 각도는 상품을 아는 눈으로 한 번 더 걸러 뺀다. 전부 걸리면 순서만 그대로 둔다
-    const screened = await screenAngles(angles, facts);
-    add(screened.tokens);
-    for (const r of screened.rejected) console.log(`  각도 제외 [${angles[r.index].situation}] ${r.reason}`);
-    const kept = angleOrder.filter((i) => !screened.rejected.some((r) => r.index === i));
+    // 다른 상품군 릴스가 섞이면 주제가 엉뚱해진다. 상품군을 못 가리면 참고 없이 쓴다
+    const references = await pickSameCategory(loaded, facts)
+      .then((r) => {
+        add(r.tokens);
+        return r.refs;
+      })
+      .catch((e) => {
+        console.warn("  참고 릴스 상품군을 가리지 못해 참고 없이 쓴다:", e instanceof Error ? e.message : e);
+        return { ...EMPTY_REFERENCES, insights: loaded.insights };
+      });
+    console.log(`  참고 릴스: 우리 계정 ${references.own.length}/${loaded.own.length}개 · 다른 계정 ${references.benchmark.length}/${loaded.benchmark.length}개(같은 상품군/후보) · 분석 요약 ${references.insights.length}줄`);
+    // 각도를 쓰고 → 모르는 눈으로 점수 → 상품을 아는 눈으로 거르기. 남은 각도가 모두 3점 미만이면
+    // 장면표로 넘어가지 않고 앞 각도와 다른 각도를 다시 낸다(2026-11-10 사용자 결정). 회차마다 쓴 각도는 모두 모아 점수 순으로 쓴다
+    const screenedOut = new Set<number>();
+    const tried: string[] = [];
+    for (let round = 0; round < MAX_ANGLE_ROUNDS; round++) {
+      const written = await writeAngles({ accountName: account, facts, knowledge, references, rejected: tried });
+      add(written.tokens);
+      const ranked = await rankAngles(written.angles);
+      add(ranked.tokens);
+      // 우리에게 불리한 정보 · 뻔한 사용법 · 이미 아는 내용이 주제인 각도는 상품을 아는 눈으로 한 번 더 걸러 뺀다
+      const screened = await screenAngles(written.angles, facts);
+      add(screened.tokens);
+      const base = angles.length;
+      for (const r of screened.rejected) {
+        screenedOut.add(base + r.index);
+        console.log(`  각도 제외 [${written.angles[r.index].viewer_want}] ${r.reason}`);
+      }
+      angles = [...angles, ...written.angles];
+      angleScores = [...angleScores, ...ranked.scores];
+      const best = Math.max(0, ...angles.map((_, i) => (screenedOut.has(i) ? 0 : angleScores[i])));
+      if (best >= MIN_INTEREST) break;
+      tried.push(...written.angles.map((a) => a.hook_line));
+      console.log(`  ${round + 1}회차 각도가 모두 ${MIN_INTEREST}점 미만(가장 높은 점수 ${best}점)${round + 1 < MAX_ANGLE_ROUNDS ? "이라 다른 각도를 다시 낸다" : "이다. 가장 높은 각도로 쓴다"}`);
+    }
+    const all = angles.map((_, i) => i).sort((a, b) => angleScores[b] - angleScores[a] || a - b);
+    const kept = all.filter((i) => !screenedOut.has(i));
     if (kept.length) angleOrder = kept;
-    else console.log("  모든 각도가 주제 기준에 걸려 순위대로 쓴다");
-    angleOrder.forEach((i) => console.log(`  각도 ${angleScores[i]}점 [${angles[i].situation}] ${angles[i].hook_line}${angles[i].reference ? ` (참고: ${angles[i].reference})` : ""}`));
+    else {
+      angleOrder = all;
+      console.log("  모든 각도가 주제 기준에 걸려 순위대로 쓴다");
+    }
+    angleOrder.forEach((i) => console.log(`  각도 ${angleScores[i]}점 [${angles[i].viewer_want}] ${angles[i].hook_line}${angles[i].reference ? ` (참고: ${angles[i].reference})` : ""}`));
   }
 
   // 2. 장면표: 쓰고, 코드 · 시청자 눈 · 광고 규칙으로 보고, 걸리면 고쳐 쓴다

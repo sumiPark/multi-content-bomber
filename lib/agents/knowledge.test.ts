@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { approvedFirst, cardMatches, COMMON_KNOWLEDGE_REF, evidenceRef, knowledgeBlock, knowledgeEvidence } from "@/lib/agents/knowledge";
-import { cleanStatement } from "@/lib/agents/knowledge-draft";
+import { cleanStatement, keepMatchingCards } from "@/lib/agents/knowledge-draft";
 import { charRange, repairEdgeVisuals, repairOverflow, repeatLimit, sentenceEnding, storyboardProblems, type Storyboard } from "@/lib/agents/storyboard";
 import { cropPixels, gifRange } from "@/lib/auto-video/gif-clips";
 import { stripFlaggedGraphics } from "@/lib/auto-video/make";
@@ -339,6 +339,14 @@ describe("화면 그래픽 근거", () => {
 });
 
 describe("초안 문장 다듬기", () => {
+  it("상품 자료에 낱말이 없는 카드는 저장하지 않는다(분야 상식은 상품군 낱말로 붙는다)", () => {
+    const facts = { name: "하례감귤 3kg", rawName: "", oneLine: null, usage: null, details: {}, sourceText: "제주 하례 감귤", claims: [] } as unknown as Parameters<typeof keepMatchingCards>[1];
+    const card = (topic: string, terms: string[]) => ({ topic, terms, statement: "s", source_title: "t", source_url: "https://a", source_quote: "q" });
+    const out = keepMatchingCards({ cards: [card("귤 고르는 법", ["감귤"]), card("귤 보관", ["귤"]), card("락투신", ["상추"])], differences: [] }, facts);
+    assert.deepEqual(out.draft.cards.map((c) => c.topic), ["귤 고르는 법"]);
+    assert.deepEqual(out.dropped, ["귤 보관", "락투신"]);
+  });
+
   it("문장 끝의 출처 링크를 지운다", () => {
     assert.equal(cleanStatement("부사는 후지의 다른 이름이에요. ([rda.go.kr](https://rda.go.kr/a?utm_source=openai))"), "부사는 후지의 다른 이름이에요.");
     assert.equal(cleanStatement("그대로 둔다 (괄호)"), "그대로 둔다 (괄호)");

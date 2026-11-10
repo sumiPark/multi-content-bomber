@@ -129,6 +129,7 @@ export const storyboardSchema = z.object({
 export type Storyboard = z.infer<typeof storyboardSchema>;
 
 const angleSchema = z.object({
+  viewer_want: z.string().describe("출발점. 상품 이야기 없이, 이 상품군을 사거나 쓰는 사람이 이미 원하거나 귀찮아하는 것 한 문장"),
   situation: z.string().describe("첫 장면이 여는 것: 시청자가 멈출 질문 · 의외의 사실 · 장면"),
   worry: z.string().describe("시청자가 궁금해하거나 잘못 알고 있거나 불편해하는 점"),
   hook_line: z.string().describe("첫 문장. 지어낸 인물 · 체험이 아니다"),
@@ -153,11 +154,17 @@ export async function writeAngles(input: { accountName: string; facts: ProductFa
   const f = input.facts;
   const model = agentModel();
   const refs = referenceBlock(input.references ?? EMPTY_REFERENCES);
-  const shape = `주제와 첫 문장은 아래 "성과가 높았던 릴스"에서 가져온다. 상세페이지는 주제를 찾는 곳이 아니라, 고른 주제에 이 상품이 무엇으로 답하는지 사실을 확인하는 곳이다.
-- 참고 릴스에서 시청자를 멈추게 한 것(의외의 사실, 흔한 오해, 비교, 구분법, 궁금증 등)을 찾아 이 상품의 주제로 옮긴다. 문장을 그대로 베끼지 않고, 어느 릴스에서 무엇을 가져왔는지 reference에 적는다. 참고 릴스가 없으면 reference는 빈 문자열이고, 이 상품군의 일반 상식 가운데 사람들이 궁금해할 주제를 고른다.
+  // 2026-11-10 사용자 결정: 출발점을 상품 사실에서 시청자가 이미 원하거나 귀찮아하는 것으로 바꾼다. 상품은 답이고, 상세페이지는 사실 확인용이다
+  const shape = `출발점은 상품이 아니라 시청자다. 각 각도는 이 순서로 정한다.
+1. viewer_want: 이 상품군을 사거나 쓰는 평범한 사람이 이미 원하는 것(더 맛있게, 덜 귀찮게, 실패 없이, 돈 아끼기 등)이나 귀찮아하고 아쉬워하는 것을 상품 이야기 없이 한 문장으로 쓴다. 시청자가 "맞아, 나도" 할 만한 것이어야 하고, 상품을 모르는 사람도 공감해야 한다.
+2. 그 바람 · 불편을 건드리는 첫 장면과 첫 문장을 정한다.
+3. 이 상품이 그 바람에 어떻게 답하는지로 이어 간다. 상품은 답이다. 상세페이지는 주제를 찾는 곳이 아니라 답이 사실인지 확인하는 곳이다.
+- 성분 · 원료 · 품종 · 공정 · 인증 같은 상품 사실은 답에 쓸 수 있지만 출발점이 되지 않는다. "이 상품에는 OO가 들어 있어요"에서 시작하는 각도를 내지 않는다.
+- 상식 카드 가운데 고르는 법 · 보관 · 먹는 법 · 쓰는 순서 · 흔한 오해 · 생활 습관 같은 분야 상식은 시청자의 바람을 정하고 첫 장면을 여는 재료로 쓴다.
+- 아래 "성과가 높았던 릴스"가 있으면 우리 계정 릴스(O)부터 본다. 그 릴스가 시청자의 어떤 바람 · 불편을 건드려 멈추게 했는지 찾아 이 상품으로 옮긴다. 문장을 그대로 베끼지 않고, 어느 릴스에서 무엇을 가져왔는지 reference에 적는다. 참고 릴스가 없거나 맞는 것이 없으면 reference는 빈 문자열이다.
 - 첫 문장(hook_line)의 모양은 각도마다 다르게 정한다. 질문, 의외의 사실, 흔한 오해 바로잡기, 비교 등 그 주제에 맞는 모양을 쓰고, 5개가 같은 말투 틀로 시작하지 않게 한다. 지어낸 인물("제 친구가", "어떤 고객님이")이나 1인칭 체험("써 봤는데")으로 시작하지 않는다.
 - situation은 첫 장면이 여는 것(질문 · 의외의 사실 · 장면), worry는 시청자가 궁금해하거나 잘못 알고 있거나 불편해하는 점이다. 숫자 · 통계 · "많은 분들이" 같은 사실 주장을 지어내지 않는다.
-- 답(answer): 왜 그런지와 이 상품이 그 궁금증에 어떻게 답하는지. 왜 그런지는 원리 · 원료 일반 · 생활 상식처럼 널리 알려진 내용도 되고, 이 상품에 대한 내용은 근거 자료에 있는 것만 쓴다. 답은 이 상품의 특징이나 우리 차이로 이어져야 한다.
+- 답(answer): 왜 그런지와 이 상품이 그 바람 · 궁금증에 어떻게 답하는지. 왜 그런지는 원리 · 원료 일반 · 생활 상식처럼 널리 알려진 내용도 되고, 이 상품에 대한 내용은 근거 자료에 있는 것만 쓴다. 답은 이 상품의 특징이나 우리 차이로 이어져야 한다.
 - 흐름(beats)의 순서는 각도마다 맞게 정한다. 정해진 순서를 따르지 않는다.
 - 5개는 서로 다른 주제여야 한다. 표현만 바꾼 비슷한 각도를 내지 않는다.
 - 한 각도는 주제 하나만 다룬다. 성분 · 특징을 나열하지 않는다.`;
@@ -174,7 +181,7 @@ ${TOPIC_RULES}
       },
       {
         role: "user",
-        content: `상품: ${f.shop} ${f.kindLabel} "${f.name}"\n한 줄 소개: ${f.oneLine ?? "없음"}\n상세 항목: ${JSON.stringify(f.details)}\n확인된 특징: ${f.claims.map((c) => c.claim).join(" / ")}\n상세페이지 원문:\n${f.sourceText.slice(0, 4000)}\n\n${knowledgeBlock(input.knowledge)}${refs ? `\n\n${refs}` : ""}`,
+        content: `${refs ? `${refs}\n\n` : ""}상품(답이 사실인지 확인하는 자료): ${f.shop} ${f.kindLabel} "${f.name}"\n한 줄 소개: ${f.oneLine ?? "없음"}\n상세 항목: ${JSON.stringify(f.details)}\n확인된 특징: ${f.claims.map((c) => c.claim).join(" / ")}\n상세페이지 원문:\n${f.sourceText.slice(0, 4000)}\n\n${knowledgeBlock(input.knowledge)}`,
       },
     ],
     response_format: zodResponseFormat(z.object({ angles: z.array(angleSchema) }), "story_angles"),
@@ -228,7 +235,7 @@ ${TOPIC_RULES}
 확인된 특징: ${facts.claims.map((c) => c.claim).join(" / ")}
 
 각도:
-${angles.map((a, i) => `${i}. 상황: ${a.situation} | 고민: ${a.worry} | 한 가지: ${a.one_thing} | 답: ${a.answer}`).join("\n")}`,
+${angles.map((a, i) => `${i}. 시청자의 바람: ${a.viewer_want} | 상황: ${a.situation} | 고민: ${a.worry} | 한 가지: ${a.one_thing} | 답: ${a.answer}`).join("\n")}`,
       },
     ],
     response_format: zodResponseFormat(z.object({ rejected: z.array(z.object({ index: z.number().int(), reason: z.string() })) }), "angle_screen"),
@@ -377,7 +384,7 @@ ${bullets(kit.caption_rules)}
 ${bullets(kit.tts_rules)}
 
 글자 디자인(look):
-${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의 제품 · 말의 내용 · 계정 분위기에 맞게 강조어 글꼴(key_font)과 작은 줄 글꼴(small_font)을 아래에서 하나씩 고른다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.\n${FONT_PAIRING_RULES.map((r) => `- ${r}`).join("\n")}\n${fontChoiceLines(ctx.fontChoices)}` : ""}${visualRules(f.kind, ctx.visualLibrary ?? [], LONG_VISUALS)}${conceptBlock("이 계정에서 바꾸고 싶은 점", ctx.notes, `무엇을 말할지 · 흐름 · 말하는 사람 · 말투 · 장면 고르기 · 글자 디자인에 반영한다. 여기 적힌 것은 위의 기본 흐름 · 말투보다 먼저 따른다. 상품 사실 · 금지 표현 · 건강기능식품 표현 규칙만은 바꾸지 않는다.`)}${ctx.phraseBlock ?? ""}${ctx.angle ? `\n\n이 영상의 각도(이미 정해졌다. 이 상황과 흐름으로 쓰고 다른 소재로 새지 않는다. situation · worry · one_thing도 이 값을 쓴다):\n- 첫 장면이 여는 것: ${ctx.angle.situation}\n- 궁금증: ${ctx.angle.worry}\n- 첫 문장: ${ctx.angle.hook_line}\n- 얻어 갈 한 가지: ${ctx.angle.one_thing}\n- 답: ${ctx.angle.answer}\n- 흐름: ${ctx.angle.beats.join(" → ")}${ctx.angle.reference ? `\n- 참고한 릴스: ${ctx.angle.reference}` : ""}` : ""}`;
+${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의 제품 · 말의 내용 · 계정 분위기에 맞게 강조어 글꼴(key_font)과 작은 줄 글꼴(small_font)을 아래에서 하나씩 고른다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.\n${FONT_PAIRING_RULES.map((r) => `- ${r}`).join("\n")}\n${fontChoiceLines(ctx.fontChoices)}` : ""}${visualRules(f.kind, ctx.visualLibrary ?? [], LONG_VISUALS)}${conceptBlock("이 계정에서 바꾸고 싶은 점", ctx.notes, `무엇을 말할지 · 흐름 · 말하는 사람 · 말투 · 장면 고르기 · 글자 디자인에 반영한다. 여기 적힌 것은 위의 기본 흐름 · 말투보다 먼저 따른다. 상품 사실 · 금지 표현 · 건강기능식품 표현 규칙만은 바꾸지 않는다.`)}${ctx.phraseBlock ?? ""}${ctx.angle ? `\n\n이 영상의 각도(이미 정해졌다. 이 상황과 흐름으로 쓰고 다른 소재로 새지 않는다. situation · worry · one_thing도 이 값을 쓴다. 상품은 시청자의 바람에 대한 답으로 나온다):\n- 시청자의 바람 · 불편(출발점): ${ctx.angle.viewer_want}\n- 첫 장면이 여는 것: ${ctx.angle.situation}\n- 궁금증: ${ctx.angle.worry}\n- 첫 문장: ${ctx.angle.hook_line}\n- 얻어 갈 한 가지: ${ctx.angle.one_thing}\n- 답: ${ctx.angle.answer}\n- 흐름: ${ctx.angle.beats.join(" → ")}${ctx.angle.reference ? `\n- 참고한 릴스: ${ctx.angle.reference}` : ""}` : ""}`;
   const gifs = ctx.gifs ?? [];
   const user = `상세페이지 원문(상품 사실은 이 안에서만 쓴다. "원료적 특성에 한함" 같은 단서가 붙은 내용은 말로 읽지 않고, 화면 그래픽에 원료의 특성이라고 밝혀 쓴다):\n${f.sourceText}\n\n${knowledgeBlock(ctx.knowledge)}\n\n쓸 수 있는 사진 후보(가로x세로): ${ctx.candidates.map((c) => `${c.id} ${c.w}x${c.h}`).join(", ")}
 그림은 후보를 번호와 함께 모은 것이다. 위 목록에 없는 번호는 화질이 낮거나 제품이 아닌데 오려야 하는 사진이라 쓰지 않는다. 가로로 넓은 사진은 사진 전체를 가로 폭에 맞추고 위아래를 단색으로 채워 보여 준다.${gifs.length ? `\n\n움직이는 이미지(사진 묶음 다음 그림부터 차례로, 그림마다 왼쪽부터 시간 순서로 프레임 6개):\n${gifs.map((g) => `${g.id} 원본 ${g.w}x${g.h}, ${g.seconds.toFixed(1)}초`).join("\n")}` : ""}${ctx.archive.length ? `\n\n자사 촬영 컷(소리 없음, 순서대로 마지막 ${ctx.archive.length}장의 그림이 컷마다 프레임 3개):\n${ctx.archive.map((a) => `${a.id} ${a.seconds.toFixed(1)}초 — ${a.what}`).join("\n")}` : ""}${
