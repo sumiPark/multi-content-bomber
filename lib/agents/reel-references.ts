@@ -2,7 +2,7 @@ import { firstLine, HIT_MULTIPLE } from "@/lib/benchmark/discovery";
 import type { InsightSummary, ReelStyle } from "@/lib/benchmark/style-stats";
 import type { createServiceClient } from "@/lib/supabase/service";
 
-// 상식형 대본의 주제 · 후킹 재료 — 다른 계정에서 성과가 높았던 릴스와 우리 계정에서 성과가 높았던 릴스.
+// AI 자동 대본의 주제 · 후킹 재료 — 다른 계정에서 성과가 높았던 릴스와 우리 계정에서 성과가 높았던 릴스.
 // 상세페이지만 보고 주제를 정하면 상품 설명서 같은 영상이 나와서(2026-11-10 사용자 결정), 주제 · 첫 문장은 여기서 가져오고
 // 상세페이지는 상품 사실을 확인하는 데만 쓴다. 워커가 이미 수집한 값만 읽고 인스타를 부르지 않는다.
 

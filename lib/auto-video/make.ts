@@ -291,7 +291,7 @@ export async function makeAutoVideo(input: {
   const savedBoard = input.dryRun ? input.savedBoard : undefined;
   if (savedBoard) console.log("  (시험) 저장된 장면표로 바로 영상을 만든다");
   if (!phrases.hooks.length && !savedBoard) {
-    // 상식형은 주제 · 첫 문장을 성과가 높았던 릴스에서 가져온다(2026-11-10). 못 읽으면 참고 없이 쓴다
+    // 주제 · 첫 문장은 성과가 높았던 릴스에서 가져온다(2026-11-10). 못 읽으면 참고 없이 쓴다
     const references = await loadReelReferences(service, input.accountId).catch((e) => {
       console.warn("  참고 릴스를 조회하지 못했어요:", e instanceof Error ? e.message : e);
       return EMPTY_REFERENCES;
