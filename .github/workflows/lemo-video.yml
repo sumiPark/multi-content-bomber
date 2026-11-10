@@ -1,0 +1,118 @@
+name: lemo-video
+
+# lemo 코드 애니메이션 영상 워커(worker/lemo-video.ts) — 사람이 직접 부를 때만 돈다(workflow_dispatch).
+# 기존 auto-video 워크플로와 따로다. 기본은 dry_run: 칸 · 상품 · 계정 설정을 읽기만 하고 결과는 실행 기록의 파일로 남긴다.
+# dry_run을 끄면 lemo_productions(0055)에 기록한다. 0055가 없으면 워커가 시작 전에 멈춘다. 발행은 하지 않는다.
+on:
+  workflow_dispatch:
+    inputs:
+      plan:
+        description: "만들 칸 id (content_plans.id, 장면표가 저장된 칸)"
+        required: true
+      account:
+        description: "계정 라이브러리 이름 (비우면 칸의 계정 표시 이름)"
+        required: false
+      dry_run:
+        description: "만들기만 하고 저장하지 않기 (결과는 실행 기록의 파일로)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: lemo-video-${{ inputs.plan }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # lemo-opuscar 고정 커밋(lib/lemo/README.md). 올릴 때는 README와 함께 바꾼다
+  LEMO_OPUSCAR_REPO: https://github.com/lemomo-ai/lemo-opuscar.git
+  LEMO_OPUSCAR_COMMIT: 9eb7739a0fca4c6990fe966cb8b87b1930f7193a
+
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # apt의 ffmpeg 6.1은 lemo 렌더에 너무 오래돼 정적 빌드(7.1)를 받는다
+      - name: Install ffmpeg 7
+        run: |
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.tar.xz" https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz
+          tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg" --strip-components=1
+          echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/ffmpeg/bin/ffmpeg" -version | head -1
+          "$RUNNER_TEMP/ffmpeg/bin/ffprobe" -version | head -1
+      - name: Prepare lemo-opuscar
+        run: |
+          git clone --quiet "$LEMO_OPUSCAR_REPO" "$RUNNER_TEMP/lemo-opuscar"
+          cd "$RUNNER_TEMP/lemo-opuscar"
+          git checkout --quiet "$LEMO_OPUSCAR_COMMIT"
+          npm ci --no-audit --no-fund
+          node node_modules/playwright-core/cli.js install --with-deps chromium-headless-shell
+          echo "LEMO_OPUSCAR_HOME=$PWD" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: lib/shoot/video-kit/py/requirements.txt
+      - run: pip install -q -r lib/shoot/video-kit/py/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.u2net
+            ~/.cache/mcb-depth
+          key: video-models-v1
+      - name: Prepare HyperFrames browser
+        run: npx --yes hyperframes@0.8.210 browser ensure
+      # 구매한 자막 모션 스킬은 저장소에 넣지 않고 비공개 저장 공간에서 받는다(auto-video와 같다).
+      # lemo 경로는 스킬이 없으면 기본 자막으로 넘어가지 않고 실패한다
+      - name: Prepare caption skill
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          npx tsx worker/fetch-caption-skill.ts "$RUNNER_TEMP/caption-skill"
+          cd "$RUNNER_TEMP/caption-skill/caption-motion-seqc"
+          npm ci --no-audit --no-fund --silent
+          sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+          echo "CAPTION_SKILL_DIR=$PWD" >> "$GITHUB_ENV"
+      - name: Make lemo video
+        # 입력값은 셸에 직접 넣지 않고 환경변수로 넘긴다
+        run: |
+          args=(--plan "$PLAN_ID" --out lemo-out)
+          if [ -n "$ACCOUNT_KEY" ]; then args+=(--account "$ACCOUNT_KEY"); fi
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          npm run worker:lemo-video -- "${args[@]}"
+        env:
+          PLAN_ID: ${{ inputs.plan }}
+          ACCOUNT_KEY: ${{ inputs.account }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
+          FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+          VIDEO_PYTHON: python
+          # GPU 없는 러너에서 WebGL 스타일을 그리려면 소프트웨어 렌더러가 필요하다(느림)
+          LEMO_ANGLE: swiftshader
+      - name: Keep result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lemo-video-${{ inputs.plan }}
+          path: |
+            lemo-out/*.json
+            lemo-out/*.mp4
+            lemo-out/*.jpg
+          retention-days: 3
+          if-no-files-found: ignore

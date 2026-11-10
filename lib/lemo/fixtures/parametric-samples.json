@@ -1,0 +1,29 @@
+[
+  {
+    "id": "sample-mina", "account_key": "fixture", "series": null, "name": "미나(예시 사람)",
+    "description": "parametric human 예시: 단발 머리 · 겨자색 윗옷 · 남색 바지. 엔진 시험용(실제 계정 캐릭터 아님)",
+    "rig": "parametric",
+    "body": { "shape": "human", "height": 520, "head_ratio": 0.3, "colors": { "body": "#e8b43a", "line": "#2b2420", "accent": "#e4613f", "cheek": "#f0b4a8" },
+      "features": { "skin": "#f2c7a0", "hair": "#3a2621", "hair_style": "bob", "pants": "#3b4766", "shoes": "#2b2420" } },
+    "expressions": ["neutral","happy","surprised","worried","determined","sad","talk","calm"], "actions": ["idle","walk","hop","wave","point","nod","bow","shake","jump","hug","push","lift","shrink","cheer","fall","float","pulled","pull","link","sit"], "views": ["front", "q", "side"], "props": [],
+    "made_for": "lemo 엔진 parametric 검증(2026-11-10)", "sheet": null
+  },
+  {
+    "id": "sample-cat", "account_key": "fixture", "series": null, "name": "고양이(예시 동물)",
+    "description": "parametric animal 예시: 뾰족 귀 · 말린 꼬리 · 크림색 배",
+    "rig": "parametric",
+    "body": { "shape": "animal", "height": 300, "head_ratio": 0.5, "colors": { "body": "#e4613f", "line": "#2b2420", "accent": "#fbf6ea", "cheek": "#f0b4a8" },
+      "features": { "ears": "pointy", "tail": "curl" } },
+    "expressions": ["neutral","happy","surprised","worried","determined","sad","talk","calm"], "actions": ["idle","walk","hop","wave","point","nod","bow","shake","jump","hug","push","lift","shrink","cheer","fall","float","pulled","pull","link","sit"], "views": ["front", "q", "side"], "props": [],
+    "made_for": "lemo 엔진 parametric 검증(2026-11-10)", "sheet": null
+  },
+  {
+    "id": "sample-apple", "account_key": "fixture", "series": null, "name": "사과(예시 과일)",
+    "description": "parametric fruit 예시: 빨간 사과 · 초록 잎",
+    "rig": "parametric",
+    "body": { "shape": "fruit", "height": 230, "head_ratio": 1, "colors": { "body": "#d4483c", "line": "#2d3263", "accent": "#d4483c", "cheek": "#ee8ea4" },
+      "features": { "kind": "apple", "leaf": "#6a9a3a" } },
+    "expressions": ["neutral","happy","surprised","worried","determined","sad","talk","calm"], "actions": ["idle","walk","hop","wave","point","nod","bow","shake","jump","hug","push","lift","shrink","cheer","fall","float","pulled","pull","link","sit"], "views": ["front", "q", "side"], "props": [],
+    "made_for": "lemo 엔진 parametric 검증(2026-11-10)", "sheet": null
+  }
+]

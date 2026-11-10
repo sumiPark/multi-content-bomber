@@ -21,7 +21,7 @@ import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/v
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
 import { captionZones, writeCoverProject, writeProject, type BehindWord, type VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
-import { layoutBeats, timeText, type TimedCut, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
+import { layoutBeats, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
 import type { createServiceClient } from "@/lib/supabase/service";
 
@@ -71,6 +71,11 @@ export interface KitInput {
   // 다시 편집: 같은 촬영본이면 이 계획을 다시 쓴다(사람이 고친 글만 반영)
   reusePlan?: EditPlan | null;
   overrides?: { no: number; onScreen?: string | null; subtitle?: string | null }[];
+  // 이미 만든 음성(lemo 경로). 있으면 음성을 새로 만들지 않고 비트마다 이 음성을 쓴다.
+  // layout이 있으면 줄 시각 · 영상 길이도 이 값으로 고정한다(화면이 먼저 만들어진 경우). 직접 촬영 · AI 자동은 넘기지 않는다
+  presetVoices?: { clips: VoiceClip[]; layout?: FixedLayout["lines"]; duration?: number };
+  // 영상 기준 시각이 정해진 효과음(lemo 장면 데이터). 있으면 비트의 sfx 대신 이 시각을 그대로 쓴다 — 말 사이 효과음도 그림과 맞는다
+  presetSfx?: TimedSfx[];
 }
 
 export interface KitSegment {
@@ -206,7 +211,7 @@ export function planProblems(plan: EditPlan): string[] {
   return [...new Set(problems)];
 }
 
-async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string, voiceId: string | null | undefined): Promise<{ voices: VoiceClip[]; usedVoice: boolean; warnings: string[] }> {
+export async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string, voiceId: string | null | undefined): Promise<{ voices: VoiceClip[]; usedVoice: boolean; warnings: string[] }> {
   const kit = editKit();
   const voiceSetting = { ...kit.voice, id: voiceId || process.env.FISH_VOICE_ID || kit.voice.id };
   const warnings: string[] = [];
@@ -352,6 +357,8 @@ const qaSchema = z.object({
 async function qaFrames(version: string, dir: string, tl: Timeline, workDir: string): Promise<{ drop: Set<string>; issues: string[]; tokens: { input: number; output: number } }> {
   const empty = { drop: new Set<string>(), issues: [] as string[], tokens: { input: 0, output: 0 } };
   if (!process.env.OPENAI_API_KEY) return empty;
+  // 그래픽 표시 자리를 보는 검수라 그래픽이 없으면 볼 것이 없다(프레임 1장이면 xstack이 실패해 어차피 빈 결과였다)
+  if (!tl.graphics.length) return empty;
   try {
     const times = [0.1, ...tl.graphics.map((g) => (g.start + g.end) / 2)];
     const unique = [...new Set(times.map((t) => t.toFixed(2)))].slice(0, 12);
@@ -526,7 +533,11 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const look = normalizeLook(plan.look);
 
   // 2. 음성 → 시각표
-  const made = await makeVoices(plan, clips, workDir, input.voiceId);
+  const preset = input.presetVoices;
+  if (preset && (preset.clips.length !== plan.beats.length || (preset.layout && preset.layout.length !== plan.beats.length))) {
+    throw new Error(`미리 만든 음성 ${preset.clips.length}줄과 비트 ${plan.beats.length}개가 맞지 않아요`);
+  }
+  const made = preset ? { voices: preset.clips, usedVoice: preset.clips.some((c) => !!c.file), warnings: [] as string[] } : await makeVoices(plan, clips, workDir, input.voiceId);
   warnings.push(...made.warnings);
 
   // AI 이미지 컷 — 말 길이를 안 뒤에 만든다. 원래 컷을 담은 plan은 그대로 저장해 다시 편집에 쓴다
@@ -545,7 +556,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   tokens.output += visual.tokens.output;
   const allClips = visual.clips;
   const seconds = new Map(allClips.map((c) => [c.no, c.duration]));
-  const base = layoutBeats(visual.plan, made.voices, seconds);
+  const base = layoutBeats(visual.plan, made.voices, seconds, preset?.layout ? { lines: preset.layout, duration: preset.duration } : undefined);
 
   const draftTimeline = timeText(plan, base, [], new Map());
   const voice = buildVoiceTrack(draftTimeline, workDir);
@@ -577,6 +588,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     live.set(line.beat, shifted);
   }
   let tl = timeText(plan, base, words, live);
+  if (input.presetSfx) tl = { ...tl, sfx: input.presetSfx.filter((s) => s.t >= 0 && s.t < tl.duration) };
   if (readable) tl = { ...tl, captions: readableCaptions(tl.captions) };
   // 사람이 볼 수 있게 어디에 들어갔는지 남긴다. 경고가 있으면 자동 발행도 멈춘다
   for (const u of visual.used) {

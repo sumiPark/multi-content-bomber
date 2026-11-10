@@ -1,0 +1,37 @@
+{
+  "version": 1, "size": { "w": 1080, "h": 1920 }, "fps": 30, "duration": 8, "account_key": "fixture", "series": null,
+  "style": { "slug": "midcentury-toon", "params": {} },
+  "brand": { "palette": ["#e4613f", "#e8b43a", "#3fa7a0"], "ink": "#2b2420", "paper": "#f4ead5" },
+  "cast": [
+    { "id": "mina", "character": "sample-mina", "role": "설명하는 사람" },
+    { "id": "cat", "character": "sample-cat", "role": "놀라는 고양이" },
+    { "id": "apple", "character": "sample-apple", "role": "인사하는 사과" }
+  ],
+  "backgrounds": [
+    { "id": "room", "kind": "plane", "params": { "floor": 0.74 } },
+    { "id": "burst", "kind": "sunburst", "params": { "cx": 0.62, "cy": 0.5 } },
+    { "id": "dots", "kind": "dots", "params": {} }
+  ],
+  "scenes": [
+    { "id": "s1", "beat": 0, "start": 0, "end": 3, "purpose": "미나가 말하며 걸어 들어오고 고양이가 바라봄", "background": "room",
+      "camera": { "from": { "x": 0.5, "y": 0.5, "zoom": 1, "rot": 0 }, "to": { "x": 0.52, "y": 0.52, "zoom": 1.06, "rot": 0 }, "ease": "inout" },
+      "actors": [
+        { "cast": "mina", "from": { "x": 0.2, "y": 0.74, "scale": 1, "facing": "right" }, "to": { "x": 0.45, "y": 0.74, "scale": 1, "facing": "right" }, "expr": "talk", "expr_to": null, "expr_at": null, "action": "walk", "look": null, "enter_at": null, "exit_at": null },
+        { "cast": "cat", "from": { "x": 0.76, "y": 0.74, "scale": 1, "facing": "left" }, "to": null, "expr": "neutral", "expr_to": null, "expr_at": null, "action": "idle", "look": "mina", "enter_at": null, "exit_at": null }
+      ], "props": [], "fx": [], "transition_in": "cut", "caption_place": "top" },
+    { "id": "s2", "beat": 1, "start": 3, "end": 5.5, "purpose": "미나가 가리키자 고양이가 놀라 뛰어오름", "background": "burst",
+      "camera": { "from": { "x": 0.55, "y": 0.55, "zoom": 1.15, "rot": 0 }, "to": { "x": 0.55, "y": 0.55, "zoom": 1.2, "rot": 0 }, "ease": "linear" },
+      "actors": [
+        { "cast": "mina", "from": { "x": 0.38, "y": 0.78, "scale": 1, "facing": "right" }, "to": null, "expr": "determined", "expr_to": null, "expr_at": null, "action": "point", "look": "cat", "enter_at": null, "exit_at": null },
+        { "cast": "cat", "from": { "x": 0.72, "y": 0.78, "scale": 1, "facing": "left" }, "to": null, "expr": "surprised", "expr_to": null, "expr_at": null, "action": "jump", "look": null, "enter_at": null, "exit_at": null }
+      ], "props": [], "fx": [{ "kind": "starburst", "t": 0.1, "at": { "x": 0.72, "y": 0.62 } }], "transition_in": "wipe", "caption_place": "top" },
+    { "id": "s3", "beat": 2, "start": 5.5, "end": 8, "purpose": "모두 기뻐하고 사과가 인사", "background": "dots",
+      "camera": { "from": { "x": 0.5, "y": 0.52, "zoom": 1, "rot": 0 }, "to": { "x": 0.5, "y": 0.52, "zoom": 1.04, "rot": 0 }, "ease": "inout" },
+      "actors": [
+        { "cast": "mina", "from": { "x": 0.3, "y": 0.76, "scale": 1, "facing": "front" }, "to": null, "expr": "happy", "expr_to": null, "expr_at": null, "action": "cheer", "look": null, "enter_at": null, "exit_at": null },
+        { "cast": "apple", "from": { "x": 0.55, "y": 0.76, "scale": 1, "facing": "front" }, "to": null, "expr": "happy", "expr_to": null, "expr_at": null, "action": "wave", "look": null, "enter_at": 0.4, "exit_at": null },
+        { "cast": "cat", "from": { "x": 0.78, "y": 0.76, "scale": 1, "facing": "left" }, "to": null, "expr": "calm", "expr_to": null, "expr_at": null, "action": "nod", "look": null, "enter_at": null, "exit_at": null }
+      ], "props": [{ "kind": "word", "at": { "x": 0.5, "y": 0.3 }, "scale": 1.4, "state": "좋아요!@0.6" }], "fx": [{ "kind": "sparkle4", "t": 0.9, "at": { "x": 0.68, "y": 0.5 } }], "transition_in": "wipe", "caption_place": "top" }
+  ],
+  "sfx": [{ "t": 3.0, "name": "whoosh" }, { "t": 3.2, "name": "pop" }, { "t": 5.5, "name": "whoosh" }, { "t": 6.1, "name": "ding" }]
+}

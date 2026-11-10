@@ -1,0 +1,3680 @@
+{
+ "version": 1,
+ "size": {
+  "w": 1080,
+  "h": 1920
+ },
+ "fps": 30,
+ "duration": 56.872,
+ "account_key": "joongdi",
+ "series": "firstgel-story",
+ "style": {
+  "slug": "crayon-book",
+  "params": {
+   "wash": "#8fc7f2",
+   "vignette": 0.28
+  }
+ },
+ "brand": {
+  "palette": [
+   "#79acd9",
+   "#a88fd8",
+   "#ee8ea4",
+   "#f4c7a4",
+   "#e5967c",
+   "#f5c63c",
+   "#7a4b31",
+   "#e7b867",
+   "#a9b8e8",
+   "#d4483c",
+   "#fbfaf4"
+  ],
+  "ink": "#2d3263",
+  "paper": "#f4efe3"
+ },
+ "cast": [
+  {
+   "id": "bangul",
+   "character": "bangul",
+   "role": "주인공 물방울(피부 위 물)"
+  },
+  {
+   "id": "friend",
+   "character": "hyaluronic-friend",
+   "role": "방울이를 붙잡아 주는 히알루론산 친구"
+  },
+  {
+   "id": "bottle",
+   "character": "firstgel-bottle",
+   "role": "퍼스트겔 병(친구 8종이 나옴, 젤)"
+  },
+  {
+   "id": "f1",
+   "character": "hyaluronic-friend",
+   "role": "히알루론산 1번(큰 분자)"
+  },
+  {
+   "id": "f2",
+   "character": "hyaluronic-friend",
+   "role": "히알루론산 2번(큰 분자)"
+  },
+  {
+   "id": "f3",
+   "character": "hyaluronic-friend",
+   "role": "히알루론산 3번(큰 분자)"
+  },
+  {
+   "id": "f4",
+   "character": "hyaluronic-friend",
+   "role": "히알루론산 4번(중간 분자)"
+  },
+  {
+   "id": "f5",
+   "character": "hyaluronic-friend",
+   "role": "히알루론산 5번(중간 분자)"
+  },
+  {
+   "id": "f6",
+   "character": "hyaluronic-friend",
+   "role": "히알루론산 6번(중간 분자)"
+  },
+  {
+   "id": "f7",
+   "character": "hyaluronic-friend",
+   "role": "히알루론산 7번(작은 분자)"
+  },
+  {
+   "id": "f8",
+   "character": "hyaluronic-friend",
+   "role": "히알루론산 8번(작은 분자)"
+  }
+ ],
+ "backgrounds": [
+  {
+   "id": "p1-intro",
+   "kind": "hill",
+   "params": {
+    "y": 0.7344,
+    "color": "peach",
+    "mark": "coral",
+    "page": 0,
+    "draw_in": true
+   }
+  },
+  {
+   "id": "p1",
+   "kind": "hill",
+   "params": {
+    "y": 0.7344,
+    "color": "peach",
+    "mark": "coral",
+    "page": 0
+   }
+  },
+  {
+   "id": "p1-dry",
+   "kind": "hill",
+   "params": {
+    "y": 0.7344,
+    "color": "peach",
+    "mark": "coral",
+    "page": 0,
+    "dry": 1,
+    "dry_from": 0.3,
+    "dry_in": 2,
+    "boil": 0.5
+   }
+  },
+  {
+   "id": "p1-dried",
+   "kind": "hill",
+   "params": {
+    "y": 0.7344,
+    "color": "peach",
+    "mark": "coral",
+    "page": 0,
+    "dry": 1,
+    "dry_in": 0
+   }
+  },
+  {
+   "id": "p2",
+   "kind": "hill",
+   "params": {
+    "y": 0.7344,
+    "color": "peach",
+    "mark": "coral",
+    "page": 1,
+    "wax": true
+   }
+  },
+  {
+   "id": "p2-washed",
+   "kind": "hill",
+   "params": {
+    "y": 0.7344,
+    "color": "peach",
+    "mark": "coral",
+    "page": 1,
+    "wax": true,
+    "washed": "0.53,0.74"
+   }
+  }
+ ],
+ "scenes": [
+  {
+   "id": "c01",
+   "beat": 0,
+   "start": 0,
+   "end": 2.989,
+   "purpose": "크레용이 피부 언덕을 그리는 중 방울이가 하늘에서 떨어져 착지(찌그러졌다 튐)",
+   "background": "p1-intro",
+   "camera": {
+    "from": {
+     "x": 0.5,
+     "y": 0.5469,
+     "zoom": 1.0333,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.6693,
+     "zoom": 2.2584,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5,
+      "y": 0.3438,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.5,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "expr": "happy",
+     "expr_to": "neutral",
+     "expr_at": 1.42,
+     "action": "fall",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.175
+     },
+     "scale": 1,
+     "state": "small"
+    }
+   ],
+   "fx": [],
+   "transition_in": "cut",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c02",
+   "beat": 1,
+   "start": 2.989,
+   "end": 5.763,
+   "purpose": "방울이가 피부 위에 잘 붙어 손을 흔들고 볼이 분홍으로 칠해짐(기분 좋음)",
+   "background": "p1",
+   "camera": {
+    "from": {
+     "x": 0.5,
+     "y": 0.6719,
+     "zoom": 2.5,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.6719,
+     "zoom": 2.5,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": "happy",
+     "expr_at": 0.1,
+     "action": "wave",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.175
+     },
+     "scale": 1,
+     "state": "small"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c03",
+   "beat": 2,
+   "start": 5.763,
+   "end": 8.193,
+   "purpose": "머리에서 김이 올라가고, 방울이가 올려다보다 걱정스러워짐(물이 가만히 있지 않음)",
+   "background": "p1",
+   "camera": {
+    "from": {
+     "x": 0.5,
+     "y": 0.6718,
+     "zoom": 2.4875,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.6662,
+     "zoom": 2.2283,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": "worried",
+     "expr_at": 1.24,
+     "action": "idle",
+     "look": {
+      "x": 0.5,
+      "y": 0.5813
+     },
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.175
+     },
+     "scale": 1,
+     "state": "small"
+    }
+   ],
+   "fx": [
+    {
+     "kind": "steam",
+     "t": 0.24,
+     "at": {
+      "x": 0.5,
+      "y": 0.6188
+     }
+    }
+   ],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c04",
+   "beat": 3,
+   "start": 8.193,
+   "end": 11.096,
+   "purpose": "방울이 발이 떨어져 당황한 채 하늘로 떠올라 구름이 됨(공기 쪽으로 날아감)",
+   "background": "p1",
+   "camera": {
+    "from": {
+     "x": 0.5,
+     "y": 0.6028,
+     "zoom": 1.9721,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.55,
+     "zoom": 1.1667,
+     "rot": 0
+    },
+    "ease": "out"
+   },
+   "actors": [
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.5,
+      "y": 0.3,
+      "scale": 1,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "float",
+     "look": null,
+     "enter_at": null,
+     "exit_at": 1.9
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.175
+     },
+     "scale": 1,
+     "state": "grow@1.9"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c05",
+   "beat": 4,
+   "start": 11.096,
+   "end": 14.214,
+   "purpose": "피부 언덕 색이 듬성해지고 선이 팽팽해짐 = 얼굴이 당김(조용히, 끓음 절반)",
+   "background": "p1-dry",
+   "camera": {
+    "from": {
+     "x": 0.5,
+     "y": 0.55,
+     "zoom": 1.1667,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.55,
+     "zoom": 1.1667,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.175
+     },
+     "scale": 1,
+     "state": "medium"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c06",
+   "beat": 5,
+   "start": 14.214,
+   "end": 16.988,
+   "purpose": "하늘에서 양동이가 기울어 물줄기와 작은 방울이 수십 개가 쏟아져 언덕에 앉음(물을 잔뜩 부음)",
+   "background": "p1-dried",
+   "camera": {
+    "from": {
+     "x": 0.5117,
+     "y": 0.5489,
+     "zoom": 1.1695,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.6389,
+     "y": 0.5375,
+     "zoom": 1.2,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.175
+     },
+     "scale": 1,
+     "state": "medium"
+    },
+    {
+     "kind": "bucket",
+     "at": {
+      "x": 0.8056,
+      "y": 0.3906
+     },
+     "scale": 1,
+     "state": "tip@0.19"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.6611,
+      "y": 0.4031
+     },
+     "scale": 1,
+     "state": "pour@0"
+    }
+   ],
+   "fx": [
+    {
+     "kind": "splash",
+     "t": 0.95,
+     "at": {
+      "x": 0.5778,
+      "y": 0.7366
+     }
+    }
+   ],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c07",
+   "beat": 6,
+   "start": 16.988,
+   "end": 19.891,
+   "purpose": "작은 방울이들이 손 흔들며 다 같이 날아올라 구름이 크게 부풂(많이 부어도 똑같음)",
+   "background": "p1-dried",
+   "camera": {
+    "from": {
+     "x": 0.6185,
+     "y": 0.5201,
+     "zoom": 1.2,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.4188,
+     "zoom": 1.2,
+     "rot": 0
+    },
+    "ease": "out"
+   },
+   "actors": [],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.175
+     },
+     "scale": 1,
+     "state": "puff@1.61"
+    },
+    {
+     "kind": "bucket",
+     "at": {
+      "x": 0.8056,
+      "y": 0.3906
+     },
+     "scale": 1,
+     "state": "tipped"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.2063
+     },
+     "scale": 1,
+     "state": "fly@0.16"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c08",
+   "beat": 7,
+   "start": 19.891,
+   "end": 23.482,
+   "purpose": "페이지가 넘어가고, 떠오르던 방울이 손을 연보라 친구가 붙잡아 끌어내림(물을 붙잡아 줄 친구)",
+   "background": "p2",
+   "camera": {
+    "from": {
+     "x": 0.5556,
+     "y": 0.6094,
+     "zoom": 2.0833,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5556,
+     "y": 0.6094,
+     "zoom": 2.0833,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "friend",
+     "from": {
+      "x": 0.6167,
+      "y": 0.7411,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": "happy",
+     "expr_at": 0.51,
+     "action": "pull",
+     "look": "bangul",
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5222,
+      "y": 0.6224,
+      "scale": 0.9167,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.5222,
+      "y": 0.7476,
+      "scale": 0.9167,
+      "facing": "front"
+     },
+     "expr": "worried",
+     "expr_to": "happy",
+     "expr_at": 1.56,
+     "action": "pulled",
+     "look": "friend",
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    }
+   ],
+   "fx": [
+    {
+     "kind": "burst",
+     "t": 0.51,
+     "at": {
+      "x": 0.609,
+      "y": 0.5588
+     }
+    }
+   ],
+   "transition_in": "page-turn",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c09",
+   "beat": 8,
+   "start": 23.482,
+   "end": 26.471,
+   "purpose": "방울이와 친구가 꼭 안고 흔들, 손글씨 \"히알루론산\"이 써지고 반짝(그 친구 이름)",
+   "background": "p2",
+   "camera": {
+    "from": {
+     "x": 0.5722,
+     "y": 0.6637,
+     "zoom": 2.7764,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5722,
+     "y": 0.6687,
+     "zoom": 3.0833,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "friend",
+     "from": {
+      "x": 0.6139,
+      "y": 0.7414,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "calm",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "hug",
+     "look": "bangul",
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5472,
+      "y": 0.7465,
+      "scale": 0.9167,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "calm",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "hug",
+     "look": "friend",
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산@0.52"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle@0.92"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c10",
+   "beat": 9,
+   "start": 26.471,
+   "end": 31.395,
+   "purpose": "퍼스트겔 병 뚜껑이 열리고 크기 다른 친구 8이 차례로 튀어나와 줄을 섬, 하늘에 1~8(여덟 종)",
+   "background": "p2",
+   "camera": {
+    "from": {
+     "x": 0.3118,
+     "y": 0.6281,
+     "zoom": 1.5796,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.4722,
+     "y": 0.6281,
+     "zoom": 1.55,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bottle",
+     "from": {
+      "x": 0.0972,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "open",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f1",
+     "from": {
+      "x": 0.0972,
+      "y": 0.6515,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.2656,
+      "y": 0.7431,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": "happy",
+     "expr_at": 0.799,
+     "action": "jump",
+     "look": null,
+     "enter_at": 0.379,
+     "exit_at": null
+    },
+    {
+     "cast": "f2",
+     "from": {
+      "x": 0.0972,
+      "y": 0.6481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.4033,
+      "y": 0.7465,
+      "scale": 1,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": "happy",
+     "expr_at": 1.039,
+     "action": "jump",
+     "look": null,
+     "enter_at": 0.619,
+     "exit_at": null
+    },
+    {
+     "cast": "f3",
+     "from": {
+      "x": 0.0972,
+      "y": 0.6455,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.5233,
+      "y": 0.7475,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": "happy",
+     "expr_at": 1.279,
+     "action": "jump",
+     "look": null,
+     "enter_at": 0.859,
+     "exit_at": null
+    },
+    {
+     "cast": "f4",
+     "from": {
+      "x": 0.0972,
+      "y": 0.6432,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.6289,
+      "y": 0.7399,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": "happy",
+     "expr_at": 1.519,
+     "action": "jump",
+     "look": null,
+     "enter_at": 1.099,
+     "exit_at": null
+    },
+    {
+     "cast": "f5",
+     "from": {
+      "x": 0.0972,
+      "y": 0.6413,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.7222,
+      "y": 0.7292,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": "happy",
+     "expr_at": 1.759,
+     "action": "jump",
+     "look": null,
+     "enter_at": 1.339,
+     "exit_at": null
+    },
+    {
+     "cast": "f6",
+     "from": {
+      "x": 0.0972,
+      "y": 0.6395,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.8044,
+      "y": 0.722,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": "happy",
+     "expr_at": 1.999,
+     "action": "jump",
+     "look": null,
+     "enter_at": 1.579,
+     "exit_at": null
+    },
+    {
+     "cast": "f7",
+     "from": {
+      "x": 0.0972,
+      "y": 0.6378,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.8761,
+      "y": 0.7199,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": "happy",
+     "expr_at": 2.239,
+     "action": "jump",
+     "look": null,
+     "enter_at": 1.819,
+     "exit_at": null
+    },
+    {
+     "cast": "f8",
+     "from": {
+      "x": 0.0972,
+      "y": 0.6365,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "to": {
+      "x": 0.9389,
+      "y": 0.721,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "expr": "surprised",
+     "expr_to": "happy",
+     "expr_at": 2.479,
+     "action": "jump",
+     "look": null,
+     "enter_at": 2.059,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.2656,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "1@0.799"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.4033,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "2@1.039"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5233,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "3@1.279"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.6289,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "4@1.519"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.7222,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "5@1.759"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8044,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "6@1.999"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8761,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "7@2.239"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.9389,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "8@2.479"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c11",
+   "beat": 10,
+   "start": 31.395,
+   "end": 35.244,
+   "purpose": "큰 친구부터 작은 친구까지 한 줄로 서서 차례로 인사(크기가 다름)",
+   "background": "p2",
+   "camera": {
+    "from": {
+     "x": 0.3605,
+     "y": 0.6406,
+     "zoom": 1.5833,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.6889,
+     "y": 0.6406,
+     "zoom": 1.5833,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bottle",
+     "from": {
+      "x": 0.0972,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "stand-open",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f1",
+     "from": {
+      "x": 0.2656,
+      "y": 0.7431,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "bow",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f2",
+     "from": {
+      "x": 0.4033,
+      "y": 0.7465,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "bow",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f3",
+     "from": {
+      "x": 0.5233,
+      "y": 0.7475,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "bow",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f4",
+     "from": {
+      "x": 0.6289,
+      "y": 0.7399,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "bow",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f5",
+     "from": {
+      "x": 0.7222,
+      "y": 0.7292,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "bow",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f6",
+     "from": {
+      "x": 0.8044,
+      "y": 0.722,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "bow",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f7",
+     "from": {
+      "x": 0.8761,
+      "y": 0.7199,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "bow",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f8",
+     "from": {
+      "x": 0.9389,
+      "y": 0.721,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "bow",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.2656,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "1"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.4033,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "2"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5233,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "3"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.6289,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "4"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.7222,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "5"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8044,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "6"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8761,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "7"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.9389,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "8"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c12",
+   "beat": 11,
+   "start": 35.244,
+   "end": 38.491,
+   "purpose": "큰 친구 · 작은 친구가 양옆과 손을 잡고, 그 틈에 작은 방울이들이 쏙쏙 들어감(서로 손을 잡으면)",
+   "background": "p2",
+   "camera": {
+    "from": {
+     "x": 0.6,
+     "y": 0.675,
+     "zoom": 1.75,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.6,
+     "y": 0.675,
+     "zoom": 1.75,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bottle",
+     "from": {
+      "x": 0.0972,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "stand-open",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f1",
+     "from": {
+      "x": 0.2656,
+      "y": 0.7431,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f2",
+     "from": {
+      "x": 0.4033,
+      "y": 0.7465,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f3",
+     "from": {
+      "x": 0.5233,
+      "y": 0.7475,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f4",
+     "from": {
+      "x": 0.6289,
+      "y": 0.7399,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f5",
+     "from": {
+      "x": 0.7222,
+      "y": 0.7292,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f6",
+     "from": {
+      "x": 0.8044,
+      "y": 0.722,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f7",
+     "from": {
+      "x": 0.8761,
+      "y": 0.7199,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f8",
+     "from": {
+      "x": 0.9389,
+      "y": 0.721,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.2656,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "1"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.4033,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "2"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5233,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "3"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.6289,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "4"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.7222,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "5"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8044,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "6"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8761,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "7"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.9389,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "8"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.625
+     },
+     "scale": 1,
+     "state": "slip@1.16"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c13",
+   "beat": 12,
+   "start": 38.491,
+   "end": 42.942,
+   "purpose": "하늘색 수채가 왼쪽에서 번져 모두를 덮고 숨어 있던 흰 물방울 무늬가 드러남 = 속부터 겉까지 꽉 채운 수분막(대표 장면)",
+   "background": "p2",
+   "camera": {
+    "from": {
+     "x": 0.5,
+     "y": 0.625,
+     "zoom": 1.0667,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.625,
+     "zoom": 1.0667,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bottle",
+     "from": {
+      "x": 0.0972,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "stand-open",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f1",
+     "from": {
+      "x": 0.2656,
+      "y": 0.7431,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f2",
+     "from": {
+      "x": 0.4033,
+      "y": 0.7465,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f3",
+     "from": {
+      "x": 0.5233,
+      "y": 0.7475,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f4",
+     "from": {
+      "x": 0.6289,
+      "y": 0.7399,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f5",
+     "from": {
+      "x": 0.7222,
+      "y": 0.7292,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f6",
+     "from": {
+      "x": 0.8044,
+      "y": 0.722,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f7",
+     "from": {
+      "x": 0.8761,
+      "y": 0.7199,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f8",
+     "from": {
+      "x": 0.9389,
+      "y": 0.721,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.2656,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "1"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.4033,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "2"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5233,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "3"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.6289,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "4"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.7222,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "5"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8044,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "6"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8761,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "7"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.9389,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "8"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.625
+     },
+     "scale": 1,
+     "state": "sit-gaps"
+    }
+   ],
+   "fx": [
+    {
+     "kind": "wash",
+     "t": 0.16,
+     "at": {
+      "x": 0.5,
+      "y": 0.53
+     }
+    },
+    {
+     "kind": "wash",
+     "t": 1.46,
+     "at": {
+      "x": 0.5,
+      "y": 0.74
+     }
+    }
+   ],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c14",
+   "beat": 13,
+   "start": 42.942,
+   "end": 46.189,
+   "purpose": "병이 폴짝 뒤집혀 젤을 통통한 덩어리로 내놓고 흐르지 않고 멈춤(겔로 만든 이유)",
+   "background": "p2-washed",
+   "camera": {
+    "from": {
+     "x": 0.1778,
+     "y": 0.6633,
+     "zoom": 2.3909,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.183,
+     "y": 0.6685,
+     "zoom": 2.6333,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bottle",
+     "from": {
+      "x": 0.0972,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "pour",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f1",
+     "from": {
+      "x": 0.2656,
+      "y": 0.7431,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f2",
+     "from": {
+      "x": 0.4033,
+      "y": 0.7465,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f3",
+     "from": {
+      "x": 0.5233,
+      "y": 0.7475,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f4",
+     "from": {
+      "x": 0.6289,
+      "y": 0.7399,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f5",
+     "from": {
+      "x": 0.7222,
+      "y": 0.7292,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f6",
+     "from": {
+      "x": 0.8044,
+      "y": 0.722,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f7",
+     "from": {
+      "x": 0.8761,
+      "y": 0.7199,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f8",
+     "from": {
+      "x": 0.9389,
+      "y": 0.721,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.2656,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "1"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.4033,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "2"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5233,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "3"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.6289,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "4"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.7222,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "5"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8044,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "6"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8761,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "7"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.9389,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "8"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.625
+     },
+     "scale": 1,
+     "state": "sit-gaps"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c15",
+   "beat": 14,
+   "start": 46.189,
+   "end": 49.178,
+   "purpose": "수분막 위 방울이가 폴짝 뛰었다 편히 앉음(세수하고 첫 단계에 바름)",
+   "background": "p2-washed",
+   "camera": {
+    "from": {
+     "x": 0.5556,
+     "y": 0.7125,
+     "zoom": 2.1667,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5556,
+     "y": 0.7125,
+     "zoom": 2.1667,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bottle",
+     "from": {
+      "x": 0.0972,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "stand-gel",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f1",
+     "from": {
+      "x": 0.2656,
+      "y": 0.7431,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f2",
+     "from": {
+      "x": 0.4033,
+      "y": 0.7465,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f3",
+     "from": {
+      "x": 0.5233,
+      "y": 0.7475,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f4",
+     "from": {
+      "x": 0.6289,
+      "y": 0.7399,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f5",
+     "from": {
+      "x": 0.7222,
+      "y": 0.7292,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f6",
+     "from": {
+      "x": 0.8044,
+      "y": 0.722,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f7",
+     "from": {
+      "x": 0.8761,
+      "y": 0.7199,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f8",
+     "from": {
+      "x": 0.9389,
+      "y": 0.721,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5556,
+      "y": 0.8055,
+      "scale": 0.8333,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": "calm",
+     "expr_at": 1.11,
+     "action": "hop",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.2656,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "1"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.4033,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "2"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5233,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "3"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.6289,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "4"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.7222,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "5"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8044,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "6"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8761,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "7"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.9389,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "8"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.625
+     },
+     "scale": 1,
+     "state": "sit-gaps"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c16",
+   "beat": 15,
+   "start": 49.178,
+   "end": 51.578,
+   "purpose": "위로 틸트하면 1쪽에서 날아간 방울이들이 구름 위에 앉아 내려다봄(아까 날아간 친구들)",
+   "background": "p2-washed",
+   "camera": {
+    "from": {
+     "x": 0.5398,
+     "y": 0.6209,
+     "zoom": 1.9201,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.3906,
+     "zoom": 1.3,
+     "rot": 0
+    },
+    "ease": "out"
+   },
+   "actors": [
+    {
+     "cast": "bottle",
+     "from": {
+      "x": 0.0972,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "stand-gel",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f1",
+     "from": {
+      "x": 0.2656,
+      "y": 0.7431,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f2",
+     "from": {
+      "x": 0.4033,
+      "y": 0.7465,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f3",
+     "from": {
+      "x": 0.5233,
+      "y": 0.7475,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f4",
+     "from": {
+      "x": 0.6289,
+      "y": 0.7399,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f5",
+     "from": {
+      "x": 0.7222,
+      "y": 0.7292,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f6",
+     "from": {
+      "x": 0.8044,
+      "y": 0.722,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f7",
+     "from": {
+      "x": 0.8761,
+      "y": 0.7199,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f8",
+     "from": {
+      "x": 0.9389,
+      "y": 0.721,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5556,
+      "y": 0.8055,
+      "scale": 0.8333,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "calm",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "sit",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.2656,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "1"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.4033,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "2"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5233,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "3"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.6289,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "4"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.7222,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "5"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8044,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "6"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8761,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "7"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.9389,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "8"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.625
+     },
+     "scale": 1,
+     "state": "sit-gaps"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "perch"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  },
+  {
+   "id": "c17",
+   "beat": 16,
+   "start": 51.578,
+   "end": 56.872,
+   "purpose": "구름 위 방울이들이 차례로 뛰어내려 비처럼 내려오고, 뒤로 빠져 페이지 전체가 보이며 끝(다음 세수 때 다시 만남)",
+   "background": "p2-washed",
+   "camera": {
+    "from": {
+     "x": 0.5,
+     "y": 0.3924,
+     "zoom": 1.295,
+     "rot": 0
+    },
+    "to": {
+     "x": 0.5,
+     "y": 0.5,
+     "zoom": 1,
+     "rot": 0
+    },
+    "ease": "inout"
+   },
+   "actors": [
+    {
+     "cast": "bottle",
+     "from": {
+      "x": 0.0972,
+      "y": 0.7481,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "neutral",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "stand-gel",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f1",
+     "from": {
+      "x": 0.2656,
+      "y": 0.7431,
+      "scale": 1.18,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f2",
+     "from": {
+      "x": 0.4033,
+      "y": 0.7465,
+      "scale": 1,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f3",
+     "from": {
+      "x": 0.5233,
+      "y": 0.7475,
+      "scale": 0.86,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f4",
+     "from": {
+      "x": 0.6289,
+      "y": 0.7399,
+      "scale": 0.74,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f5",
+     "from": {
+      "x": 0.7222,
+      "y": 0.7292,
+      "scale": 0.64,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f6",
+     "from": {
+      "x": 0.8044,
+      "y": 0.722,
+      "scale": 0.54,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f7",
+     "from": {
+      "x": 0.8761,
+      "y": 0.7199,
+      "scale": 0.45,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "f8",
+     "from": {
+      "x": 0.9389,
+      "y": 0.721,
+      "scale": 0.38,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "happy",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "link",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    },
+    {
+     "cast": "bangul",
+     "from": {
+      "x": 0.5556,
+      "y": 0.8055,
+      "scale": 0.8333,
+      "facing": "front"
+     },
+     "to": null,
+     "expr": "calm",
+     "expr_to": null,
+     "expr_at": null,
+     "action": "sit",
+     "look": null,
+     "enter_at": null,
+     "exit_at": null
+    }
+   ],
+   "props": [
+    {
+     "kind": "sun",
+     "at": {
+      "x": 0.1667,
+      "y": 0.2688
+     },
+     "scale": 1,
+     "state": null
+    },
+    {
+     "kind": "cloud",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "wide"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5722,
+      "y": 0.5625
+     },
+     "scale": 1,
+     "state": "히알루론산"
+    },
+    {
+     "kind": "star",
+     "at": {
+      "x": 0.7167,
+      "y": 0.5375
+     },
+     "scale": 1,
+     "state": "twinkle"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.2656,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "1"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.4033,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "2"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.5233,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "3"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.6289,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "4"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.7222,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "5"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8044,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "6"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.8761,
+      "y": 0.4875
+     },
+     "scale": 1.0833,
+     "state": "7"
+    },
+    {
+     "kind": "word",
+     "at": {
+      "x": 0.9389,
+      "y": 0.5094
+     },
+     "scale": 1.0833,
+     "state": "8"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.625
+     },
+     "scale": 1,
+     "state": "sit-gaps"
+    },
+    {
+     "kind": "drop-swarm",
+     "at": {
+      "x": 0.5,
+      "y": 0.2
+     },
+     "scale": 1.4583,
+     "state": "rain@0.17"
+    }
+   ],
+   "fx": [],
+   "transition_in": "match",
+   "caption_place": "lower"
+  }
+ ],
+ "sfx": [
+  {
+   "t": 1.15,
+   "name": "pop"
+  },
+  {
+   "t": 3.59,
+   "name": "rustle"
+  },
+  {
+   "t": 6,
+   "name": "whoosh"
+  },
+  {
+   "t": 8.4,
+   "name": "whoosh"
+  },
+  {
+   "t": 9.8,
+   "name": "pop"
+  },
+  {
+   "t": 14.21,
+   "name": "rustle"
+  },
+  {
+   "t": 14.4,
+   "name": "click"
+  },
+  {
+   "t": 14.8,
+   "name": "rustle"
+  },
+  {
+   "t": 15,
+   "name": "tick"
+  },
+  {
+   "t": 15.116,
+   "name": "tick"
+  },
+  {
+   "t": 15.232,
+   "name": "tick"
+  },
+  {
+   "t": 15.348,
+   "name": "tick"
+  },
+  {
+   "t": 15.464,
+   "name": "tick"
+  },
+  {
+   "t": 15.58,
+   "name": "tick"
+  },
+  {
+   "t": 15.696,
+   "name": "tick"
+  },
+  {
+   "t": 15.812,
+   "name": "tick"
+  },
+  {
+   "t": 15.928,
+   "name": "tick"
+  },
+  {
+   "t": 16.044,
+   "name": "tick"
+  },
+  {
+   "t": 16.16,
+   "name": "tick"
+  },
+  {
+   "t": 16.276,
+   "name": "tick"
+  },
+  {
+   "t": 16.392,
+   "name": "tick"
+  },
+  {
+   "t": 17.2,
+   "name": "whoosh"
+  },
+  {
+   "t": 17.5,
+   "name": "whoosh"
+  },
+  {
+   "t": 17.85,
+   "name": "whoosh"
+  },
+  {
+   "t": 18.2,
+   "name": "whoosh"
+  },
+  {
+   "t": 18.6,
+   "name": "pop"
+  },
+  {
+   "t": 19.891,
+   "name": "rustle"
+  },
+  {
+   "t": 20.4,
+   "name": "pop"
+  },
+  {
+   "t": 21.45,
+   "name": "tick"
+  },
+  {
+   "t": 24,
+   "name": "ding"
+  },
+  {
+   "t": 26.6,
+   "name": "click"
+  },
+  {
+   "t": 26.85,
+   "name": "pop"
+  },
+  {
+   "t": 27.09,
+   "name": "pop"
+  },
+  {
+   "t": 27.27,
+   "name": "tick"
+  },
+  {
+   "t": 27.33,
+   "name": "pop"
+  },
+  {
+   "t": 27.51,
+   "name": "tick"
+  },
+  {
+   "t": 27.57,
+   "name": "pop"
+  },
+  {
+   "t": 27.75,
+   "name": "tick"
+  },
+  {
+   "t": 27.81,
+   "name": "pop"
+  },
+  {
+   "t": 27.99,
+   "name": "tick"
+  },
+  {
+   "t": 28.05,
+   "name": "pop"
+  },
+  {
+   "t": 28.23,
+   "name": "tick"
+  },
+  {
+   "t": 28.29,
+   "name": "pop"
+  },
+  {
+   "t": 28.47,
+   "name": "tick"
+  },
+  {
+   "t": 28.53,
+   "name": "pop"
+  },
+  {
+   "t": 28.71,
+   "name": "tick"
+  },
+  {
+   "t": 28.95,
+   "name": "tick"
+  },
+  {
+   "t": 31.395,
+   "name": "tick"
+  },
+  {
+   "t": 31.815,
+   "name": "tick"
+  },
+  {
+   "t": 32.235,
+   "name": "tick"
+  },
+  {
+   "t": 32.655,
+   "name": "tick"
+  },
+  {
+   "t": 33.075,
+   "name": "tick"
+  },
+  {
+   "t": 33.495,
+   "name": "tick"
+  },
+  {
+   "t": 33.915,
+   "name": "tick"
+  },
+  {
+   "t": 34.335,
+   "name": "tick"
+  },
+  {
+   "t": 35.75,
+   "name": "click"
+  },
+  {
+   "t": 36.56,
+   "name": "pop"
+  },
+  {
+   "t": 36.78,
+   "name": "pop"
+  },
+  {
+   "t": 37,
+   "name": "pop"
+  },
+  {
+   "t": 37.22,
+   "name": "pop"
+  },
+  {
+   "t": 37.44,
+   "name": "pop"
+  },
+  {
+   "t": 37.66,
+   "name": "pop"
+  },
+  {
+   "t": 37.88,
+   "name": "pop"
+  },
+  {
+   "t": 38.65,
+   "name": "rustle"
+  },
+  {
+   "t": 39.95,
+   "name": "rustle"
+  },
+  {
+   "t": 41,
+   "name": "ding"
+  },
+  {
+   "t": 42.95,
+   "name": "whoosh"
+  },
+  {
+   "t": 43.3,
+   "name": "plug"
+  },
+  {
+   "t": 45.6,
+   "name": "whoosh"
+  },
+  {
+   "t": 46.4,
+   "name": "whoosh"
+  },
+  {
+   "t": 46.9,
+   "name": "pop"
+  },
+  {
+   "t": 51.75,
+   "name": "pop"
+  },
+  {
+   "t": 52.25,
+   "name": "pop"
+  },
+  {
+   "t": 52.75,
+   "name": "tick"
+  },
+  {
+   "t": 52.75,
+   "name": "pop"
+  },
+  {
+   "t": 53.25,
+   "name": "pop"
+  },
+  {
+   "t": 53.25,
+   "name": "tick"
+  },
+  {
+   "t": 53.75,
+   "name": "tick"
+  },
+  {
+   "t": 53.75,
+   "name": "pop"
+  },
+  {
+   "t": 54.25,
+   "name": "tick"
+  },
+  {
+   "t": 54.25,
+   "name": "pop"
+  },
+  {
+   "t": 54.75,
+   "name": "pop"
+  },
+  {
+   "t": 54.75,
+   "name": "tick"
+  },
+  {
+   "t": 55.25,
+   "name": "tick"
+  },
+  {
+   "t": 55.75,
+   "name": "tick"
+  }
+ ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "hyaluronic-friend",
+  "account_key": "joongdi",
+  "series": "firstgel-story",
+  "name": "히알루론산 친구",
+  "description": "물을 붙잡아 주는 보습 원료 히알루론산을 맡은 연보라 동글이. 머리 위 작은 곱슬(배우마다 조금 다름). 크기가 다른 8종은 같은 캐릭터를 scale만 바꿔 쓴다(큰 분자 · 작은 분자)",
+  "rig": "module",
+  "body": {
+    "shape": "blob",
+    "height": 120,
+    "head_ratio": 1,
+    "colors": { "body": "#a88fd8", "line": "#2d3263", "accent": "#a88fd8", "cheek": "#ee8ea4" },
+    "features": { "sprout": true }
+  },
+  "expressions": ["neutral","happy","surprised","worried","determined","sad","talk","calm"],
+  "actions": ["idle","walk","hop","wave","point","nod","bow","shake","jump","hug","push","lift","shrink","cheer","fall","float","pulled","pull","link","sit"],
+  "views": ["front", "q", "side"],
+  "props": [],
+  "made_for": "퍼스트겔 「방울이 이야기」 lemo 크레용 비교 시험(2026-11-10, D:/ai/lemo-firstgel-test/firstgel-story-crayon) — 같은 대본 · 음성 · 컷 시각",
+  "sheet": null
+}

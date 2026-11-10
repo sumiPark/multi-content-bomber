@@ -21,6 +21,7 @@
     "worker:shoot-edit": "tsx worker/edit-shoots.ts",
     "worker:edit-kit-smoke": "tsx worker/edit-kit-smoke.ts",
     "worker:auto-video": "tsx worker/make-auto-videos.ts",
+    "worker:lemo-video": "tsx worker/lemo-video.ts",
     "worker:archive-shoots": "tsx worker/archive-shoots.ts",
     "worker:knowledge": "tsx worker/draft-knowledge.ts",
     "worker:cleanup-drafts": "tsx worker/cleanup-drafts.ts",

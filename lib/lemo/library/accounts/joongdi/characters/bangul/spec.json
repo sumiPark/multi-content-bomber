@@ -1,0 +1,21 @@
+{
+  "id": "bangul",
+  "account_key": "joongdi",
+  "series": "firstgel-story",
+  "name": "방울이",
+  "description": "피부 위 물(수분)을 맡은 하늘색 물방울. 뾰족한 머리 · 짧은 다리 · 관 팔 · 흰 크레용 하이라이트. 기분이 좋으면 볼에 분홍 낙서. 작은 방울이 무리(drop-swarm)는 같은 캐릭터의 작은 판",
+  "rig": "module",
+  "body": {
+    "shape": "drop",
+    "height": 200,
+    "head_ratio": 1,
+    "colors": { "body": "#79acd9", "line": "#2d3263", "accent": "#79acd9", "cheek": "#ee8ea4" },
+    "features": { "highlight": true, "legs": true }
+  },
+  "expressions": ["neutral","happy","surprised","worried","determined","sad","talk","calm"],
+  "actions": ["idle","walk","hop","wave","point","nod","bow","shake","jump","hug","push","lift","shrink","cheer","fall","float","pulled","pull","link","sit"],
+  "views": ["front", "q", "side"],
+  "props": ["drop-swarm"],
+  "made_for": "퍼스트겔 「방울이 이야기」 lemo 크레용 비교 시험(2026-11-10, D:/ai/lemo-firstgel-test/firstgel-story-crayon) — 같은 대본 · 음성 · 컷 시각",
+  "sheet": null
+}

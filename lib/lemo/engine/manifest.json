@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "notes": {
+    "coords": "x · y · at은 0~1 화면 비율(production.size 기준). 배우 placement는 발 위치. 카메라 zoom 1 = 한 쪽 전체",
+    "times": "장면 시작 기준 초: actors[].expr_at · enter_at · exit_at, scenes[].fx[].t, 소품 state의 '@초'. 영상 기준 초: production.sfx[].t",
+    "state": "소품 state는 '이름' 또는 '이름@초'(장면 시작 기준)",
+    "continuation": "직전 장면에서 같은 배우가 같은 동작을 하던 중이면(이번 장면에 to · enter_at이 없을 때) 동작 시간이 이어진다. 표정도 같으면 이어진다",
+    "match": "match 전환은 이미지를 섞지 않고 앞 장면 끝 카메라에서 0.45초 동안 이어 미끄러진다(같은 배경에서 쓴다)",
+    "subtitles": "엔진은 나레이션 자막을 그리지 않는다. caption_place 자리에 얼굴 · 중요한 행동을 두지 않는 것은 연출 쪽 책임",
+    "camera_rot": "rot(기울기)는 midcentury-toon만 반영하고 crayon-book은 무시한다",
+    "unsupported_transition": "스타일 transitions 목록에 없는 전환은 cut으로 바뀐다"
+  },
+  "styles": {
+    "crayon-book": {
+      "render_mode": "2d",
+      "webgl": true,
+      "transitions": ["cut", "wipe", "page-turn", "match"],
+      "fx": ["wash", "sparkle", "burst", "steam", "splash", "speed"],
+      "fx_desc": {
+        "wash": "수채 붓질: at.y 높이(쪽의 약 1/4 두께)를 왼쪽 → 오른쪽으로 1.8초에 칠함. 흰 왁스 무늬가 드러나고 인물은 물감 위에 남음",
+        "sparkle": "반짝 별(노란 별 하나가 2.5초 동안 깜빡임)",
+        "burst": "번쩍(노란 짧은 선 5개 방사, 0.2초) — 잡기 · 부딪힘 강조",
+        "steam": "김(물결선 3가닥이 위로 올라가며 사라짐, 약 2.5초)",
+        "splash": "튀는 물(하늘색 짧은 선 6개, 0.35초)",
+        "speed": "속도선(세로 짧은 선 3개, 0.8초)"
+      },
+      "params": { "paper": "종이색 #hex(기본 brand.paper)", "wash": "수채 물감 색 #hex(기본 #8fc7f2)", "boil": "선 끓음 배율(기본 1)", "vignette": "비네트(기본 0.28)", "c_<색이름>": "크레용 상자 색 바꾸기(ink sky lav pink peach coral yellow brown ochre peri red white)" },
+      "backgrounds": [
+        { "kind": "paper", "params": { "page": "종이 결 위치(쪽 번호, 0부터). 쪽이 바뀌면 다른 번호", "boil": "선 끓음 배율(1 기본, 0.5 조용한 장면)" } },
+        { "kind": "hill", "params": {
+          "y": "언덕 꼭대기 높이(0~1, 기본 0.734)", "amp": "물결 크기 배율(기본 1)", "color": "언덕 색(#hex 또는 상자 색 이름, 기본 peach)", "mark": "결 무늬 색(기본 coral)",
+          "page": "종이 결 위치(쪽 번호)", "boil": "선 끓음 배율(0.5 = 조용한 장면)", "draw_in": "true면 장면 시작에 선 · 색이 그려지는 중(약 2.3초)",
+          "dry": "0~1 마름(색이 듬성해지고 선이 팽팽해짐)", "dry_from": "마르기 시작(장면 기준 초)", "dry_in": "마르는 데 걸리는 초(0이면 이미 마름)",
+          "wax": "true면 하늘에 흰 크레용 물방울 무늬를 숨겨 둠(수채가 지나가면 드러남)", "washed": "이미 칠해진 수채 띠 가운데 높이들(쉼표, 예 \"0.53,0.74\")"
+        } }
+      ]
+    },
+    "midcentury-toon": {
+      "render_mode": "2d",
+      "webgl": false,
+      "transitions": ["cut", "wipe", "match"],
+      "fx": ["starburst", "rays", "wash", "sparkle4", "sparkle", "burst", "steam", "splash", "speed"],
+      "fx_desc": {
+        "starburst": "별 터짐(16각 흰 별이 뒤에서 튀어나옴, 1.8초)",
+        "rays": "햇살(30개 쐐기가 천천히 돎)",
+        "wash": "색 면이 at.y 띠를 왼쪽 → 오른쪽으로 1.8초에 덮음",
+        "sparkle4": "4각 원자 반짝임(흰색, 0.6초)",
+        "sparkle": "반짝 별(2.5초)", "burst": "번쩍(0.2초)", "steam": "김(약 2.5초)", "splash": "튀는 물(0.35초)", "speed": "속도선(0.8초)"
+      },
+      "params": { "register": "색 셀 어긋남 px(기본 6)", "grain": "종이 결 · 비네트 세기(기본 1)" },
+      "backgrounds": [
+        { "kind": "plane", "params": { "color": "벽 색(#hex, 기본 브랜드 둘째 색의 옅은 톤)", "floor": "바닥 높이(0~1, 기본 0.74)", "floor_color": "바닥 띠 색", "horizon": "false면 지평선 없음" } },
+        { "kind": "sunburst", "params": { "color": "바탕 색", "ray_color": "햇살 색", "cx": "햇살 중심 x(0~1)", "cy": "햇살 중심 y(0~1)", "floor": "바닥 높이(0~1, 기본 0.78)" } },
+        { "kind": "dots", "params": { "color": "바탕 색", "dot_color": "물방울 무늬 색", "size": "무늬 크기(px, 기본 18)", "floor": "바닥 높이(0~1, 기본 0.76)" } }
+      ]
+    }
+  },
+  "props": [
+    { "kind": "sun", "layer": "bg", "states": { "(없음)": "해(노란 동그라미 + 햇살 9개), scale 1 = 지름 약 100px" } },
+    { "kind": "cloud", "layer": "bg", "states": { "small": "작은 구름(덩이 5)", "medium": "덩이 하나 더", "big": "크게 부푼 구름", "wide": "넓은 구름(덩이 8)", "grow@초": "그 시각에 덩이 하나가 자람", "puff@초": "그 시각에 크게 부풂" } },
+    { "kind": "bucket", "layer": "obj", "states": { "upright": "바로 선 양동이", "tip@초": "그 시각부터 기울어 물줄기를 언덕으로 쏟음(약 2초)", "tipped": "기울어진 채" } },
+    { "kind": "star", "layer": "fx", "states": { "twinkle": "반짝이는 별", "twinkle@초": "그 시각에 나타나 반짝임" } },
+    { "kind": "word", "layer": "bg", "states": { "글자": "화면 속 손글씨(이미 써 있음) — 나레이션 자막이 아니라 그림 속 글씨(라벨 · 숫자 · 성분 이름)", "글자@초": "그 시각부터 한 글자씩 써짐" } }
+  ],
+  "account_props": "계정 캐릭터 리그가 소품을 더 내보낼 수 있다(예: joongdi 방울이의 drop-swarm). 계정 account.json의 props와 캐릭터 spec.props에 적힌다",
+  "parametric": {
+    "shapes": ["drop", "blob", "bottle", "fruit", "human", "animal"],
+    "shape_features": {
+      "fruit": { "kind": "apple | citrus | berry | pear", "leaf": "#hex 또는 false", "stem": "#hex", "seed_color": "#hex(berry)" },
+      "bottle": { "label": "라벨 글자", "label_color": "#hex", "cap_open": "true면 뚜껑 열림" },
+      "human": { "skin": "#hex", "hair": "#hex", "hair_style": "short | bob | long | bun | spiky | none", "pants": "#hex", "skirt": "true면 치마", "shoes": "#hex" },
+      "animal": { "ears": "round | pointy | long | floppy | none", "tail": "curl | long | fluffy | none", "snout": "false면 주둥이 없음", "belly": "false면 배 무늬 없음" },
+      "blob": { "sprout": "false면 머리 위 곱슬 없음" }
+    },
+    "expressions": ["neutral", "happy", "surprised", "worried", "determined", "sad", "talk", "calm"],
+    "actions": ["idle", "walk", "hop", "wave", "point", "nod", "bow", "shake", "jump", "hug", "push", "lift", "shrink", "cheer", "fall", "float", "pulled", "pull", "link", "sit"],
+    "action_desc": {
+      "idle": "가만히 숨쉬기", "walk": "걷기(to가 있으면 장면 끝까지 이동)", "hop": "폴짝 한 번 후 편히 앉음(to가 있으면 0.2~0.7초 이동)",
+      "wave": "한 손 흔들기", "point": "look 대상 쪽으로 팔 뻗어 가리키기", "nod": "끄덕임(0.8초마다)", "bow": "차례로 인사(같은 장면 bow 배우가 왼쪽부터 0.42초 간격)",
+      "shake": "아니라고 좌우로 흔듦", "jump": "크게 뛰기(to가 있으면 0.45초 포물선)", "hug": "look 대상을 감싸 안고 흔듦", "push": "앞으로 기울여 두 팔로 밀기",
+      "lift": "두 팔을 머리 위로 들어 올림", "shrink": "0.6초 동안 움츠러듦", "cheer": "두 팔 번쩍 + 콩콩", "fall": "떨어져서(0~1.15초 이동) 찌그러졌다 튀며 착지",
+      "float": "팔 번갈아 들고 떠오름(0.2~1.6초 이동)", "pulled": "0.5초에 look 대상과 손이 잡혀 0.55~1.5초에 끌려 내려옴", "pull": "look 대상의 손을 0.5초에 붙잡아 계속 잡고 있음",
+      "link": "양옆 link 배우와 0.2~0.55초에 손을 잡음", "sit": "편히 앉음"
+    },
+    "views": ["front", "q", "side"]
+  }
+}

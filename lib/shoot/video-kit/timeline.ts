@@ -80,18 +80,33 @@ export interface Timeline {
   hook: { start: number; end: number; onScreen: string; highlight: string; position: "top" | "lower" };
 }
 
-export function layoutBeats(plan: EditPlan, voices: VoiceClip[], clipSeconds: Map<number, number>): Omit<Timeline, "captions" | "graphics" | "sfx" | "hook"> {
+/**
+ * 이미 확정된 줄 시각(lemo 경로 · 비교 시험). 있으면 줄 시각과 영상 길이를 계산하지 않고 이 값을 쓴다.
+ * 없으면(직접 촬영 · AI 자동) 예전 계산 그대로다.
+ */
+export interface FixedLayout {
+  lines: { start: number; end: number }[];
+  duration?: number;
+}
+
+export function layoutBeats(plan: EditPlan, voices: VoiceClip[], clipSeconds: Map<number, number>, fixed?: FixedLayout): Omit<Timeline, "captions" | "graphics" | "sfx" | "hook"> {
   const lines: TimedLine[] = [];
   let t = HEAD;
   plan.beats.forEach((beat, i) => {
     const v = voices[i];
     const length = v.estimated ?? v.fileOut - v.fileIn;
     if (i > 0) t += GAP;
+    const at = fixed?.lines[i];
+    if (at) {
+      lines.push({ beat: i, start: round(at.start), end: round(at.end), file: v.file, fileIn: v.fileIn, fileOut: v.fileOut, tts: beat.tts, live: beat.mode === "live" });
+      t = at.end;
+      return;
+    }
     lines.push({ beat: i, start: round(t), end: round(t + length), file: v.file, fileIn: v.fileIn, fileOut: v.fileOut, tts: beat.tts, live: beat.mode === "live" });
     t += length;
   });
   const hasEndCard = plan.beats[plan.beats.length - 1]?.graphics.some((g) => g.type === "end_card");
-  const duration = toFrame(t + (hasEndCard ? TAIL_END_CARD : TAIL_PLAIN));
+  const duration = fixed?.duration != null ? toFrame(fixed.duration) : toFrame(t + (hasEndCard ? TAIL_END_CARD : TAIL_PLAIN));
 
   const cuts: TimedCut[] = [];
   let prev = 0;

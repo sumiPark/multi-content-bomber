@@ -1,0 +1,19 @@
+{
+  "account_key": "joongdi",
+  "name": "@joongdi — 리유코스메틱 화장품 + 건강기능식품(상품 중심)",
+  "why_this_key": "퍼스트겔은 리유코스메틱(NEOSTEM) 화장품이고, 이야기형 캐릭터 시험은 'joongdi 상품 하나로 이야기 대본 · 장면표'로 진행됐다(2026-11-09 결정 기록). lib/products/shops.ts: @joongdi = 리유 화장품 + 건기식",
+  "brand": {
+    "palette": ["#79acd9", "#a88fd8", "#ee8ea4", "#f4c7a4", "#e5967c", "#f5c63c", "#7a4b31", "#e7b867", "#a9b8e8", "#d4483c", "#fbfaf4"],
+    "ink": "#2d3263",
+    "paper": "#f4efe3"
+  },
+  "mood": "다정한 그림책 상식 이야기. 성분을 얼굴 있는 친구로, 피부를 언덕으로 그린다. 효능은 상품 자료 근거 문구 범위 안에서만",
+  "preferredStyles": ["crayon-book"],
+  "series": [
+    { "id": "firstgel-story", "name": "퍼스트겔 방울이 이야기", "characters": ["bangul", "hyaluronic-friend", "firstgel-bottle"] }
+  ],
+  "backgrounds": [
+    { "id": "skin-hill", "style": "crayon-book", "kind": "hill", "params": { "y": 0.734, "color": "peach", "mark": "coral" }, "desc": "세수한 피부 언덕(살구색 크레용 + 산호색 결)" }
+  ],
+  "props": ["drop-swarm"]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "firstgel-bottle",
+  "account_key": "joongdi",
+  "series": "firstgel-story",
+  "name": "퍼스트겔 병",
+  "description": "리유코스메틱(NEOSTEM) 퍼스트겔과 비슷한 결의 연보라 병 · 흰 뚜껑 · 손글씨 라벨. 얼굴 없음. 상표 글자를 그대로 재현하지 않는다(2026-11-09 사용자 결정: 비슷한 결이면 됨)",
+  "rig": "module",
+  "body": {
+    "shape": "bottle",
+    "height": 233,
+    "head_ratio": 0.35,
+    "colors": { "body": "#a9b8e8", "line": "#2d3263", "accent": "#fbfaf4", "cheek": null },
+    "features": { "label": "퍼스트겔", "gel": "#79acd9" }
+  },
+  "expressions": ["neutral"],
+  "actions": ["idle", "open", "stand-open", "pour", "stand-gel"],
+  "views": ["front"],
+  "props": [],
+  "made_for": "퍼스트겔 「방울이 이야기」 lemo 크레용 비교 시험(2026-11-10, D:/ai/lemo-firstgel-test/firstgel-story-crayon) — 같은 대본 · 음성 · 컷 시각",
+  "sheet": null
+}
