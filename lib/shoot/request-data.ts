@@ -14,8 +14,8 @@ export const REQUEST_STATUS: Record<string, { label: string; variant: "default" 
 export const REQUEST_SELECT =
   "id, status, cuts, clips, created_at, error, content_plans!inner(id, status, social_account_id, proposal, human_brief, script, check_result, social_accounts(display_name), products(name, url, represent_image_url))";
 
-type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; narration?: string; done?: boolean; skipped?: boolean };
-type Clip = { cut: number; name: string; size: number };
+type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; narration?: string; skipped?: boolean };
+type Clip = { cut: number; path: string; name: string; size: number };
 type SavedShotlist = {
   hooks?: { spoken: string; on_screen: string; score?: number | null }[];
   chosen_hook?: number;
@@ -68,18 +68,22 @@ export function toRequestCard(r: RequestRow, liveVoice: boolean): ShootRequestCa
     caption: script.caption?.text ?? "",
     fixedHook: !!script.fixed?.hook,
     fixedNotes: script.fixed?.notes ?? [],
-    cuts: ((r.cuts ?? []) as unknown as Cut[]).map((c) => ({
-      no: c.no,
-      seconds: c.seconds,
-      shot: c.shot,
-      how: c.how,
-      onScreen: c.on_screen,
-      voice: liveVoice ? c.voice : "",
-      narration: liveVoice ? "" : c.narration || c.voice || "",
-      done: !!c.done,
-      skipped: !!c.skipped,
-    })),
-    clips: ((r.clips ?? []) as unknown as Clip[]).map((c) => ({ cut: c.cut, name: c.name, size: c.size })),
+    // 추천 대본 — 촬영본은 이와 상관없이 올린다(2026-11-10). 예전에 뺀 컷은 보이지 않는다
+    cuts: ((r.cuts ?? []) as unknown as Cut[])
+      .filter((c) => !c.skipped)
+      .map((c) => ({
+        no: c.no,
+        seconds: c.seconds,
+        shot: c.shot,
+        how: c.how,
+        onScreen: c.on_screen,
+        voice: liveVoice ? c.voice : "",
+        narration: liveVoice ? "" : c.narration || c.voice || "",
+      })),
+    clips: ((r.clips ?? []) as unknown as Clip[])
+      .slice()
+      .sort((a, b) => a.cut - b.cut)
+      .map((c) => ({ path: c.path, name: c.name, size: c.size })),
     // 찍는 사람이 고칠 수 있는 것만(화면 문구 · 대사) — 캡션 · 말투 점수는 찍을 때 고칠 수 없다
     issues: ((plan.check_result as { issues?: { kind?: string; detail: string }[] } | null)?.issues ?? [])
       .filter((i) => i.kind !== "caption" && i.kind !== "tone" && i.kind !== "hook")

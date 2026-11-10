@@ -3,25 +3,20 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { CheckCircle2, Circle, ExternalLink, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, ExternalLink, Save, Trash2, Upload } from "lucide-react";
 import { Upload as TusUpload } from "tus-js-client";
-import {
-  addClipAction,
-  finishUploadAction,
-  removeClipAction,
-  skipCutAction,
-  toggleCutAction,
-  type ShootResult,
-} from "@/app/(dashboard)/shoot/actions";
+import { addClipAction, finishUploadAction, moveClipAction, removeClipAction, saveBriefAction, type ShootResult } from "@/app/(dashboard)/shoot/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { REQUEST_STATUS } from "@/lib/shoot/request-data";
 import { createClient } from "@/lib/supabase/client";
 import { HookFields } from "@/components/shoot/hook-fields";
-import { cn } from "@/lib/utils";
 
-// 촬영 요청 하나(상세 화면) — 컷 목록(찍을 것 · 찍는 법 · 화면 문구 · 대사), 컷마다 촬영본 올리기, 다 올렸어요.
+// 촬영 요청 하나(상세 화면) — 하고 싶은 말, 추천 대본(참고), 촬영본 올리기(개수 · 순서 자유), 다 올렸어요.
+// 컷 리스트대로 못 찍어도 편집할 수 있게 촬영본을 컷과 떼어 냈다(2026-11-10). 편집 에이전트는
+// 하고 싶은 말 → 추천 대본 → 상품 정보 차례로 따르고, 촬영본 순서를 기본 흐름으로 본다.
 // 업로드는 Supabase Storage의 tus(이어 올리기) 엔드포인트로 — 휴대폰에서 끊겨도 같은 파일을 다시 고르면 이어서 올라간다.
 
 export interface ShootRequestCardData {
@@ -30,6 +25,7 @@ export interface ShootRequestCardData {
   account: string;
   ideaTitle: string | null;
   product: { name: string; url: string; image: string | null } | null;
+  // 이 상품으로 하고 싶은 말(human_brief)
   brief: string | null;
   hook: { spoken: string; onScreen: string; score: number | null } | null;
   // 사람이 넣은 첫 화면 후킹 · 표지 글자 — 비면 편집 에이전트가 만든다
@@ -41,8 +37,10 @@ export interface ShootRequestCardData {
   // 저장한 후킹 문구를 썼는지 · 못 썼으면 왜 (계정 컨셉, 0039)
   fixedHook: boolean;
   fixedNotes: string[];
-  cuts: { no: number; seconds: number; shot: string; how: string; onScreen: string; voice: string; narration: string; done: boolean; skipped: boolean }[];
-  clips: { cut: number; name: string; size: number }[];
+  // 추천 대본 — 참고용
+  cuts: { no: number; seconds: number; shot: string; how: string; onScreen: string; voice: string; narration: string }[];
+  // 올린 촬영본, 편집 순서대로
+  clips: { path: string; name: string; size: number }[];
   issues: string[];
   error: string | null;
 }
@@ -53,6 +51,8 @@ const VIDEO_TYPES: Record<string, string> = { "video/mp4": "mp4", "video/quickti
 const CHUNK = 6 * 1024 * 1024;
 // media 버킷 한도(0014) — 올리기 전에 알려 준다
 const MAX_CLIP_BYTES = 1024 * 1024 * 1024;
+// actions.ts MAX_CLIPS와 같게
+const MAX_CLIPS = 20;
 
 function mb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)}MB`;
@@ -87,10 +87,7 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
   const { isPending, error, run } = useRun();
   const s = REQUEST_STATUS[request.status] ?? { label: request.status, variant: "outline" as const };
   const open = request.status === "OPEN";
-  const clipOf = new Map(request.clips.map((c) => [c.cut, c]));
-  const activeCuts = request.cuts.filter((c) => !c.skipped);
-  const uploaded = activeCuts.filter((c) => clipOf.has(c.no)).length;
-  const totalSeconds = activeCuts.reduce((sum, c) => sum + c.seconds, 0);
+  const totalSeconds = request.cuts.reduce((sum, c) => sum + c.seconds, 0);
 
   return (
     <article className="space-y-3 rounded-lg border bg-card p-4">
@@ -119,7 +116,7 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
           </a>
         </div>
       )}
-      {request.brief && <p className="text-xs">메모: {request.brief}</p>}
+      {open ? <BriefField planId={request.planId} brief={request.brief ?? ""} /> : request.brief && <p className="text-xs">하고 싶은 말: {request.brief}</p>}
       {request.hook && (
         <p className="rounded-md bg-muted/40 px-3 py-2 text-sm">
           첫 장면: <b>{request.hook.spoken}</b>
@@ -146,15 +143,33 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
         </details>
       )}
 
-      <p className="text-xs text-muted-foreground">
-        컷 {activeCuts.length}개 · 약 {Math.round(totalSeconds)}초 · 올린 컷 {uploaded}/{activeCuts.length}
-        {activeCuts.length < request.cuts.length && ` · 뺀 컷 ${request.cuts.length - activeCuts.length}개`}
-      </p>
-      <ol className="space-y-2">
-        {request.cuts.map((c) => (
-          <CutRow key={c.no} requestId={request.id} cut={c} clip={clipOf.get(c.no) ?? null} open={open} canSkip={activeCuts.length > 1} orgId={orgId} userId={userId} />
-        ))}
-      </ol>
+      {request.cuts.length > 0 && (
+        <details className="rounded-md border px-3 py-2">
+          <summary className="cursor-pointer text-sm font-semibold">
+            추천 대본 <span className="text-xs font-normal text-muted-foreground">· 장면 {request.cuts.length}개 · 약 {Math.round(totalSeconds)}초 · 참고용</span>
+          </summary>
+          <p className="mt-1 text-xs text-muted-foreground">이대로 찍지 않아도 돼요. 찍은 장면에 맞는 말만 AI가 골라 써요.</p>
+          <ol className="mt-2 space-y-2">
+            {request.cuts.map((c) => (
+              <li key={c.no} className="space-y-0.5">
+                <p className="text-sm">
+                  <b>{c.no}.</b> {c.shot} <span className="text-xs text-muted-foreground">· {c.seconds}초</span>
+                </p>
+                {c.how && <p className="text-xs text-muted-foreground">찍는 법: {c.how}</p>}
+                {c.onScreen && (
+                  <p className="text-xs">
+                    화면 문구: <span className="rounded bg-muted px-1">{c.onScreen}</span>
+                  </p>
+                )}
+                {c.voice && <p className="text-xs">말하기: “{c.voice}”</p>}
+                {c.narration && <p className="text-xs text-muted-foreground">AI 음성이 읽어요: “{c.narration}”</p>}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+
+      <ClipList requestId={request.id} clips={request.clips} open={open} orgId={orgId} userId={userId} />
 
       {request.caption && (
         <details className="rounded-md border px-3 py-2 text-xs">
@@ -171,10 +186,10 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
       )}
       {open && (
         <div className="flex flex-col items-start gap-1">
-          <Button disabled={isPending || uploaded < activeCuts.length} onClick={() => run(() => finishUploadAction({ requestId: request.id }), "다 올렸어요. 자동 편집을 시작해요.")}>
+          <Button disabled={isPending || !request.clips.length} onClick={() => run(() => finishUploadAction({ requestId: request.id }), "다 올렸어요. 자동 편집을 시작해요.")}>
             <CheckCircle2 className="size-4" /> 다 올렸어요 · 편집 시작
           </Button>
-          {uploaded < activeCuts.length && <p className="text-xs text-muted-foreground">컷마다 촬영본을 하나씩 올리면 눌러져요. 못 찍는 컷은 빼도 돼요.</p>}
+          {!request.clips.length && <p className="text-xs text-muted-foreground">촬영본을 하나 이상 올리면 눌러져요.</p>}
         </div>
       )}
       {error && <p className="text-xs text-risk">{error}</p>}
@@ -182,199 +197,226 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
   );
 }
 
-function CutRow({
-  requestId,
-  cut,
-  clip,
-  open,
-  canSkip,
-  orgId,
-  userId,
-}: {
-  requestId: string;
-  cut: ShootRequestCardData["cuts"][number];
-  clip: { name: string; size: number } | null;
-  open: boolean;
-  canSkip: boolean;
-  orgId: string;
-  userId: string;
-}) {
+/** 이 상품으로 하고 싶은 말 — 기획 고를 때 넣은 것을 촬영 중에 고친다. */
+function BriefField({ planId, brief }: { planId: string; brief: string }) {
+  const { isPending, error, run } = useRun();
+  const [text, setText] = useState(brief);
+  const changed = text.trim() !== brief.trim();
+  return (
+    <div className="space-y-1.5 rounded-md border px-3 py-2.5">
+      <label className="block space-y-1 text-xs font-semibold">
+        하고 싶은 말
+        <Textarea
+          value={text}
+          maxLength={300}
+          rows={2}
+          placeholder="예: 껍질째 먹는 법을 보여 주고 싶어요. 비우면 추천 대본과 상품 정보로 만들어요."
+          onChange={(e) => setText(e.target.value)}
+        />
+      </label>
+      <p className="text-xs text-muted-foreground">뜻은 그대로 두고 AI가 영상 길이 · 계정 말투에 맞게 다듬어요. 광고 문구 규칙에 어긋나거나 상품 정보에 없는 효능은 고쳐 쓰고 경고로 알려요.</p>
+      {changed && (
+        <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => saveBriefAction({ planId, brief: text.trim() }), "저장했어요. 편집할 때 이 말을 먼저 따라요.")}>
+          <Save className="size-4" /> 저장
+        </Button>
+      )}
+      {error && <p className="text-xs text-risk">{error}</p>}
+    </div>
+  );
+}
+
+type Progress = { index: number; count: number; name: string; percent: number; sent: number; total: number };
+
+/** 올린 촬영본 목록 + 여러 개 올리기. 고른 파일을 하나씩 차례로 올리고, 다 끝나면 화면을 새로 고친다. */
+function ClipList({ requestId, clips, open, orgId, userId }: { requestId: string; clips: ShootRequestCardData["clips"]; open: boolean; orgId: string; userId: string }) {
+  const router = useRouter();
   const { isPending, error, run } = useRun();
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadRef = useRef<TusUpload | null>(null);
-  const [progress, setProgress] = useState<{ percent: number; sent: number; total: number } | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const stopRef = useRef(false);
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [uploadErrors, setUploadErrors] = useState<string[]>([]);
 
   // 올리는 중에 화면을 떠나면 업로드가 멈춘다 — 떠나기 전에 묻는다
-  const isUploading = progress != null;
+  const uploading = progress != null;
   useEffect(() => {
-    if (!isUploading) return;
+    if (!uploading) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [isUploading]);
+  }, [uploading]);
 
-  const startUpload = async (file: File) => {
-    setUploadError(null);
-    const type = videoType(file);
-    if (!type) {
-      setUploadError("MP4 · MOV 영상만 올릴 수 있어요.");
-      return;
-    }
-    if (file.size > MAX_CLIP_BYTES) {
-      setUploadError(`파일이 너무 커요 (${mb(file.size)}). 컷 하나에 1GB까지 올릴 수 있어요. 휴대폰 카메라 화질을 1080p로 낮춰 다시 찍어 주세요.`);
-      return;
-    }
+  /** 파일 하나를 tus로 올리고 저장된 경로를 돌려준다. 멈추면 null. */
+  const uploadOne = async (file: File, type: string, onProgress: (sent: number, total: number) => void): Promise<string | null> => {
     const supabase = createClient();
     const { data } = await supabase.auth.getSession();
     const token = data.session?.access_token;
-    if (!token) {
-      setUploadError("로그인이 풀렸어요. 새로고침해 주세요.");
-      return;
-    }
+    if (!token) throw new Error("로그인이 풀렸어요. 새로고침해 주세요.");
 
     let objectName = `${orgId}/${userId}/shoot/${requestId}/${crypto.randomUUID()}.${VIDEO_TYPES[type]}`;
-    const upload = new TusUpload(file, {
-      endpoint: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/upload/resumable`,
-      retryDelays: [0, 3000, 5000, 10000, 20000, 30000],
-      headers: { authorization: `Bearer ${token}`, apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, "x-upsert": "false" },
-      uploadDataDuringCreation: true,
-      removeFingerprintOnSuccess: true,
-      chunkSize: CHUNK,
-      // 큰 파일은 오래 걸려 로그인 토큰이 도중에 만료될 수 있다 — 요청마다 새 토큰으로
-      onBeforeRequest: async (req) => {
-        const { data: fresh } = await supabase.auth.getSession();
-        if (fresh.session?.access_token) req.setHeader("authorization", `Bearer ${fresh.session.access_token}`);
-      },
-      metadata: { bucketName: "media", objectName, contentType: type, cacheControl: "3600" },
-      onProgress: (sent, total) => setProgress({ percent: total ? Math.round((sent / total) * 100) : 0, sent, total }),
-      onError: (err) => {
-        console.error("[shoot] 업로드 오류:", err);
-        setProgress(null);
-        setUploadError("올리다 멈췄어요. 같은 파일을 다시 고르면 이어서 올라가요.");
-      },
-      onSuccess: () => {
-        setProgress(null);
-        uploadRef.current = null;
-        run(() => addClipAction({ requestId, cut: cut.no, path: objectName, name: file.name, size: file.size, type }), `${cut.no}번 컷을 올렸어요.`);
-      },
+    return new Promise((resolve, reject) => {
+      const upload = new TusUpload(file, {
+        endpoint: `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/upload/resumable`,
+        retryDelays: [0, 3000, 5000, 10000, 20000, 30000],
+        headers: { authorization: `Bearer ${token}`, apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, "x-upsert": "false" },
+        uploadDataDuringCreation: true,
+        removeFingerprintOnSuccess: true,
+        chunkSize: CHUNK,
+        // 큰 파일은 오래 걸려 로그인 토큰이 도중에 만료될 수 있다 — 요청마다 새 토큰으로
+        onBeforeRequest: async (req) => {
+          const { data: fresh } = await supabase.auth.getSession();
+          if (fresh.session?.access_token) req.setHeader("authorization", `Bearer ${fresh.session.access_token}`);
+        },
+        metadata: { bucketName: "media", objectName, contentType: type, cacheControl: "3600" },
+        onProgress,
+        onError: (err) => {
+          console.error("[shoot] 업로드 오류:", err);
+          reject(new Error("올리다 멈췄어요. 같은 파일을 다시 고르면 이어서 올라가요."));
+        },
+        onSuccess: () => resolve(objectName),
+      });
+      uploadRef.current = upload;
+      // 같은 파일을 전에 올리다 끊겼으면 그 자리부터 — 이전 업로드의 파일 경로를 그대로 쓴다
+      void upload.findPreviousUploads().then((previous) => {
+        if (stopRef.current) return resolve(null);
+        const prev = previous.find((p) => p.metadata.objectName?.startsWith(`${orgId}/${userId}/shoot/${requestId}/`));
+        if (prev) {
+          objectName = prev.metadata.objectName;
+          upload.options.metadata = { ...upload.options.metadata, objectName };
+          upload.resumeFromPreviousUpload(prev);
+        }
+        upload.start();
+      });
     });
-    uploadRef.current = upload;
-    // 같은 파일을 전에 올리다 끊겼으면 그 자리부터 — 이전 업로드의 파일 경로를 그대로 쓴다
-    const previous = await upload.findPreviousUploads();
-    const prev = previous.find((p) => p.metadata.objectName?.startsWith(`${orgId}/${userId}/shoot/${requestId}/`));
-    if (prev) {
-      objectName = prev.metadata.objectName;
-      upload.options.metadata = { ...upload.options.metadata, objectName };
-      upload.resumeFromPreviousUpload(prev);
-    }
-    setProgress({ percent: 0, sent: 0, total: file.size });
-    upload.start();
   };
 
-  const uploading = isUploading;
+  const startUploads = async (files: File[]) => {
+    const errors: string[] = [];
+    const room = MAX_CLIPS - clips.length;
+    if (files.length > room) errors.push(`촬영본은 ${MAX_CLIPS}개까지예요. 앞의 ${Math.max(room, 0)}개만 올려요.`);
+    const queue = files.slice(0, Math.max(room, 0));
+    stopRef.current = false;
+    let added = 0;
+    for (let i = 0; i < queue.length && !stopRef.current; i++) {
+      const file = queue[i];
+      const type = videoType(file);
+      if (!type) {
+        errors.push(`${file.name}: MP4 · MOV 영상만 올릴 수 있어요.`);
+        continue;
+      }
+      if (file.size > MAX_CLIP_BYTES) {
+        errors.push(`${file.name}: 파일이 너무 커요 (${mb(file.size)}). 하나에 1GB까지예요. 휴대폰 카메라 화질을 1080p로 낮춰 다시 찍어 주세요.`);
+        continue;
+      }
+      setProgress({ index: i + 1, count: queue.length, name: file.name, percent: 0, sent: 0, total: file.size });
+      try {
+        const path = await uploadOne(file, type, (sent, total) =>
+          setProgress({ index: i + 1, count: queue.length, name: file.name, percent: total ? Math.round((sent / total) * 100) : 0, sent, total }),
+        );
+        if (!path) break;
+        const r = await addClipAction({ requestId, path, name: file.name, size: file.size, type });
+        if (r.ok) added++;
+        else errors.push(`${file.name}: ${r.error}`);
+      } catch (e) {
+        errors.push(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    uploadRef.current = null;
+    setProgress(null);
+    setUploadErrors(errors);
+    if (added) {
+      toast(`촬영본 ${added}개를 올렸어요.`);
+      router.refresh();
+    }
+  };
 
-  if (cut.skipped) {
-    return (
-      <li className="rounded-md border border-dashed p-2.5 text-muted-foreground">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="min-w-0 flex-1 truncate text-sm">
-            <b>{cut.no}.</b> {cut.shot}
-          </p>
-          <Badge variant="outline">뺀 컷</Badge>
-          {open && (
-            <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => skipCutAction({ requestId, no: cut.no, skipped: false }), `${cut.no}번 컷을 되돌렸어요.`)}>
-              되돌리기
-            </Button>
-          )}
-        </div>
-        {error && <p className="mt-1 text-xs text-risk">{error}</p>}
-      </li>
-    );
-  }
+  const stop = () => {
+    stopRef.current = true;
+    void uploadRef.current?.abort();
+    uploadRef.current = null;
+    setProgress(null);
+  };
 
   return (
-    <li className={cn("rounded-md border p-2.5", clip && "border-ok/40 bg-ok-soft")}>
-      <div className="flex items-start">
-        {/* 휴대폰에서 누르기 쉽게 누르는 영역은 44px */}
-        <button
-          type="button"
-          disabled={!open || isPending}
-          onClick={() => run(() => toggleCutAction({ requestId, no: cut.no, done: !cut.done }))}
-          className="-mt-2 -ml-2 grid size-11 shrink-0 place-items-center text-muted-foreground disabled:opacity-50"
-          aria-label={cut.done ? "찍음 표시 풀기" : "찍음으로 표시"}
-        >
-          {cut.done || clip ? <CheckCircle2 className="size-5 text-ok" /> : <Circle className="size-5" />}
-        </button>
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-sm">
-            <b>{cut.no}.</b> {cut.shot} <span className="text-xs text-muted-foreground">· {cut.seconds}초</span>
-          </p>
-          <p className="text-xs text-muted-foreground">찍는 법: {cut.how}</p>
-          {cut.onScreen && <p className="text-xs">화면 문구: <span className="rounded bg-muted px-1">{cut.onScreen}</span></p>}
-          {cut.voice && <p className="text-xs">말하기: “{cut.voice}”</p>}
-          {cut.narration && <p className="text-xs text-muted-foreground">AI 음성이 읽어요 (찍을 때 말하지 않아도 돼요): “{cut.narration}”</p>}
-        </div>
-      </div>
+    <section className="space-y-2">
+      <p className="text-sm font-semibold">
+        촬영본 <span className="text-xs font-normal text-muted-foreground">· {clips.length}개 · 위에서부터 이 순서로 이어 붙여요</span>
+      </p>
+      {clips.length > 0 && (
+        <ol className="divide-y rounded-md border">
+          {clips.map((c, i) => (
+            <li key={c.path} className="flex items-center gap-2 px-2.5 py-1.5">
+              <span className="w-5 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+              <span className="min-w-0 flex-1 truncate text-sm">{c.name}</span>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{mb(c.size)}</span>
+              {open && !uploading && (
+                <span className="flex shrink-0 items-center">
+                  {/* 휴대폰에서 누르기 쉽게 누르는 영역은 44px */}
+                  <Button size="icon-lg" variant="ghost" disabled={isPending || i === 0} onClick={() => run(() => moveClipAction({ requestId, path: c.path, dir: "up" }))} aria-label="위로">
+                    <ArrowUp className="size-4" />
+                  </Button>
+                  <Button size="icon-lg" variant="ghost" disabled={isPending || i === clips.length - 1} onClick={() => run(() => moveClipAction({ requestId, path: c.path, dir: "down" }))} aria-label="아래로">
+                    <ArrowDown className="size-4" />
+                  </Button>
+                  <Button size="icon-lg" variant="ghost" disabled={isPending} onClick={() => run(() => removeClipAction({ requestId, path: c.path }), `${i + 1}번 촬영본을 지웠어요.`)} aria-label="촬영본 지우기">
+                    <Trash2 className="size-4" />
+                  </Button>
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
 
-      <div className="mt-2 flex flex-wrap items-center gap-2 pl-9">
-        {clip && !uploading && (
-          <span className="min-w-0 truncate text-xs text-ok">
-            올림 · {clip.name} ({mb(clip.size)})
-          </span>
-        )}
-        {open && !uploading && (
-          <>
-            <input
-              ref={inputRef}
-              type="file"
-              accept="video/mp4,video/quicktime,.mp4,.mov,.m4v"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) void startUpload(f);
-              }}
-            />
-            <Button size="sm" variant={clip ? "ghost" : "outline"} disabled={isPending} onClick={() => inputRef.current?.click()}>
-              <Upload className="size-4" /> {clip ? "다시 올리기" : "촬영본 올리기"}
-            </Button>
-            {clip && (
-              <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => removeClipAction({ requestId, cut: cut.no }), `${cut.no}번 컷 촬영본을 지웠어요.`)} aria-label="올린 촬영본 지우기">
-                <Trash2 className="size-4" />
-              </Button>
-            )}
-            {!clip && canSkip && (
-              <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => skipCutAction({ requestId, no: cut.no, skipped: true }), `${cut.no}번 컷을 뺐어요. 이 컷 없이 편집해요.`)}>
-                이 컷 빼기
-              </Button>
-            )}
-          </>
-        )}
-        {uploading && (
-          <div className="flex w-full items-center gap-2">
+      {open && !uploading && (
+        <>
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            accept="video/mp4,video/quicktime,.mp4,.mov,.m4v"
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = "";
+              if (files.length) void startUploads(files);
+            }}
+          />
+          <Button variant="outline" disabled={isPending || clips.length >= MAX_CLIPS} onClick={() => inputRef.current?.click()}>
+            <Upload className="size-4" /> 촬영본 올리기
+          </Button>
+          <p className="text-xs text-muted-foreground">여러 개를 한 번에 골라도 돼요. 고른 순서대로 뒤에 붙어요.</p>
+        </>
+      )}
+      {progress && (
+        <div className="space-y-1 rounded-md border px-2.5 py-2">
+          <p className="truncate text-xs">
+            {progress.count > 1 && `${progress.index}/${progress.count} · `}
+            {progress.name}
+          </p>
+          <div className="flex items-center gap-2">
             <div className="h-2 flex-1 overflow-hidden rounded bg-muted">
               <div className="h-full bg-primary transition-[width]" style={{ width: `${progress.percent}%` }} />
             </div>
             <span className="text-right text-xs tabular-nums whitespace-nowrap">
               {progress.percent}% · {mb(progress.sent)}/{mb(progress.total)}
             </span>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                void uploadRef.current?.abort();
-                setProgress(null);
-              }}
-            >
+            <Button size="sm" variant="ghost" onClick={stop}>
               멈추기
             </Button>
           </div>
-        )}
-      </div>
-      {(uploadError || error) && <p className="mt-1 pl-9 text-xs text-risk">{uploadError ?? error}</p>}
-    </li>
+        </div>
+      )}
+      {uploadErrors.length > 0 && (
+        <ul className="space-y-0.5 text-xs text-risk">
+          {uploadErrors.map((e) => (
+            <li key={e}>{e}</li>
+          ))}
+        </ul>
+      )}
+      {error && <p className="text-xs text-risk">{error}</p>}
+    </section>
   );
 }

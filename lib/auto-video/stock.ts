@@ -80,7 +80,7 @@ async function vet(hits: Hit[], intent: string, workDir: string): Promise<{ verd
 - fits: 컷 의도와 맞는가
 - real: 실제로 촬영한 영상인가. 그림, 3D, 애니메이션, AI 생성처럼 보이면 false
 - logo: 브랜드 로고, 상표, 알아볼 수 있는 상품 포장이 보이는가
-- person: 누구인지 알아볼 수 있는 사람(얼굴)이 보이는가
+- person: 사람 얼굴이 한 프레임이라도 보이는가. 손 · 팔 · 뒷모습 · 얼굴이 화면 밖인 사람만 나오면 false
 - text: 자막, 워터마크, 글자가 보이는가
 - reason: 한국어 한 문장
 애매하면 logo, person, text를 true로 답한다. 영상은 세로로 가운데를 잘라 쓴다.

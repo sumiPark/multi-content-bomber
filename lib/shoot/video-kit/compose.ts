@@ -2,7 +2,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editKitAsset } from "@/lib/agents/ko-skills";
 import type { EditPlan } from "@/lib/agents/edit-plan";
-import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, ZONE_BOX, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
+import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, readableCaptionBlock, readableRows, ZONE_BOX, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import type { TimedGraphic, Timeline } from "@/lib/shoot/video-kit/timeline";
 
 // 시각표 → HyperFrames 프로젝트(index.html + compositions). 글자 · 그래픽 틀은 ig-edit-ko/kit.json과 같은 이름을 쓴다.
@@ -10,9 +10,30 @@ import type { TimedGraphic, Timeline } from "@/lib/shoot/video-kit/timeline";
 
 const GSAP = "https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js";
 
-const FONT = `@font-face { font-family: "Pretendard"; font-weight: 400; src: url("assets/fonts/Pretendard-Regular.woff2") format("woff2"); }
-    @font-face { font-family: "Pretendard"; font-weight: 600; src: url("assets/fonts/Pretendard-SemiBold.woff2") format("woff2"); }
-    @font-face { font-family: "Pretendard"; font-weight: 800; src: url("assets/fonts/Pretendard-ExtraBold.woff2") format("woff2"); }`;
+// 영상 글자에 쓸 글꼴. 영상마다 스킬 글꼴에서 고른 값을 넘기고, 못 구했으면 아래 대체 글꼴을 쓴다
+export interface VideoFonts {
+  css: string;
+  family: string;
+  files: { from: string; name: string }[];
+}
+
+export function fallbackFonts(): VideoFonts {
+  const faces = [
+    ["Regular", 400],
+    ["SemiBold", 600],
+    ["ExtraBold", 800],
+  ] as const;
+  return {
+    css: faces.map(([f, w]) => `@font-face { font-family: "Pretendard"; font-weight: ${w}; src: url("assets/fonts/Pretendard-${f}.woff2") format("woff2"); }`).join("\n    "),
+    family: `"Pretendard", sans-serif`,
+    files: faces.map(([f]) => ({ from: editKitAsset("fonts", `Pretendard-${f}.woff2`), name: `Pretendard-${f}.woff2` })),
+  };
+}
+
+export function installFonts(dir: string, fonts: VideoFonts): void {
+  mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
+  for (const f of fonts.files) copyFileSync(f.from, join(dir, "assets", "fonts", f.name));
+}
 
 export function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -134,31 +155,33 @@ export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
   });
 }
 
-// noCaptions: 자막 모션 스킬이 렌더 뒤에 자막을 얹을 때 쓴다
-export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null; noCaptions?: boolean } = {}): void {
+// noCaptions: 자막 모션 스킬이 렌더 뒤에 자막 · 후킹 글자 · 끝 화면을 얹을 때 쓴다
+export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zones?: CutZones[] | null; behind?: BehindWord | null; noCaptions?: boolean; fonts?: VideoFonts; readable?: boolean } = {}): void {
+  const fonts = opts.fonts ?? fallbackFonts();
   const look = opts.look ?? DEFAULT_LOOK;
   const zones = opts.zones ?? null;
   const hookAt: Zone = hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
   const places = captionZones(tl, zones);
-  const blocks = opts.noCaptions ? [] : tl.captions.map((c, i) => captionBlock(c, look, places[i]));
+  const blocks = opts.noCaptions ? [] : tl.captions.map((c, i) => opts.readable ? readableCaptionBlock(c, look, places[i]) : captionBlock(c, look, places[i]));
   const behind = opts.behind ?? null;
   // 제품 뒤 글자 구간에서 화면을 당기면 제품 레이어와 어긋난다
   const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.cutStart - 0.4 && t < behind.end)) : [];
   const behindSize = behind ? Math.min(470, Math.floor(980 / Math.max(1, [...behind.word].length))) : 0;
-  mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
   mkdirSync(join(dir, "compositions"), { recursive: true });
-  for (const f of ["Regular", "SemiBold", "ExtraBold"]) copyFileSync(editKitAsset("fonts", `Pretendard-${f}.woff2`), join(dir, "assets", "fonts", `Pretendard-${f}.woff2`));
+  installFonts(dir, fonts);
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "shoot-edit", private: true }));
   writeFileSync(join(dir, "hyperframes.json"), JSON.stringify({ paths: { blocks: "compositions", components: "compositions/components", assets: "assets" }, media: { autoProxy: false } }));
 
   const D = tl.duration;
+  // 브라우저가 실제로 받은 글꼴의 폭으로 한 번 더 맞춘다. 강조어 포함 문장 전체의 크기를 함께 조정한다.
+  const fitReadable = opts.readable ? `document.fonts.ready.then(() => document.querySelectorAll('[data-fit-width]').forEach(el => { const width = Number(el.dataset.fitWidth); const actual = el.getBoundingClientRect().width; if (actual > width) el.style.fontSize = Math.floor(parseFloat(getComputedStyle(el).fontSize) * width / actual) + 'px'; }));` : "";
   const caps = blocks.map((b) => b.html).join("\n    ");
   writeFileSync(
     join(dir, "compositions", "captions.html"),
     `<template>
   <style>
-    ${FONT}
-    #root { position: absolute; inset: 0; font-family: "Pretendard", sans-serif; pointer-events: none; }
+    ${fonts.css}
+    #root { position: absolute; inset: 0; font-family: ${fonts.family}; pointer-events: none; }
     ${lookCss(look)}
   </style>
   <div id="root" data-composition-id="captions" data-width="1080" data-height="1920">
@@ -166,6 +189,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
+    ${fitReadable}
     ${blocks.map((b) => b.motion).join("\n    ")}
     window.__timelines["captions"] = tl;
   </script>
@@ -173,13 +197,14 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
 `,
   );
 
-  const lines = hookLines(tl.hook.onScreen);
+  const lines = opts.readable ? readableRows(tl.hook.onScreen) : hookLines(tl.hook.onScreen);
+  const shown = opts.noCaptions ? tl.graphics.filter((g) => g.type !== "end_card") : tl.graphics;
   writeFileSync(
     join(dir, "compositions", "graphics.html"),
     `<template>
   <style>
-    ${FONT}
-    #root { position: absolute; inset: 0; font-family: "Pretendard", sans-serif; pointer-events: none; color: #fff; }
+    ${fonts.css}
+    #root { position: absolute; inset: 0; font-family: ${fonts.family}; pointer-events: none; color: #fff; }
     .g { position: absolute; opacity: 0; }
     ${lookCss(look)}
     .card { background: rgba(20,20,20,.86); border-radius: 30px; }
@@ -212,15 +237,16 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
     .ecard em { display: block; margin-top: 18px; font-style: normal; font-size: 33px; font-weight: 400; color: #ccc; letter-spacing: -.5px; }
   </style>
   <div id="root" data-composition-id="graphics" data-width="1080" data-height="1920">
-    <div id="hook" class="lk clip" data-start="0" data-duration="${tl.hook.end}" style="top:${ZONE_BOX[hookAt].top}px;height:${ZONE_BOX[hookAt].height}px">${bigText(lines, tl.hook.highlight, look, Math.max(112, Math.min(150, look.size * 1.7)), 950)}</div>
-    ${tl.graphics.map(graphicHtml).join("\n    ")}
+    ${opts.noCaptions ? "" : `<div id="hook" class="lk clip" data-start="0" data-duration="${tl.hook.end}" style="top:${ZONE_BOX[hookAt].top}px;height:${ZONE_BOX[hookAt].height}px">${bigText(lines, tl.hook.highlight, look, Math.max(112, Math.min(150, look.size * 1.7)), opts.readable ? 880 : 950, !!opts.readable)}</div>`}
+    ${shown.map(graphicHtml).join("\n    ")}
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
     // 후킹은 첫 프레임부터 보인다 — 살짝 커지기만 하고, 말이 끝나면 사라진다
-    tl.fromTo("#hook", { scale: 1 }, { scale: 1.035, duration: ${Math.max(0.4, tl.hook.end - 0.1).toFixed(3)}, ease: "none" }, 0);
-    tl.to("#hook", { opacity: 0, duration: 0.1, ease: "power2.in" }, ${(tl.hook.end - 0.1).toFixed(3)});
-    ${tl.graphics.map(graphicMotion).join("\n    ")}
+    ${fitReadable}
+    ${opts.noCaptions ? "" : `tl.fromTo("#hook", { scale: 1 }, { scale: 1.035, duration: ${Math.max(0.4, tl.hook.end - 0.1).toFixed(3)}, ease: "none" }, 0);
+    tl.to("#hook", { opacity: 0, duration: 0.1, ease: "power2.in" }, ${(tl.hook.end - 0.1).toFixed(3)});`}
+    ${shown.map(graphicMotion).join("\n    ")}
     window.__timelines["graphics"] = tl;
   </script>
 </template>
@@ -242,7 +268,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
       #root { position: relative; width: 100%; height: 100%; background: #000; overflow: hidden; }
       #stage { position: absolute; inset: 0; }
       #base { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-      ${FONT}
+      ${fonts.css}
     </style>
   </head>
   <body>
@@ -250,7 +276,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
       <div id="stage"><video id="base" class="clip" src="assets/base.mp4" muted data-start="0" data-duration="${D}" data-track-index="0"></video></div>
       ${
         behind
-          ? `<div id="bwrap" class="clip" data-start="${behind.start}" data-duration="${(behind.end - behind.start).toFixed(3)}" data-track-index="5" style="position:absolute;inset:0"><div id="bword" style="position:absolute;left:0;right:0;top:430px;text-align:center;font-family:Pretendard,sans-serif;font-weight:800;font-size:${behindSize}px;line-height:1;letter-spacing:-.05em;color:${look.accent_color}">${esc(behind.word)}</div></div>
+          ? `<div id="bwrap" class="clip" data-start="${behind.start}" data-duration="${(behind.end - behind.start).toFixed(3)}" data-track-index="5" style="position:absolute;inset:0"><div id="bword" style="position:absolute;left:0;right:0;top:430px;text-align:center;font-family:${esc(fonts.family)};font-weight:800;font-size:${behindSize}px;line-height:1;letter-spacing:-.05em;color:${look.accent_color}">${esc(behind.word)}</div></div>
       <video id="bcut" class="clip" src="assets/${behind.file}" muted data-start="${behind.cutStart}" data-duration="${(behind.end - behind.cutStart).toFixed(3)}" data-track-index="6" data-layout-allow-occlusion style="position:absolute;inset:0;width:1080px;height:1920px"></video>`
           : ""
       }
@@ -261,7 +287,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
     <script>
       const tl = gsap.timeline({ paused: true });
       // 첫 컷은 살짝 밀려 들어와 눈길을 끈다
-      tl.fromTo("#stage", { scale: 1.1 }, { scale: 1, duration: ${Math.min(firstCutEnd, 1.2).toFixed(3)}, ease: "power2.out" }, 0);
+      tl.fromTo("#stage", { scale: ${opts.readable ? 1 : 1.1} }, { scale: 1, duration: ${Math.min(firstCutEnd, 1.2).toFixed(3)}, ease: "power2.out" }, 0);
       ${behind ? `tl.fromTo("#bword", { scale: 0.86, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, ${behind.start});` : ""}
       ${punches.map((t) => `tl.to("#stage", { scale: 1.035, duration: 0.09, ease: "power2.out" }, ${t.toFixed(3)}); tl.to("#stage", { scale: 1, duration: 0.26, ease: "power2.inOut" }, ${(t + 0.09).toFixed(3)});`).join("\n      ")}
       window.__timelines["main"] = tl;
@@ -273,10 +299,9 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
 }
 
 /** 표지 프로젝트 — 프레임 위에 후킹보다 큰 글자. 피드에서 잘리지 않게 가운데 4:5 안에 둔다. */
-export function writeCoverProject(dir: string, frame: string, plan: EditPlan["thumbnail"], look: Look = DEFAULT_LOOK): void {
-  mkdirSync(join(dir, "assets", "fonts"), { recursive: true });
-  copyFileSync(editKitAsset("fonts", "Pretendard-ExtraBold.woff2"), join(dir, "assets", "fonts", "Pretendard-ExtraBold.woff2"));
-  copyFileSync(editKitAsset("fonts", "Pretendard-SemiBold.woff2"), join(dir, "assets", "fonts", "Pretendard-SemiBold.woff2"));
+export function writeCoverProject(dir: string, frame: string, plan: EditPlan["thumbnail"], look: Look = DEFAULT_LOOK, videoFonts?: VideoFonts): void {
+  const fonts = videoFonts ?? fallbackFonts();
+  installFonts(dir, fonts);
   copyFileSync(frame, join(dir, "assets", "frame.jpg"));
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "shoot-cover", private: true }));
   writeFileSync(join(dir, "hyperframes.json"), JSON.stringify({ paths: { assets: "assets" } }));
@@ -287,11 +312,10 @@ export function writeCoverProject(dir: string, frame: string, plan: EditPlan["th
 <html lang="ko"><head><meta charset="UTF-8" /><meta name="viewport" content="width=1080, height=1920" />
 <script src="${GSAP}"></script>
 <style>
-  @font-face { font-family: "Pretendard"; font-weight: 800; src: url("assets/fonts/Pretendard-ExtraBold.woff2") format("woff2"); }
-  @font-face { font-family: "Pretendard"; font-weight: 600; src: url("assets/fonts/Pretendard-SemiBold.woff2") format("woff2"); }
+  ${fonts.css}
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { width: 1080px; height: 1920px; overflow: hidden; background: #000; }
-  #root { position: relative; width: 100%; height: 100%; font-family: "Pretendard", sans-serif; overflow: hidden; }
+  #root { position: relative; width: 100%; height: 100%; font-family: ${fonts.family}; overflow: hidden; }
   #bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   #shade { position: absolute; left: 0; right: 0; ${plan.position === "lower" ? "bottom: 0; height: 1100px; background: linear-gradient(0deg, rgba(0,0,0,.55), rgba(0,0,0,0));" : "top: 0; height: 1000px; background: linear-gradient(180deg, rgba(0,0,0,.55), rgba(0,0,0,0));"} }
   ${lookCss(look)}

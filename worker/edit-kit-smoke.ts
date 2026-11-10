@@ -1,7 +1,7 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
 
-import { mkdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EditGraphic, EditPlan } from "@/lib/agents/edit-plan";
@@ -29,6 +29,7 @@ const plan: EditPlan = {
     { mode: "tts", tts: "세탁망에 넣어서 울코스로요.", captions: ["세탁망에 넣어서 울코스로요"], emphasis: ["울코스"], cuts: [{ clip: 2, in: 2.4, out: 4, what: "시험 4" }], graphics: [{ ...blank, type: "steps", at: 0.05, items: ["세탁망에 넣고", "울코스로"], note: "시험 안내" }], sfx: [{ name: "pop", at_word: "", at: 0.1 }] },
     { mode: "tts", tts: "쿠마마켓에서 찾아보세요!", captions: ["쿠마마켓에서 찾아보세요!"], emphasis: ["쿠마마켓"], cuts: [{ clip: 1, in: 4.2, out: 5.8, what: "시험 5" }], graphics: [{ ...blank, type: "end_card", chip: "쿠마마켓", text: "시험 상품", sub: "싱글 · 더블", note: "사용 전 설명서를 확인하세요" }], sfx: [{ name: "ding", at_word: "", at: 0.1 }] },
   ],
+  visuals: [],
   warnings: [],
 };
 
@@ -36,8 +37,9 @@ const facts = { id: "smoke", name: "시험 상품", rawName: "시험 상품", sh
 
 async function main() {
   if (process.env.SMOKE_VOICE !== "1") delete process.env.FISH_API_KEY;
-  // 프레임 검수도 부르지 않는다
-  delete process.env.OPENAI_API_KEY;
+  // 프레임 검수도 부르지 않는다. AI 이미지 컷을 시험할 때만 OpenAI를 쓴다
+  const visual = process.env.SMOKE_VISUAL === "1";
+  if (!visual) delete process.env.OPENAI_API_KEY;
   const workDir = join(tmpdir(), `edit-kit-smoke-${Date.now()}`);
   mkdirSync(workDir, { recursive: true });
   const started = Date.now();
@@ -48,9 +50,25 @@ async function main() {
       return f;
     });
     const clips = files.map((f, i) => readClip(i + 1, f, { shot: `시험 ${i + 1}` }));
-    const r = await renderKitEdit({ workDir: join(workDir, "kit"), service: null, accountName: "smoke", liveVoice: false, facts, rules: [], clips, reusePlan: plan });
+    const r = await renderKitEdit({
+      workDir: join(workDir, "kit"),
+      service: null,
+      accountName: "smoke",
+      liveVoice: false,
+      facts: visual ? { ...facts, kind: "COSMETIC", sourceText: "연어에서 추출한 소듐디엔에이" } : facts,
+      rules: [],
+      clips,
+      reusePlan: visual
+        ? { ...plan, visuals: [{ beat: 2, key: "smoke-sodium-dna", subject: "연어 유래 소듐디엔에이를 나타낸 투명한 이중 나선", evidence: "연어에서 추출한 소듐디엔에이", prompt: "Glassy double-helix strands suspended in translucent coral-pink liquid with tiny clear droplets.", motion: "liquid" }] }
+        : plan,
+    });
     console.log(`[edit-kit-smoke] 통과 — ${Math.round((Date.now() - started) / 1000)}초, 영상 ${r.seconds.toFixed(1)}초, ${(statSync(r.final).size / 1024 / 1024).toFixed(1)}MB, 표지 ${(statSync(r.cover).size / 1024).toFixed(0)}KB, ${r.loudness} LUFS, 음성 ${r.usedVoice ? "있음" : "없음"}`);
     console.log("경고:", r.warnings);
+    if (visual) {
+      console.log("AI 이미지:", r.visuals, "컷:", r.timeline.cuts.map((c) => `${c.clip}:${c.start}-${c.end}`).join(" "), "구간:", r.segments.map((s) => s.cut).join(","));
+      mkdirSync("smoke-out", { recursive: true });
+      copyFileSync(r.final, join("smoke-out", "smoke.mp4"));
+    }
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }

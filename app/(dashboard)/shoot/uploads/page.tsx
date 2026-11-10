@@ -34,7 +34,6 @@ export default async function ShootUploadsPage({ searchParams }: { searchParams:
   const rows = (data ?? [])
     .map((r) => {
       const row = r as unknown as RequestRow;
-      const cuts = ((r.cuts ?? []) as unknown as { no: number; skipped?: boolean; seconds?: number }[]).filter((c) => !c.skipped);
       const clips = (r.clips ?? []) as unknown as { cut: number }[];
       const product = row.content_plans.products;
       return {
@@ -45,9 +44,7 @@ export default async function ShootUploadsPage({ searchParams }: { searchParams:
         title: ideaTitleOf(row.content_plans.proposal) ?? product?.name ?? "기획",
         productName: product?.name ?? null,
         image: product?.represent_image_url ?? null,
-        total: cuts.length,
-        uploaded: cuts.filter((c) => clips.some((k) => k.cut === c.no)).length,
-        seconds: Math.round(cuts.reduce((sum, c) => sum + (c.seconds ?? 0), 0)),
+        uploaded: clips.length,
       };
     })
     .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9));
@@ -72,7 +69,7 @@ export default async function ShootUploadsPage({ searchParams }: { searchParams:
           {open > 0 && <Badge>찍을 것 {open}건</Badge>}
         </div>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          찍을 영상을 눌러 컷 목록을 보고 <b>컷마다 휴대폰에서 바로 올리세요.</b> 다 올리면 AI가 컷을 잇고 화면 문구를 입혀요.
+          찍을 영상을 눌러 추천 대본을 보고, <b>찍은 촬영본을 개수 상관없이 휴대폰에서 바로 올리세요.</b> 다 올리면 AI가 순서대로 잇고 화면 문구를 입혀요.
         </p>
       </header>
 
@@ -95,7 +92,6 @@ export default async function ShootUploadsPage({ searchParams }: { searchParams:
           <ul className="divide-y overflow-hidden rounded-lg border bg-card">
             {visible.map((r) => {
               const s = REQUEST_STATUS[r.status] ?? { label: r.status, variant: "outline" as const };
-              const percent = r.total ? Math.round((r.uploaded / r.total) * 100) : 0;
               return (
                 <li key={r.id}>
                   <Link href={`/shoot/uploads/${r.id}`} className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2">
@@ -116,12 +112,7 @@ export default async function ShootUploadsPage({ searchParams }: { searchParams:
                         {r.productName && r.productName !== r.title && ` · ${r.productName}`}
                       </span>
                       {r.status === "OPEN" && (
-                        <span className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
-                          <span className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-3" aria-hidden>
-                            <span className="block h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
-                          </span>
-                          컷 {r.uploaded}/{r.total} 올림 · 약 {r.seconds}초
-                        </span>
+                        <span className="block text-xs text-muted-foreground tabular-nums">{r.uploaded ? `촬영본 ${r.uploaded}개 올림` : "아직 올린 촬영본이 없어요"}</span>
                       )}
                     </span>
                     <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />

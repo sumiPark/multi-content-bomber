@@ -100,6 +100,11 @@ export async function triggerAutoVideoRun(reason: string): Promise<void> {
   await dispatch("auto-video", reason);
 }
 
+/** 상식 카드 · 우리 차이 초안. product가 없으면 다가오는 칸의 새 상품을 처리한다. */
+export async function triggerKnowledgeDraftRun(reason: string, product?: string): Promise<void> {
+  await dispatch("draft-knowledge", reason, product ? { product } : {});
+}
+
 export async function triggerShootEditRun(reason: string): Promise<void> {
   await dispatch(SHOOT_EDIT_DISPATCH_EVENT, reason);
 }

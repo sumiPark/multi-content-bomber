@@ -76,9 +76,11 @@ function systemPrompt(ctx: ShotlistContext): string {
   const f = ctx.facts;
   const person = ctx.roleFocus === "PERSON";
   const focus = person ? (ctx.liveVoice ? "사람 중심(사람이 나와 말하고 쓰는 모습)" : "사람 중심(사람이 나와 쓰는 모습, 말은 하지 않고 AI 음성이 읽는다)") : ctx.roleFocus === "PRODUCT" ? "상품 중심(손 · 제형 · 구성 클로즈업, 얼굴 없이)" : "미정";
+  // 하고 싶은 말(human_brief)은 목록 기획을 골랐을 때도 넣을 수 있다(2026-11-10) — 기획보다 먼저 따른다
+  const briefLine = ctx.brief ? ` 관리자가 하고 싶은 말: "${ctx.brief}" — 뜻은 그대로 두고 가장 먼저 반영한다. 고른 기획과 흐름(주제 · 순서 · 강조점 · 마지막 말)이 다르면 하고 싶은 말의 흐름으로 컷을 짜고, 기획은 거기에 맞는 부분만 쓴다. 광고 문구 규칙에 어긋나거나 상품 사실에 없는 효능은 맞는 말로 고쳐 쓴다.` : "";
   const what = ctx.idea
-    ? `고른 기획: "${ctx.idea.title}" (${ctx.idea.format}) — ${ctx.idea.concept}`
-    : `사람이 상품을 직접 골랐다.${ctx.brief ? ` 메모: "${ctx.brief}" — 이 메모를 가장 먼저 반영한다.` : " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
+    ? `고른 기획: "${ctx.idea.title}" (${ctx.idea.format}) — ${ctx.idea.concept}${briefLine}`
+    : `사람이 상품을 직접 골랐다.${briefLine || " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
   const kit = editKit();
   return `너는 인스타그램 @${ctx.accountName}의 릴스 촬영 감독 겸 대본 작가다. 사람이 휴대폰으로 컷 리스트대로 찍어 올리면 AI 편집자가 원본을 보고 컷 · 음성 · 자막 · 그래픽 · 효과음을 넣어 완성한다.
 계정 역할: ${focus}${ctx.roleNote ? ` — ${ctx.roleNote}` : ""}
@@ -92,7 +94,7 @@ ${what}
 ${kit.hook_rules.map((r) => `   - ${r}`).join("\n")}
    표지 규칙(thumbnail):
 ${kit.thumbnail_rules.map((r) => `   - ${r}`).join("\n")}
-3. 컷 리스트: 컷 5~8개, 컷마다 1.5~5초, 합계 15~25초. 첫 컷은 후킹 글자와 함께 궁금증을 만드는 장면이다(결과 · 단면 · 움직임 · 의외의 행동). 편집에서 잘라 쓰게 컷마다 동작을 2~3초 더 길게 찍으라고 how에 적는다.
+3. 컷 리스트: 보여 주는 기획은 컷 5~8개, 합계 15~30초. 사람이 설명하는 기획은 컷 10~24개, 합계 30~85초로 내용에 맞춘다. 컷마다 1.5~5초. 첫 컷은 후킹 글자와 함께 궁금증을 만드는 장면이다(결과 · 단면 · 움직임 · 의외의 행동). 편집에서 잘라 쓰게 컷마다 동작을 2~3초 더 길게 찍으라고 how에 적는다.
    컷마다 장면이 바뀌어야 한다(같은 각도 연속 금지). 마지막 컷은 훅의 낱말을 되받아 다시 보게.
    how는 찍는 사람이 그대로 따라 할 수 있게 구체적으로: 위에서 · 옆에서 · 손 클로즈업 · 흰 배경 · 창가 빛 등.
 4. ${ctx.liveVoice ? "voice: 사람이 카메라 보고 말할 짧은 대사. 컷 길이 안에 말할 수 있게(1초에 6음절 안팎). time_script로 재고 경고를 없앤다." : "voice는 모두 빈 문자열이다. 찍는 사람은 말하지 않고, narration을 AI 음성이 읽는다. 말투는 친근한 수다체, 컷 길이 안에 읽을 수 있게(1초에 6음절 안팎). 말은 그 컷에서 보이는 것에 맞춘다. time_script로 재고 경고를 없앤다."}

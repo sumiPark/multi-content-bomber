@@ -46,11 +46,12 @@ def spans(mask, min_len, gap):
 
 def blocks_of(path):
     im = Image.open(path).convert("RGB")
+    native_w = im.width
     if im.width != W:
         im = im.resize((W, round(im.height * W / im.width)), Image.LANCZOS)
     # 대표 이미지처럼 짧은 이미지는 바탕이 단색이어도 제품 사진이다. 통째로 후보에 넣는다
     if im.height <= im.width * 1.4:
-        return im, [(0, 0, im.width, im.height)]
+        return im, [(0, 0, im.width, im.height)], native_w
     arr = np.asarray(im)
     # 속도를 위해 4줄마다 잰다
     rows = flat_ratio(arr[::4, ::2])
@@ -67,7 +68,7 @@ def blocks_of(path):
             continue
         # 경계의 흰 줄이 남지 않게 조금 안쪽으로 자른다
         out.append((left + 6, top + 8, right - 6, bottom - 8))
-    return im, out
+    return im, out, native_w
 
 
 def main():
@@ -77,7 +78,7 @@ def main():
     cands = []
     for n, path in enumerate(images):
         try:
-            im, boxes = blocks_of(path)
+            im, boxes, native_w = blocks_of(path)
         except Exception as e:  # 깨진 이미지 하나로 전체를 멈추지 않는다
             print(f"건너뜀 {path}: {e}", file=sys.stderr)
             continue
@@ -87,7 +88,7 @@ def main():
             cid = f"p{len(cands) + 1}"
             f = os.path.join(out_dir, f"{cid}.jpg")
             im.crop((x0, y0, x1, y1)).save(f, quality=93)
-            cands.append({"id": cid, "file": f, "image": n, "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0})
+            cands.append({"id": cid, "file": f, "image": n, "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0, "native_w": round((x1 - x0) * native_w / W), "native_h": round((y1 - y0) * native_w / W)})
     sheets = []
     per = COLS * 3
     for s in range(0, len(cands), per):

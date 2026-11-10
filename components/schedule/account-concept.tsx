@@ -1,8 +1,8 @@
 "use client";
 
-import { DEFAULT_VOICE_TITLE, VOICE_CHOICES } from "@/lib/shoot/voices";
 import { useState } from "react";
 import { Save } from "lucide-react";
+import { DEFAULT_VOICE_TITLE, VOICE_CHOICES } from "@/lib/shoot/voices";
 import { saveAutoConceptAction, saveShootConceptAction } from "@/app/(dashboard)/schedule/actions";
 import { useScheduleRun } from "@/components/schedule/slot-rule-cell";
 import { Button } from "@/components/ui/button";
@@ -16,12 +16,10 @@ import { Textarea } from "@/components/ui/textarea";
 export interface ConceptCardData {
   accountId: string;
   name: string;
-  autoRole: string;
-  autoConcept: string;
+  // 바꾸고 싶은 점(0052) — 옛 컨셉 · 말투 · 영상 스타일을 합친 한 칸
+  autoNotes: string;
   autoHooks: string;
   autoEndings: string;
-  autoTone: string;
-  autoVideoStyle: string;
   // 목소리 — 방식별로 따로. 빈 값은 기본 목소리
   autoVoiceId: string;
   shootVoiceId: string;
@@ -40,9 +38,10 @@ export interface ConceptCardData {
 }
 
 type Role = "" | "PRODUCT" | "PERSON";
-type AutoKey = "autoRole" | "autoConcept" | "autoHooks" | "autoEndings" | "autoTone" | "autoVideoStyle" | "autoVoiceId";
+// AI 자동에는 영상 방향 · 대본 방식이 없다(2026-11-10). 직접 촬영만 영상 방향을 정한다
+type AutoKey = "autoNotes" | "autoHooks" | "autoEndings" | "autoVoiceId";
 type ShootKey = "shootRole" | "shootVoice" | "shootVoiceId" | "shootConcept" | "shootHooks" | "shootEndings" | "shootTone" | "shootEditStyle";
-const AUTO_KEYS: AutoKey[] = ["autoRole", "autoConcept", "autoHooks", "autoEndings", "autoTone", "autoVideoStyle", "autoVoiceId"];
+const AUTO_KEYS: AutoKey[] = ["autoNotes", "autoHooks", "autoEndings", "autoVoiceId"];
 const SHOOT_KEYS: ShootKey[] = ["shootRole", "shootVoice", "shootVoiceId", "shootConcept", "shootHooks", "shootEndings", "shootTone", "shootEditStyle"];
 
 function Field({
@@ -153,12 +152,9 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
       mode === "auto"
         ? saveAutoConceptAction({
             accountId: data.accountId,
-            autoRole: form.autoRole as Role,
-            autoConcept: form.autoConcept,
+            autoNotes: form.autoNotes,
             autoHooks: form.autoHooks,
             autoEndings: form.autoEndings,
-            autoTone: form.autoTone,
-            autoVideoStyle: form.autoVideoStyle,
             autoVoiceId: form.autoVoiceId,
           })
         : saveShootConceptAction({
@@ -182,20 +178,26 @@ export function AccountConceptCard({ data, canManage, mode, top, hideName }: { d
       {mode === "auto" ? (
         <>
           <div className="grid gap-4 lg:grid-cols-2">
-            <RoleField {...bind("autoRole")} help="AI가 만드는 영상의 장면과 말투 방향이에요. 직접 촬영과는 따로 정해요." />
             <VoicePickField {...bind("autoVoiceId")} help="AI 자동 콘텐츠의 내레이션 목소리예요. 직접 촬영과는 따로 정해요." />
           </div>
+          <Field
+            {...bind("autoNotes")}
+            label="바꾸고 싶은 점"
+            rows={4}
+            max={3000}
+            help="말투 · 분위기, 화면 · 소재, 다룰 내용 등 바꾸고 싶은 점을 자유롭게 적어요. 상품을 고르고 대본 · 장면 · 자막 디자인을 정할 때 AI가 참고해요."
+            placeholder={"친구에게 알려 주듯 편한 존댓말로 짧게 끊어서.\n밝은 자연광, 나무 식탁 위 클로즈업.\n가격보다 맛 표현 위주로."}
+          />
           <div className="grid gap-4 lg:grid-cols-2">
             <Field {...bind("autoHooks")} label="후킹 문구" rows={3} max={2000} help={PHRASE_HELP} placeholder={"{상품} 고를 때 이것만 보세요\n이거 모르고 사면 손해예요"} />
-            <Field {...bind("autoEndings")} label="마지막 문구" rows={3} max={2000} help="영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요." placeholder={"저장해 두고 살 때 꺼내 보세요"} />
-            <Field {...bind("autoTone")} label="말투 · 분위기" help="내레이션 · 캡션과 자막 디자인 · 음악 분위기에 반영돼요." placeholder={"친구에게 알려 주듯 편한 존댓말, 짧게 끊어서."} />
             <Field
-              {...bind("autoVideoStyle")}
-              label="영상 생성 스타일"
-              help="대본의 장면 설명, 소재 선택, 자막 디자인, 음악에 반영돼요."
-              placeholder={"밝은 자연광, 나무 식탁 위 클로즈업, 카메라는 천천히. 사람 얼굴은 나오지 않게."}
+              {...bind("autoEndings")}
+              label="마지막 문구"
+              rows={3}
+              max={2000}
+              help="영상 끝에 나가요. 빈칸 쓰는 법은 후킹 문구와 같아요."
+              placeholder={"저장해 두고 살 때 꺼내 보세요"}
             />
-            <Field {...bind("autoConcept")} label="컨셉 · 자유 메모" help="상품을 고르고 대본을 쓸 때 AI가 참고해요." placeholder={"20대 후반 직장인이 보는 계정. 가격보다 맛 표현 위주로."} />
           </div>
         </>
       ) : (

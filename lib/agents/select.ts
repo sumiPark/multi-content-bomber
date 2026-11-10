@@ -18,15 +18,16 @@ export interface SelectContext {
   service: Service;
   accountId: string;
   accountName: string;
-  roleFocus: string | null;
-  roleNote: string | null;
+  // 직접 촬영 기획(plan-a)만 쓴다. AI 자동 상품 고르기는 계정 역할을 읽지 않는다(2026-11-10)
+  roleFocus?: string | null;
+  roleNote?: string | null;
   scopes: ProductScope[];
   repeatGapDays: number;
   slotDate: string;
   slotTimes: string[];
   // 편성표 칸 주제 (slot_time → 주제, 0031). 사람이 정한 것만 들어 있다.
   slotTopics?: Record<string, string>;
-  // 계정 컨셉(0038) — AI 자동 칸은 auto_concept, 직접 촬영 칸은 shoot_concept
+  // 계정 컨셉(0038) — AI 자동 칸은 auto_notes(0052, 바꾸고 싶은 점), 직접 촬영 칸은 shoot_concept
   concept?: string | null;
   // 이번 실행에서 앞 계정이 이미 고른 상품 (아직 DB에 없을 수 있어 따로 넘긴다)
   alsoBlocked: Set<string>;
@@ -226,9 +227,7 @@ export function topicLine(ctx: Pick<SelectContext, "slotTimes" | "slotTopics">, 
 }
 
 function systemPrompt(ctx: SelectContext): string {
-  const focus = ctx.roleFocus === "PERSON" ? "사람 중심(1인칭 후기 · 일상 루틴)" : ctx.roleFocus === "PRODUCT" ? "상품 중심(성분 · 제형 · 구성 · 가격)" : "미정";
   return `너는 인스타그램 계정 @${ctx.accountName}의 B 트랙(AI 자동 생성 릴스) 상품 선정 담당이다.
-계정 역할: ${focus}${ctx.roleNote ? ` — ${ctx.roleNote}` : ""}
 쓸 수 있는 상품: ${ctx.scopes.map((s) => `${SHOPS[s.shop].name} ${KIND_LABEL[s.kind]}`).join(", ")}
 
 할 일: ${ctx.slotDate}의 B 칸(${ctx.slotTimes.join(", ")})마다 상품 하나씩 고른다.

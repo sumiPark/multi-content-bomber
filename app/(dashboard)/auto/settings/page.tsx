@@ -3,7 +3,7 @@ import { AddAccountPanel } from "@/components/schedule/account-schedule";
 import { SettingsList } from "@/components/shoot/settings-list";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
-import { CONCEPT_SELECT, roleLabel, savedConceptItems, type ConceptRow } from "@/lib/schedule/concept-data";
+import { CONCEPT_SELECT, savedConceptItems, type ConceptRow } from "@/lib/schedule/concept-data";
 import { MAX_SLOTS_PER_DAY, MIN_GAP_MINUTES, SCOPE_OPTIONS, scopeLabelsOf } from "@/lib/schedule/slot-admin";
 
 // 자동 콘텐츠 설정 목록 — AI가 영상까지 자동으로 만드는 계정. 줄을 누르면 상세(/auto/settings/[accountId])에서 고친다.
@@ -39,7 +39,6 @@ export default async function AutoSettingsPage() {
       return {
         accountId: s.social_account_id,
         name: s.social_accounts!.display_name ?? "",
-        role: roleLabel(c?.auto_role_focus),
         meta: on.length ? `하루 ${on.length}칸 · ${on.map((r) => r.slot_time).join(" · ")}` : "켜진 칸 없음",
         scopeLabels: scopeLabelsOf(s.product_scopes),
         saved: savedConceptItems(c, "auto"),
@@ -56,7 +55,7 @@ export default async function AutoSettingsPage() {
         <div>
           <h1 className="text-xl font-bold tracking-[-0.01em]">자동 콘텐츠 설정</h1>
           <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-            AI가 영상까지 자동으로 만드는 계정이에요. 계정을 눌러 올릴 시각과 후킹 문구 · 말투 · 영상 스타일을 정하면 상품 제안과 대본에 계속 씁니다. 직접 촬영 설정과는 따로 저장되고, 쓸 상품만 함께 써요.
+            AI가 영상까지 자동으로 만드는 계정이에요. 계정을 눌러 올릴 시각과 목소리 · 대본 방식 · 바꾸고 싶은 점 · 후킹 문구를 정하면 상품 제안과 대본에 계속 씁니다. 직접 촬영 설정과는 따로 저장되고, 쓸 상품만 함께 써요.
             {!canManage && " 관리자 · 매니저만 바꿀 수 있어요."}
           </p>
         </div>

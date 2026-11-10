@@ -51,7 +51,44 @@ type Cut = {
   // 못 찍어서 뺀 컷 — 편집에서 건너뛴다
   skipped?: boolean;
 };
-type Clip = { cut: number; path: string; name: string; size: number; type: string; uploaded_by: string };
+// cut = 촬영본 순서 번호. free = 컷과 상관없이 올린 촬영본(2026-11-10~), 없으면 같은 번호 컷에 맞춰 찍은 예전 촬영본
+type Clip = {
+  cut: number;
+  path: string;
+  name: string;
+  size: number;
+  type: string;
+  uploaded_by: string;
+  free?: boolean;
+  on_screen_override?: string | null;
+  subtitle_override?: string | null;
+};
+
+// 자유 촬영본의 기본 편집(키트 실패 시) 길이
+const FREE_CLIP_SECONDS = 5;
+
+/**
+ * 촬영본 순서대로 편집 단위를 만든다. 예전 촬영본은 같은 번호 컷의 설명(찍을 것 · 대사)을 힌트로 붙이고,
+ * 자유 촬영본은 설명 없이 프레임만 보고 편집한다. 사람이 고친 문구는 촬영본 것 → 예전 컷 것 차례로.
+ */
+function clipUnits(cuts: Cut[], clips: Clip[]): { clip: Clip; cut: Cut }[] {
+  return clips
+    .slice()
+    .sort((a, b) => a.cut - b.cut)
+    .map((clip) => {
+      const legacy = clip.free ? undefined : cuts.find((c) => c.no === clip.cut && !c.skipped);
+      const base: Cut = legacy ?? { no: clip.cut, seconds: FREE_CLIP_SECONDS, shot: "", how: "", on_screen: "", voice: "", narration: "" };
+      return {
+        clip,
+        cut: {
+          ...base,
+          no: clip.cut,
+          on_screen_override: clip.on_screen_override ?? legacy?.on_screen_override ?? null,
+          subtitle_override: clip.subtitle_override ?? legacy?.subtitle_override ?? null,
+        },
+      };
+    });
+}
 type Subtitle = { text: string; from: number; to: number };
 
 // 촬영 버튼을 누를 때 흔들리는 앞부분
@@ -197,7 +234,7 @@ async function main() {
   let q = service
     .from("shoot_requests")
     .select(
-      "id, organization_id, plan_id, status, updated_at, cuts, clips, edit, content_plans!inner(id, social_account_id, product_id, script, social_accounts(display_name, role_focus))",
+      "id, organization_id, plan_id, status, updated_at, cuts, clips, edit, content_plans!inner(id, social_account_id, product_id, script, human_brief, social_accounts(display_name, role_focus))",
     )
     .order("uploaded_at");
   // 편집 중(EDITING)인 채 STALE_EDIT_MS 넘게 멈춘 건 — 러너가 시간 제한 · 장애로 죽은 것 — 도 다시 집는다(2026-11-04).
@@ -231,9 +268,12 @@ async function main() {
     mkdirSync(workDir, { recursive: true });
     const startedAt = Date.now();
     try {
-      const cuts = ((req.cuts ?? []) as Cut[]).filter((c) => !c.skipped).sort((a, b) => a.no - b.no);
-      if (!cuts.length) throw new Error("편집할 컷이 없어요");
+      // 컷 리스트는 추천 대본으로만 쓰고, 편집은 올린 촬영본 순서대로 한다(2026-11-10)
+      const scriptCuts = ((req.cuts ?? []) as Cut[]).filter((c) => !c.skipped).sort((a, b) => a.no - b.no);
       const clips = (req.clips ?? []) as Clip[];
+      const units = clipUnits(scriptCuts, clips);
+      if (!units.length) throw new Error("편집할 촬영본이 없어요");
+      const cuts = units.map((u) => u.cut);
       const concept = await loadAccountConcept(service, plan.social_account_id);
       // 말한 소리를 고른 계정만 촬영본의 말을 쓰고, 기본은 AI 음성이다(0044). 영상 방향과 별개다
       const liveVoice = concept.shootLiveVoice;
@@ -241,9 +281,7 @@ async function main() {
       const style = concept.editStyle;
 
       const fileOf = new Map<number, string>();
-      for (const cut of cuts) {
-        const clip = clips.find((c) => c.cut === cut.no);
-        if (!clip) throw new Error(`${cut.no}번 컷 촬영본이 없어요`);
+      for (const { clip, cut } of units) {
         const ext = clip.path.split(".").pop() ?? "mp4";
         const file = join(workDir, `in${cut.no}.${ext}`);
         await download(service, clip.path, file);
@@ -262,7 +300,9 @@ async function main() {
       const facts = await loadProductFacts(service, plan.product_id!);
 
       // 편집 키트 — 실패하면 아래 기본 편집으로 넘어간다
-      const clipsSig = cuts.map((c) => clips.find((k) => k.cut === c.no)?.path ?? "").join("|");
+      // 촬영본 · 순서 · 하고 싶은 말이 같을 때만 지난 계획을 다시 쓴다
+      const brief = plan.human_brief?.trim() || null;
+      const clipsSig = [...units.map((u) => u.clip.path), `brief:${brief ?? ""}`].join("|");
       const prevKit = (req.edit as { kit?: { plan?: EditPlan; clipsSig?: string } } | null)?.kit;
       let kit: KitResult | null = null;
       let kitError: string | null = null;
@@ -296,6 +336,8 @@ async function main() {
             clips: kitClips,
             humanHook: script.human?.hook,
             humanThumbnail: script.human?.thumbnail,
+            brief,
+            recommendedScript: scriptCuts.map((c) => ({ shot: c.shot, onScreen: c.on_screen, narration: (c.narration || c.voice || "").trim() })),
             shotlistHook: hook ? { spoken: hook.spoken, on_screen: hook.on_screen } : null,
             shotlistThumbnail: script.thumbnail ?? null,
             fixedHook: script.fixed?.hook?.text,

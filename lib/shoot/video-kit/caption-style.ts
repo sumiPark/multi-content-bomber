@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { TimedCaption } from "@/lib/shoot/video-kit/timeline";
 
 // 영상의 글자 디자인(look). 편집 에이전트가 계정 설정(말투 · 분위기 · 편집 스타일)을 읽고 영상마다 값을 만들고,
 // 코드는 값을 안전한 범위로 고친 뒤 그대로 그린다. 정해진 틀을 고르는 방식이 아니라 값의 조합이다.
@@ -50,20 +51,65 @@ export const DEFAULT_LOOK: Look = {
 const clamp = (n: number, min: number, max: number) => (Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : min);
 const hex = (s: unknown, fallback: string) => (typeof s === "string" && /^#[0-9a-fA-F]{6}$/.test(s.trim()) ? s.trim().toUpperCase() : fallback);
 
+/** sRGB 채널 값(0~255)을 WCAG 상대 휘도 계산용 선형 값으로. */
+const linear = (v: number) => {
+  const c = v / 255;
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+};
+
+/** WCAG 상대 휘도(0~1). */
+export const rgbLuminance = (r: number, g: number, b: number): number => 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+
 function luminance(color: string): number {
-  const [r, g, b] = [1, 3, 5].map((i) => {
-    const c = parseInt(color.slice(i, i + 2), 16) / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+  return rgbLuminance(r, g, b);
 }
 
+const ratio = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+
 export function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
+  return ratio(luminance(a), luminance(b));
 }
 
 export const readableOn = (bg: string): string => (luminance(bg) > 0.4 ? "#111111" : "#FFFFFF");
+
+// 강조색 대비 기준(WCAG 큰 글자 3:1). 자막은 큰 글자라 이 기준이면 노랑은 대부분 그대로 두고,
+// 정말 안 보일 때만 밝힌다(사용자 결정 2026-11-09 — 4.5:1은 강조어가 연노랑으로 바래 거절)
+export const ACCENT_MIN_CONTRAST = 3;
+// 배경이 중간 밝기라 기본 글자조차 기준에 못 미치면, 강조색은 기본 글자 대비의 이 비율까지만 맞춘다(가독성은 그림자가 받친다).
+// 그렇지 않으면 강조색이 기본 글자와 같은 흰색으로 바래 강조가 사라진다
+const ACCENT_TEXT_SHARE = 0.85;
+
+/**
+ * 강조색이 배경에서 읽히게 명도만 고친다. 색 성격(색상)은 AI · 기본값이 고른 그대로 두고, 기본 글자색 쪽으로
+ * (밝은 글자면 흰색 쪽, 어두운 글자면 검은색 쪽) 섞어 대비가 기준에 닿는 가장 작은 만큼만 바꾼다. 이미 읽히면 그대로 둔다.
+ * background는 #RRGGBB 또는 상대 휘도(0~1) — 영상 배경은 잰 휘도를 넘긴다.
+ */
+export function readableAccent(accent: string, background: string | number, text: string, min = ACCENT_MIN_CONTRAST): string {
+  const color = hex(accent, DEFAULT_LOOK.accent_color);
+  const bg = typeof background === "number" ? Math.min(1, Math.max(0, background)) : luminance(hex(background, "#000000"));
+  const lighten = luminance(hex(text, "#FFFFFF")) >= bg;
+  const target = Math.min(min, ACCENT_TEXT_SHARE * ratio(luminance(hex(text, "#FFFFFF")), bg));
+  const rgb = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+  const toHex = (c: number[]) => `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+  // 글자색과 같은 쪽(밝게/어둡게)에 있으면서 대비가 기준 이상이어야 읽힌다
+  const ok = (c: number[]) => {
+    const l = rgbLuminance(c[0], c[1], c[2]);
+    return (lighten ? l >= bg : l <= bg) && ratio(l, bg) >= target;
+  };
+  if (ok(rgb)) return color;
+  for (let step = 1; step <= 50; step++) {
+    const t = step / 50;
+    const next = rgb.map((v) => Math.round(lighten ? v + (255 - v) * t : v * (1 - t)));
+    if (ok(next)) return toHex(next);
+  }
+  return lighten ? "#FFFFFF" : "#000000";
+}
+
+/** 사진의 평균 밝기에 의존하지 않고 글자 바로 뒤에서 대비를 확보한다. 글꼴 선택은 유지한다. */
+export function readableLook(raw: Look): Look {
+  return { ...raw, treatment: "box", box_color: "#171717", text_color: "#FFFFFF", accent_color: contrast(raw.accent_color, "#171717") >= 4.5 ? raw.accent_color : "#FFE08A", size: 86, emphasis_scale: 1, emphasis: "color", layout: "inline", reveal: "line", entrance: "fade", tilt: 0, punch: false, behind_word: "" };
+}
 
 /** AI가 낸 값을 읽을 수 있는 범위로 고친다. 값이 없으면(예전 계획) 기본 모양. */
 export function normalizeLook(raw: Partial<Look> | null | undefined): Look {
@@ -73,7 +119,10 @@ export function normalizeLook(raw: Partial<Look> | null | undefined): Look {
   let text = hex(raw.text_color, DEFAULT_LOOK.text_color);
   let accent = hex(raw.accent_color, DEFAULT_LOOK.accent_color);
   if ((treatment === "box" || treatment === "pill") && contrast(text, box) < 4.5) text = readableOn(box);
-  if ((treatment === "box" || treatment === "pill") && contrast(accent, box) < 2.6) accent = readableOn(box) === "#FFFFFF" ? "#FFD23F" : "#D9480F";
+  // 강조어는 상자 위에 놓이므로 상자색과 대비를 잰다. 모자라면 고른 색 계열은 두고 명도만 고친다
+  if (treatment === "box" || treatment === "pill") accent = readableAccent(accent, box, text);
+  // 외곽선 글자는 강조어도 같은 외곽선(lookCss의 stroke)에 둘러싸이므로 외곽선 색과 대비를 잰다
+  if (treatment === "stroke") accent = readableAccent(accent, strokeColor(text), text);
   // 어두운 그림자 위 글자라서 너무 어두운 글자색은 쓰지 않는다
   if (treatment === "shade" && luminance(text) < 0.5) text = "#FFFFFF";
   if (treatment === "shade" && luminance(accent) < 0.18) accent = "#FFD23F";
@@ -150,6 +199,45 @@ function units(text: string): number {
   return [...text].reduce((s, c) => s + (c === " " ? 0.32 : /[,.!?]/.test(c) ? 0.34 : /[가-힣]/.test(c) ? 0.98 : 0.62), 0);
 }
 
+/** 낱말을 보존하며 가장 균형 잡힌 두 줄을 만든다. 조사를 홀로 떼지 않는다. */
+export function readableRows(text: string): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (units(words.join(" ")) <= 10.5 || words.length < 2) return [words.join(" ")];
+  let split = 1;
+  let best = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(" ");
+    const b = words.slice(i).join(" ");
+    const modifier = /^(?:어느|어떤|무슨|몇|첫|한|두|세|각|매|이|그|저|이런|그런|저런|같은|다른|적당한)$/;
+    const penalty = Math.max(units(a), units(b)) + (words.length - i === 1 && words[i].replace(/[,.!?]/g, "").length <= 2 ? 10 : 0) + (modifier.test(words[i - 1]) ? 10 : 0);
+    if (penalty < best) { best = penalty; split = i; }
+  }
+  return [words.slice(0, split).join(" "), words.slice(split).join(" ")];
+}
+
+/** 실제 음성 시각은 그대로 두고 짧은 구절만 합친다. 고유명사나 '수 있어요'가 깜빡이며 분리되지 않게 한다. */
+export function readableCaptions(captions: TimedCaption[]): TimedCaption[] {
+  const out: TimedCaption[] = [];
+  for (const c of captions) {
+    const previous = out.at(-1);
+    const joined = previous ? `${previous.text} ${c.text}` : "";
+    if (previous && previous.beat === c.beat && c.start - previous.end <= 0.18 && units(joined) <= 22 && (previous.end - previous.start < 1.05 || c.end - c.start < 1)) {
+      previous.text = joined;
+      previous.end = c.end;
+      previous.emphasis = [...new Set([...previous.emphasis, ...c.emphasis])];
+    } else out.push({ ...c, emphasis: [...c.emphasis] });
+  }
+  return out;
+}
+
+export function readableCaptionBlock(c: CaptionInput, look: Look, zone: Zone): { html: string; motion: string; keyAt: number | null } {
+  const lines = readableRows(c.text);
+  const size = Math.floor(Math.min(look.size, ...lines.map((l) => 840 / Math.max(units(l), 1))));
+  const rows = bigText(lines, c.emphasis.find((e) => e && lines.some((l) => l.includes(e))) ?? "", look, size, 840, true);
+  const box = ZONE_BOX[zone];
+  return { html: `<div id="${c.id}" class="lk clip" data-start="${c.start}" data-duration="${(c.end - c.start).toFixed(3)}" style="top:${box.top}px;height:${box.height}px">${rows}</div>`, motion: `tl.set("#${c.id}", {opacity:0}, 0); tl.set("#${c.id}", {opacity:1}, ${c.start}); tl.set("#${c.id}", {opacity:0}, ${c.end});`, keyAt: null };
+}
+
 const fit = (text: string, size: number, width: number) => Math.floor(Math.min(size, width / Math.max(units(text), 0.5)));
 const TILTS = [-1, 0.7, -0.45, 1, -0.8, 0.55];
 
@@ -174,8 +262,11 @@ function tokenize(text: string, emphasis: string[]): Token[] {
   return out;
 }
 
+/** stroke 처리의 외곽선 색. 글자색의 반대쪽 밝기다. */
+const strokeColor = (text: string) => (readableOn(text) === "#111111" ? "#0B0B0B" : "#FFFFFF");
+
 export function lookCss(look: Look): string {
-  const stroke = readableOn(look.text_color) === "#111111" ? "#0B0B0B" : "#FFFFFF";
+  const stroke = strokeColor(look.text_color);
   const onAccent = readableOn(look.accent_color);
   const center = look.align === "center";
   const base = `.lk { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; justify-content: center; align-items: ${center ? "center" : "flex-start"}; padding: 0 64px; gap: 8px; overflow: visible; }
@@ -258,10 +349,16 @@ export function captionBlock(c: CaptionInput, look: Look, zone: Zone): { html: s
 }
 
 /** 후킹 · 표지의 큰 글자. 첫 프레임부터 보여야 하므로 등장 움직임을 넣지 않는다. */
-export function bigText(lines: string[], highlight: string, look: Look, max: number, width: number): string {
+export function bigText(lines: string[], highlight: string, look: Look, max: number, width: number, inline = false): string {
   const size = Math.floor(Math.min(max, width / Math.max(1, ...lines.map(units))));
   return lines
     .map((line, n) => {
+      if (inline) {
+        // 강조어를 flex 자식으로 쪼개면 조사 앞에 공백/추가 줄바꿈이 생긴다. 한 줄을 한 인라인 문장으로 그린다.
+        const text = esc(line);
+        const body = highlight && line.includes(highlight) ? text.split(esc(highlight)).join(`<span class="k">${esc(highlight)}</span>`) : text;
+        return `<div class="row"><span class="w" data-fit-width="${width}" style="font-size:${size}px">${body}</span></div>`;
+      }
       const parts = highlight && line.includes(highlight) ? line.split(highlight) : [line];
       const tokens: string[] = [];
       parts.forEach((p, i) => {

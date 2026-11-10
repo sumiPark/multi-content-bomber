@@ -20,12 +20,14 @@ on:
         description: "만들기만 하고 저장 · 발행하지 않기 (결과는 실행 기록의 파일로)"
         type: boolean
         default: false
-      test_tone:
-        description: "시험에서만 쓸 말투 · 분위기 (dry_run 전용, 저장 안 됨)"
-        required: false
+      use_draft_knowledge:
+        description: "승인 전 상식 카드 · 우리 차이 초안도 쓰기 (dry_run 전용, 저장 안 됨)"
+        type: boolean
+        default: false
 
+# 저장하지 않는 시험은 칸을 차지하지 않으니 상품별로 동시에 돌린다
 concurrency:
-  group: auto-video-worker
+  group: ${{ inputs.dry_run && format('auto-video-dry-{0}', inputs.plan) || 'auto-video-worker' }}
   cancel-in-progress: false
 
 permissions:
@@ -43,7 +45,15 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Install ffmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-nanum > /dev/null
+        # 실행 환경에 있는 도구를 재사용한다. 자막은 저장소/영상별 웹폰트를 써 OS 한글폰트가 필요 없다.
+        # apt 저장소가 응답하지 않아 영상 제작 전 무한히 기다리던 경우를 막는다.
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            timeout 120s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq
+            timeout 120s sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version
+          ffprobe -version
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -83,7 +93,7 @@ jobs:
           AGENT_MODEL: ${{ vars.AGENT_MODEL }}
           AUTO_VIDEO_PUBLISH: ${{ vars.AUTO_VIDEO_PUBLISH }}
           VIDEO_PYTHON: python
-          TEST_AUTO_TONE: ${{ inputs.test_tone }}
+          TEST_USE_DRAFT_KNOWLEDGE: ${{ inputs.use_draft_knowledge && '1' || '' }}
       - name: Keep dry-run result
         if: ${{ inputs.dry_run && !cancelled() }}
         uses: actions/upload-artifact@v4

@@ -27,6 +27,28 @@ type Edit = {
   check?: { issues?: { kind: string; detail: string }[] };
 };
 type Proposal = { ideas?: { title: string }[]; chosen?: number | null };
+type Clip = { cut: number; free?: boolean; on_screen_override?: string | null; subtitle_override?: string | null };
+type Segment = NonNullable<Edit["segments"]>[number];
+
+/**
+ * 고치는 칸 — 촬영본마다 하나(no = 촬영본 번호 = 편집 결과 segments의 cut). 예전 촬영본은 같은 번호 컷의 문구로 채운다.
+ * 촬영본 파일이 보관 기간이 지나 지워졌으면 예전처럼 컷 목록으로 보여 준다.
+ */
+function reviewRows(cuts: Cut[], clips: Clip[], segments: Segment[]) {
+  const rows = clips.length
+    ? clips
+        .slice()
+        .sort((a, b) => a.cut - b.cut)
+        .map((k) => {
+          const legacy = k.free ? undefined : cuts.find((c) => c.no === k.cut && !c.skipped);
+          return { no: k.cut, onScreen: k.on_screen_override ?? legacy?.on_screen_override ?? legacy?.on_screen ?? "", subtitle: k.subtitle_override ?? legacy?.subtitle_override ?? null };
+        })
+    : cuts.filter((c) => !c.skipped).map((c) => ({ no: c.no, onScreen: c.on_screen_override ?? c.on_screen, subtitle: c.subtitle_override ?? null }));
+  return rows.map((row) => {
+    const seg = segments.find((s) => s.cut === row.no);
+    return { no: row.no, onScreen: seg?.onScreen ?? row.onScreen, subtitle: row.subtitle ?? (seg?.subtitles.map((t) => t.text).join(" ") || null) };
+  });
+}
 
 // 렌더 함수 밖에서 현재 시각을 읽는다(react-hooks/purity)
 function nowMs(): number {
@@ -124,14 +146,7 @@ export default async function ShootReviewPage() {
       humanHook: script.human?.hook ?? "",
       humanThumbnail: script.human?.thumbnail ?? "",
       skippedCuts: cuts.filter((c) => c.skipped).map((c) => c.no),
-      cuts: cuts.filter((c) => !c.skipped).map((c) => {
-        const seg = segments.find((s) => s.cut === c.no);
-        return {
-          no: c.no,
-          onScreen: seg?.onScreen ?? c.on_screen_override ?? c.on_screen,
-          subtitle: c.subtitle_override ?? (seg?.subtitles.map((t) => t.text).join(" ") || null),
-        };
-      }),
+      cuts: reviewRows(cuts, (r?.clips ?? []) as Clip[], segments),
       blocking,
       warnings: (edit.check?.issues ?? []).filter((i) => i.kind !== "rules" && i.kind !== "stock").map((i) => i.detail),
       acked: blocking.every((b) => acked.has(b)),

@@ -5,16 +5,13 @@ import type { Tables } from "@/types/database";
 // 영상 참고 내용 카드에 넘길 값 — 자동 콘텐츠 설정과 촬영 설정이 같이 쓴다. 카드는 자기 방식의 값만 보여 주고 저장한다.
 
 export const CONCEPT_SELECT =
-  "social_account_id, auto_role_focus, auto_concept, auto_hooks, auto_endings, auto_tone, auto_video_style, auto_voice_id, shoot_voice_id, shoot_role_focus, shoot_voice_mode, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at";
+  "social_account_id, auto_notes, auto_hooks, auto_endings, auto_voice_id, shoot_voice_id, shoot_role_focus, shoot_voice_mode, shoot_concept, shoot_hooks, shoot_endings, shoot_tone, shoot_edit_style, shoot_edit_params, updated_at";
 
 export type ConceptRow = Pick<
   Tables<"account_concepts">,
-  | "auto_role_focus"
-  | "auto_concept"
+  | "auto_notes"
   | "auto_hooks"
   | "auto_endings"
-  | "auto_tone"
-  | "auto_video_style"
   | "shoot_role_focus"
   | "shoot_voice_mode"
   | "shoot_concept"
@@ -38,12 +35,9 @@ export function conceptCardData(input: { accountId: string; name: string; row: C
   return {
     accountId: input.accountId,
     name: input.name,
-    autoRole: c?.auto_role_focus ?? "",
-    autoConcept: c?.auto_concept ?? "",
+    autoNotes: c?.auto_notes ?? "",
     autoHooks: (c?.auto_hooks ?? []).join("\n"),
     autoEndings: (c?.auto_endings ?? []).join("\n"),
-    autoTone: c?.auto_tone ?? "",
-    autoVideoStyle: c?.auto_video_style ?? "",
     autoVoiceId: c?.auto_voice_id ?? "",
     shootVoiceId: c?.shoot_voice_id ?? "",
     shootRole: c?.shoot_role_focus ?? "",
@@ -67,9 +61,7 @@ export function savedConceptItems(c: ConceptRow | null | undefined, mode: "auto"
       ? [
           c.auto_hooks?.length ? `후킹 문구 ${c.auto_hooks.length}개` : null,
           c.auto_endings?.length ? `마지막 문구 ${c.auto_endings.length}개` : null,
-          c.auto_tone?.trim() ? "말투" : null,
-          c.auto_video_style?.trim() ? "영상 스타일" : null,
-          c.auto_concept?.trim() ? "메모" : null,
+          c.auto_notes?.trim() ? "바꾸고 싶은 점" : null,
         ]
       : [
           c.shoot_hooks?.length ? `후킹 문구 ${c.shoot_hooks.length}개` : null,
