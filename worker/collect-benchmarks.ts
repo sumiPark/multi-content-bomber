@@ -6,6 +6,7 @@ import { baselineViews, firstLine, HIT_MULTIPLE, isAdSuspected, readBenchmarkAcc
 import { decryptToken } from "@/lib/crypto";
 import { InstagramApiError } from "@/lib/platforms/instagram-comments";
 import { getProfile, listSystemAccounts } from "@/lib/platforms/instagram-insights";
+import { mustOk, warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,9 +46,12 @@ async function syncOwnAccounts(service: Service, dryRun: boolean) {
       const profile = await getProfile(decryptToken(a.access_token_encrypted as string));
       if (dryRun) continue;
       const username = profile.username.toLowerCase();
-      await service.from("benchmark_accounts").upsert(
-        { organization_id: a.organization_id, username, own_account_id: a.id },
-        { onConflict: "organization_id,username" },
+      mustOk(
+        await service.from("benchmark_accounts").upsert(
+          { organization_id: a.organization_id, username, own_account_id: a.id },
+          { onConflict: "organization_id,username" },
+        ),
+        `우리 계정 비교 목록 저장 (account=${a.id})`,
       );
     } catch (err) {
       console.warn(`[collect-benchmarks] 우리 계정 ${a.id} 확인 실패:`, err instanceof Error ? err.message : err);
@@ -157,22 +161,25 @@ async function main() {
         );
         if (postErr) throw new Error(`게시물 저장 실패: ${postErr.message}`);
       }
-      await service
-        .from("benchmark_accounts")
-        .update({
-          status: "OK",
-          error: null,
-          display_name: profile.name ?? null,
-          biography: profile.biography?.slice(0, 500) ?? null,
-          followers_count: profile.followers_count ?? null,
-          media_count: profile.media_count ?? null,
-          median_views: median,
-          reels_sampled: sampled,
-          reels_30d: reels30,
-          last_post_at: media[0]?.timestamp ?? null,
-          last_collected_at: new Date().toISOString(),
-        })
-        .eq("id", t.id);
+      mustOk(
+        await service
+          .from("benchmark_accounts")
+          .update({
+            status: "OK",
+            error: null,
+            display_name: profile.name ?? null,
+            biography: profile.biography?.slice(0, 500) ?? null,
+            followers_count: profile.followers_count ?? null,
+            media_count: profile.media_count ?? null,
+            median_views: median,
+            reels_sampled: sampled,
+            reels_30d: reels30,
+            last_post_at: media[0]?.timestamp ?? null,
+            last_collected_at: new Date().toISOString(),
+          })
+          .eq("id", t.id),
+        `비교 계정 저장 (id=${t.id})`,
+      );
     } catch (err) {
       // 호출 한도 · 키 문제는 그 계정 잘못이 아니다 — 멈추고 다음 실행에
       if (err instanceof InstagramApiError && (err.kind === "RATE_LIMIT" || err.kind === "TOKEN")) {
@@ -184,14 +191,17 @@ async function main() {
       const message = err instanceof InstagramApiError ? notFoundMessage(err) : err instanceof Error ? err.message.slice(0, 300) : String(err);
       console.warn(`[collect-benchmarks] @${t.username}: ${message}`);
       if (!dryRun) {
-        await service
-          .from("benchmark_accounts")
-          .update({
-            status: err instanceof InstagramApiError ? "NOT_FOUND" : "ERROR",
-            error: message,
-            last_collected_at: new Date().toISOString(),
-          })
-          .eq("id", t.id);
+        warnIfError(
+          await service
+            .from("benchmark_accounts")
+            .update({
+              status: err instanceof InstagramApiError ? "NOT_FOUND" : "ERROR",
+              error: message,
+              last_collected_at: new Date().toISOString(),
+            })
+            .eq("id", t.id),
+          `비교 계정 실패 기록 (id=${t.id})`,
+        );
       }
     }
   }

@@ -10,6 +10,7 @@ import { BoardOnlyDone, makeAutoVideo, StopError } from "@/lib/auto-video/make";
 import { scheduleAutoVideo, type AutoVideo } from "@/lib/auto-video/publish";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -72,7 +73,8 @@ async function main() {
     const prev = (plan.video ?? {}) as AutoVideo;
     // 확인한 칸은 시각이 지나도 만든다(끝나는 즉시 올라간다). 그제 이전 칸은 사람이 다시 만들라고 했을 때만 만든다
     if (!onlyPlan && !prev.remake && (plan.slot_date as string) < kstDate(-1)) {
-      if (!dryRun) await service.from("content_plans").update({ status: "BLOCKED", note: "올릴 시각이 오래 지나 만들지 않았어요. 필요하면 다시 만들어 주세요." }).eq("id", plan.id).eq("status", "SCRIPTED");
+      // 실패해도 다음 실행이 같은 조건으로 다시 막는다 — 실행 전체를 멈추지 않게 경고만
+      if (!dryRun) warnIfError(await service.from("content_plans").update({ status: "BLOCKED", note: "올릴 시각이 오래 지나 만들지 않았어요. 필요하면 다시 만들어 주세요." }).eq("id", plan.id).eq("status", "SCRIPTED"), `칸 막기 (plan=${plan.id})`);
       continue;
     }
     // 다른 실행이 만드는 중이면 건너뛴다. 오래됐으면 끊긴 것으로 보고 다시 만든다
@@ -84,10 +86,14 @@ async function main() {
     }
     if (!onlyPlan && attempts > MAX_ATTEMPTS) {
       // 만드는 도중 끊긴 칸이 "만드는 중"으로 남지 않게 사람에게 넘긴다
-      if (!dryRun) await service.from("content_plans").update({ status: "BLOCKED", note: "영상을 만들다 여러 번 끊겼어요. 다시 만들어 주세요." }).eq("id", plan.id).eq("status", "SCRIPTED");
+      if (!dryRun) warnIfError(await service.from("content_plans").update({ status: "BLOCKED", note: "영상을 만들다 여러 번 끊겼어요. 다시 만들어 주세요." }).eq("id", plan.id).eq("status", "SCRIPTED"), `칸 막기 (plan=${plan.id})`);
       continue;
     }
-    if (!dryRun) await service.from("content_plans").update({ video: { state: "making", startedAt: new Date().toISOString(), attempts } as unknown as Json, error: null }).eq("id", plan.id).eq("status", "SCRIPTED");
+    // "만드는 중" · 시도 횟수를 못 남기면 유료 생성이 횟수 제한 없이 반복될 수 있어 이 칸은 건너뛴다
+    if (!dryRun && !warnIfError(await service.from("content_plans").update({ video: { state: "making", startedAt: new Date().toISOString(), attempts } as unknown as Json, error: null }).eq("id", plan.id).eq("status", "SCRIPTED"), `만드는 중 표시 (plan=${plan.id})`)) {
+      process.exitCode = 1;
+      continue;
+    }
 
     const workDir = join(tmpdir(), `auto-video-${plan.id}`);
     rmSync(workDir, { recursive: true, force: true });
@@ -158,7 +164,7 @@ async function main() {
       };
       const passed = check.passed && blocking.length === 0;
       const issues = [...check.issues, ...blocking.map((detail) => ({ kind: "rule" as const, detail })), ...made.warnings.map((detail) => ({ kind: "edit" as const, detail }))];
-      const { data: saved } = await service
+      const { data: saved, error: saveErr } = await service
         .from("content_plans")
         .update({
           status: passed ? "RENDERED" : "BLOCKED",
@@ -172,24 +178,32 @@ async function main() {
         .eq("status", "SCRIPTED")
         .eq("product_id", plan.product_id)
         .select("id");
+      if (saveErr) {
+        // 유료로 만든 완성본이라 throw하지 않는다(다시 만들게 될 수 있음) — 칸이 가리키지 않는 파일은 아래처럼 지운다
+        process.exitCode = 1;
+        console.error(`[auto-video] ${label} 완성본 저장 실패 — 칸은 대본 완료 상태로 남고 만든 영상은 버림 (plan=${plan.id}): ${saveErr.message}`);
+      }
       if (!saved?.length) {
-        console.log("  만드는 사이 칸이 바뀌어(건너뜀 · 다른 상품) 결과를 버림");
+        if (!saveErr) console.log("  만드는 사이 칸이 바뀌어(건너뜀 · 다른 상품) 결과를 버림");
         await service.storage.from("media").remove([`${base}.mp4`, `${base}.jpg`]);
         continue;
       }
       await markArchiveUsed(service, (made.sources as { kind?: string; id?: string }[]).filter((s) => s.kind === "archive" && s.id).map((s) => s.id as string));
-      await service.from("agent_runs").insert({
-        organization_id: plan.organization_id,
-        agent: "edit",
-        plan_id: plan.id,
-        status: "success",
-        model: "auto-video",
-        input: { product: made.facts.name, clips: made.sources.length } as Json,
-        output: { seconds: kit.seconds, took: seconds, look: kit.plan.look ?? null, sources: made.sources, warnings: made.warnings, passed } as unknown as Json,
-        tokens_input: made.tokens.input,
-        tokens_output: made.tokens.output,
-        finished_at: new Date().toISOString(),
-      });
+      warnIfError(
+        await service.from("agent_runs").insert({
+          organization_id: plan.organization_id,
+          agent: "edit",
+          plan_id: plan.id,
+          status: "success",
+          model: "auto-video",
+          input: { product: made.facts.name, clips: made.sources.length } as Json,
+          output: { seconds: kit.seconds, took: seconds, look: kit.plan.look ?? null, sources: made.sources, warnings: made.warnings, passed } as unknown as Json,
+          tokens_input: made.tokens.input,
+          tokens_output: made.tokens.output,
+          finished_at: new Date().toISOString(),
+        }),
+        `agent_runs 자동 영상 기록 (plan=${plan.id})`,
+      );
       // 사람이 볼 경고가 있으면 자동 발행하지 않고 확인 화면에 남긴다
       if (passed && autoPublish && issues.length === 0) {
         const r = await scheduleAutoVideo(service, plan.id);
@@ -220,15 +234,18 @@ async function main() {
       }
       if (!dryRun) {
         const stop = err instanceof StopError || attempts >= MAX_ATTEMPTS;
-        await service
-          .from("content_plans")
-          .update({
-            ...(stop ? { status: "BLOCKED", note: `영상을 만들지 못했어요: ${message}`.slice(0, 300) } : {}),
-            error: message.slice(0, 500),
-            video: { state: "done", attempts } as unknown as Json,
-          })
-          .eq("id", plan.id)
-          .eq("status", "SCRIPTED");
+        warnIfError(
+          await service
+            .from("content_plans")
+            .update({
+              ...(stop ? { status: "BLOCKED", note: `영상을 만들지 못했어요: ${message}`.slice(0, 300) } : {}),
+              error: message.slice(0, 500),
+              video: { state: "done", attempts } as unknown as Json,
+            })
+            .eq("id", plan.id)
+            .eq("status", "SCRIPTED"),
+          `칸 실패 기록 (plan=${plan.id})`,
+        );
       }
     } finally {
       if (!dryRun || !arg(argv, "--keep")) rmSync(workDir, { recursive: true, force: true });

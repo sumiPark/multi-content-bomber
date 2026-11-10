@@ -62,10 +62,14 @@ export async function approveAnalysisAction(input: z.infer<typeof idSchema>): Pr
     .select("product_id");
   if (error) return { ok: false, error: error.message };
   if (!data?.length) return { ok: false, error: "아직 분석 결과가 없습니다." };
-  await service
+  const { error: stateError } = await service
     .from("products")
     .update({ analysis_state: "ready", analysis_note: null })
     .eq("id", parsed.data.productId);
+  if (stateError) {
+    console.error("[products] 후보 상태 저장 실패:", stateError.message);
+    return { ok: false, error: "확인 상태를 저장하지 못했어요. 다시 시도해 주세요." };
+  }
   refresh(parsed.data.productId);
   return { ok: true };
 }
@@ -84,9 +88,17 @@ export async function reanalyzeAction(input: z.infer<typeof reanalyzeSchema>): P
 
   const service = createServiceClient();
   if (parsed.data.fromImages) {
-    await service.from("product_image_extracts").delete().eq("product_id", parsed.data.productId);
+    const { error: extractError } = await service.from("product_image_extracts").delete().eq("product_id", parsed.data.productId);
+    if (extractError) {
+      console.error("[products] 받아 적은 원문 지우기 실패:", extractError.message);
+      return { ok: false, error: "다시 분석을 준비하지 못했어요. 다시 시도해 주세요." };
+    }
   }
-  await service.from("product_analyses").update({ edited: false }).eq("product_id", parsed.data.productId);
+  const { error: editedError } = await service.from("product_analyses").update({ edited: false }).eq("product_id", parsed.data.productId);
+  if (editedError) {
+    console.error("[products] 고친 요약 풀기 실패:", editedError.message);
+    return { ok: false, error: "다시 분석을 준비하지 못했어요. 다시 시도해 주세요." };
+  }
   const { error } = await service
     .from("products")
     .update({
@@ -169,10 +181,14 @@ export async function editAnalysisAction(input: z.infer<typeof editSchema>): Pro
     })
     .eq("product_id", parsed.data.productId);
   if (error) return { ok: false, error: error.message };
-  await service
+  const { error: stateError } = await service
     .from("products")
     .update({ analysis_state: "ready", analysis_note: null })
     .eq("id", parsed.data.productId);
+  if (stateError) {
+    console.error("[products] 후보 상태 저장 실패:", stateError.message);
+    return { ok: false, error: "요약은 저장했지만 후보 상태를 바꾸지 못했어요. 다시 저장해 주세요." };
+  }
   refresh(parsed.data.productId);
   return { ok: true };
 }

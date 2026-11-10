@@ -9,6 +9,7 @@ import { kstDate } from "@/lib/automation/time";
 import { decryptToken } from "@/lib/crypto";
 import { InstagramApiError } from "@/lib/platforms/instagram-comments";
 import type { ContentRule } from "@/lib/rules/check";
+import { mustOk, warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -125,7 +126,7 @@ async function reviewAccount(
     const message = failMessage(err);
     if (!opts.dryRun) {
       for (const p of pending) {
-        await service.from("profile_reviews").update({ status: "FAILED", error: message, finished_at: new Date().toISOString() }).eq("id", p.id);
+        warnIfError(await service.from("profile_reviews").update({ status: "FAILED", error: message, finished_at: new Date().toISOString() }).eq("id", p.id), `대기 채점 실패 표시 (id=${p.id})`);
       }
     }
     throw new Error(`${label}: ${message}`);
@@ -133,15 +134,18 @@ async function reviewAccount(
 
   // 1. 스토리 기록
   if (!opts.dryRun && api.liveStories != null) {
-    await service.from("account_story_days").upsert(
-      {
-        social_account_id: account.id,
-        day: opts.today,
-        organization_id: account.organization_id,
-        stories_count: api.liveStories,
-        checked_at: new Date().toISOString(),
-      },
-      { onConflict: "social_account_id,day" },
+    warnIfError(
+      await service.from("account_story_days").upsert(
+        {
+          social_account_id: account.id,
+          day: opts.today,
+          organization_id: account.organization_id,
+          stories_count: api.liveStories,
+          checked_at: new Date().toISOString(),
+        },
+        { onConflict: "social_account_id,day" },
+      ),
+      `스토리 기록 (account=${account.id})`,
     );
   }
 
@@ -158,17 +162,21 @@ async function reviewAccount(
   let reviewId: string | null = pending[0]?.id ?? null;
   if (!opts.dryRun) {
     if (reviewId) {
-      const { data: claimed } = await service
-        .from("profile_reviews")
-        .update({ status: "RUNNING", started_at: new Date().toISOString(), error: null })
-        .eq("id", reviewId)
-        .in("status", ["PENDING", "RUNNING"])
-        .select("id");
+      // 저장 실패를 "다른 run이 먼저 집음"으로 착각하지 않게 오류는 그 계정 실패로 넘긴다
+      const claimed = mustOk(
+        await service
+          .from("profile_reviews")
+          .update({ status: "RUNNING", started_at: new Date().toISOString(), error: null })
+          .eq("id", reviewId)
+          .in("status", ["PENDING", "RUNNING"])
+          .select("id"),
+        `${label}: 채점 요청 집기 (id=${reviewId})`,
+      );
       if (!claimed?.length) return `${label}: 다른 run이 먼저 집음 — 건너뜀`;
       // 같은 계정의 나머지 대기 요청은 이 채점으로 갈음
       const rest = pending.slice(1).map((p) => p.id);
       if (rest.length) {
-        await service.from("profile_reviews").update({ status: "FAILED", error: "더 새 채점으로 갈음했어요.", finished_at: new Date().toISOString() }).in("id", rest);
+        warnIfError(await service.from("profile_reviews").update({ status: "FAILED", error: "더 새 채점으로 갈음했어요.", finished_at: new Date().toISOString() }).in("id", rest), `${label}: 나머지 대기 요청 갈음`);
       }
     } else {
       const { data: created, error } = await service
@@ -212,29 +220,33 @@ async function reviewAccount(
           if (oldPath && oldPath !== path) await service.storage.from("media").remove([oldPath]);
         }
       }
-      await service
-        .from("profile_reviews")
-        .update({
-          status: "DONE",
-          snapshot: result.snapshot as unknown as Json,
-          items: result.items as unknown as Json,
-          rewrites: result.rewrites as unknown as Json,
-          total_score: result.total,
-          rescore: result.rescore,
-          summary: result.summary,
-          model: result.model,
-          tokens_input: result.tokens.input,
-          tokens_output: result.tokens.output,
-          finished_at: new Date().toISOString(),
-        })
-        .eq("id", reviewId as string);
+      // 실패하면 아래 catch가 이 행을 FAILED로 남긴다(RUNNING으로 남아 20분 뒤 다시 채점되지 않게)
+      mustOk(
+        await service
+          .from("profile_reviews")
+          .update({
+            status: "DONE",
+            snapshot: result.snapshot as unknown as Json,
+            items: result.items as unknown as Json,
+            rewrites: result.rewrites as unknown as Json,
+            total_score: result.total,
+            rescore: result.rescore,
+            summary: result.summary,
+            model: result.model,
+            tokens_input: result.tokens.input,
+            tokens_output: result.tokens.output,
+            finished_at: new Date().toISOString(),
+          })
+          .eq("id", reviewId as string),
+        "채점 결과 저장",
+      );
     }
     const why = pending.length ? "캡처 저장" : !lastSnap ? "첫 채점" : changed ? "프로필 바뀜" : opts.force ? "강제" : "7일 지남";
     return `${label}: ${result.total}/${result.max} → 고치면 ${result.rescore} (${why}) | API 칸 ${api.fields.length}개 | 토큰 ${result.tokens.input}/${result.tokens.output}`;
   } catch (err) {
     const message = failMessage(err);
     if (!opts.dryRun && reviewId) {
-      await service.from("profile_reviews").update({ status: "FAILED", error: message, finished_at: new Date().toISOString() }).eq("id", reviewId);
+      warnIfError(await service.from("profile_reviews").update({ status: "FAILED", error: message, finished_at: new Date().toISOString() }).eq("id", reviewId), `채점 실패 표시 (id=${reviewId})`);
     }
     throw new Error(`${label}: ${message}`);
   }

@@ -1,4 +1,5 @@
 import { decryptToken } from "@/lib/crypto";
+import { mustOk, warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/types/database";
 import { refreshSeriesTemplates } from "./auto-templates";
@@ -227,10 +228,13 @@ export async function enableEpisodeReplies(
   if (!created.created && created.reason === "no-previous") {
     return { started: false, reason: "no-previous" };
   }
-  await service
-    .from("series_episodes")
-    .update({ reply_enabled: true })
-    .eq("id", args.episode.id);
+  mustOk(
+    await service
+      .from("series_episodes")
+      .update({ reply_enabled: true })
+      .eq("id", args.episode.id),
+    "회차 답글 켜기",
+  );
   if (created.created) return { started: true };
 
   const task = created.task;
@@ -241,13 +245,16 @@ export async function enableEpisodeReplies(
 
   // 끌 때 빠졌던 대상을 되살린다. 이전 화에도 보내면 "이전 화 그만 보냄"으로 빠졌던 대상도.
   // 이번엔 이전 화를 안 고르면 되살아난 이전 화 대상은 다시 모을 때 빠진다(scope.ts).
-  await service
-    .from("episode_alert_replies")
-    .update({ status: "PENDING", skip_reason: null })
-    .eq("task_id", task.id)
-    .eq("status", "EXCLUDED")
-    .in("skip_reason", includeOlder ? [REPLY_OFF_REASON, OLDER_OFF_REASON] : [REPLY_OFF_REASON]);
-  await service
+  mustOk(
+    await service
+      .from("episode_alert_replies")
+      .update({ status: "PENDING", skip_reason: null })
+      .eq("task_id", task.id)
+      .eq("status", "EXCLUDED")
+      .in("skip_reason", includeOlder ? [REPLY_OFF_REASON, OLDER_OFF_REASON] : [REPLY_OFF_REASON]),
+    "빠졌던 답글 대상 되살리기",
+  );
+  const reopenRes = await service
     .from("episode_alert_tasks")
     .update({
       include_older: includeOlder,
@@ -262,6 +269,7 @@ export async function enableEpisodeReplies(
       last_comment_count: null,
     })
     .eq("id", task.id);
+  mustOk(reopenRes, "답글 작업 다시 모으기");
   return { started: true };
 }
 
@@ -316,7 +324,7 @@ export async function includeOlderEpisodes(
   }
   if (task.include_older) return { ok: false, reason: "already" };
 
-  const { data: updated } = await service
+  const updateRes = await service
     .from("episode_alert_tasks")
     .update({
       include_older: true,
@@ -334,16 +342,20 @@ export async function includeOlderEpisodes(
     .neq("status", "CANCELLED")
     .select("id")
     .maybeSingle();
+  const updated = mustOk(updateRes, "이전 화 댓글에도 보내기");
   // 동시에 두 번 눌러 다른 쪽이 먼저 켰다.
   if (!updated) return { ok: false, reason: "already" };
 
   // 전에 "이전 화는 그만 보내기"로 빠졌던 대상은 되살린다(다시 모을 때 같은 댓글은 그대로 두므로).
-  await service
-    .from("episode_alert_replies")
-    .update({ status: "PENDING", skip_reason: null })
-    .eq("task_id", task.id)
-    .eq("status", "EXCLUDED")
-    .eq("skip_reason", OLDER_OFF_REASON);
+  mustOk(
+    await service
+      .from("episode_alert_replies")
+      .update({ status: "PENDING", skip_reason: null })
+      .eq("task_id", task.id)
+      .eq("status", "EXCLUDED")
+      .eq("skip_reason", OLDER_OFF_REASON),
+    "이전 화 답글 대상 되살리기",
+  );
   return { ok: true };
 }
 
@@ -357,21 +369,23 @@ export async function stopOlderEpisodes(
   service: Service,
   episodeId: string,
 ): Promise<{ ok: true } | { ok: false; reason: "not-included" }> {
-  const { data: task } = await service
+  const stopRes = await service
     .from("episode_alert_tasks")
     .update({ include_older: false })
     .eq("target_episode_id", episodeId)
     .eq("include_older", true)
     .select("id, source_episode_id")
     .maybeSingle();
+  const task = mustOk(stopRes, "이전 화 댓글 보내기 끄기");
   if (!task) return { ok: false, reason: "not-included" };
 
-  await service
+  const excludeRes = await service
     .from("episode_alert_replies")
     .update({ status: "EXCLUDED", skip_reason: OLDER_OFF_REASON })
     .eq("task_id", task.id)
     .eq("status", "PENDING")
     .neq("source_episode_id", task.source_episode_id);
+  mustOk(excludeRes, "이전 화 답글 대상 빼기");
 
   // 남은 게 이전 화 대상뿐이었으면 바로 완료로 — 워커가 다시 돌 때까지 "보내는 중"으로 남지 않게.
   const { count } = await service
@@ -380,12 +394,14 @@ export async function stopOlderEpisodes(
     .eq("task_id", task.id)
     .eq("status", "PENDING");
   if ((count ?? 0) === 0) {
-    await service
+    const doneRes = await service
       .from("episode_alert_tasks")
       .update({ status: "DONE", completed_at: new Date().toISOString(), last_error: null })
       .eq("id", task.id)
       .eq("status", "SENDING")
       .is("locked_at", null);
+    // 실패해도 워커가 다음에 돌 때 완료로 바꾼다
+    warnIfError(doneRes, `답글 작업 완료 처리 (task=${task.id})`);
   }
   return { ok: true };
 }
@@ -395,15 +411,17 @@ export async function stopOlderEpisodes(
  * 새 댓글 지켜보기도 멈춘다. 이미 보낸 답글은 그대로다.
  */
 export async function disableEpisodeReplies(service: Service, episodeId: string) {
-  await Promise.all([
+  const [offRes, unwatchRes] = await Promise.all([
     service.from("series_episodes").update({ reply_enabled: false }).eq("id", episodeId),
     service
       .from("episode_alert_tasks")
       .update({ watch_until: null })
       .eq("target_episode_id", episodeId),
   ]);
+  mustOk(offRes, "회차 답글 끄기");
+  mustOk(unwatchRes, "새 댓글 지켜보기 멈추기");
 
-  const { data: task } = await service
+  const cancelRes = await service
     .from("episode_alert_tasks")
     .update({
       status: "CANCELLED",
@@ -414,12 +432,14 @@ export async function disableEpisodeReplies(service: Service, episodeId: string)
     .in("status", ["COLLECTING", "SENDING"])
     .select("id")
     .maybeSingle();
+  const task = mustOk(cancelRes, "답글 작업 멈추기");
   if (task) {
-    await service
+    const excludeRes = await service
       .from("episode_alert_replies")
       .update({ status: "EXCLUDED", skip_reason: REPLY_OFF_REASON })
       .eq("task_id", task.id)
       .eq("status", "PENDING");
+    mustOk(excludeRes, "남은 답글 대상 빼기");
   }
 }
 

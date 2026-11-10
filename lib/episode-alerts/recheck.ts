@@ -1,5 +1,6 @@
 import type { createServiceClient } from "@/lib/supabase/service";
 import { getInstagramMedia, InstagramApiError } from "@/lib/platforms/instagram-comments";
+import { mustOk, warnIfError } from "@/lib/supabase/result";
 import { collectCandidates } from "./collect";
 import { loadTaskScope } from "./scope";
 import { getInstagramAuth } from "./server";
@@ -64,7 +65,7 @@ export async function recheckWatchedTasks(
     if (Date.now() > deadlineAt) break;
 
     // 선점 — 겹쳐 돈 다른 호출이 이미 봤으면 건너뛴다.
-    const { data: claimed } = await service
+    const claimRes = await service
       .from("episode_alert_tasks")
       .update({ last_checked_at: nowIso })
       .eq("id", task.id)
@@ -72,7 +73,8 @@ export async function recheckWatchedTasks(
       .or(recentlyChecked)
       .select("id")
       .maybeSingle();
-    if (!claimed) continue;
+    warnIfError(claimRes, `새 댓글 확인 선점 (task=${task.id})`);
+    if (!claimRes.data) continue;
     checked++;
 
     try {
@@ -92,13 +94,16 @@ export async function recheckWatchedTasks(
       }
 
       const pending = await collectCandidates(service, task, auth);
-      await service
-        .from("episode_alert_tasks")
-        .update({ last_comment_count: count })
-        .eq("id", task.id);
+      warnIfError(
+        await service
+          .from("episode_alert_tasks")
+          .update({ last_comment_count: count })
+          .eq("id", task.id),
+        `댓글 수 기록 (task=${task.id})`,
+      );
 
       if (pending > 0) {
-        const { data: reopened } = await service
+        const reopenRes = await service
           .from("episode_alert_tasks")
           .update({
             status: "SENDING",
@@ -110,6 +115,8 @@ export async function recheckWatchedTasks(
           .eq("status", "DONE")
           .select("id")
           .maybeSingle();
+        // 실패하면 아래 catch가 last_error로 남긴다(보낼 대상이 생겼는데 다시 열지 못한 상태)
+        const reopened = mustOk(reopenRes, "답글 작업 다시 열기");
         if (reopened) newTargets += pending;
       }
     } catch (err) {
@@ -120,10 +127,13 @@ export async function recheckWatchedTasks(
           ? "계정 토큰이 만료돼 새 댓글을 확인하지 못했어요. 계정을 다시 연결해주세요."
           : `새 댓글 확인 실패: ${err instanceof Error ? err.message : String(err)}`;
       console.error(`[episode-replies-recheck] ${task.id}:`, message);
-      await service
-        .from("episode_alert_tasks")
-        .update({ last_error: message.slice(0, 500) })
-        .eq("id", task.id);
+      warnIfError(
+        await service
+          .from("episode_alert_tasks")
+          .update({ last_error: message.slice(0, 500) })
+          .eq("id", task.id),
+        `새 댓글 확인 오류 기록 (task=${task.id})`,
+      );
     }
   }
 

@@ -15,6 +15,7 @@ import {
   type InstagramMedia,
   type MetricValues,
 } from "@/lib/platforms/instagram-insights";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 import { startRunLog } from "./run-log";
@@ -255,10 +256,13 @@ async function collectAccount(
     const message = err instanceof Error ? err.message : String(err);
     if (err instanceof InstagramApiError && err.kind === "TOKEN") {
       // 발행 워커와 같은 정책 — 비활성으로 표시해 계정 연동 화면에서 재연결을 유도한다.
-      await service
-        .from("social_accounts")
-        .update({ is_active: false, updated_at: new Date().toISOString() })
-        .eq("id", account.id);
+      warnIfError(
+        await service
+          .from("social_accounts")
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq("id", account.id),
+        `계정 비활성 표시 (id=${account.id})`,
+      );
       return { account: label, status: "token_expired", insights: false, posts: 0, message };
     }
     if (err instanceof InstagramApiError && err.kind === "RATE_LIMIT") {

@@ -18,6 +18,7 @@ import {
 } from "@/lib/platforms/instagram-insights";
 import { suggestTopics, writeFindings, type Usage } from "@/lib/post-analysis/interpret";
 import { baseByFormat, clip, computeStats, formatOf, type ReelRow } from "@/lib/post-analysis/stats";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import { kstDate } from "@/lib/automation/time";
 import type { Json } from "@/types/database";
@@ -115,15 +116,19 @@ async function listHistory(service: Service, account: { id: string; organization
     );
     if (error) throw new Error(`게시물 저장 실패: ${error.message}`);
   }
-  await service.from("post_history_sync").upsert({
-    social_account_id: account.id,
-    organization_id: account.organization_id,
-    listed_at: new Date().toISOString(),
-    all_listed_at: new Date().toISOString(),
-    media_listed: media.length,
-    reels_listed: reels.length,
-    updated_at: new Date().toISOString(),
-  });
+  // 게시물은 이미 저장했다 — 못 남기면 다음 실행이 목록을 한 번 더 읽을 뿐이라 이번 실행은 이어 간다
+  warnIfError(
+    await service.from("post_history_sync").upsert({
+      social_account_id: account.id,
+      organization_id: account.organization_id,
+      listed_at: new Date().toISOString(),
+      all_listed_at: new Date().toISOString(),
+      media_listed: media.length,
+      reels_listed: reels.length,
+      updated_at: new Date().toISOString(),
+    }),
+    `지난 게시물 목록 완료 표시 (account=${account.id})`,
+  );
   console.log(`[post-history] 지난 게시물 ${media.length}개 중 릴스 ${reels.length}개, 읽을 게시물 ${posts.length}개`);
 }
 
@@ -181,7 +186,8 @@ async function fillInsights(service: Service, accountToken: string, systemToken:
       if (error) throw new Error(`성과 저장 실패: ${error.message}`);
       read++;
     }
-    await service.from("social_posts").update({ insights_checked_at: new Date().toISOString() }).eq("id", r.post_id);
+    // 못 남기면 다음 실행이 이 게시물을 한 번 더 읽는다
+    warnIfError(await service.from("social_posts").update({ insights_checked_at: new Date().toISOString() }).eq("id", r.post_id), `성과 확인 시각 기록 (post=${r.post_id})`);
     return true;
   };
 
@@ -240,7 +246,8 @@ async function keepThumbs(service: Service, orgId: string, accountId: string, to
       const path = `${orgId}/reel-thumbs/${accountId}/${r.post_id}.jpg`;
       const { error } = await service.storage.from("media").upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
       if (error) continue;
-      await service.from("social_posts").update({ thumb_path: path }).eq("id", r.post_id);
+      // 아래 catch는 조용히 넘어가므로 throw하지 않고 여기서 경고를 남긴다 — 다음 실행이 다시 보관한다
+      if (!warnIfError(await service.from("social_posts").update({ thumb_path: path }).eq("id", r.post_id), `표지 경로 저장 (post=${r.post_id})`)) continue;
       saved++;
     } catch (err) {
       if (err instanceof InstagramApiError && err.kind === "RATE_LIMIT") break;
@@ -263,7 +270,7 @@ async function analyze(service: Service, account: { id: string; organization_id:
   const captions = new Map(rows.map((r) => [r.post_id, r.caption ?? ""]));
   const usage: Usage = { input: 0, output: 0 };
   const model = agentModel();
-  const { data: run } = await service
+  const runRes = await service
     .from("agent_runs")
     .insert({
       organization_id: await resolveOrgId(service, { accountId: account.id }),
@@ -273,12 +280,18 @@ async function analyze(service: Service, account: { id: string; organization_id:
     })
     .select("id")
     .single();
+  // 실행 기록은 부가 정보 — 못 남겨도 분석은 계속한다
+  warnIfError(runRes, `agent_runs 기록 (account=${account.id})`);
+  const run = runRes.data;
   const finish = async (patch: { status: "success" | "failed"; output?: unknown; error?: string }) => {
     if (!run) return;
-    await service
-      .from("agent_runs")
-      .update({ status: patch.status, output: (patch.output ?? null) as Json, error: patch.error ?? null, tokens_input: usage.input, tokens_output: usage.output, finished_at: new Date().toISOString() })
-      .eq("id", run.id);
+    warnIfError(
+      await service
+        .from("agent_runs")
+        .update({ status: patch.status, output: (patch.output ?? null) as Json, error: patch.error ?? null, tokens_input: usage.input, tokens_output: usage.output, finished_at: new Date().toISOString() })
+        .eq("id", run.id),
+      `agent_runs 마감 (id=${run.id})`,
+    );
   };
   try {
     const titles = [...usable].sort((a, b) => (b.views as number) - (a.views as number)).map((r) => r.title).filter(Boolean);

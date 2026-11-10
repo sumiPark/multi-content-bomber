@@ -5,6 +5,7 @@ import { loadAccountConcept } from "@/lib/agents/concept";
 import { selectProducts, type ProductScope } from "@/lib/agents/select";
 import { isPastSlot } from "@/lib/automation/deadline";
 import { kstDate } from "@/lib/automation/time";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -44,11 +45,15 @@ async function main() {
       .eq("status", "PROPOSED");
     const expired = (open ?? []).filter((p) => isPastSlot(p.slot_date as string, p.slot_time as string));
     if (expired.length) {
-      await service
-        .from("content_plans")
-        .update({ status: "SKIPPED", note: "올릴 시각까지 확인이 없어 건너뛰었어요" })
-        .in("id", expired.map((p) => p.id));
-      console.log(`[plan-b] 올릴 시각 지난 제안 ${expired.length}개 건너뜀`);
+      // 내일 칸 기획과는 따로라 실패해도 이어 간다 — 다음 실행이 다시 건너뜀으로 바꾼다
+      const ok = warnIfError(
+        await service
+          .from("content_plans")
+          .update({ status: "SKIPPED", note: "올릴 시각까지 확인이 없어 건너뛰었어요" })
+          .in("id", expired.map((p) => p.id)),
+        `시각 지난 제안 건너뜀 표시 (${expired.length}개)`,
+      );
+      if (ok) console.log(`[plan-b] 올릴 시각 지난 제안 ${expired.length}개 건너뜀`);
     }
   }
 

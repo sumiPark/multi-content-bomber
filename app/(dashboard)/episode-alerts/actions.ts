@@ -24,6 +24,7 @@ import {
   type InstagramMedia,
 } from "@/lib/platforms/instagram-comments";
 import { createClient } from "@/lib/supabase/server";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // 시리즈 댓글 자동화 서버 액션. 새 테이블은 authenticated에 쓰기 정책이 없어(0017) 모든 쓰기는
@@ -148,20 +149,26 @@ async function excludePending(
   replyIds?: string[],
 ) {
   if (!replyIds) {
-    await service
-      .from("episode_alert_replies")
-      .update({ status: "EXCLUDED", skip_reason: reason })
-      .eq("task_id", taskId)
-      .eq("status", "PENDING");
+    warnIfError(
+      await service
+        .from("episode_alert_replies")
+        .update({ status: "EXCLUDED", skip_reason: reason })
+        .eq("task_id", taskId)
+        .eq("status", "PENDING"),
+      "남은 답글 제외",
+    );
     return;
   }
   for (let i = 0; i < replyIds.length; i += 100) {
-    await service
-      .from("episode_alert_replies")
-      .update({ status: "EXCLUDED", skip_reason: reason })
-      .eq("task_id", taskId)
-      .eq("status", "PENDING")
-      .in("id", replyIds.slice(i, i + 100));
+    warnIfError(
+      await service
+        .from("episode_alert_replies")
+        .update({ status: "EXCLUDED", skip_reason: reason })
+        .eq("task_id", taskId)
+        .eq("status", "PENDING")
+        .in("id", replyIds.slice(i, i + 100)),
+      "남은 답글 제외",
+    );
   }
 }
 
@@ -297,7 +304,7 @@ export async function createSeriesAction(input: {
         });
       }
     } catch (err) {
-      await service.from("series").delete().eq("id", series.id);
+      warnIfError(await service.from("series").delete().eq("id", series.id), "반쯤 만든 시리즈 지우기");
       throw err;
     }
 
@@ -409,12 +416,17 @@ export async function deleteSeriesAction(input: { seriesId: string }): Promise<A
   if (!series) return { ok: false, error: "시리즈를 찾을 수 없어요." };
 
   const nowIso = new Date().toISOString();
-  const { data: open } = await service
+  const { data: open, error: cancelError } = await service
     .from("episode_alert_tasks")
     .update({ status: "CANCELLED", completed_at: nowIso, locked_at: null })
     .eq("series_id", series.id)
     .in("status", ["COLLECTING", "SENDING"])
     .select("id");
+  // 알림을 못 멈춘 채 시리즈만 지우면 지운 시리즈의 답글이 계속 나간다
+  if (cancelError) {
+    console.error("[episode-alerts] 시리즈 삭제 전 알림 멈추기 실패:", cancelError.message);
+    return { ok: false, error: "진행 중인 알림을 멈추지 못했어요. 잠시 뒤 다시 시도해주세요." };
+  }
   for (const t of open ?? []) await excludePending(service, t.id, "시리즈 삭제");
 
   const { error } = await service
@@ -509,7 +521,11 @@ export async function removeLastEpisodeAction(input: {
     if ((count ?? 0) > 0) {
       return { ok: false, error: "이미 답글을 보낸 회차라 뺄 수 없어요. 기록을 지키기 위해서예요." };
     }
-    await service.from("episode_alert_tasks").delete().in("id", taskIds);
+    const { error: taskError } = await service.from("episode_alert_tasks").delete().in("id", taskIds);
+    if (taskError) {
+      console.error("[episode-alerts] 회차 알림 작업 지우기 실패:", taskError.message);
+      return { ok: false, error: "회차를 빼지 못했어요. 잠시 뒤 다시 시도해주세요." };
+    }
   }
 
   const { error } = await service.from("series_episodes").delete().eq("id", episode.id);

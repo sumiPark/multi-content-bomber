@@ -1,6 +1,7 @@
 import { kstDate, kstToIso } from "@/lib/automation/time";
 import type { ProductKind, ShopCode } from "@/lib/products/shops";
 import { appendPublishHistory } from "@/lib/publish-history";
+import { mustOk, warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 편성 관리(계정 넣기 · 빼기, 칸 시각 · 방식 바꾸기) — 2026-11-03 사용자 결정:
@@ -144,13 +145,15 @@ export async function cancelPlans(
   const cancelledJobs = new Set<string>();
   const uploadingJobs = new Set<string>();
   if (jobIds.length) {
-    const { data } = await service
+    const cancelRes = await service
       .from("publish_jobs")
       .update({ status: "CANCELLED", cancelled_at: new Date().toISOString() })
       .in("id", jobIds)
       // 워커가 이미 잡아 간(PROCESSING) 건은 건드리지 않는다 — 결과 기록에 덮인다
       .in("status", ["PENDING", "RETRYING"])
       .select("id");
+    // 취소하지 못했는데 칸만 건너뜀이 되면 예약 발행이 그대로 올라간다
+    const data = mustOk(cancelRes, "예약 발행 취소");
     for (const r of data ?? []) cancelledJobs.add(r.id);
     if (cancelledJobs.size) await appendPublishHistory(service, [...cancelledJobs], { status: "CANCELLED", message: reason });
     const { data: rest } = await service.from("publish_jobs").select("id, status").in("id", jobIds.filter((id) => !cancelledJobs.has(id)));
@@ -159,8 +162,8 @@ export async function cancelPlans(
   const targets = plans.filter((p) => !p.publish_job_id || !uploadingJobs.has(p.publish_job_id));
   const ids = targets.map((p) => p.id);
   if (ids.length) {
-    await service.from("shoot_requests").update({ status: "CANCELLED" }).in("plan_id", ids).in("status", OPEN_REQUEST_STATUSES);
-    await service.from("content_plans").update({ status: "SKIPPED", note: reason }).in("id", ids);
+    mustOk(await service.from("shoot_requests").update({ status: "CANCELLED" }).in("plan_id", ids).in("status", OPEN_REQUEST_STATUSES), "촬영 요청 취소");
+    mustOk(await service.from("content_plans").update({ status: "SKIPPED", note: reason }).in("id", ids), "기획 건너뜀 처리");
   }
   return { plans: ids.length, jobs: cancelledJobs.size, uploading: uploadingJobs.size };
 }
@@ -181,7 +184,7 @@ export async function clearScheduleCancelled(service: Service, accountId: string
     .like("note", `${SCHEDULE_CANCEL_NOTE_PREFIX}%`)
     .gte("slot_date", kstDate(-1, now));
   const ids = (data ?? []).filter((p) => Date.parse(kstToIso(p.slot_date as string, p.slot_time as string)) > now).map((p) => p.id);
-  if (ids.length) await service.from("content_plans").delete().in("id", ids);
+  if (ids.length) warnIfError(await service.from("content_plans").delete().in("id", ids), `편성에서 취소한 기획 정리 (account=${accountId}, ${slotTime})`);
 }
 
 /**
@@ -222,7 +225,8 @@ export async function movePlans(
     if (planErr) return { ok: false, error: `${p.slot_date.slice(5)} 칸을 옮기지 못했어요: ${planErr.message}` };
     const status = p.publish_job_id ? jobStatus.get(p.publish_job_id) : null;
     if (p.publish_job_id && (status === "PENDING" || status === "RETRYING")) {
-      await service.from("publish_jobs").update({ scheduled_for: kstToIso(p.slot_date, toTime) }).eq("id", p.publish_job_id).in("status", ["PENDING", "RETRYING"]);
+      const { error: jobErr } = await service.from("publish_jobs").update({ scheduled_for: kstToIso(p.slot_date, toTime) }).eq("id", p.publish_job_id).in("status", ["PENDING", "RETRYING"]);
+      if (jobErr) return { ok: false, error: `${p.slot_date.slice(5)} 칸의 예약 시각을 옮기지 못했어요: ${jobErr.message}` };
       await appendPublishHistory(service, [p.publish_job_id], { status, message: `자동 업로드 일정에서 시각 변경 ${fromTime} → ${toTime}` });
     }
   }

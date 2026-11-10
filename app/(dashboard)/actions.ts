@@ -739,11 +739,15 @@ export async function deleteContentsAction(
   }
   // 같은 콘텐츠의 남은 예약은 올릴 파일이 없어졌으니 취소한다
   if (erasedIds.size > 0) {
-    await createServiceClient()
+    const { error: cancelError } = await createServiceClient()
       .from("publish_jobs")
       .update({ status: "CANCELLED", cancelled_at: new Date().toISOString() })
       .in("content_id", Array.from(erasedIds))
       .in("status", ["PENDING", "RETRYING"]);
+    // 예약이 남은 채 파일을 지우면 발행이 실패만 반복한다 — 여기서 멈추고 다시 시도하게 한다
+    if (cancelError) {
+      return { ok: false, error: `삭제 실패: ${cancelError.message}` };
+    }
   }
 
   // DB 먼저 삭제 (publish_jobs는 cascade). 콘텐츠 삭제는 만든 사람이나 관리자만 된다(RLS, 0001) —

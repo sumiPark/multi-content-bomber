@@ -4,6 +4,7 @@ import type { z } from "zod";
 import { loadActivePlaybook, playbookBlock, resolveOrgId } from "@/lib/agents/playbook";
 import { getOpenAI, OPENAI_TEXT_MODEL } from "@/lib/openai";
 import { callOptions, isReasoningModel } from "@/lib/products/analysis/analyze";
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -76,7 +77,7 @@ export async function runAgent<T>(opts: {
 
   let runId: string | null = null;
   if (opts.service) {
-    const { data } = await opts.service
+    const runRes = await opts.service
       .from("agent_runs")
       .insert({
         organization_id: orgId,
@@ -88,12 +89,13 @@ export async function runAgent<T>(opts: {
       })
       .select("id")
       .single();
-    runId = data?.id ?? null;
+    warnIfError(runRes, `에이전트 실행 기록 추가 (agent=${opts.agent}, plan=${opts.planId ?? "-"})`);
+    runId = runRes.data?.id ?? null;
   }
 
   const finish = async (patch: { status: "success" | "failed"; output?: unknown; error?: string }) => {
     if (!opts.service || !runId) return;
-    await opts.service
+    const finishRes = await opts.service
       .from("agent_runs")
       .update({
         status: patch.status,
@@ -105,6 +107,7 @@ export async function runAgent<T>(opts: {
         finished_at: new Date().toISOString(),
       })
       .eq("id", runId);
+    warnIfError(finishRes, `에이전트 실행 기록 마감 (run=${runId})`);
   };
 
   const tools = opts.skills.map((s) =>

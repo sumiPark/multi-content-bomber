@@ -8,6 +8,7 @@ import { DEFAULT_EDIT_STYLE } from "@/lib/shoot/edit-style";
 import { probe, probeFrameSize, renderSegment } from "@/lib/shoot/ffmpeg";
 import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 자사 촬영 아카이브(2026-11-05 사용자 결정) — "올렸어요"를 누른 촬영본에서 얼굴이 안 나오고 품질이 좋은 제품 컷만 남겨 AI 자동 영상에 다시 쓴다.
@@ -169,7 +170,7 @@ export async function saveArchiveCut(
   const old = (all ?? []).slice(MAX_PER_PRODUCT);
   if (old.length) {
     await service.storage.from(BUCKET).remove(old.map((o) => o.path));
-    await service.from("shoot_archive_clips").delete().in("id", old.map((o) => o.id));
+    warnIfError(await service.from("shoot_archive_clips").delete().in("id", old.map((o) => o.id)), `오래된 아카이브 컷 기록 정리 (product=${row.productId})`);
   }
 }
 

@@ -21,9 +21,14 @@ export async function POST(request: Request) {
 
   const service = createServiceClient();
   if (!secret) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const { data: valid } = await service.rpc("verify_episode_replies_cron_secret", {
+  const { data: valid, error: verifyError } = await service.rpc("verify_episode_replies_cron_secret", {
     p_secret: secret,
   });
+  // DB 오류를 비밀값 불일치(401)로 감추지 않는다
+  if (verifyError) {
+    console.error("[episode-replies-recheck] 비밀값 확인 실패:", verifyError.message);
+    return NextResponse.json({ error: verifyError.message }, { status: 500 });
+  }
   if (valid !== true) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const result = await recheckWatchedTasks(service, startedAt + BUDGET_MS);

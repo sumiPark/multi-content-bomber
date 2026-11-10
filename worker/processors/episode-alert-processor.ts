@@ -1,3 +1,4 @@
+import { mustOk, warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import { collectCandidates } from "@/lib/episode-alerts/collect";
 import {
@@ -151,11 +152,15 @@ async function sendReplies(
     if (current.status === "COLLECTING" || (current.include_older && !collectedOlder)) {
       await collectCandidates(service, current, auth);
       collectedOlder = current.include_older;
-      await service
-        .from("episode_alert_tasks")
-        .update({ status: "SENDING" })
-        .eq("id", task.id)
-        .eq("status", "COLLECTING");
+      // 아직 이 배치는 보내기 전 — 실패하면 작업 오류로 넘겨(15분 뒤 재시도) COLLECTING에 머문 채 같은 run에서 계속 다시 모으지 않게 한다
+      mustOk(
+        await service
+          .from("episode_alert_tasks")
+          .update({ status: "SENDING" })
+          .eq("id", task.id)
+          .eq("status", "COLLECTING"),
+        `작업 발송 단계 전환 (task=${task.id})`,
+      );
     }
     const scope = await loadTaskScope(service, current);
     await excludeInactiveOlder(service, current, scope);
@@ -291,18 +296,25 @@ async function loadLiveTask(service: Service, task: TaskRow): Promise<TaskRow | 
 }
 
 // 답글이 꺼진 작업 정리 — 끄기(disableEpisodeReplies)와 같은 모양으로 남겨 다시 켜면 되살아나게.
+// 보내기 전 정리라 실패하면 작업 오류로 넘긴다 — 다음 run이 다시 꺼짐을 보고 이어서 정리한다.
 async function stopTurnedOff(service: Service, taskId: string) {
-  await service
-    .from("episode_alert_replies")
-    .update({ status: "EXCLUDED", skip_reason: REPLY_OFF_REASON })
-    .eq("task_id", taskId)
-    .eq("status", "PENDING");
+  mustOk(
+    await service
+      .from("episode_alert_replies")
+      .update({ status: "EXCLUDED", skip_reason: REPLY_OFF_REASON })
+      .eq("task_id", taskId)
+      .eq("status", "PENDING"),
+    `꺼진 작업 대상 제외 (task=${taskId})`,
+  );
   // 새 댓글 확인 중에 꺼서 확인 쪽이 SENDING으로 되돌린 경우도 꺼짐으로 맞춘다.
-  await service
-    .from("episode_alert_tasks")
-    .update({ status: "CANCELLED", completed_at: nowIso(), locked_at: null })
-    .eq("id", taskId)
-    .in("status", ["COLLECTING", "SENDING"]);
+  mustOk(
+    await service
+      .from("episode_alert_tasks")
+      .update({ status: "CANCELLED", completed_at: nowIso(), locked_at: null })
+      .eq("id", taskId)
+      .in("status", ["COLLECTING", "SENDING"]),
+    `꺼진 작업 취소 (task=${taskId})`,
+  );
 }
 
 // 뒤 회차의 "이전 화에도" 작업이 이 댓글을 맡았으면(보낼 예정이거나 보냄) 그 회차 번호.
@@ -376,10 +388,13 @@ async function handleTaskError(
   if (err instanceof InstagramApiError) {
     if (err.kind === "TOKEN") {
       // 발행 워커와 같은 정책 — 계정을 비활성으로 표시해 재연결을 유도한다.
-      await service
-        .from("social_accounts")
-        .update({ is_active: false, updated_at: nowIso() })
-        .eq("id", task.social_account_id);
+      warnIfError(
+        await service
+          .from("social_accounts")
+          .update({ is_active: false, updated_at: nowIso() })
+          .eq("id", task.social_account_id),
+        `계정 비활성 표시 (account=${task.social_account_id})`,
+      );
       await fail(
         service,
         task.id,

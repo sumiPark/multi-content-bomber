@@ -1,3 +1,4 @@
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 /**
@@ -24,11 +25,12 @@ export function appendPublishHistory(
         ...prev,
         { ...entry, timestamp: new Date().toISOString() },
       ];
-      await service
+      const res = await service
         .from("publish_jobs")
         // @ts-expect-error status_history는 0007 마이그레이션 이후 추가
         .update({ status_history: next })
         .eq("id", id);
+      warnIfError(res, `발행 이력 추가 (job=${id})`);
     }),
   );
 }

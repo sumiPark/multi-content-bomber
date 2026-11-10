@@ -7,6 +7,7 @@ import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import { checkText, type ContentRule } from "@/lib/rules/check";
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 import { buildFeedMosaic } from "./feed-mosaic";
@@ -385,7 +386,7 @@ export async function scoreProfile(opts: {
   const tokens = { input: 0, output: 0 };
   let runId: string | null = null;
   if (opts.service) {
-    const { data } = await opts.service
+    const runRes = await opts.service
       .from("agent_runs")
       .insert({
         // 0036 — 실행 기록은 같은 조직에만 보인다
@@ -396,11 +397,12 @@ export async function scoreProfile(opts: {
       })
       .select("id")
       .single();
-    runId = data?.id ?? null;
+    warnIfError(runRes, `프로필 채점 실행 기록 추가 (review=${opts.reviewId})`);
+    runId = runRes.data?.id ?? null;
   }
   const finishRun = async (patch: { status: "success" | "failed"; output?: unknown; error?: string }) => {
     if (!opts.service || !runId) return;
-    await opts.service
+    const finishRes = await opts.service
       .from("agent_runs")
       .update({
         status: patch.status,
@@ -412,6 +414,7 @@ export async function scoreProfile(opts: {
         finished_at: new Date().toISOString(),
       })
       .eq("id", runId);
+    warnIfError(finishRes, `프로필 채점 실행 기록 마감 (run=${runId})`);
   };
 
   try {

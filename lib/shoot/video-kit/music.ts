@@ -5,6 +5,7 @@ import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import { ffmpeg } from "@/lib/shoot/video-kit/tools";
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 영상마다 음악을 찾는다. 편집 에이전트가 설정 · 상품 · 장면을 읽고 검색어를 내면, Openverse에서 CC0만 찾아
@@ -144,7 +145,7 @@ async function findWith(opts: { service: Service | null; readService?: Service; 
       const ok = !!m && m.silence <= MAX_SILENCE && m.lufs >= MIN_LUFS;
       const source: MusicSource = { provider: "Openverse", id: h.id, title: h.title ?? "", creator: h.creator ?? "", source: h.source ?? "", landing: h.foreign_landing_url ?? "", url: h.url!, license: h.license ?? "", license_url: h.license_url ?? "" };
       if (opts.service) {
-        await opts.service.from("stock_music").upsert({
+        const saved = await opts.service.from("stock_music").upsert({
           track_id: h.id,
           title: source.title,
           creator: source.creator,
@@ -154,6 +155,7 @@ async function findWith(opts: { service: Service | null; readService?: Service; 
           reason: ok ? null : `무음 ${(((m?.silence ?? 0) * 100) | 0)}% · ${m?.lufs ?? "?"} LUFS`,
           ...(ok ? { last_used_at: new Date().toISOString() } : {}),
         });
+        warnIfError(saved, `배경 음악 기록 (track=${h.id})`);
       }
       if (!ok || !m) continue;
       const gain = Math.max(-18, Math.min(8, TARGET_LUFS - m.lufs));

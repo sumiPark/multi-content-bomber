@@ -9,6 +9,7 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { videoProductName } from "@/lib/agents/product-facts";
 import { findArchiveCut, saveArchiveCut, verifyArchiveCut, type ArchiveCandidate } from "@/lib/auto-video/archive";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // 자사 촬영 아카이브 워커 — "올렸어요"를 누른 촬영본에서 재사용할 제품 컷을 남긴다(얼굴 제외, 손 · 팔 허용). shoot-edit 워크플로에서 돈다.
@@ -93,11 +94,15 @@ async function main() {
         }
         console.log(`[archive-shoots] ${req.id}: ${kept}컷 ${dryRun ? "통과" : "저장"} · 토큰 ${tokens}`);
       }
-      if (!dryRun) await service.from("shoot_requests").update({ archived_at: new Date().toISOString() }).eq("id", req.id);
+      if (!dryRun) {
+        // 컷은 이미 저장했다 — 여기서 throw하면 다음 실행이 같은 촬영본을 다시 분석해 컷이 두 번 남으니 기록만 크게 남긴다
+        const { error: doneErr } = await service.from("shoot_requests").update({ archived_at: new Date().toISOString() }).eq("id", req.id);
+        if (doneErr) console.error(`[archive-shoots] ${req.id} 아카이브 완료 표시 실패 — 다음 실행이 다시 처리해 컷이 중복될 수 있음: ${doneErr.message}`);
+      }
     } catch (err) {
       process.exitCode = 1;
       console.error(`[archive-shoots] ${req.id} 실패: ${err instanceof Error ? err.message : err}`);
-      if (!dryRun) await service.from("shoot_requests").update({ archive_attempts: req.archive_attempts + 1 }).eq("id", req.id);
+      if (!dryRun) warnIfError(await service.from("shoot_requests").update({ archive_attempts: req.archive_attempts + 1 }).eq("id", req.id), `아카이브 시도 횟수 기록 (id=${req.id})`);
     } finally {
       rmSync(workDir, { recursive: true, force: true });
     }

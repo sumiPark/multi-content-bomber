@@ -275,7 +275,13 @@ export async function skipShootAction(input: z.infer<typeof idSchema>): Promise<
   if (["PUBLISHED", "SKIPPED"].includes(plan.status)) return { ok: false, error: "뺄 수 없는 기획입니다." };
   const { error } = await service.from("content_plans").update({ status: "SKIPPED", note: "사람이 건너뜀" }).eq("id", plan.id);
   if (error) return { ok: false, error: error.message };
-  if (plan.shoot_requests) await service.from("shoot_requests").update({ status: "CANCELLED" }).eq("id", plan.shoot_requests.id);
+  if (plan.shoot_requests) {
+    const { error: reqError } = await service.from("shoot_requests").update({ status: "CANCELLED" }).eq("id", plan.shoot_requests.id);
+    if (reqError) {
+      console.error("[shoot] 촬영 요청 멈추기 실패:", reqError.message);
+      return { ok: false, error: "기획은 뺐지만 올린 촬영본의 편집을 멈추지 못했어요. 새로 고쳐 확인해 주세요." };
+    }
+  }
   revalidateShoot();
   return { ok: true };
 }
@@ -495,7 +501,11 @@ export async function finishUploadAction(input: z.infer<typeof finishSchema>): P
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!moved?.length) return { ok: false, error: "이미 편집으로 넘어간 촬영 요청입니다." };
-  await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id).in("status", ["SCRIPTED", "SHOT"]);
+  const { error: planError } = await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id).in("status", ["SCRIPTED", "SHOT"]);
+  if (planError) {
+    console.error("[shoot] 기획 상태(SHOT) 저장 실패:", planError.message);
+    return { ok: false, error: "기획 상태를 바꾸지 못했어요. 새로 고쳐 주세요." };
+  }
   // 실패해도 한 시간마다 도는 편집 sweep이 집어 간다 — 즉시성만 손해
   await triggerShootEditRun(`request ${req.id}`).catch((e) => console.error("[shoot] 편집 트리거 실패:", e));
   revalidatePath("/shoot/uploads");
@@ -622,7 +632,11 @@ export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
-  await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id).in("status", ["RENDERED", "SHOT"]);
+  const { error: planError } = await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id).in("status", ["RENDERED", "SHOT"]);
+  if (planError) {
+    console.error("[shoot] 기획 상태(SHOT) 저장 실패:", planError.message);
+    return { ok: false, error: "기획 상태를 바꾸지 못했어요. 새로 고쳐 주세요." };
+  }
   await triggerShootEditRun(`re-edit ${req.id}`).catch((e) => console.error("[shoot] 편집 트리거 실패:", e));
   revalidatePath("/shoot/review");
   revalidatePath("/shoot/uploads");
@@ -655,7 +669,11 @@ export async function reopenShootAction(input: z.infer<typeof reopenSchema>): Pr
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
-  await service.from("content_plans").update({ status: "SCRIPTED" }).eq("id", req.plan_id).in("status", ["SHOT", "RENDERED"]);
+  const { error: planError } = await service.from("content_plans").update({ status: "SCRIPTED" }).eq("id", req.plan_id).in("status", ["SHOT", "RENDERED"]);
+  if (planError) {
+    console.error("[shoot] 기획 상태(SCRIPTED) 저장 실패:", planError.message);
+    return { ok: false, error: "기획 상태를 바꾸지 못했어요. 새로 고쳐 주세요." };
+  }
   revalidatePath("/shoot/review");
   revalidatePath("/shoot/uploads");
   revalidatePath("/shoot/plans");

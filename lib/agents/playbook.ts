@@ -170,9 +170,11 @@ export async function applyFeedback(
     userId: args.userId,
   });
   if (!saved.ok) return saved;
-  await service
+  const { error: markError } = await service
     .from("agent_feedback")
     .update({ status: "APPLIED", decided_by: args.userId, decided_at: new Date().toISOString(), applied_version: saved.version })
     .eq("id", fb.id);
+  // 새 버전은 이미 저장됐다 — 제안이 대기로 남은 걸 알려 같은 제안을 또 반영하지 않게 한다
+  if (markError) return { ok: false, error: `v${saved.version}은 저장했지만 제안을 반영됨으로 바꾸지 못했어요: ${markError.message}` };
   return saved;
 }

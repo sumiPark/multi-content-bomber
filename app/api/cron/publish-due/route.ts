@@ -21,9 +21,14 @@ export async function POST(request: Request) {
   if (!secret) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const service = createServiceClient();
-  const { data: valid } = await service.rpc("verify_episode_replies_cron_secret", {
+  const { data: valid, error: verifyError } = await service.rpc("verify_episode_replies_cron_secret", {
     p_secret: secret,
   });
+  // DB 오류를 비밀값 불일치(401)로 감추지 않는다
+  if (verifyError) {
+    console.error("[publish-due] 비밀값 확인 실패:", verifyError.message);
+    return NextResponse.json({ error: verifyError.message }, { status: 500 });
+  }
   if (valid !== true) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   // pg_cron 조건을 한 번 더 확인 — 그사이 워커가 이미 집어갔으면 깨우지 않는다.

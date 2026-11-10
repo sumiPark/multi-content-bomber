@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
+import { mustOk } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 
 /**
@@ -27,10 +28,14 @@ export default async function OnboardingPage() {
       .limit(1)
       .maybeSingle();
     if (org) {
-      await service
-        .from("profiles")
-        .update({ organization_id: org.id, role: "ADMIN" })
-        .eq("id", user.id);
+      // 실패한 채 "/"로 보내면 다시 여기로 돌아와 리다이렉트 루프가 된다 — 오류 화면으로 멈춘다
+      mustOk(
+        await service
+          .from("profiles")
+          .update({ organization_id: org.id, role: "ADMIN" })
+          .eq("id", user.id),
+        "공유 워크스페이스 합류",
+      );
     }
   }
 

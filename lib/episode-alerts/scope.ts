@@ -1,4 +1,5 @@
 // server-only는 쓰지 않는다 — 워커(tsx + plain Node)에서도 import한다.
+import { mustOk } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Database } from "@/types/database";
 import { EpisodeAlertError, OLDER_OFF_REASON } from "./server";
@@ -68,12 +69,14 @@ export async function excludeInactiveOlder(service: Service, task: TaskRow, scop
   const reason = !task.include_older
     ? OLDER_OFF_REASON
     : `${scope.newerEpisodeNo}화가 올라와 멈췄어요`;
-  await service
+  const res = await service
     .from("episode_alert_replies")
     .update({ status: "EXCLUDED", skip_reason: reason })
     .eq("task_id", task.id)
     .eq("status", "PENDING")
     .neq("source_episode_id", task.source_episode_id);
+  // 빼지 못하면 철 지난 소식이 이전 화 댓글에 나간다 — 보내기 전에 멈춘다
+  mustOk(res, "이전 화 답글 대상 빼기");
 }
 
 export interface NewerTask {

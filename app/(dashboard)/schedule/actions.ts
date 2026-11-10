@@ -17,6 +17,7 @@ import {
   scopesOfKeys,
   validateSlots,
 } from "@/lib/schedule/slot-admin";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -223,14 +224,17 @@ export async function addAccountAction(input: { accountId: string; scopes: strin
     : await service.from("track_settings").insert({ social_account_id: acc.id, organization_id: auth.orgId, product_scopes: scopesJson(parsed.data.scopes) });
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
   // 예전에 빼면서 남은 칸이 없게(빼기는 칸도 지운다) — 그래도 남아 있으면 지우고 새로
-  await service.from("slot_rules").delete().eq("social_account_id", acc.id);
-  const { error: rErr } = await service.from("slot_rules").insert(
-    parsed.data.slots.map((s) => ({ organization_id: auth.orgId, social_account_id: acc.id, slot_time: s.time, track: s.track })),
-  );
+  // 남은 칸을 못 지웠으면 새 칸을 넣지 않고 아래 되돌리기로 간다(칸이 겹치지 않게)
+  const { error: dErr } = await service.from("slot_rules").delete().eq("social_account_id", acc.id);
+  const { error: rErr } = dErr
+    ? { error: dErr }
+    : await service.from("slot_rules").insert(
+        parsed.data.slots.map((s) => ({ organization_id: auth.orgId, social_account_id: acc.id, slot_time: s.time, track: s.track })),
+      );
   if (rErr) {
     // 직접 촬영 설정이 있던 계정의 행은 지우지 않는다
-    if (!exists) await service.from("track_settings").delete().eq("social_account_id", acc.id);
-    else await service.from("track_settings").update({ product_scopes: exists.product_scopes }).eq("social_account_id", acc.id);
+    if (!exists) warnIfError(await service.from("track_settings").delete().eq("social_account_id", acc.id), "계정 설정 되돌리기");
+    else warnIfError(await service.from("track_settings").update({ product_scopes: exists.product_scopes }).eq("social_account_id", acc.id), "쓸 상품 되돌리기");
     return { ok: false, error: `칸을 만들지 못했어요: ${rErr.message}` };
   }
   for (const slot of parsed.data.slots) await clearScheduleCancelled(service, acc.id, slot.time);
@@ -273,7 +277,8 @@ export async function removeAccountAction(input: { accountId: string }): Promise
     const { error } = await service.from("track_settings").delete().eq("social_account_id", ts.social_account_id);
     if (error) return { ok: false, error: `빼지 못했어요: ${error.message}` };
   }
-  await service.from("slot_rules").delete().eq("social_account_id", ts.social_account_id);
+  const { error: slotError } = await service.from("slot_rules").delete().eq("social_account_id", ts.social_account_id);
+  if (slotError) return { ok: false, error: `빼지 못했어요: ${slotError.message}` };
   const cancelled = await cancelPlans(service, await futurePlans(service, ts.social_account_id), "편성에서 계정을 빼 취소");
   const tail = cancelMessage(cancelled);
   return done(`@${ts.social_accounts?.display_name ?? ""} 계정을 자동 콘텐츠에서 뺐어요.${tail ? ` ${tail}` : ""}`);
@@ -320,14 +325,15 @@ export async function disableShootAccountAction(input: { accountId: string }): P
   if (!ts) return { ok: false, error: "촬영 설정에 없는 계정이에요." };
   const { error } = await service.from("track_settings").update({ shoot_enabled: false }).eq("social_account_id", ts.social_account_id);
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
-  await service
+  const { error: planError } = await service
     .from("content_plans")
     .update({ status: "SKIPPED", note: "촬영 설정에서 계정을 꺼 목록에서 뺐어요" })
     .eq("social_account_id", ts.social_account_id)
     .eq("track", "A")
     .eq("status", "PROPOSED");
+  if (planError) return { ok: false, error: `고르기 전 기획을 빼지 못했어요: ${planError.message}` };
   // AI 자동 칸도 없는 계정은 설정을 남겨 둘 이유가 없다
-  if ((await accountRules(service, ts.social_account_id)).length === 0) await service.from("track_settings").delete().eq("social_account_id", ts.social_account_id);
+  if ((await accountRules(service, ts.social_account_id)).length === 0) warnIfError(await service.from("track_settings").delete().eq("social_account_id", ts.social_account_id), "빈 계정 설정 정리");
   return done(`@${ts.social_accounts?.display_name ?? ""} 계정을 뺐어요. 이미 고른 기획은 끝까지 진행돼요.`);
 }
 

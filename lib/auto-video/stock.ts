@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
 import type { Json } from "@/types/database";
@@ -44,7 +45,7 @@ async function search(service: Service, query: string): Promise<Hit[]> {
   const res = await fetch(`https://pixabay.com/api/videos/?${q}`, { headers: { "User-Agent": "MCB-Video/1.0" } });
   if (!res.ok) throw new Error(`Pixabay ${res.status}`);
   const hits = ((await res.json()) as { hits: Hit[] }).hits ?? [];
-  await service.from("stock_searches").upsert({ query: key, hits: hits as unknown as Json, fetched_at: new Date().toISOString() });
+  warnIfError(await service.from("stock_searches").upsert({ query: key, hits: hits as unknown as Json, fetched_at: new Date().toISOString() }), `스톡 검색 결과 저장 (query=${key})`);
   return hits;
 }
 
@@ -109,7 +110,7 @@ export async function stockClip(service: Service, query: string, intent: string,
     .map((h, i) => ({ h, v: verdicts[i] }))
     .filter((x) => x.v && (x.v.logo || x.v.person || x.v.text || !x.v.real))
     .map((x) => ({ provider: "pixabay", video_id: x.h.id, rejected: true, reason: (x.v.reason ?? "").slice(0, 300), page_url: x.h.pageURL }));
-  if (rows.length) await service.from("stock_videos").upsert(rows);
+  if (rows.length) warnIfError(await service.from("stock_videos").upsert(rows), `스톡 탈락 후보 저장 (query=${query})`);
   const idx = hits.findIndex((_, i) => {
     const v = verdicts[i];
     return v && v.fits && v.real && !v.logo && !v.person && !v.text;

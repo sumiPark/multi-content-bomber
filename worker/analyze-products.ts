@@ -6,6 +6,7 @@ import { analysisModel, emptyUsage, type TokenUsage } from "@/lib/products/analy
 import { analyzeProduct, type AnalysisResult, type StoredExtract } from "@/lib/products/analysis/run";
 import { fetchProduct } from "@/lib/products/shop-api";
 import { SHOP_CODES, type ProductKind, type ShopCode } from "@/lib/products/shops";
+import { mustOk, warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Database, Json } from "@/types/database";
 import { startRunLog } from "./run-log";
@@ -101,15 +102,18 @@ async function saveResult(service: Service, product: ProductRow, r: AnalysisResu
 
   // 사람이 고친 요약은 덮어쓰지 않는다 — 상세페이지가 바뀌었으니 다시 보라고만 남긴다.
   if (prev?.edited) {
-    await service
-      .from("products")
-      .update({
-        analysis_state: "review",
-        analysis_note: "사람이 고친 요약이 있어 새 분석으로 덮어쓰지 않았어요. 상세페이지가 바뀌었는지 확인해 주세요.",
-        analysis_error: null,
-        analysis_locked_until: null,
-      })
-      .eq("id", product.id);
+    mustOk(
+      await service
+        .from("products")
+        .update({
+          analysis_state: "review",
+          analysis_note: "사람이 고친 요약이 있어 새 분석으로 덮어쓰지 않았어요. 상세페이지가 바뀌었는지 확인해 주세요.",
+          analysis_error: null,
+          analysis_locked_until: null,
+        })
+        .eq("id", product.id),
+      `상품 분석 상태 저장 (id=${product.id})`,
+    );
     return;
   }
 
@@ -130,15 +134,18 @@ async function saveResult(service: Service, product: ProductRow, r: AnalysisResu
   });
   if (error) throw new Error(`product_analyses 저장 실패: ${error.message}`);
 
-  await service
-    .from("products")
-    .update({
-      analysis_state: r.state,
-      analysis_note: r.reason,
-      analysis_error: null,
-      analysis_locked_until: null,
-    })
-    .eq("id", product.id);
+  mustOk(
+    await service
+      .from("products")
+      .update({
+        analysis_state: r.state,
+        analysis_note: r.reason,
+        analysis_error: null,
+        analysis_locked_until: null,
+      })
+      .eq("id", product.id),
+    `상품 분석 상태 저장 (id=${product.id})`,
+  );
 }
 
 async function analyzeOne(service: Service, product: ProductRow, usage: TokenUsage): Promise<string> {
@@ -165,7 +172,10 @@ async function analyzeOne(service: Service, product: ProductRow, usage: TokenUsa
     // 상세페이지에서 빠진 이미지의 추출 결과는 지운다.
     const stale = [...reuse.keys()].filter((u) => !product.detail_image_urls.includes(u));
     if (stale.length) {
-      await service.from("product_image_extracts").delete().eq("product_id", product.id).in("image_url", stale);
+      warnIfError(
+        await service.from("product_image_extracts").delete().eq("product_id", product.id).in("image_url", stale),
+        `빠진 이미지 추출 결과 삭제 (product=${product.id})`,
+      );
     }
 
     const r = await analyzeProduct(
@@ -202,23 +212,29 @@ async function analyzeOne(service: Service, product: ProductRow, usage: TokenUsa
     const message = err instanceof Error ? err.message : String(err);
     if (isQuotaError(err)) {
       // 시도 횟수는 그대로 두고 대기로 되돌린다 — 크레딧을 채우면 다음 run이 그대로 이어 간다.
-      await service
-        .from("products")
-        .update({ analysis_state: "queued", analysis_error: null, analysis_locked_until: null })
-        .eq("id", product.id);
+      warnIfError(
+        await service
+          .from("products")
+          .update({ analysis_state: "queued", analysis_error: null, analysis_locked_until: null })
+          .eq("id", product.id),
+        `상품 대기로 되돌리기 (id=${product.id})`,
+      );
       throw new QuotaExhaustedError(`OpenAI 크레딧 · 한도 소진 — 분석을 멈춤: ${message.slice(0, 200)}`);
     }
     const attempts = product.analysis_attempts + 1;
-    await service
-      .from("products")
-      .update({
-        analysis_state: attempts >= MAX_ATTEMPTS ? "failed" : "queued",
-        analysis_attempts: attempts,
-        analysis_next_at: new Date(Date.now() + attempts * 10 * 60_000).toISOString(),
-        analysis_error: message.slice(0, 500),
-        analysis_locked_until: null,
-      })
-      .eq("id", product.id);
+    warnIfError(
+      await service
+        .from("products")
+        .update({
+          analysis_state: attempts >= MAX_ATTEMPTS ? "failed" : "queued",
+          analysis_attempts: attempts,
+          analysis_next_at: new Date(Date.now() + attempts * 10 * 60_000).toISOString(),
+          analysis_error: message.slice(0, 500),
+          analysis_locked_until: null,
+        })
+        .eq("id", product.id),
+      `상품 분석 실패 기록 (id=${product.id})`,
+    );
     console.error(`[analyze-products] ${product.shop_code} ${product.shop_product_id} 실패(${attempts}회): ${message}`);
     return "error";
   }
@@ -263,11 +279,14 @@ async function main() {
       fatal = err.message;
       console.error(`[analyze-products] ${err.message}`);
       // 같은 묶음에서 아직 잡혀 있는 상품은 잠금을 풀어 대기로 돌린다.
-      await service
-        .from("products")
-        .update({ analysis_state: "queued", analysis_locked_until: null })
-        .in("id", batch.map((p) => p.id))
-        .eq("analysis_state", "analyzing");
+      warnIfError(
+        await service
+          .from("products")
+          .update({ analysis_state: "queued", analysis_locked_until: null })
+          .in("id", batch.map((p) => p.id))
+          .eq("analysis_state", "analyzing"),
+        "묶음 잠금 풀기",
+      );
       process.exitCode = 1;
       break;
     }

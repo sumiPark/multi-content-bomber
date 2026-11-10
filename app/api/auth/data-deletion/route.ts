@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
+import { mustOk } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // Meta Data Deletion Callback.
@@ -130,17 +131,21 @@ export async function POST(request: Request) {
   //   Meta가 응답을 빠르게 받도록 단일 UPDATE.
   try {
     const supabase = createServiceClient();
-    await supabase
-      .from("social_accounts")
-      .update({
-        is_active: false,
-        access_token_encrypted: null,
-        refresh_token_encrypted: null,
-        token_expires_at: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("platform", "INSTAGRAM")
-      .eq("platform_account_id", userId);
+    // supabase-js는 실패해도 throw하지 않는다 — mustOk로 던져 아래 catch에서 로그를 남긴다
+    mustOk(
+      await supabase
+        .from("social_accounts")
+        .update({
+          is_active: false,
+          access_token_encrypted: null,
+          refresh_token_encrypted: null,
+          token_expires_at: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("platform", "INSTAGRAM")
+        .eq("platform_account_id", userId),
+      "Meta 데이터 삭제 요청 처리",
+    );
   } catch (err) {
     // DB 실패해도 Meta에 200을 줘야 재시도 폭주를 막을 수 있다. 로그만 남기고
     // 사람이 모니터링에서 확인하도록.

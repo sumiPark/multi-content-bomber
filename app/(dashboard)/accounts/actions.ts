@@ -61,13 +61,20 @@ export async function disconnectAccountAction(
 
   // 워커가 아직 잡지 않은 발행 건(예약/대기·재시도 대기)은 취소로 남긴다. 그대로 두면
   // 토큰이 없어 시도마다 실패만 쌓인다. PROCESSING은 워커 결과 기록에 덮이므로 건드리지 않음.
-  const { data: cancelled } = await service
+  const { data: cancelled, error: cancelError } = await service
     .from("publish_jobs")
     .update({ status: "CANCELLED", cancelled_at: nowIso })
     .eq("social_account_id", parsed.data.accountId)
     .in("status", ["PENDING", "RETRYING"])
     .is("deleted_at", null)
     .select("id");
+  if (cancelError) {
+    // 계정 해제는 끝났다 — 남은 예약은 배포 관리에서 직접 취소하도록 알린다
+    console.error("[accounts] 해제 계정의 예약 발행 취소 실패:", cancelError.message);
+    redirect(
+      `/accounts?error=${encodeURIComponent("계정은 해제했지만 예약된 발행을 취소하지 못했어요. 배포 관리에서 직접 취소해 주세요.")}`,
+    );
+  }
 
   const cancelledIds = (cancelled ?? []).map((r) => r.id);
   if (cancelledIds.length > 0) {

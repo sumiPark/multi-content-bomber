@@ -3,6 +3,7 @@ import "./load-env";
 
 import { POSTED_KEEP_DAYS, shootFilesDeleteAt, UNPOSTED_KEEP_DAYS } from "@/lib/shoot/retention";
 import { AUTO_VIDEO_KEEP_DAYS } from "@/lib/auto-video/retention";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,7 +187,10 @@ async function cleanupAutoVideos(service: Service, apply: boolean): Promise<void
       console.warn(`[cleanup-drafts] 자동 영상 삭제 실패(${p.id}): ${removeErr.message}`);
       continue;
     }
-    await service.from("content_plans").update({ video: { ...v, path: null, thumbnail: null } }).eq("id", p.id);
+    warnIfError(
+      await service.from("content_plans").update({ video: { ...v, path: null, thumbnail: null } }).eq("id", p.id),
+      `자동 영상 경로 비우기 (plan=${p.id})`,
+    );
   }
   console.log(`  4) 올리지 않은 AI 자동 영상(${AUTO_VIDEO_KEEP_DAYS}일 지남): ${count}개`);
 }

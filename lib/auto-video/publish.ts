@@ -1,6 +1,7 @@
 import { kstToIso } from "@/lib/automation/time";
 import { appendPublishHistory } from "@/lib/publish-history";
 import { splitHashtags } from "@/lib/shoot/final-check";
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -42,7 +43,8 @@ export async function scheduleAutoVideo(service: Service, planId: string, opts: 
   if (!plan.slot_date || !plan.slot_time) return { ok: false, error: "올릴 시각이 없는 칸이에요." };
 
   // 칸을 먼저 옮긴다. 두 곳에서 동시에 승인해도 한쪽만 작업을 만든다(이중 발행 방지)
-  const { data: claimed } = await service.from("content_plans").update({ status: "SCHEDULED", note: null }).eq("id", plan.id).eq("status", "RENDERED").select("id");
+  const { data: claimed, error: claimError } = await service.from("content_plans").update({ status: "SCHEDULED", note: null }).eq("id", plan.id).eq("status", "RENDERED").select("id");
+  if (claimError) return { ok: false, error: `칸을 옮기지 못했어요: ${claimError.message}` };
   if (!claimed?.length) return { ok: false, error: "칸의 상태가 바뀌었어요. 새로 고쳐 주세요." };
   const undo = () => service.from("content_plans").update({ status: "RENDERED" }).eq("id", plan.id).eq("status", "SCHEDULED");
 
@@ -64,7 +66,7 @@ export async function scheduleAutoVideo(service: Service, planId: string, opts: 
     .select("id")
     .single();
   if (contentError || !content) {
-    await undo();
+    warnIfError(await undo(), `칸 상태 되돌리기 (plan=${plan.id})`);
     return { ok: false, error: contentError?.message ?? "콘텐츠를 만들지 못했어요." };
   }
 
@@ -75,11 +77,15 @@ export async function scheduleAutoVideo(service: Service, planId: string, opts: 
     .select("id")
     .single();
   if (jobError || !job) {
-    await service.from("contents").delete().eq("id", content.id);
-    await undo();
+    warnIfError(await service.from("contents").delete().eq("id", content.id), `발행 작업 실패 뒤 콘텐츠 정리 (content=${content.id})`);
+    warnIfError(await undo(), `칸 상태 되돌리기 (plan=${plan.id})`);
     return { ok: false, error: jobError?.message ?? "발행 작업을 만들지 못했어요." };
   }
-  await service.from("content_plans").update({ content_id: content.id, publish_job_id: job.id }).eq("id", plan.id);
+  // 발행 작업은 이미 대기열에 있다 — 여기서 실패를 돌려주면 다시 승인해 두 번 올라갈 수 있어 기록만 남긴다
+  warnIfError(
+    await service.from("content_plans").update({ content_id: content.id, publish_job_id: job.id }).eq("id", plan.id),
+    `칸에 발행 작업 연결 (plan=${plan.id}, job=${job.id})`,
+  );
   return { ok: true, scheduledFor };
 }
 
@@ -94,9 +100,11 @@ export async function releaseOldPublish(service: Service, planId: string): Promi
   if (job?.status === "PROCESSING") return { ok: false, error: "지금 올리는 중이에요. 끝난 뒤 다시 해 주세요." };
   if (job?.status === "SUCCESS") return { ok: false, error: "이미 올라간 칸이에요." };
   if (job && job.status !== "CANCELLED") {
-    await service.from("publish_jobs").update({ status: "CANCELLED", cancelled_at: new Date().toISOString() }).eq("id", job.id).in("status", ["PENDING", "RETRYING", "FAILED"]);
+    const { error: cancelError } = await service.from("publish_jobs").update({ status: "CANCELLED", cancelled_at: new Date().toISOString() }).eq("id", job.id).in("status", ["PENDING", "RETRYING", "FAILED"]);
+    if (cancelError) return { ok: false, error: `예전 발행 작업을 취소하지 못했어요: ${cancelError.message}` };
     await appendPublishHistory(service, [job.id], { status: "CANCELLED", message: "AI 자동 칸을 건너뛰거나 다시 만들어 취소" });
   }
-  await service.from("content_plans").update({ publish_job_id: null, content_id: null, video: null }).eq("id", planId);
+  const { error: unlinkError } = await service.from("content_plans").update({ publish_job_id: null, content_id: null, video: null }).eq("id", planId);
+  if (unlinkError) return { ok: false, error: `칸에서 예전 발행 작업을 떼지 못했어요: ${unlinkError.message}` };
   return { ok: true, hadJob: true };
 }

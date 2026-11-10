@@ -5,6 +5,7 @@ import { loadAccountConcept } from "@/lib/agents/concept";
 import { planShootIdeas } from "@/lib/agents/plan-a";
 import type { ProductScope } from "@/lib/agents/select";
 import { kstDate } from "@/lib/automation/time";
+import { mustOk } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -54,9 +55,10 @@ async function tidyList(service: Service, accountId: string, dryRun: boolean): P
     else if (Date.parse(p.created_at) < cutoff) old.push(p.id);
   }
   if (!dryRun) {
-    if (noDraft.length) await service.from("content_plans").delete().in("id", noDraft).eq("status", "PROPOSED");
-    if (notSelling.length) await service.from("content_plans").update({ status: "SKIPPED", note: "판매 중이 아니게 돼 목록에서 뺐어요" }).in("id", notSelling).eq("status", "PROPOSED");
-    if (old.length) await service.from("content_plans").update({ status: "SKIPPED", note: `${KEEP_DAYS}일 동안 고르지 않아 새 기획으로 바꿨어요` }).in("id", old).eq("status", "PROPOSED");
+    // 뒤의 "모자란 개수"가 이 정리에 기댄다 — 실패하면 그 계정만 실패로 남는다(main의 계정별 catch)
+    if (noDraft.length) mustOk(await service.from("content_plans").delete().in("id", noDraft).eq("status", "PROPOSED"), `초안 없는 기획 삭제 (account=${accountId})`);
+    if (notSelling.length) mustOk(await service.from("content_plans").update({ status: "SKIPPED", note: "판매 중이 아니게 돼 목록에서 뺐어요" }).in("id", notSelling).eq("status", "PROPOSED"), `판매 중 아닌 기획 빼기 (account=${accountId})`);
+    if (old.length) mustOk(await service.from("content_plans").update({ status: "SKIPPED", note: `${KEEP_DAYS}일 동안 고르지 않아 새 기획으로 바꿨어요` }).in("id", old).eq("status", "PROPOSED"), `오래된 기획 빼기 (account=${accountId})`);
   }
   return notSelling.length + old.length + noDraft.length;
 }

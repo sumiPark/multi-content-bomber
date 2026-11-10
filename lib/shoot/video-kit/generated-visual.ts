@@ -11,6 +11,7 @@ import { probe } from "@/lib/shoot/ffmpeg";
 import type { KitClip } from "@/lib/shoot/video-kit/pipeline";
 import { ffmpeg, imageDataUrl } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // AI 이미지 컷 — 성분 · 원료 · 원리를 설명할 실제 화면이 없는 비트에 OpenAI 이미지와 코드 움직임을 넣는다(2026-11-05 사용자 결정).
@@ -192,7 +193,7 @@ export async function buildVisualClips(input: {
   }
   if (used.length && service) {
     const { data: rows } = await service.from("generated_visuals").select("key, use_count").in("key", used.map((u) => u.key));
-    for (const r of rows ?? []) await service.from("generated_visuals").update({ use_count: r.use_count + 1, last_used_at: new Date().toISOString() }).eq("key", r.key);
+    for (const r of rows ?? []) warnIfError(await service.from("generated_visuals").update({ use_count: r.use_count + 1, last_used_at: new Date().toISOString() }).eq("key", r.key), `AI 이미지 사용 횟수 기록 (${r.key})`);
   }
   return { plan: { ...plan, beats }, clips, used, realClipOf, warnings, tokens };
 }

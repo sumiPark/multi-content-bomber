@@ -1,3 +1,4 @@
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import {
@@ -99,10 +100,13 @@ export async function processTokenRefreshSweep(
     } catch (err) {
       if (err instanceof TokenExpiredError) {
         // refresh_token이 revoke됨. 사용자 재연동 필요.
-        await supabase
-          .from("social_accounts")
-          .update({ is_active: false, updated_at: new Date().toISOString() })
-          .eq("id", account.id);
+        warnIfError(
+          await supabase
+            .from("social_accounts")
+            .update({ is_active: false, updated_at: new Date().toISOString() })
+            .eq("id", account.id),
+          `계정 비활성 표시 (id=${account.id})`,
+        );
         stats.deactivated++;
         console.warn(
           `[token-refresh] ${account.id} (${account.platform}) deactivated: ${err.message}`,

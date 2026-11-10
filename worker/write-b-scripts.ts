@@ -9,6 +9,7 @@ import { loadProductFacts } from "@/lib/agents/product-facts";
 import { writeScript, type ScriptOutput } from "@/lib/agents/script";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
+import { mustOk, warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -73,16 +74,19 @@ async function main() {
       if (facts.stockStatus !== "available") {
         console.log(`[b-script] ${label} ${facts.name} — 판매 중이 아니라 멈춤 (${facts.stockStatus})`);
         if (!dryRun) {
-          await service
-            .from("content_plans")
-            .update({
-              status: "BLOCKED",
-              check_result: { passed: false, issues: [{ kind: "stock", detail: "지금 판매 중이 아닌 상품이에요" }] } as unknown as Json,
-              note: "확인한 뒤 판매 중이 아니게 돼서 만들지 않았어요. 다른 상품으로 바꾸거나 건너뛰세요.",
-            })
-            .eq("id", plan.id)
-            .eq("status", "CONFIRMED")
-            .eq("product_id", plan.product_id);
+          mustOk(
+            await service
+              .from("content_plans")
+              .update({
+                status: "BLOCKED",
+                check_result: { passed: false, issues: [{ kind: "stock", detail: "지금 판매 중이 아닌 상품이에요" }] } as unknown as Json,
+                note: "확인한 뒤 판매 중이 아니게 돼서 만들지 않았어요. 다른 상품으로 바꾸거나 건너뛰세요.",
+              })
+              .eq("id", plan.id)
+              .eq("status", "CONFIRMED")
+              .eq("product_id", plan.product_id),
+            `판매 중 아닌 칸 막기 (plan=${plan.id})`,
+          );
         }
         continue;
       }
@@ -164,7 +168,7 @@ async function main() {
       process.exitCode = 1;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[b-script] ${label} 실패: ${message}`);
-      if (!dryRun) await service.from("content_plans").update({ error: message.slice(0, 500) }).eq("id", plan.id);
+      if (!dryRun) warnIfError(await service.from("content_plans").update({ error: message.slice(0, 500) }).eq("id", plan.id), `칸 오류 기록 (plan=${plan.id})`);
     }
   }
 }

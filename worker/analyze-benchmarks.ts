@@ -8,6 +8,7 @@ import { computeStyleStats, type ReelStyle, type StyleRow, type StyleSource } fr
 import { analyzeCover, analyzeVideo, writeInsight } from "@/lib/benchmark/video-style";
 import { clip } from "@/lib/post-analysis/stats";
 import { checkText, type ContentRule } from "@/lib/rules/check";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -224,7 +225,7 @@ async function main() {
 
     const insightUsage = { input: 0, output: 0 };
     const model = agentModel();
-    const { data: run } = await service
+    const runRes = await service
       .from("agent_runs")
       .insert({
         organization_id: await resolveOrgId(service, { accountId: account.id }),
@@ -234,12 +235,18 @@ async function main() {
       })
       .select("id")
       .single();
+    // 실행 기록은 부가 정보 — 못 남겨도 종합 분석은 계속한다
+    warnIfError(runRes, `agent_runs 기록 (account=${account.id})`);
+    const run = runRes.data;
     const finish = async (patch: { status: "success" | "failed"; output?: unknown; error?: string }) => {
       if (!run) return;
-      await service
-        .from("agent_runs")
-        .update({ status: patch.status, output: (patch.output ?? null) as Json, error: patch.error ?? null, tokens_input: insightUsage.input, tokens_output: insightUsage.output, finished_at: new Date().toISOString() })
-        .eq("id", run.id);
+      warnIfError(
+        await service
+          .from("agent_runs")
+          .update({ status: patch.status, output: (patch.output ?? null) as Json, error: patch.error ?? null, tokens_input: insightUsage.input, tokens_output: insightUsage.output, finished_at: new Date().toISOString() })
+          .eq("id", run.id),
+        `agent_runs 마감 (id=${run.id})`,
+      );
     };
     try {
       const styleById = new Map(hitRows.map((r) => [r.id, r.style]));

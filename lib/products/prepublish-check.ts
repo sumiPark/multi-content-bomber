@@ -1,5 +1,6 @@
 import { fetchProductStatus, type StockStatus } from "@/lib/products/shop-api";
 import type { ShopCode } from "@/lib/products/shops";
+import { warnIfError } from "@/lib/supabase/result";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 발행 직전 다시 확인(콘텐츠 자동화 5-4) — 편성 칸(content_plans)에서 예약된 발행만.
@@ -51,7 +52,7 @@ export async function prepublishCheck(service: Service, job: { id: string; conte
     price = fresh.price;
     // 받은 김에 상품 행도 최신으로(수집은 하루 한 번이라)
     if (fresh.stockStatus !== product.stock_status || fresh.price !== product.price) {
-      await service.from("products").update({ stock_status: fresh.stockStatus, price: fresh.price }).eq("id", plan.product_id!);
+      warnIfError(await service.from("products").update({ stock_status: fresh.stockStatus, price: fresh.price }).eq("id", plan.product_id!), `상품 판매 상태 갱신 (product=${plan.product_id})`);
     }
   } catch (err) {
     source = `몰 API 실패 — 수집해 둔 상태로 판단 (${err instanceof Error ? err.message.slice(0, 80) : String(err)})`;
@@ -70,10 +71,11 @@ export async function prepublishCheck(service: Service, job: { id: string; conte
   }
 
   if (reason) {
-    await service.from("content_plans").update({ status: "BLOCKED", note: reason }).eq("id", plan.id);
+    // 실패해도 발행은 아래 반환 값으로 막힌다 — 칸 표시만 늦는다
+    warnIfError(await service.from("content_plans").update({ status: "BLOCKED", note: reason }).eq("id", plan.id), `칸 멈춤 표시 (plan=${plan.id})`);
     return { ok: false, reason };
   }
   // 예전에 막혔다가 사람이 다시 시도해 통과하면 칸을 예약 상태로 되돌린다
-  if (plan.status === "BLOCKED") await service.from("content_plans").update({ status: "SCHEDULED", note: null }).eq("id", plan.id);
+  if (plan.status === "BLOCKED") warnIfError(await service.from("content_plans").update({ status: "SCHEDULED", note: null }).eq("id", plan.id), `칸 예약 상태 되돌리기 (plan=${plan.id})`);
   return { ok: true, note: `발행 직전 확인 통과 (${source}: ${STOCK_LABEL[stock]}${price != null ? ` · ${price.toLocaleString("ko-KR")}원` : ""})` };
 }

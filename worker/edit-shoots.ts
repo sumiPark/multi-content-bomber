@@ -18,6 +18,7 @@ import { concatSegments, extractAudio, probe, renderSegment, snapshot, type Segm
 import { readClip, renderKitEdit, type KitClip, type KitResult } from "@/lib/shoot/video-kit/pipeline";
 import { transcribeWords } from "@/lib/shoot/video-kit/tools";
 import type { EditPlan } from "@/lib/agents/edit-plan";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -446,33 +447,41 @@ async function main() {
         await service.storage.from("media").remove([`${base}.mp4`, `${base}.jpg`]);
         continue;
       }
-      await service
+      // 촬영 요청은 이미 EDITED로 저장됐다 — 여기서 throw해도 되돌릴 것이 없고 예전 완성본 정리만 건너뛰니, 실패로 표시하고 이어 간다
+      const { error: planErr } = await service
         .from("content_plans")
         .update({ status: "RENDERED", check_result: edit.check as unknown as Json, error: null })
         .eq("id", plan.id)
         .in("status", ["SHOT", "RENDERED"]);
+      if (planErr) {
+        process.exitCode = 1;
+        console.error(`[shoot-edit] ${label} 기획 RENDERED 저장 실패 — 완성본은 저장됐지만 기획 상태가 그대로임 (plan=${plan.id}): ${planErr.message}`);
+      }
       // 다시 편집이면 예전 완성본은 지운다
       const oldThumb = (prev?.edit as { thumbnail?: string } | null)?.thumbnail;
       const old = [prev?.rendered_path, oldThumb].filter((p): p is string => !!p && !p.startsWith(base));
       if (old.length) await service.storage.from("media").remove(old);
 
-      await service.from("agent_runs").insert({
-        organization_id: req.organization_id,
-        agent: "edit",
-        plan_id: plan.id,
-        status: "success",
-        model: kit ? "video-kit" : speaks ? "whisper-1 + ffmpeg" : "ffmpeg",
-        input: { requestId: req.id, cuts: cuts.length } as Json,
-        output: { seconds, segments: edit.segments.length, checkModel: agentModel(), issues: check.issues.length, kit: !!kit, kitError, hook: kit?.hook ?? null } as Json,
-        tokens_input: check.tokens.input,
-        tokens_output: check.tokens.output,
-        finished_at: new Date().toISOString(),
-      });
+      warnIfError(
+        await service.from("agent_runs").insert({
+          organization_id: req.organization_id,
+          agent: "edit",
+          plan_id: plan.id,
+          status: "success",
+          model: kit ? "video-kit" : speaks ? "whisper-1 + ffmpeg" : "ffmpeg",
+          input: { requestId: req.id, cuts: cuts.length } as Json,
+          output: { seconds, segments: edit.segments.length, checkModel: agentModel(), issues: check.issues.length, kit: !!kit, kitError, hook: kit?.hook ?? null } as Json,
+          tokens_input: check.tokens.input,
+          tokens_output: check.tokens.output,
+          finished_at: new Date().toISOString(),
+        }),
+        `agent_runs 편집 기록 (plan=${plan.id})`,
+      );
     } catch (err) {
       process.exitCode = 1;
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[shoot-edit] ${label} 실패: ${message}`);
-      if (!dryRun) await service.from("shoot_requests").update({ status: "FAILED", error: message.slice(0, 500) }).eq("id", req.id).eq("status", "EDITING");
+      if (!dryRun) warnIfError(await service.from("shoot_requests").update({ status: "FAILED", error: message.slice(0, 500) }).eq("id", req.id).eq("status", "EDITING"), `촬영 요청 실패 표시 (id=${req.id})`);
     } finally {
       if (!dryRun) rmSync(workDir, { recursive: true, force: true });
     }
