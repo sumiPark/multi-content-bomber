@@ -114,7 +114,7 @@ export default async function Page({ searchParams }: AccountsPageProps) {
       canManage={canManage}
       flashMessage={
         params.connected
-          ? `${({ YOUTUBE: "유튜브", INSTAGRAM: "인스타그램", TIKTOK: "틱톡" } as Record<string, string>)[params.connected.toUpperCase()] ?? params.connected} 계정을 연결했어요.`
+          ? `${({ YOUTUBE: "유튜브", INSTAGRAM: "인스타그램", TIKTOK: "틱톡", THREADS: "스레드" } as Record<string, string>)[params.connected.toUpperCase()] ?? params.connected} 계정을 연결했어요.`
           : null
       }
       flashError={params.error ?? null}

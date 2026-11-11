@@ -37,9 +37,9 @@ import { PlatformIcon } from "@/components/ui/platform-icon";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
+type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK" | "THREADS";
 
-const PLATFORM_KO: Record<Platform, string> = { YOUTUBE: "유튜브", INSTAGRAM: "인스타그램", TIKTOK: "틱톡" };
+const PLATFORM_KO: Record<Platform, string> = { YOUTUBE: "유튜브", INSTAGRAM: "인스타그램", TIKTOK: "틱톡", THREADS: "스레드" };
 
 export interface AccountRow {
   id: string;
@@ -75,6 +75,8 @@ const PLATFORM_BUTTONS: {
   { id: "INSTAGRAM", name: "Instagram" },
   { id: "TIKTOK", name: "TikTok" },
   { id: "YOUTUBE", name: "YouTube" },
+  // 스레드(0056)는 업로드 마법사의 "스레드에도 올리기"로 인스타 캡션을 같이 올린다.
+  { id: "THREADS", name: "Threads" },
 ];
 
 export type GroupColor =

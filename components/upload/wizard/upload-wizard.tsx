@@ -44,7 +44,7 @@ import {
   type RegenerateCaptionsResult,
 } from "@/app/(dashboard)/actions";
 import type { Captions } from "@/lib/ai/caption-generator";
-import type { Platform } from "@/lib/platforms";
+import type { ContentPlatform as Platform } from "@/lib/platforms";
 import type { WizardDraft, WizardDraftState } from "@/lib/upload/draft";
 import { uploadMedia, uploadOne } from "@/lib/storage/upload";
 import { isVideoFile } from "@/lib/upload/media-kind";
@@ -106,6 +106,18 @@ interface SeriesOption {
   pendingCount: number;
 }
 
+interface ThreadsAccountSummary {
+  id: string;
+  display_name: string | null;
+}
+
+// 고른 인스타 계정 하나와, 이름이 같은 스레드 계정(없으면 null).
+// 스레드 프로필은 인스타 프로필에서 만들어져 사용자 이름이 같다.
+interface ThreadsRow {
+  account: SocialAccountSummary;
+  threads: ThreadsAccountSummary | null;
+}
+
 interface UploadWizardProps {
   organizationId: string;
   userId: string;
@@ -113,6 +125,8 @@ interface UploadWizardProps {
   accountGroups: AccountGroupSummary[];
   presets: PresetSummary[];
   seriesOptions?: SeriesOption[];
+  /** 연결한 스레드 계정(0056). 인스타 계정과 이름이 같으면 마지막 단계에 "스레드에도 올리기"가 나온다. */
+  threadsAccounts?: ThreadsAccountSummary[];
   /** 보관함에서 '이어서 하기'로 열었을 때 임시 저장한 상태 (0033). */
   initialDraft?: WizardDraft | null;
 }
@@ -151,6 +165,7 @@ export function UploadWizard({
   accountGroups = [],
   presets = [],
   seriesOptions = [],
+  threadsAccounts = [],
   initialDraft = null,
 }: UploadWizardProps) {
   const router = useRouter();
@@ -236,6 +251,8 @@ export function UploadWizard({
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(
     draft?.draftSavedAt ?? null,
   );
+  // 인스타 계정 id → 같은 이름의 스레드 계정에도 올릴지. 기본 꺼짐.
+  const [threadsChoice, setThreadsChoice] = useState<Record<string, boolean>>({});
   const [savingDraft, setSavingDraft] = useState(false);
   const [completing, setCompleting] = useState(false);
   // '완료' 재진입 잠금 — state 반영(다음 렌더)보다 먼저 걸린다. 성공하면 페이지를
@@ -274,6 +291,28 @@ export function UploadWizard({
         }))
         .filter((row) => row.options.length > 0),
     [selectedAccounts, seriesOptions],
+  );
+
+  // 스레드 계정을 하나라도 연결했을 때만 보여 준다(연결 안 했으면 마지막 단계에 아무것도 안 늘어난다).
+  const threadsRows = useMemo<ThreadsRow[]>(() => {
+    if (threadsAccounts.length === 0) return [];
+    const byName = new Map(
+      threadsAccounts
+        .filter((t) => t.display_name)
+        .map((t) => [t.display_name!.toLowerCase(), t]),
+    );
+    return selectedAccounts
+      .filter((a) => a.platform === "INSTAGRAM")
+      .map((account) => ({
+        account,
+        threads: account.display_name
+          ? (byName.get(account.display_name.toLowerCase()) ?? null)
+          : null,
+      }));
+  }, [selectedAccounts, threadsAccounts]);
+
+  const threadsAccountIds = threadsRows.flatMap((r) =>
+    r.threads && threadsChoice[r.account.id] ? [r.threads.id] : [],
   );
 
   // TikTok이 포함되면 영상 모드 강제 (TikTok Content Posting API는 영상만 지원)
@@ -692,6 +731,7 @@ export function UploadWizard({
       accountIds: selectedAccountIds,
       scheduledFor,
       seriesByAccount,
+      threadsAccountIds,
     });
     if (!result.ok) {
       completingRef.current = false;
@@ -919,8 +959,13 @@ export function UploadWizard({
           <Step5Schedule
             scheduleMode={scheduleMode}
             scheduledAt={scheduledAt}
-            selectedAccountCount={selectedAccountIds.length}
+            selectedAccountCount={selectedAccountIds.length + threadsAccountIds.length}
             hasTikTok={selectedPlatforms.includes("TIKTOK")}
+            threadsRows={threadsRows}
+            threadsChoice={threadsChoice}
+            onChangeThreads={(accountId, on) =>
+              setThreadsChoice((prev) => ({ ...prev, [accountId]: on }))
+            }
             seriesRows={seriesRows}
             seriesChoice={seriesChoice}
             onChangeSeries={(accountId, seriesId) => {
@@ -2060,6 +2105,9 @@ function Step5Schedule({
   scheduledAt,
   selectedAccountCount,
   hasTikTok,
+  threadsRows,
+  threadsChoice,
+  onChangeThreads,
   seriesRows,
   seriesChoice,
   onChangeSeries,
@@ -2077,6 +2125,9 @@ function Step5Schedule({
   selectedAccountCount: number;
   // 틱톡은 앱 심사 전이라 '나만 보기'로만 올라간다(lib/platforms/tiktok.ts privacy_level SELF_ONLY)
   hasTikTok: boolean;
+  threadsRows: ThreadsRow[];
+  threadsChoice: Record<string, boolean>;
+  onChangeThreads: (accountId: string, on: boolean) => void;
   seriesRows: { account: SocialAccountSummary; options: SeriesOption[] }[];
   seriesChoice: Record<string, string>;
   onChangeSeries: (accountId: string, seriesId: string) => void;
@@ -2179,6 +2230,46 @@ function Step5Schedule({
             <p>
               틱톡은 지금 <b>&lsquo;나만 보기&rsquo;</b>로 올라가요. 틱톡 앱 심사를 마치기 전이라 공개로 올릴 수 없어요. 올라간 뒤 틱톡 앱에서 공개로 바꿔 주세요.
             </p>
+          </div>
+        )}
+
+        {threadsRows.length > 0 && (
+          <div className="space-y-3 rounded-lg border p-4">
+            <div>
+              <p className="text-sm font-semibold text-ink-2">
+                스레드에도 올리기{" "}
+                <span className="text-xs font-normal text-faint">선택</span>
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                인스타 캡션을 스레드에 맞춰 500자 · 태그 1개로 줄여 같은 시각에 올려요. 스레드가 실패해도 인스타 발행은 그대로예요.
+              </p>
+            </div>
+            <ul className="space-y-2">
+              {threadsRows.map(({ account, threads }) => (
+                <li key={account.id}>
+                  {threads ? (
+                    <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+                      <input
+                        type="checkbox"
+                        id={`threads-${account.id}`}
+                        checked={threadsChoice[account.id] === true}
+                        onChange={(e) => onChangeThreads(account.id, e.target.checked)}
+                        disabled={completing}
+                        className="size-4 accent-primary"
+                      />
+                      <span className="min-w-0 truncate font-semibold">
+                        @{threads.display_name}
+                      </span>
+                      <span className="text-xs text-muted-foreground">스레드</span>
+                    </label>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      @{account.display_name ?? "(이름 없음)"} · 같은 이름의 스레드 계정이 연결되지 않았어요. 계정 연동에서 연결해 주세요.
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

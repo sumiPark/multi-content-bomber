@@ -1,7 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { getOpenAI, OPENAI_TEXT_MODEL } from "@/lib/openai";
-import type { Platform } from "@/lib/platforms";
+import type { ContentPlatform as Platform } from "@/lib/platforms";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import type { MediaItemKind } from "@/lib/upload/media-kind";

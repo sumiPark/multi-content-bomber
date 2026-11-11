@@ -66,6 +66,8 @@ const createJobsInputSchema = z.object({
   seriesByAccount: z
     .record(z.string().uuid(), z.object({ seriesId: z.string().uuid(), reply: z.boolean() }))
     .optional(),
+  // "스레드에도 올리기"(0056)로 고른 스레드 계정. 인스타 캡션으로 같은 시각에 따로 올린다.
+  threadsAccountIds: z.array(z.string().uuid()).max(20).optional(),
 });
 
 const createBlankInputSchema = z.object({
@@ -151,7 +153,7 @@ function buildBlankCaptions(platforms: Platform[]): Captions {
 }
 
 function pickPostType(
-  platform: Platform,
+  platform: Platform | "THREADS",
   mediaType: MediaType,
   count: number,
 ):
@@ -162,6 +164,10 @@ function pickPostType(
   | "PHOTO_MODE"
   | "VIDEO"
   | "PHOTO" {
+  if (platform === "THREADS") {
+    if (mediaType === "VIDEO") return "VIDEO";
+    return count > 1 ? "CAROUSEL" : "PHOTO";
+  }
   if (mediaType === "VIDEO") {
     if (platform === "YOUTUBE") return "SHORTS";
     if (platform === "INSTAGRAM") return "REELS";
@@ -846,14 +852,34 @@ export async function createPublishJobsAction(
   if (!content) return { ok: false, error: "콘텐츠를 찾을 수 없습니다." };
 
   // 연결 해제(0016)된 계정으로는 새 발행을 만들지 않는다 — 토큰이 없어 실패만 쌓인다.
-  const { data: accounts } = await supabase
+  const { data: pickedAccounts } = await supabase
     .from("social_accounts")
     .select("id, platform")
     .in("id", parsed.data.accountIds)
+    .neq("platform", "THREADS")
     .is("disconnected_at", null);
-  if (!accounts || accounts.length === 0) {
+  if (!pickedAccounts || pickedAccounts.length === 0) {
     return { ok: false, error: "계정 조회 실패" };
   }
+  // 스레드 계정은 "스레드에도 올리기"로 고른 것만, 인스타를 같이 올릴 때만 받는다.
+  // 스레드 발행은 인스타와 따로 도는 job이라 한쪽이 실패해도 다른 쪽은 그대로 올라간다.
+  const threadsIds = parsed.data.threadsAccountIds ?? [];
+  const withInstagram = pickedAccounts.some((a) => a.platform === "INSTAGRAM");
+  let threadsAccounts: { id: string; platform: string }[] = [];
+  if (threadsIds.length > 0 && withInstagram) {
+    const { data } = await supabase
+      .from("social_accounts")
+      .select("id, platform")
+      .in("id", threadsIds)
+      .eq("platform", "THREADS")
+      .eq("is_active", true)
+      .is("disconnected_at", null);
+    threadsAccounts = data ?? [];
+    if (threadsAccounts.length < threadsIds.length) {
+      return { ok: false, error: "스레드 계정 연결이 끊겼어요. 계정 연동에서 다시 연결하거나 체크를 해제해 주세요." };
+    }
+  }
+  const accounts = [...pickedAccounts, ...threadsAccounts];
 
   // 중복 발행 가드 — 같은 콘텐츠에 대해 아직 처리가 안 끝난 job이 있는 계정은 제외한다.
   // (마법사 '완료'가 두 번 눌리면 5초 간격으로 같은 배치가 두 번 등록돼 릴스가 2개씩
@@ -901,7 +927,7 @@ export async function createPublishJobsAction(
     content_id: parsed.data.contentId,
     social_account_id: a.id,
     post_type: pickPostType(
-      a.platform as Platform,
+      a.platform as Platform | "THREADS",
       content.media_type as MediaType,
       mediaCount,
     ),

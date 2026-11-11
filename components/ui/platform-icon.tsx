@@ -1,17 +1,19 @@
 import { cn } from "@/lib/utils";
 
-type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
+type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK" | "THREADS";
 
 const LOGO_SRC: Record<Platform, string> = {
   YOUTUBE: "/logos/youtube.svg",
   INSTAGRAM: "/logos/instagram.svg",
   TIKTOK: "/logos/tiktok.svg",
+  THREADS: "/logos/threads.svg",
 };
 
 const LABEL: Record<Platform, string> = {
   YOUTUBE: "YouTube",
   INSTAGRAM: "Instagram",
   TIKTOK: "TikTok",
+  THREADS: "Threads",
 };
 
 interface PlatformIconProps {

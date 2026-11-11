@@ -1,10 +1,12 @@
 import "./server-guard";
 import { instagram } from "./instagram";
+import { threads } from "./threads";
 import { tiktok } from "./tiktok";
 import { youtube } from "./youtube";
 import type { Platform, PlatformAdapter } from "./types";
 
 export type {
+  ContentPlatform,
   Platform,
   PlatformAdapter,
   OAuthTokens,
@@ -23,6 +25,7 @@ const ADAPTERS: Partial<Record<Platform, PlatformAdapter>> = {
   INSTAGRAM: instagram,
   TIKTOK: tiktok,
   YOUTUBE: youtube,
+  THREADS: threads,
 };
 
 export function getAdapter(platform: Platform): PlatformAdapter | null {
@@ -30,7 +33,7 @@ export function getAdapter(platform: Platform): PlatformAdapter | null {
 }
 
 export function isSupportedPlatform(value: string): value is Platform {
-  return value === "INSTAGRAM" || value === "TIKTOK" || value === "YOUTUBE";
+  return value === "INSTAGRAM" || value === "TIKTOK" || value === "YOUTUBE" || value === "THREADS";
 }
 
 export function getRedirectUri(platform: Platform): string {

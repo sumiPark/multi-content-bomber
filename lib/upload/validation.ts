@@ -1,4 +1,4 @@
-import type { Platform } from "@/lib/platforms";
+import type { ContentPlatform as Platform } from "@/lib/platforms";
 import {
   CAROUSEL_VIDEO_MAX_SEC,
   CAROUSEL_VIDEO_MIN_SEC,

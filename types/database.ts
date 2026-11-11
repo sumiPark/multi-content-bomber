@@ -2845,7 +2845,7 @@ export type Database = {
         | "FAILED"
         | "RETRYING"
         | "CANCELLED"
-      social_platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK"
+      social_platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK" | "THREADS"
       user_role: "ADMIN" | "MANAGER" | "STAFF"
     }
     CompositeTypes: {
@@ -2992,7 +2992,7 @@ export const Constants = {
         "RETRYING",
         "CANCELLED",
       ],
-      social_platform: ["YOUTUBE", "INSTAGRAM", "TIKTOK"],
+      social_platform: ["YOUTUBE", "INSTAGRAM", "TIKTOK", "THREADS"],
       user_role: ["ADMIN", "MANAGER", "STAFF"],
     },
   },

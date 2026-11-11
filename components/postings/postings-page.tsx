@@ -42,7 +42,7 @@ type PublishStatus =
   | "RETRYING"
   | "CANCELLED";
 
-type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
+type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK" | "THREADS";
 
 // 기획서의 6가지 사용자 보기 상태 — 백엔드 enum + scheduled_for로 파생.
 export type DisplayStatus =
@@ -865,6 +865,7 @@ const PLATFORM_LABEL: Record<Platform, string> = {
   INSTAGRAM: "인스타그램",
   YOUTUBE: "유튜브",
   TIKTOK: "틱톡",
+  THREADS: "스레드",
 };
 
 const PERIOD_SHORT: Record<PeriodPreset, string> = {

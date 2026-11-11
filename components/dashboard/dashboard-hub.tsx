@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 
-export type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
+export type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK" | "THREADS";
 export type PublishStatus =
   | "PENDING"
   | "PROCESSING"
@@ -235,6 +235,7 @@ const PLATFORM_LABEL: Record<Platform, string> = {
   YOUTUBE: "유튜브",
   INSTAGRAM: "인스타그램",
   TIKTOK: "틱톡",
+  THREADS: "스레드",
 };
 
 const ALL_PLATFORMS: Platform[] = ["YOUTUBE", "INSTAGRAM", "TIKTOK"];

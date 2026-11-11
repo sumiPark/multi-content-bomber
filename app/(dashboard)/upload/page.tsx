@@ -94,7 +94,7 @@ export default async function UploadPage({
   // group_id / account_groups는 0009 마이그레이션 이후. 타입 재생성 전이라 cast.
   type AccountRow = {
     id: string;
-    platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
+    platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK" | "THREADS";
     display_name: string | null;
     is_active: boolean;
     token_expires_at: string | null;
@@ -164,6 +164,15 @@ export default async function UploadPage({
       Math.max(0, ...s.series_episodes.map((e) => e.episode_no)) + 1 + (pendingBySeries.get(s.id) ?? 0),
   }));
 
+  // 스레드 계정(0056)은 계정 고르기에 따로 나오지 않고, 마지막 단계의 "스레드에도 올리기"로만 고른다.
+  const allAccounts = accountsRes.data ?? [];
+  const contentAccounts = allAccounts.flatMap((a) =>
+    a.platform === "THREADS" ? [] : [{ ...a, platform: a.platform }],
+  );
+  const threadsAccounts = allAccounts
+    .filter((a) => a.platform === "THREADS" && a.is_active)
+    .map((a) => ({ id: a.id, display_name: a.display_name }));
+
   const initialDraft = draftId ? await loadDraft(supabase, draftId) : null;
 
   return (
@@ -185,7 +194,8 @@ export default async function UploadPage({
         initialDraft={initialDraft}
         organizationId={profile.organization_id}
         userId={user.id}
-        socialAccounts={accountsRes.data ?? []}
+        socialAccounts={contentAccounts}
+        threadsAccounts={threadsAccounts}
         accountGroups={groupsRes.data ?? []}
         presets={presetsRes.data ?? []}
         seriesOptions={seriesOptions}

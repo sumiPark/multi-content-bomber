@@ -16,7 +16,10 @@ const REFRESH_THRESHOLD_MS = 60 * 60 * 1000;
 const INSTAGRAM_REFRESH_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 
 function thresholdOf(platform: Platform): number {
-  return platform === "INSTAGRAM" ? INSTAGRAM_REFRESH_THRESHOLD_MS : REFRESH_THRESHOLD_MS;
+  // 스레드 60일 토큰(0056)도 인스타와 같다 — 만료되면 th_refresh_token으로 살릴 수 없다.
+  return platform === "INSTAGRAM" || platform === "THREADS"
+    ? INSTAGRAM_REFRESH_THRESHOLD_MS
+    : REFRESH_THRESHOLD_MS;
 }
 
 // 한 번 sweep에서 처리할 최대 계정 수. 만료가 동시에 몰려도 외부 API 호출이 너무

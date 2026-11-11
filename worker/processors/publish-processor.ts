@@ -699,6 +699,17 @@ function buildPublishContext(
     };
   }
 
+  if (platform === "THREADS") {
+    // 스레드는 따로 쓰는 캡션 칸이 없다 — "스레드에도 올리기"는 인스타 캡션을 그대로 쓰고,
+    // 어댑터(lib/platforms/threads.ts)가 500자 · 주제 태그 1개로 맞춘다.
+    const ig = (captions.instagram ?? {}) as { caption?: string; hashtags?: string[] };
+    return {
+      ...empty,
+      caption: ig.caption ?? null,
+      hashtags: Array.isArray(ig.hashtags) ? ig.hashtags : [],
+    };
+  }
+
   // TIKTOK
   const tt = (captions.tiktok ?? {}) as {
     caption?: string;

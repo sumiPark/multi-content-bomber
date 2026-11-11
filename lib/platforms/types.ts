@@ -1,6 +1,10 @@
 import type { Json } from "@/types/database";
 
-export type Platform = "INSTAGRAM" | "TIKTOK" | "YOUTUBE";
+// 캡션 칸 · 업로드 규격 · 마법사 계정 고르기가 있는 플랫폼. 스레드는 인스타 캡션을 같이 쓰는
+// '스레드에도 올리기'로만 올라가서 여기에 없다(0056).
+export type ContentPlatform = "INSTAGRAM" | "TIKTOK" | "YOUTUBE";
+// 연결 · 발행 어댑터가 있는 플랫폼 전체.
+export type Platform = ContentPlatform | "THREADS";
 
 export interface OAuthTokens {
   accessToken: string;

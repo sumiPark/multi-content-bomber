@@ -1,6 +1,6 @@
 import "server-only";
 import { conceptBlock } from "@/lib/agents/concept";
-import type { Platform } from "@/lib/platforms";
+import type { ContentPlatform as Platform } from "@/lib/platforms";
 
 // 단일 출처: docs/caption-engine.md
 // Instagram 규칙의 출처는 한국어 인스타 스킬 ig-caption-ko · ig-human-ko(.claude/skills)다.
