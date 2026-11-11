@@ -22,6 +22,10 @@ on:
         description: "만들기만 하고 저장 · 발행하지 않기 (결과는 실행 기록의 파일로)"
         type: boolean
         default: false
+      saved_board:
+        description: "칸에 저장된 장면표로 영상만 만들기 (dry_run 전용, 영상 단계 시험용)"
+        type: boolean
+        default: false
       use_draft_knowledge:
         description: "승인 전 상식 카드 · 우리 차이 초안도 쓰기 (dry_run 전용, 저장 안 됨)"
         type: boolean
@@ -124,7 +128,7 @@ jobs:
           sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
           echo "CAPTION_SKILL_DIR=$PWD" >> "$GITHUB_ENV"
       - name: Make videos
-        run: npm run worker:auto-video -- ${{ inputs.plan && format('--plan {0}', inputs.plan) || '' }} ${{ inputs.dry_run && '--dry-run --out dry-out' || '' }}
+        run: npm run worker:auto-video -- ${{ inputs.plan && format('--plan {0}', inputs.plan) || '' }} ${{ inputs.dry_run && '--dry-run --out dry-out' || '' }} ${{ inputs.dry_run && inputs.saved_board && '--saved-board' || '' }}
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
