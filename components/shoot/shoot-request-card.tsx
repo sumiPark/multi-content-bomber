@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { ArrowDown, ArrowUp, CheckCircle2, ExternalLink, RotateCcw, Save, Trash2, Upload } from "lucide-react";
-import { Upload as TusUpload } from "tus-js-client";
+import { DetailedError, Upload as TusUpload } from "tus-js-client";
 import { addClipAction, finishUploadAction, moveClipAction, remakeShotlistAction, removeClipAction, saveBriefAction, type ShootResult } from "@/app/(dashboard)/shoot/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { HookFields } from "@/components/shoot/hook-fields";
 // 컷 리스트대로 못 찍어도 편집할 수 있게 촬영본을 컷과 떼어 냈다(2026-11-10). 편집 에이전트는
 // 하고 싶은 말 → 추천 대본 → 상품 정보 차례로 따르고, 촬영본 순서를 기본 흐름으로 본다.
 // 업로드는 Supabase Storage의 tus(이어 올리기) 엔드포인트로 — 휴대폰에서 끊겨도 같은 파일을 다시 고르면 이어서 올라간다.
+// tus가 실패하면 실제 오류(응답 코드 · 서버 메시지)를 화면에 남기고 한 번에 올리기로 다시 올린다(2026-11-11).
 
 export interface ShootRequestCardData {
   id: string;
@@ -61,6 +62,20 @@ const MAX_CLIPS = 20;
 
 function mb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)}MB`;
+}
+
+/** 올리기 오류에서 응답 코드와 서버 메시지를 꺼낸다 — 화면에 그대로 보여 원인을 바로 알 수 있게 */
+function describeUploadError(err: unknown): string {
+  if (err instanceof DetailedError) {
+    const res = err.originalResponse;
+    if (res) {
+      const body = (res.getBody() ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+      return `응답 ${res.getStatus()}${body ? ` · ${body}` : ""}`;
+    }
+    const cause = err.causingError?.message;
+    return `서버 응답 없음(연결이 끊기거나 막힘)${cause ? ` · ${cause.slice(0, 160)}` : ""}`;
+  }
+  return err instanceof Error ? err.message.slice(0, 200) : String(err);
 }
 
 function videoType(file: File): string | null {
@@ -274,7 +289,8 @@ function BriefField({ planId, brief }: { planId: string; brief: string }) {
   );
 }
 
-type Progress = { index: number; count: number; name: string; percent: number; sent: number; total: number };
+// direct: 한 번에 올리기 — 진행률을 알 수 없어 막대 대신 크기만 보인다
+type Progress = { index: number; count: number; name: string; percent: number; sent: number; total: number; direct?: boolean };
 
 /** 올린 촬영본 목록 + 여러 개 올리기. 고른 파일을 하나씩 차례로 올리고, 다 끝나면 화면을 새로 고친다. */
 function ClipList({ requestId, clips, open, orgId, userId }: { requestId: string; clips: ShootRequestCardData["clips"]; open: boolean; orgId: string; userId: string }) {
@@ -322,7 +338,7 @@ function ClipList({ requestId, clips, open, orgId, userId }: { requestId: string
         onProgress,
         onError: (err) => {
           console.error("[shoot] 업로드 오류:", err);
-          reject(new Error("올리다 멈췄어요. 같은 파일을 다시 고르면 이어서 올라가요."));
+          reject(new Error(describeUploadError(err)));
         },
         onSuccess: () => resolve(objectName),
       });
@@ -341,6 +357,13 @@ function ClipList({ requestId, clips, open, orgId, userId }: { requestId: string
     });
   };
 
+  /** 이어 올리기(tus)가 안 될 때 쓰는 한 번에 올리기 — 보관함 업로드와 같은 방식 */
+  const uploadDirect = async (file: File, type: string): Promise<{ ok: true; path: string } | { ok: false; error: string }> => {
+    const path = `${orgId}/${userId}/shoot/${requestId}/${crypto.randomUUID()}.${VIDEO_TYPES[type]}`;
+    const { error } = await createClient().storage.from("media").upload(path, file, { contentType: type, upsert: false, cacheControl: "3600" });
+    return error ? { ok: false, error: error.message.slice(0, 200) } : { ok: true, path };
+  };
+
   const startUploads = async (files: File[]) => {
     const errors: string[] = [];
     const room = MAX_CLIPS - clips.length;
@@ -348,6 +371,8 @@ function ClipList({ requestId, clips, open, orgId, userId }: { requestId: string
     const queue = files.slice(0, Math.max(room, 0));
     stopRef.current = false;
     let added = 0;
+    // 이어 올리기가 한 번 실패하면 이번 묶음은 한 번에 올리기로 — 파일마다 재시도를 기다리지 않게
+    let tusError: string | null = null;
     for (let i = 0; i < queue.length && !stopRef.current; i++) {
       const file = queue[i];
       const type = videoType(file);
@@ -361,10 +386,28 @@ function ClipList({ requestId, clips, open, orgId, userId }: { requestId: string
       }
       setProgress({ index: i + 1, count: queue.length, name: file.name, percent: 0, sent: 0, total: file.size });
       try {
-        const path = await uploadOne(file, type, (sent, total) =>
-          setProgress({ index: i + 1, count: queue.length, name: file.name, percent: total ? Math.round((sent / total) * 100) : 0, sent, total }),
-        );
-        if (!path) break;
+        let path: string | null = null;
+        if (tusError == null) {
+          try {
+            path = await uploadOne(file, type, (sent, total) =>
+              setProgress({ index: i + 1, count: queue.length, name: file.name, percent: total ? Math.round((sent / total) * 100) : 0, sent, total }),
+            );
+            if (!path) break;
+          } catch (e) {
+            tusError = describeUploadError(e);
+            errors.push(`참고: 이어 올리기가 안 돼서 한 번에 올리기로 바꿨어요 (${tusError}).`);
+          }
+        }
+        if (!path) {
+          if (stopRef.current) break;
+          setProgress({ index: i + 1, count: queue.length, name: file.name, percent: 0, sent: 0, total: file.size, direct: true });
+          const d = await uploadDirect(file, type);
+          if (!d.ok) {
+            errors.push(`${file.name}: 올리지 못했어요 (${d.error}).`);
+            continue;
+          }
+          path = d.path;
+        }
         const r = await addClipAction({ requestId, path, name: file.name, size: file.size, type });
         if (r.ok) added++;
         else errors.push(`${file.name}: ${r.error}`);
@@ -447,10 +490,14 @@ function ClipList({ requestId, clips, open, orgId, userId }: { requestId: string
           </p>
           <div className="flex items-center gap-2">
             <div className="h-2 flex-1 overflow-hidden rounded bg-muted">
-              <div className="h-full bg-primary transition-[width]" style={{ width: `${progress.percent}%` }} />
+              {progress.direct ? (
+                <div className="h-full w-full animate-pulse bg-primary/40" />
+              ) : (
+                <div className="h-full bg-primary transition-[width]" style={{ width: `${progress.percent}%` }} />
+              )}
             </div>
             <span className="text-right text-xs tabular-nums whitespace-nowrap">
-              {progress.percent}% · {mb(progress.sent)}/{mb(progress.total)}
+              {progress.direct ? `한 번에 올리는 중 · ${mb(progress.total)}` : `${progress.percent}% · ${mb(progress.sent)}/${mb(progress.total)}`}
             </span>
             <Button size="sm" variant="ghost" onClick={stop}>
               멈추기
