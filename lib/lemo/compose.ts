@@ -7,7 +7,7 @@ import type { ContentRule } from "@/lib/rules/check";
 import { CAPTION_FALLBACK_WARNING } from "@/lib/shoot/video-kit/caption-renderer";
 import { captionSkillDir } from "@/lib/shoot/video-kit/caption-skill";
 import { DEFAULT_LOOK, normalizeLook } from "@/lib/shoot/video-kit/caption-style";
-import { readClip, renderKitEdit, type KitResult } from "@/lib/shoot/video-kit/pipeline";
+import { readClip, renderKitEdit, type KitInput, type KitResult } from "@/lib/shoot/video-kit/pipeline";
 import { layoutBeats } from "@/lib/shoot/video-kit/timeline";
 import type { createServiceClient } from "@/lib/supabase/service";
 
@@ -53,6 +53,9 @@ export interface ComposeInput {
   tone?: string | null;
   // 배경음악 검색어 · 분위기. 없으면 스타일 기본값(STYLE_MUSIC). 키트가 영상마다 검색하고, 못 찾을 때만 대체 곡을 쓴다
   music?: { query: string; intent: string } | null;
+  // AI 자동 영상 경로에서 부를 때: 칸 id(편집 키트 기록용)와 완성본 프레임 검수(AI 자동과 같은 기준). 수동 실행은 비워 둔다
+  planId?: string;
+  reviewFinal?: KitInput["reviewFinal"];
 }
 
 /** 스타일별 배경음악 기본 검색어. 연출 AI · 계정 설정이 값을 주면 그 값을 쓴다. */
@@ -63,7 +66,7 @@ export const STYLE_MUSIC: Record<string, { query: string; intent: string }> = {
 const DEFAULT_MUSIC = { query: "light acoustic background", intent: "말을 가리지 않는 가벼운 음악" };
 
 /** lemo 장면 데이터 · 음성으로 편집 계획을 만든다. 렌더는 하지 않는다(시험에서 계획만 볼 때도 쓴다). */
-export function buildLemoPlan(input: Omit<ComposeInput, "service" | "readService" | "workDir" | "rules" | "voiceId" | "accountName" | "tone">, clipSeconds: number): { plan: EditPlan; dropped: string[] } {
+export function buildLemoPlan(input: Omit<ComposeInput, "service" | "readService" | "workDir" | "rules" | "voiceId" | "accountName" | "tone" | "planId" | "reviewFinal">, clipSeconds: number): { plan: EditPlan; dropped: string[] } {
   const { voice, production: p } = input;
   if (!voice.length) throw new Error("음성 줄이 없어요");
   const dropped: string[] = [];
@@ -141,6 +144,8 @@ export async function composeLemoVideo(input: ComposeInput): Promise<KitResult> 
     workDir: join(input.workDir, "kit"),
     service: input.service,
     readService: input.readService,
+    planId: input.planId,
+    reviewFinal: input.reviewFinal,
     accountName: input.accountName,
     liveVoice: false,
     facts: input.facts,

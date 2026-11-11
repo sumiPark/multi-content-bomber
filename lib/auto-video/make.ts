@@ -18,13 +18,14 @@ import { loadArchiveChoices } from "@/lib/auto-video/archive";
 import { motionClip, photoClip, photoLayers, type PhotoLayers } from "@/lib/auto-video/clips";
 import { gifClip, isAnimatedGif, isGif, prepareGifAssets, shownGifSheet } from "@/lib/auto-video/gif-clips";
 import { stockClip } from "@/lib/auto-video/stock";
+import { makeWithLemo, type AutoVideoEngine, type LemoAttempt } from "@/lib/auto-video/lemo";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
 import { finalBlocking } from "@/lib/shoot/final-check";
 import { captionSkillDir } from "@/lib/shoot/video-kit/caption-skill";
 import type { VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { loadVisualLibrary } from "@/lib/shoot/video-kit/generated-visual";
-import { readClip, renderKitEdit, type KitClip } from "@/lib/shoot/video-kit/pipeline";
+import { readClip, renderKitEdit, type KitClip, type KitInput, type KitResult } from "@/lib/shoot/video-kit/pipeline";
 import { chosenFonts, downloadVideoFonts, loadSkillFonts, type SkillFont } from "@/lib/shoot/video-kit/skill-fonts";
 import { ffmpeg, fishTts, imageDataUrl, voicedSpan } from "@/lib/shoot/video-kit/tools";
 import { runVisionTool } from "@/lib/shoot/video-kit/vision-tools";
@@ -251,6 +252,8 @@ export async function makeAutoVideo(input: {
   redo?: RedoRequest | null;
   /** 장면표를 새로 확정하면 영상을 만들기 전에 부른다. 워커가 저장하고 SCRIPTED로 바꾼다. 저장하지 못하면 throw해 영상을 만들지 않는다 */
   onBoard?: (saved: SavedStoryboard, script: ScriptOutput & { fixed?: unknown }) => Promise<void>;
+  /** 영상 단계 제작 방식. lemo(기본)면 lemo 코드 애니메이션을 먼저 시도하고, 안 되면 사진 · 스톡 컷으로 만든다. kit이면 사진 · 스톡 컷만 */
+  engine?: AutoVideoEngine;
 }) {
   const { service, planId, account, productId, rules, workDir } = input;
   const facts = await loadProductFacts(service, productId);
@@ -663,192 +666,221 @@ export async function makeAutoVideo(input: {
     );
   }
 
-  // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
-  // AI가 고른 글꼴을 자막 · 설명 화면이 함께 쓴다. 못 받으면 설명 화면만 대체 글꼴로 만든다
-  const finalBoard = board;
-  const pickedFonts = fontChoices.length ? chosenFonts(fontChoices, { key_font: finalBoard.key_font, small_font: finalBoard.small_font }) : null;
-  if (pickedFonts) console.log(`  글꼴: ${pickedFonts.key.name} + ${pickedFonts.small.name}`);
-  let motionFonts: VideoFonts | undefined;
-  const clips: KitClip[] = [];
   const sources: unknown[] = [];
   const warnings: string[] = [...boardWarnings];
-  if (pickedFonts && finalBoard.scenes.some((s) => s.source === "motion")) {
-    try {
-      motionFonts = await downloadVideoFonts(pickedFonts, workDir);
-    } catch (e) {
-      warnings.push(`고른 글꼴을 받지 못해 설명 화면은 대체 글꼴로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
-    }
-  }
-  const clipNo = new Map<string, number>();
-  const used = new Map<string, number>();
-  // AI 이미지를 못 만들면 상품 사진이 대신 나간다
-  const fallbackPhoto = finalBoard.photos.find((p) => p.usable && p.kind === "product" && p.upright)?.id ?? finalBoard.photos.find((p) => p.usable && p.kind !== "product")?.id;
-  const clipOf = (id: string, kind: "photo" | "archive" | "gif"): number | null => {
-    if (clipNo.has(id)) return clipNo.get(id)!;
-    const no = clips.length + 1;
-    if (kind === "gif") {
-      const asset = gifs.find((g) => g.id === id);
-      const meta = finalBoard.gifs.find((g) => g.id === id);
-      if (!asset || !meta) return null;
-      const made = gifClip(asset, meta, workDir);
-      if (made.soft) warnings.push(`${id} 움직이는 이미지(${meta.what})는 원본 해상도가 낮아 영상에서 흐릴 수 있어요.`);
-      clips.push(readClip(no, made.file, { shot: `[상세 움직임] ${meta.what}` }));
-      sources.push({ no, kind: "gif", id, what: meta.what });
-    } else if (kind === "archive") {
-      const a = archive.find((x) => x.id === id);
-      if (!a) return null;
-      clips.push(readClip(no, a.file, { shot: `[자사 촬영] ${a.what}` }));
-      sources.push({ no, kind: "archive", id: a.rowId, what: a.what });
-    } else {
-      const meta = finalBoard.photos.find((p) => p.id === id);
-      const layers = meta && trimmedLayers(id, meta.trim_top, meta.trim_bottom);
-      if (!meta || !layers) return null;
-      const made = photoClip(layers, workDir, `photo-${id}`);
-      if (made.soft) warnings.push(`${id} 사진(${meta.what})은 해상도가 낮아 영상에서 흐릴 수 있어요.`);
-      clips.push(readClip(no, made.file, { shot: `[제품컷] ${meta.what}` }));
-      sources.push({ no, kind: "photo", id, what: meta.what, mode: made.mode });
-    }
-    clipNo.set(id, no);
-    return no;
-  };
-  const motionClipOf = (spec: NonNullable<Storyboard["scenes"][number]["motion"]>, i: number, seconds: number): number => {
-    const made = motionClip(spec, workDir, `motion-${i}`, { seconds, fonts: motionFonts });
-    const no = clips.length + 1;
-    clips.push(readClip(no, made.file, { shot: `[코드 모션] ${made.shot}` }));
-    sources.push({ no, kind: "motion", spec });
-    return no;
-  };
-  // 스톡 영상: 장면마다 검색 → 얼굴 · 로고 · 글자 검수 → 세로 컷. 못 찾으면 상품 사진이 대신 나가고 경고를 남긴다
-  const stockNo = new Map<number, number>();
-  const usedStock = new Set<number>();
-  const stockDir = join(workDir, "stock");
-  for (const [i, s] of board.scenes.entries()) {
-    if (s.source !== "stock") continue;
-    mkdirSync(stockDir, { recursive: true });
-    try {
-      const pick = await stockClip(service, s.stock_query, s.shows || s.say, stockDir, `stock-${i}`, usedStock);
-      if (pick) {
-        add(pick.tokens);
-        const no = clips.length + 1;
-        clips.push(readClip(no, pick.file, { shot: `[스톡] ${pick.shot}` }));
-        sources.push({ no, kind: "stock", ...pick.source });
-        stockNo.set(i, no);
-        continue;
-      }
-      warnings.push(`${i}번 장면 스톡 영상("${s.stock_query}")에서 쓸 수 있는 영상을 찾지 못해 AI 이미지로 대신했어요.`);
-    } catch (e) {
-      warnings.push(`${i}번 장면 스톡 영상을 받지 못해 AI 이미지로 대신했어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
-    }
-    console.warn(`  ${warnings.at(-1)}`);
-  }
-  // 스톡을 못 찾은 장면은 AI 이미지로 바꾼다(영상당 AI 이미지 한도 안에서, 마지막 장면 제외).
-  // 한도를 넘거나 그림 설명을 못 받은 장면은 아래 기본 컷이 그대로 나간다
-  const stockMissed = board.scenes.map((s, i) => (s.source === "stock" && !stockNo.has(i) ? i : -1)).filter((i) => i >= 0);
-  if (stockMissed.length) {
-    const room = Math.max(0, LONG_VISUALS.max - board.scenes.filter((s) => s.source === "visual").length);
-    const toVisual = new Set(stockMissed.filter((i) => i !== board!.scenes.length - 1).slice(0, room));
-    if (toVisual.size) {
-      board = { ...board, scenes: board.scenes.map((s, i) => (toVisual.has(i) ? { ...s, source: "visual" as const, source_id: `v${i}`, motion: null, stock_query: "" } : s)) };
-      try {
-        const filled = await writeSceneVisuals({ board, beats: [...toVisual], facts, knowledge, visualLibrary });
-        add(filled.tokens);
-        board = { ...board, visuals: [...board.visuals.filter((v) => !toVisual.has(v.beat)), ...filled.visuals] };
-        console.log(`  스톡을 못 찾은 ${[...toVisual].join(", ")}번 장면을 AI 이미지로 바꿈 (그림 설명 ${filled.visuals.length}개)`);
-      } catch (e) {
-        warnings.push(`스톡을 못 찾은 장면의 AI 이미지 설명을 쓰지 못해 기본 컷으로 대신했어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
-        console.warn(`  ${warnings.at(-1)}`);
-      }
-    }
-  }
-  // AI 이미지 장면 · 스톡을 못 찾은 장면 밑에 까는 기본 컷. 상품 사진 → 움직이는 이미지 → 찾은 스톡 순서로 고른다.
-  // AI 이미지가 만들어지면 이 컷은 화면에 나오지 않고, 그림을 못 만들면 이 컷이 나간다
-  const fallbackGif = finalBoard.gifs.find((g) => g.usable && gifs.some((a) => a.id === g.id))?.id;
-  const firstStock = stockNo.values().next().value as number | undefined;
-  const fallbackKey = fallbackPhoto ?? fallbackGif ?? (firstStock ? `stock-clip-${firstStock}` : null);
-  const fallbackClip = (): number | null => (fallbackPhoto ? clipOf(fallbackPhoto, "photo") : fallbackGif ? clipOf(fallbackGif, "gif") : firstStock ?? null);
-  if (!fallbackPhoto) {
-    warnings.push(`쓸 수 있는 상품 사진이 없어 AI 이미지 · 스톡 장면의 기본 컷을 ${fallbackGif ? `움직이는 이미지(${fallbackGif})` : firstStock ? "찾은 스톡 영상" : "만들 수 없었어요"}${fallbackGif || firstStock ? "로 썼어요" : ""}.`);
-    console.warn(`  ${warnings.at(-1)}`);
-  }
-  const beats: EditPlan["beats"] = [];
-  board.scenes.forEach((s, i) => {
-    const want = Math.max(1.2, squash(s.tts).length / speechRate + 0.25);
-    const stockFallback = s.source === "stock" && !stockNo.has(i);
-    const no =
-      s.source === "motion" ? (s.motion ? motionClipOf(s.motion, i, want) : null)
-      : s.source === "stock" ? (stockNo.get(i) ?? fallbackClip())
-      : s.source === "visual" ? fallbackClip()
-      : clipOf(s.source_id, s.source);
-    if (!no) throw new Error(`${i}번 장면(${s.source_id})에 쓸 컷이 없어요. 쓸 수 있는 상품 사진 · 움직이는 이미지 · 스톡이 하나도 없어요`);
-    const seconds = clips[no - 1].duration;
-    // 설명 화면은 장면마다 새로 만든 컷이라 늘 0초부터 쓴다(등장 움직임이 빠지지 않게).
-    // AI 이미지 장면과 스톡을 못 찾은 장면은 대신 쓰는 기본 컷의 기록을 이어 쓴다
-    const key = s.source === "motion" ? null : s.source === "visual" || stockFallback ? fallbackKey : s.source_id;
-    const from = key ? Math.min(used.get(key) ?? 0, Math.max(0, seconds - want)) : 0;
-    const to = Math.min(seconds, from + want);
-    if (key) used.set(key, to);
-    beats.push({
-      mode: "tts",
-      tts: s.tts,
-      captions: i === 0 ? [] : s.captions.length && squash(s.captions.join("")) === squash(s.say) ? s.captions : splitCaption(s.say),
-      emphasis: s.emphasis,
-      cuts: [{ clip: no, in: from, out: to, what: s.shows }],
-      // 글자 없는 그래픽은 빈 막대로 나온다
-      graphics: i === 0 ? [] : s.graphics.filter((g) => graphicTexts(g).length > 0),
-      sfx: s.sfx.filter((x) => s.say.includes(x.at_word)).map((x) => ({ name: x.name, at_word: x.at_word, at: 0 })),
+  // 완성본 프레임 검수 — lemo · 사진 컷 경로가 같은 기준으로 본다
+  const reviewFinal: NonNullable<KitInput["reviewFinal"]> = async (file, timeline) => {
+    const every = Math.max(0.5, timeline.duration / 24);
+    const sheetFile = join(workDir, "final-frames.jpg");
+    ffmpeg(["-y", "-v", "error", "-i", file, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
+    // 연락판만 보면 짧은 자막을 놓친다. 모든 자막의 안정 구간을 휴대폰 크기로 별도 검사한다.
+    const allTimes = timeline.captions.map((c) => (c.start + c.end) / 2);
+    const step = Math.max(1, allTimes.length / MAX_REVIEW_FRAMES);
+    const times = [Math.min(0.35, timeline.hook.end / 2), ...Array.from({ length: Math.min(MAX_REVIEW_FRAMES, allTimes.length) }, (_, n) => allTimes[Math.floor(n * step)])];
+    const frames = times.map((at, i) => {
+      const path = join(workDir, `readability-${i}.jpg`);
+      ffmpeg(["-y", "-v", "error", "-ss", at.toFixed(3), "-i", file, "-frames:v", "1", "-vf", "scale=360:640", "-q:v", "2", path]);
+      return { at, image: imageDataUrl(path) };
     });
-  });
-  // 표지는 제품이 보이는 장면으로. 설명 화면 · AI 이미지를 골랐으면 첫 장면을 쓴다
-  const coverAt = Math.min(Math.max(0, board.thumbnail.scene), beats.length - 1);
-  const coverSource = board.scenes[coverAt]?.source;
-  const coverScene = beats[coverSource === "motion" || coverSource === "visual" ? 0 : coverAt]?.cuts[0];
-  const plan: EditPlan = {
-    look: board.look,
-    analysis: [],
-    hook: board.hook,
-    thumbnail: { title: board.thumbnail.title, highlight: board.thumbnail.highlight, position: board.thumbnail.position, sub: board.thumbnail.sub, clip: coverScene?.clip ?? 1, at: coverScene ? (coverScene.in + coverScene.out) / 2 : 1 },
-    beats,
-    visuals: board.visuals,
-    warnings: [],
+    const review = await reviewFinalFrames({ sheet: imageDataUrl(sheetFile), frames, everySeconds: every, lines: timeline.lines.map((l) => ({ at: l.start, say: board!.scenes[l.beat]?.say ?? l.tts })) });
+    add(review.tokens);
+    return review;
   };
 
-  // 4. 음성 → 시간표 → 렌더. 컷 · 그래픽 · 자막이 낱말 시각에 맞춰진다. 자동 콘텐츠 설정만 넘긴다
-  const kit = await renderKitEdit({
-    workDir: join(workDir, "kit"),
-    service: input.dryRun ? null : service,
-    readService: service,
-    planId,
-    accountName: account,
-    liveVoice: false,
-    facts,
-    rules,
-    clips,
-    source: "auto",
-    reusePlan: plan,
-    // 바꾸고 싶은 점 한 칸에 말투 · 분위기 · 영상 스타일이 같이 들어 있어 말투 칸으로 한 번만 넘긴다(같은 글을 두 번 넣지 않는다)
-    tone: concept.autoNotes,
-    voiceId: concept.autoVoiceId,
-    fonts: pickedFonts ? { key_font: pickedFonts.key.name, small_font: pickedFonts.small.name } : undefined,
-    visualPolicy,
-    reviewFinal: async (file, timeline) => {
-      const every = Math.max(0.5, timeline.duration / 24);
-      const sheetFile = join(workDir, "final-frames.jpg");
-      ffmpeg(["-y", "-v", "error", "-i", file, "-vf", `fps=1/${every.toFixed(3)},scale=270:-2,tile=8x3`, "-frames:v", "1", "-q:v", "3", sheetFile]);
-      // 연락판만 보면 짧은 자막을 놓친다. 모든 자막의 안정 구간을 휴대폰 크기로 별도 검사한다.
-      const allTimes = timeline.captions.map((c) => (c.start + c.end) / 2);
-      const step = Math.max(1, allTimes.length / MAX_REVIEW_FRAMES);
-      const times = [Math.min(0.35, timeline.hook.end / 2), ...Array.from({ length: Math.min(MAX_REVIEW_FRAMES, allTimes.length) }, (_, n) => allTimes[Math.floor(n * step)])];
-      const frames = times.map((at, i) => {
-        const path = join(workDir, `readability-${i}.jpg`);
-        ffmpeg(["-y", "-v", "error", "-ss", at.toFixed(3), "-i", file, "-frames:v", "1", "-vf", "scale=360:640", "-q:v", "2", path]);
-        return { at, image: imageDataUrl(path) };
+  // 3-0. 기본은 lemo 코드 애니메이션(2026-11-11 사용자 결정). 제작 방식 선택이 기존 방식을 고르거나 lemo가 실패하면 아래 사진 · 스톡 컷으로 만든다
+  let kit: KitResult | null = null;
+  let lemo: LemoAttempt["record"] | null = null;
+  if (input.engine === "lemo") {
+    const tried = await makeWithLemo({
+      service,
+      dryRun: input.dryRun,
+      planId,
+      accountId: input.accountId,
+      account,
+      concept,
+      facts,
+      rules,
+      board,
+      sources: { photos: Object.keys(assets.photos).length, gifs: Object.keys(assets.gifs).length, archive: Object.keys(assets.archive).length },
+      workDir,
+      reviewFinal,
+    });
+    add(tried.tokens);
+    warnings.push(...tried.warnings);
+    lemo = tried.record;
+    kit = tried.kit;
+    if (kit) sources.push({ no: 1, kind: "lemo", style: tried.record.choice?.style ?? null, characters: [...tried.record.characters.reused, ...tried.record.characters.created] });
+  }
+  if (!kit) {
+    // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
+    // AI가 고른 글꼴을 자막 · 설명 화면이 함께 쓴다. 못 받으면 설명 화면만 대체 글꼴로 만든다
+    const finalBoard = board;
+    const pickedFonts = fontChoices.length ? chosenFonts(fontChoices, { key_font: finalBoard.key_font, small_font: finalBoard.small_font }) : null;
+    if (pickedFonts) console.log(`  글꼴: ${pickedFonts.key.name} + ${pickedFonts.small.name}`);
+    let motionFonts: VideoFonts | undefined;
+    const clips: KitClip[] = [];
+    if (pickedFonts && finalBoard.scenes.some((s) => s.source === "motion")) {
+      try {
+        motionFonts = await downloadVideoFonts(pickedFonts, workDir);
+      } catch (e) {
+        warnings.push(`고른 글꼴을 받지 못해 설명 화면은 대체 글꼴로 만들었어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+      }
+    }
+    const clipNo = new Map<string, number>();
+    const used = new Map<string, number>();
+    // AI 이미지를 못 만들면 상품 사진이 대신 나간다
+    const fallbackPhoto = finalBoard.photos.find((p) => p.usable && p.kind === "product" && p.upright)?.id ?? finalBoard.photos.find((p) => p.usable && p.kind !== "product")?.id;
+    const clipOf = (id: string, kind: "photo" | "archive" | "gif"): number | null => {
+      if (clipNo.has(id)) return clipNo.get(id)!;
+      const no = clips.length + 1;
+      if (kind === "gif") {
+        const asset = gifs.find((g) => g.id === id);
+        const meta = finalBoard.gifs.find((g) => g.id === id);
+        if (!asset || !meta) return null;
+        const made = gifClip(asset, meta, workDir);
+        if (made.soft) warnings.push(`${id} 움직이는 이미지(${meta.what})는 원본 해상도가 낮아 영상에서 흐릴 수 있어요.`);
+        clips.push(readClip(no, made.file, { shot: `[상세 움직임] ${meta.what}` }));
+        sources.push({ no, kind: "gif", id, what: meta.what });
+      } else if (kind === "archive") {
+        const a = archive.find((x) => x.id === id);
+        if (!a) return null;
+        clips.push(readClip(no, a.file, { shot: `[자사 촬영] ${a.what}` }));
+        sources.push({ no, kind: "archive", id: a.rowId, what: a.what });
+      } else {
+        const meta = finalBoard.photos.find((p) => p.id === id);
+        const layers = meta && trimmedLayers(id, meta.trim_top, meta.trim_bottom);
+        if (!meta || !layers) return null;
+        const made = photoClip(layers, workDir, `photo-${id}`);
+        if (made.soft) warnings.push(`${id} 사진(${meta.what})은 해상도가 낮아 영상에서 흐릴 수 있어요.`);
+        clips.push(readClip(no, made.file, { shot: `[제품컷] ${meta.what}` }));
+        sources.push({ no, kind: "photo", id, what: meta.what, mode: made.mode });
+      }
+      clipNo.set(id, no);
+      return no;
+    };
+    const motionClipOf = (spec: NonNullable<Storyboard["scenes"][number]["motion"]>, i: number, seconds: number): number => {
+      const made = motionClip(spec, workDir, `motion-${i}`, { seconds, fonts: motionFonts });
+      const no = clips.length + 1;
+      clips.push(readClip(no, made.file, { shot: `[코드 모션] ${made.shot}` }));
+      sources.push({ no, kind: "motion", spec });
+      return no;
+    };
+    // 스톡 영상: 장면마다 검색 → 얼굴 · 로고 · 글자 검수 → 세로 컷. 못 찾으면 상품 사진이 대신 나가고 경고를 남긴다
+    const stockNo = new Map<number, number>();
+    const usedStock = new Set<number>();
+    const stockDir = join(workDir, "stock");
+    for (const [i, s] of board.scenes.entries()) {
+      if (s.source !== "stock") continue;
+      mkdirSync(stockDir, { recursive: true });
+      try {
+        const pick = await stockClip(service, s.stock_query, s.shows || s.say, stockDir, `stock-${i}`, usedStock);
+        if (pick) {
+          add(pick.tokens);
+          const no = clips.length + 1;
+          clips.push(readClip(no, pick.file, { shot: `[스톡] ${pick.shot}` }));
+          sources.push({ no, kind: "stock", ...pick.source });
+          stockNo.set(i, no);
+          continue;
+        }
+        warnings.push(`${i}번 장면 스톡 영상("${s.stock_query}")에서 쓸 수 있는 영상을 찾지 못해 AI 이미지로 대신했어요.`);
+      } catch (e) {
+        warnings.push(`${i}번 장면 스톡 영상을 받지 못해 AI 이미지로 대신했어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+      }
+      console.warn(`  ${warnings.at(-1)}`);
+    }
+    // 스톡을 못 찾은 장면은 AI 이미지로 바꾼다(영상당 AI 이미지 한도 안에서, 마지막 장면 제외).
+    // 한도를 넘거나 그림 설명을 못 받은 장면은 아래 기본 컷이 그대로 나간다
+    const stockMissed = board.scenes.map((s, i) => (s.source === "stock" && !stockNo.has(i) ? i : -1)).filter((i) => i >= 0);
+    if (stockMissed.length) {
+      const room = Math.max(0, LONG_VISUALS.max - board.scenes.filter((s) => s.source === "visual").length);
+      const toVisual = new Set(stockMissed.filter((i) => i !== board!.scenes.length - 1).slice(0, room));
+      if (toVisual.size) {
+        board = { ...board, scenes: board.scenes.map((s, i) => (toVisual.has(i) ? { ...s, source: "visual" as const, source_id: `v${i}`, motion: null, stock_query: "" } : s)) };
+        try {
+          const filled = await writeSceneVisuals({ board, beats: [...toVisual], facts, knowledge, visualLibrary });
+          add(filled.tokens);
+          board = { ...board, visuals: [...board.visuals.filter((v) => !toVisual.has(v.beat)), ...filled.visuals] };
+          console.log(`  스톡을 못 찾은 ${[...toVisual].join(", ")}번 장면을 AI 이미지로 바꿈 (그림 설명 ${filled.visuals.length}개)`);
+        } catch (e) {
+          warnings.push(`스톡을 못 찾은 장면의 AI 이미지 설명을 쓰지 못해 기본 컷으로 대신했어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+          console.warn(`  ${warnings.at(-1)}`);
+        }
+      }
+    }
+    // AI 이미지 장면 · 스톡을 못 찾은 장면 밑에 까는 기본 컷. 상품 사진 → 움직이는 이미지 → 찾은 스톡 순서로 고른다.
+    // AI 이미지가 만들어지면 이 컷은 화면에 나오지 않고, 그림을 못 만들면 이 컷이 나간다
+    const fallbackGif = finalBoard.gifs.find((g) => g.usable && gifs.some((a) => a.id === g.id))?.id;
+    const firstStock = stockNo.values().next().value as number | undefined;
+    const fallbackKey = fallbackPhoto ?? fallbackGif ?? (firstStock ? `stock-clip-${firstStock}` : null);
+    const fallbackClip = (): number | null => (fallbackPhoto ? clipOf(fallbackPhoto, "photo") : fallbackGif ? clipOf(fallbackGif, "gif") : firstStock ?? null);
+    if (!fallbackPhoto) {
+      warnings.push(`쓸 수 있는 상품 사진이 없어 AI 이미지 · 스톡 장면의 기본 컷을 ${fallbackGif ? `움직이는 이미지(${fallbackGif})` : firstStock ? "찾은 스톡 영상" : "만들 수 없었어요"}${fallbackGif || firstStock ? "로 썼어요" : ""}.`);
+      console.warn(`  ${warnings.at(-1)}`);
+    }
+    const beats: EditPlan["beats"] = [];
+    board.scenes.forEach((s, i) => {
+      const want = Math.max(1.2, squash(s.tts).length / speechRate + 0.25);
+      const stockFallback = s.source === "stock" && !stockNo.has(i);
+      const no =
+        s.source === "motion" ? (s.motion ? motionClipOf(s.motion, i, want) : null)
+        : s.source === "stock" ? (stockNo.get(i) ?? fallbackClip())
+        : s.source === "visual" ? fallbackClip()
+        : clipOf(s.source_id, s.source);
+      if (!no) throw new Error(`${i}번 장면(${s.source_id})에 쓸 컷이 없어요. 쓸 수 있는 상품 사진 · 움직이는 이미지 · 스톡이 하나도 없어요`);
+      const seconds = clips[no - 1].duration;
+      // 설명 화면은 장면마다 새로 만든 컷이라 늘 0초부터 쓴다(등장 움직임이 빠지지 않게).
+      // AI 이미지 장면과 스톡을 못 찾은 장면은 대신 쓰는 기본 컷의 기록을 이어 쓴다
+      const key = s.source === "motion" ? null : s.source === "visual" || stockFallback ? fallbackKey : s.source_id;
+      const from = key ? Math.min(used.get(key) ?? 0, Math.max(0, seconds - want)) : 0;
+      const to = Math.min(seconds, from + want);
+      if (key) used.set(key, to);
+      beats.push({
+        mode: "tts",
+        tts: s.tts,
+        captions: i === 0 ? [] : s.captions.length && squash(s.captions.join("")) === squash(s.say) ? s.captions : splitCaption(s.say),
+        emphasis: s.emphasis,
+        cuts: [{ clip: no, in: from, out: to, what: s.shows }],
+        // 글자 없는 그래픽은 빈 막대로 나온다
+        graphics: i === 0 ? [] : s.graphics.filter((g) => graphicTexts(g).length > 0),
+        sfx: s.sfx.filter((x) => s.say.includes(x.at_word)).map((x) => ({ name: x.name, at_word: x.at_word, at: 0 })),
       });
-      const review = await reviewFinalFrames({ sheet: imageDataUrl(sheetFile), frames, everySeconds: every, lines: timeline.lines.map((l) => ({ at: l.start, say: board!.scenes[l.beat]?.say ?? l.tts })) });
-      add(review.tokens);
-      return review;
-    },
-  });
-  add(kit.tokens);
+    });
+    // 표지는 제품이 보이는 장면으로. 설명 화면 · AI 이미지를 골랐으면 첫 장면을 쓴다
+    const coverAt = Math.min(Math.max(0, board.thumbnail.scene), beats.length - 1);
+    const coverSource = board.scenes[coverAt]?.source;
+    const coverScene = beats[coverSource === "motion" || coverSource === "visual" ? 0 : coverAt]?.cuts[0];
+    const plan: EditPlan = {
+      look: board.look,
+      analysis: [],
+      hook: board.hook,
+      thumbnail: { title: board.thumbnail.title, highlight: board.thumbnail.highlight, position: board.thumbnail.position, sub: board.thumbnail.sub, clip: coverScene?.clip ?? 1, at: coverScene ? (coverScene.in + coverScene.out) / 2 : 1 },
+      beats,
+      visuals: board.visuals,
+      warnings: [],
+    };
+
+    // 4. 음성 → 시간표 → 렌더. 컷 · 그래픽 · 자막이 낱말 시각에 맞춰진다. 자동 콘텐츠 설정만 넘긴다
+    kit = await renderKitEdit({
+      workDir: join(workDir, "kit"),
+      service: input.dryRun ? null : service,
+      readService: service,
+      planId,
+      accountName: account,
+      liveVoice: false,
+      facts,
+      rules,
+      clips,
+      source: "auto",
+      reusePlan: plan,
+      // 바꾸고 싶은 점 한 칸에 말투 · 분위기 · 영상 스타일이 같이 들어 있어 말투 칸으로 한 번만 넘긴다(같은 글을 두 번 넣지 않는다)
+      tone: concept.autoNotes,
+      voiceId: concept.autoVoiceId,
+      fonts: pickedFonts ? { key_font: pickedFonts.key.name, small_font: pickedFonts.small.name } : undefined,
+      visualPolicy,
+      reviewFinal,
+    });
+    add(kit.tokens);
+  }
 
   const coverTexts = [kit.plan.thumbnail.title.replace(/\n+/g, " "), kit.plan.thumbnail.sub].filter(Boolean);
   const lastBeat = kit.plan.beats.length - 1;
@@ -857,7 +889,7 @@ export async function makeAutoVideo(input: {
     {
       ...script,
       // 근거 점검은 화면에 보이는 표기로 한다
-      beats: kit.plan.beats.map((b, i) => ({ spoken: board!.scenes[i]?.say ?? b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(board!.scenes[i]?.motion ? motionTexts(board!.scenes[i].motion!) : []), ...(i === lastBeat ? coverTexts : [])].join(" "), visual: "" })),
+      beats: kit.plan.beats.map((b, i) => ({ spoken: board!.scenes[i]?.say ?? b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(!lemo?.used && board!.scenes[i]?.motion ? motionTexts(board!.scenes[i].motion!) : []), ...(i === lastBeat ? coverTexts : [])].join(" "), visual: "" })),
     },
     facts,
     rules,
@@ -877,14 +909,15 @@ export async function makeAutoVideo(input: {
     console.warn("  처음 보는 사람 시험 실패:", e instanceof Error ? e.message : e);
   }
   const blocking = finalBlocking(
-    { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...board.scenes.flatMap((s) => (s.motion ? motionTexts(s.motion) : [])), ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
+    { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...(lemo?.used ? [] : board.scenes.flatMap((s) => (s.motion ? motionTexts(s.motion) : []))), ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
     { kind: facts.kind, rules, approvedClaims: facts.approvedClaims, stockStatus: facts.stockStatus, healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions },
   );
   if (!kit.quality?.passed) {
     check.passed = false;
     check.issues.push(...(kit.quality?.attempts.at(-1)?.issues.filter((i) => i.severity === "blocking").map((i) => ({ kind: "edit" as const, detail: `${i.at.toFixed(1)}초 ${i.detail}` })) ?? [{ kind: "edit" as const, detail: "완성본 검수가 완료되지 않았어요" }]));
   }
-  return { kit, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts, script, board, storyboardReviews, phraseNotes: phraseNotes(phrases), knowledge, firstViewer, speechRate };
+  // kitDir: 편집 키트 작업 폴더(시험 결과에 base.mp4 · mix.wav를 남길 때). lemo면 lemo 작업 폴더 아래다
+  return { kit, kitDir: lemo?.used ? join(workDir, "lemo", "kit") : join(workDir, "kit"), engine: (lemo?.used ? "lemo" : "kit") as AutoVideoEngine, lemo, check, blocking, warnings: [...new Set([...warnings, ...kit.warnings])], sources, tokens, facts, script, board, storyboardReviews, phraseNotes: phraseNotes(phrases), knowledge, firstViewer, speechRate };
 }
 
 export class StopError extends Error {}

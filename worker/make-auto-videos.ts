@@ -5,6 +5,7 @@ import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { markArchiveUsed } from "@/lib/auto-video/archive";
+import type { AutoVideoEngine } from "@/lib/auto-video/lemo";
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { scoreHooks } from "@/lib/agents/ko-skills";
 import { BoardOnlyDone, makeAutoVideo, StopError, type RedoRequest, type SavedStoryboard } from "@/lib/auto-video/make";
@@ -22,6 +23,8 @@ import type { Json } from "@/types/database";
 //   같은 칸은 making_since 조건부 UPDATE로 한 실행만 집는다.
 //   참고 내용은 자동 콘텐츠 설정(auto_*)만 읽는다. 직접 촬영의 shoot_* 값은 읽지 않는다.
 //   통과하면 RENDERED. AUTO_VIDEO_PUBLISH=1이고 사람이 볼 경고가 없을 때만 바로 발행 대기열로 간다.
+//   영상 단계는 기본이 lemo 코드 애니메이션(lib/auto-video/lemo.ts, 2026-11-11). 제작 방식 선택이 기존 방식을 고르거나 lemo가 실패하면
+//   사진 · 스톡 컷으로 만든다. 러너 변수 AUTO_VIDEO_ENGINE=kit이면 lemo를 부르지 않고 사진 · 스톡 컷만 쓴다.
 //
 // 옵션: --dry-run (DB에 안 쓰고 결과 파일 위치만 출력) · --plan <id> (그 칸만)
 //       --board-only (--dry-run과 함께: 대본 · 장면표까지만 만들고 영상은 만들지 않는다. --out에 storyboard-review.json)
@@ -41,6 +44,8 @@ async function main() {
   const dryRun = argv.includes("--dry-run");
   const onlyPlan = arg(argv, "--plan");
   const autoPublish = process.env.AUTO_VIDEO_PUBLISH === "1";
+  const engine: AutoVideoEngine = process.env.AUTO_VIDEO_ENGINE === "kit" ? "kit" : "lemo";
+  console.log(`[auto-video] 영상 제작 방식: ${engine === "lemo" ? "lemo 우선(안 되면 사진 · 스톡 컷)" : "사진 · 스톡 컷"}`);
   const service = createServiceClient();
 
   const { data: ruleRows } = await service.from("content_rules").select("id, scope, rule_type, phrase, match_type, reason, suggestion").eq("active", true);
@@ -135,6 +140,7 @@ async function main() {
         rules,
         dryRun,
         workDir,
+        engine,
         // 시험에서만: --board <storyboard-review.json> 으로 저장된 장면표부터 영상을 만든다
         savedBoard: dryRun && arg(argv, "--board") ? JSON.parse(readFileSync(arg(argv, "--board")!, "utf8")).board : undefined,
         boardOnly: dryRun && argv.includes("--board-only"),
@@ -160,6 +166,7 @@ async function main() {
       });
       const { kit, check, blocking } = made;
       const seconds = Math.round((Date.now() - t0) / 1000);
+      console.log(`  제작 방식: ${made.engine}${made.lemo?.choice?.style ? ` (${made.lemo.choice.style})` : ""}${made.lemo?.fallback ? ` — ${made.lemo.fallback}` : ""}`);
       console.log(`  완성 ${kit.seconds.toFixed(1)}초 · ${seconds}초 걸림 · 토큰 입력 ${made.tokens.input} 출력 ${made.tokens.output} · ${kit.loudness} LUFS · 음성 ${kit.usedVoice} · 글자 "${kit.plan.look?.reading ?? ""}"`);
       console.log(`  소재: ${JSON.stringify(made.sources.map((s) => { const x = s as { no: number; kind: string }; return `${x.no}:${x.kind}`; }))}`);
       for (const b of kit.plan.beats) console.log(`  · ${b.tts} | ${b.captions.join(" / ")} | ${b.cuts.map((c) => `${c.clip}:${c.in}-${c.out}`).join(",")}`);
@@ -174,9 +181,9 @@ async function main() {
           copyFileSync(kit.final, join(out, `${plan.id}.mp4`));
           copyFileSync(kit.cover, join(out, `${plan.id}.jpg`));
           // 다음 자막 보정은 음성/소재를 다시 생성하지 않고 재현할 수 있게 남긴다. 구매한 글꼴 파일은 포함하지 않는다.
-          copyFileSync(join(workDir, "kit", "project", "assets", "base.mp4"), join(out, `${plan.id}-base.mp4`));
-          copyFileSync(join(workDir, "kit", "project", "assets", "mix.wav"), join(out, `${plan.id}-mix.wav`));
-          writeFileSync(join(out, `${plan.id}.json`), JSON.stringify({ knowledge: made.knowledge, firstViewer: made.firstViewer?.answer ?? null, firstViewerGaps: made.firstViewer?.gaps ?? null, speechRate: made.speechRate, board: made.board, plan: kit.plan, timeline: kit.timeline, sources: made.sources, warnings: made.warnings, check, blocking, quality: kit.quality, captionMode: kit.captionMode, storyboardReviews: made.storyboardReviews, phraseNotes: made.phraseNotes, voice: { used: kit.usedVoice, id: concept.autoVoiceId, model: "s2.1-pro-free" } }, null, 1));
+          copyFileSync(join(made.kitDir, "project", "assets", "base.mp4"), join(out, `${plan.id}-base.mp4`));
+          copyFileSync(join(made.kitDir, "project", "assets", "mix.wav"), join(out, `${plan.id}-mix.wav`));
+          writeFileSync(join(out, `${plan.id}.json`), JSON.stringify({ engine: made.engine, lemo: made.lemo, knowledge: made.knowledge, firstViewer: made.firstViewer?.answer ?? null, firstViewerGaps: made.firstViewer?.gaps ?? null, speechRate: made.speechRate, board: made.board, plan: kit.plan, timeline: kit.timeline, sources: made.sources, warnings: made.warnings, check, blocking, quality: kit.quality, captionMode: kit.captionMode, storyboardReviews: made.storyboardReviews, phraseNotes: made.phraseNotes, voice: { used: kit.usedVoice, id: concept.autoVoiceId, model: "s2.1-pro-free" } }, null, 1));
           console.log(`  (dry-run) 결과: ${out}`);
         }
         if (!check.passed || blocking.length || !kit.quality?.passed) process.exitCode = 1;
@@ -202,6 +209,8 @@ async function main() {
         plan: kit.plan,
         sounds: kit.sounds,
         loudness: kit.loudness,
+        engine: made.engine,
+        ...(made.lemo ? { lemo: made.lemo } : {}),
         madeAt: new Date().toISOString(),
       };
       const passed = check.passed && blocking.length === 0;
@@ -239,9 +248,9 @@ async function main() {
           agent: "edit",
           plan_id: plan.id,
           status: "success",
-          model: "auto-video",
+          model: made.engine === "lemo" ? "auto-video:lemo" : "auto-video",
           input: { product: made.facts.name, clips: made.sources.length } as Json,
-          output: { seconds: kit.seconds, took: seconds, look: kit.plan.look ?? null, sources: made.sources, warnings: made.warnings, passed } as unknown as Json,
+          output: { engine: made.engine, lemo: made.lemo ?? null, seconds: kit.seconds, took: seconds, look: kit.plan.look ?? null, sources: made.sources, warnings: made.warnings, passed } as unknown as Json,
           tokens_input: made.tokens.input,
           tokens_output: made.tokens.output,
           finished_at: new Date().toISOString(),

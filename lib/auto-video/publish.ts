@@ -24,6 +24,9 @@ export interface AutoVideo {
   plan?: unknown;
   sounds?: unknown;
   loudness?: number | null;
+  // 영상 단계 제작 방식(lemo 코드 애니메이션 · 사진 · 스톡 컷)과 lemo 선택 · 사용량 기록
+  engine?: "lemo" | "kit";
+  lemo?: unknown;
   madeAt?: string;
 }
 
