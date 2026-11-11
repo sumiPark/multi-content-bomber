@@ -2,16 +2,23 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Check, ExternalLink, FileText, RotateCcw, SkipForward } from "lucide-react";
+import { Check, ExternalLink, FileText, RotateCcw, Search, SkipForward } from "lucide-react";
 import {
+  approveVideoAction,
   confirmAllAction,
   confirmPlanAction,
+  pickProductAction,
+  remakeVideoAction,
+  searchAutoProductsAction,
   skipPlanAction,
-  type ConfirmResult, approveVideoAction, remakeVideoAction } from "@/app/(dashboard)/auto/confirm/actions";
+  type AutoProductHit,
+  type ConfirmResult,
+} from "@/app/(dashboard)/auto/confirm/actions";
 import { won } from "@/components/products/labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
@@ -33,11 +40,15 @@ export interface PlanCardData {
   id: string;
   slotTime: string;
   status: string;
+  // 지금 상품에 대한 AI 이유 (처음 제안이면 그 이유, 대안으로 바꿨으면 그 대안의 이유)
   reason: string | null;
+  // 사람이 찾아 넣은 상품 — AI 이유가 없다
+  humanPicked: boolean;
   note: string | null;
   productChanged: boolean;
   product: ProductBrief | null;
-  alternatives: { reason: string; product: ProductBrief }[];
+  // first = AI가 처음 제안한 상품(바꾼 뒤 되돌리기용)
+  alternatives: { reason: string; first: boolean; product: ProductBrief }[];
   // 서버에서 계산 — 렌더 중 시계를 읽으면 서버 · 클라이언트 결과가 갈린다
   pastSlot: boolean;
   // 대본 워커 오류(OpenAI 한도 등)
@@ -118,7 +129,11 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
       ) : (
         <p className="text-sm text-muted-foreground">상품 없음</p>
       )}
-      {plan.reason && <p className="rounded-md bg-muted/40 px-3 py-2 text-xs leading-relaxed">AI 이유: {plan.reason}</p>}
+      {plan.reason ? (
+        <p className="rounded-md bg-muted/40 px-3 py-2 text-xs leading-relaxed">AI 이유: {plan.reason}</p>
+      ) : (
+        plan.humanPicked && <p className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">사람이 직접 고른 상품이에요.</p>
+      )}
       {plan.note && <p className="text-xs text-muted-foreground">{plan.note}</p>}
       {plan.error && (
         <p className="rounded-md border border-risk/30 bg-risk-soft px-3 py-2 text-xs text-risk">만드는 중에 오류가 났어요. 다음 실행(1시간 안)에 다시 시도해요. ({plan.error.slice(0, 120)})</p>
@@ -258,21 +273,28 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
         <div className="space-y-1.5">
           <p className="text-xs font-semibold text-muted-foreground">다른 후보로 바꾸기</p>
           {plan.alternatives.map((a) => (
-            <div key={a.product.id} className="flex items-center gap-2 rounded-md border px-2 py-1.5">
-              <ProductRow product={a.product} compact />
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto shrink-0"
-                disabled={isPending}
-                onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: a.product.id }), "상품을 바꿔 확인했어요.")}
-              >
-                이걸로 바꾸기
-              </Button>
+            <div key={a.product.id} className="space-y-1 rounded-md border px-2 py-1.5">
+              <div className="flex items-center gap-2">
+                <ProductRow product={a.product} compact />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto shrink-0"
+                  disabled={isPending}
+                  onClick={() => run(() => confirmPlanAction({ planId: plan.id, productId: a.product.id }), "상품을 바꿔 확인했어요.")}
+                >
+                  이걸로 바꾸기
+                </Button>
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {a.first && <Badge variant="outline" className="mr-1">AI 처음 제안</Badge>}
+                {a.reason}
+              </p>
             </div>
           ))}
         </div>
       )}
+      {editable && <ProductPicker planId={plan.id} disabled={isPending} run={run} />}
       {error && <p className="text-xs text-risk">{error}</p>}
       <ConfirmDialog
         open={askSkip}
@@ -286,6 +308,107 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
         }}
       >
         <p>건너뛰면 되돌릴 수 없어요. 이 칸은 그날 비게 돼요.</p>
+      </ConfirmDialog>
+    </div>
+  );
+}
+
+/**
+ * 상품 직접 찾아 넣기 — 이 계정이 쓰는 몰 · 종류에서 판매 중 · 분석 완료 상품만 나온다.
+ * 최근에 쓴 상품 · 다른 계정이 진행 중인 상품은 서버가 경고를 돌려주고, 확인하면 그대로 넣는다(직접 촬영과 같다).
+ */
+function ProductPicker({ planId, disabled, run }: { planId: string; disabled: boolean; run: ReturnType<typeof useRun>["run"] }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<AutoProductHit[] | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searching, startSearch] = useTransition();
+  const [warn, setWarn] = useState<{ hit: AutoProductHit; message: string } | null>(null);
+
+  const search = () => {
+    if (!query.trim()) return;
+    startSearch(async () => {
+      setSearchError(null);
+      const r = await searchAutoProductsAction({ planId, query: query.trim() });
+      if (r.ok) setHits(r.hits);
+      else {
+        setHits(null);
+        setSearchError(r.error);
+      }
+    });
+  };
+
+  const pick = (hit: AutoProductHit, force: boolean) =>
+    run(async () => {
+      const r = await pickProductAction({ planId, productId: hit.id, force });
+      // 겹침 경고는 오류로 보이지 않고 확인 창으로 묻는다
+      if (!r.ok && r.warning) {
+        setWarn({ hit, message: r.error });
+        return { ok: true };
+      }
+      if (r.ok) {
+        toast("고른 상품으로 확인했어요. AI가 대본을 쓸 거예요.");
+        setOpen(false);
+        setHits(null);
+        setQuery("");
+      }
+      return r;
+    });
+
+  if (!open) {
+    return (
+      <Button size="sm" variant="ghost" disabled={disabled} onClick={() => setOpen(true)}>
+        <Search className="size-4" /> 다른 상품 직접 찾기
+      </Button>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-md border px-3 py-2">
+      <p className="text-xs text-muted-foreground">이 계정이 쓰는 상품 종류 중 판매 중이고 상세페이지 분석이 끝난 상품만 나와요.</p>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          search();
+        }}
+      >
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} maxLength={50} placeholder="상품 이름" autoFocus />
+        <Button type="submit" size="sm" variant="outline" disabled={searching || !query.trim()}>
+          찾기
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          닫기
+        </Button>
+      </form>
+      {searchError && <p className="text-xs text-risk">{searchError}</p>}
+      {hits && hits.length === 0 && <p className="text-xs text-muted-foreground">맞는 상품이 없어요.</p>}
+      {hits && hits.length > 0 && (
+        <ul className="space-y-1.5">
+          {hits.map((h) => (
+            <li key={h.id} className="flex items-center gap-2 rounded-md border px-2 py-1.5">
+              <ProductRow product={{ ...h, url: "", stock: "available" }} compact />
+              <Button size="sm" variant="outline" className="ml-auto shrink-0" disabled={disabled} onClick={() => pick(h, false)}>
+                이걸로 확인
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <ConfirmDialog
+        open={!!warn}
+        title="그래도 이 상품으로 할까요?"
+        confirmLabel="이 상품으로 확인"
+        pending={disabled}
+        onClose={() => setWarn(null)}
+        onConfirm={() => {
+          const w = warn;
+          setWarn(null);
+          if (w) pick(w.hit, true);
+        }}
+      >
+        <p>
+          {warn?.hit.name} — {warn?.message}
+        </p>
       </ConfirmDialog>
     </div>
   );
@@ -369,7 +492,8 @@ export function ProductRow({ product, compact }: { product: ProductBrief; compac
   );
 }
 
-export function ConfirmAllButton({ slotDate, count }: { slotDate: string; count: number }) {
+/** 그날 확인 대기 칸 모두 확인. 계정 탭에서는 그 계정 칸만 확인한다 */
+export function ConfirmAllButton({ slotDate, count, accountId, accountName }: { slotDate: string; count: number; accountId: string | null; accountName: string | null }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -380,14 +504,14 @@ export function ConfirmAllButton({ slotDate, count }: { slotDate: string; count:
         onClick={() =>
           startTransition(async () => {
             setError(null);
-            const r = await confirmAllAction({ slotDate });
+            const r = await confirmAllAction({ slotDate, ...(accountId ? { accountId } : {}) });
             if (!r.ok) return setError(r.error);
             toast(`${r.count ?? 0}개를 확인했어요.${r.soldOut ? ` ${r.soldOut}개는 판매 중이 아니라 남겨 뒀어요.` : ""}`);
             router.refresh();
           })
         }
       >
-        <Check className="size-4" /> {count}개 모두 그대로 확인
+        <Check className="size-4" /> {accountName ? `@${accountName} ` : ""}{count}개 모두 그대로 확인
       </Button>
       {error && <p className="text-xs text-risk">{error}</p>}
     </div>
