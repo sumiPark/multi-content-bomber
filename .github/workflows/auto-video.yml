@@ -63,15 +63,28 @@ jobs:
           fi
           ffmpeg -version
           ffprobe -version
-      # lemo 렌더는 apt의 ffmpeg 6.1로는 오래돼 정적 빌드(7.1)를 받는다(lemo-video.yml과 같다). lemo가 실패해 사진 · 스톡 컷으로 넘어가도 같은 ffmpeg를 쓴다
-      - name: Install ffmpeg 7
+      # lemo 렌더는 apt의 ffmpeg 6.1로는 오래돼 정적 빌드(8.1, 없으면 9.0)를 받는다(lemo-video.yml과 같다). lemo가 실패해 사진 · 스톡 컷으로 넘어가도 같은 ffmpeg를 쓴다
+      # BtbN latest 릴리스는 오래된 판을 내린다(2026-11-11 n7.1이 404로 영상 제작 전체가 멈췄다). 다 못 받으면 apt ffmpeg로라도 영상은 만든다
+      - name: Install ffmpeg 8
         if: ${{ vars.AUTO_VIDEO_ENGINE != 'kit' }}
         run: |
           mkdir -p "$RUNNER_TEMP/ffmpeg"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.tar.xz" https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz
-          tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg" --strip-components=1
-          echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
-          "$RUNNER_TEMP/ffmpeg/bin/ffmpeg" -version | head -1
+          ok=""
+          for v in 8.1 9.0; do
+            if curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n$v-latest-linux64-gpl-$v.tar.xz" \
+              && tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg" --strip-components=1; then ok=1; break; fi
+          done
+          if [ -n "$ok" ]; then
+            echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
+            "$RUNNER_TEMP/ffmpeg/bin/ffmpeg" -version | head -1
+          else
+            echo "::warning::ffmpeg 정적 빌드를 못 받아 apt ffmpeg를 쓴다(lemo는 사진 · 스톡 컷으로 넘어갈 수 있다)"
+            if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+              timeout 120s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq
+              timeout 120s sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq --no-install-recommends ffmpeg
+            fi
+            ffmpeg -version | head -1
+          fi
       # 준비가 실패해도 영상은 만든다 — lemo가 렌더 환경 점검에서 멈추고 사진 · 스톡 컷으로 넘어간다
       - name: Prepare lemo-opuscar
         if: ${{ vars.AUTO_VIDEO_ENGINE != 'kit' }}

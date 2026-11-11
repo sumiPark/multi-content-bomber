@@ -40,12 +40,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # apt의 ffmpeg 6.1은 lemo 렌더에 너무 오래돼 정적 빌드(7.1)를 받는다
-      - name: Install ffmpeg 7
+      # apt의 ffmpeg 6.1은 lemo 렌더에 너무 오래돼 정적 빌드(8.1, 없으면 9.0)를 받는다. BtbN latest는 오래된 판을 내린다(2026-11-11 n7.1 404)
+      - name: Install ffmpeg 8
         run: |
           mkdir -p "$RUNNER_TEMP/ffmpeg"
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.tar.xz" https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n7.1-latest-linux64-gpl-7.1.tar.xz
-          tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg" --strip-components=1
+          ok=""
+          for v in 8.1 9.0; do
+            if curl -fsSL --retry 3 -o "$RUNNER_TEMP/ffmpeg.tar.xz" "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n$v-latest-linux64-gpl-$v.tar.xz" \
+              && tar -xJf "$RUNNER_TEMP/ffmpeg.tar.xz" -C "$RUNNER_TEMP/ffmpeg" --strip-components=1; then ok=1; break; fi
+          done
+          [ -n "$ok" ] || { echo "ffmpeg 정적 빌드를 받지 못했다"; exit 1; }
           echo "$RUNNER_TEMP/ffmpeg/bin" >> "$GITHUB_PATH"
           "$RUNNER_TEMP/ffmpeg/bin/ffmpeg" -version | head -1
           "$RUNNER_TEMP/ffmpeg/bin/ffprobe" -version | head -1
