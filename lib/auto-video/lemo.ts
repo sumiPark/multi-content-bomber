@@ -12,7 +12,7 @@ import type { KitInput, KitResult } from "@/lib/shoot/video-kit/pipeline";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // AI 자동 영상의 기본 제작 경로: 확정한 장면표의 말 · 후킹으로 lemo 코드 애니메이션을 만든다(lib/lemo/run.ts).
-// 제작 방식 선택이 기존 방식(auto-video)을 고르거나 lemo가 실패하면 kit 없이 돌아오고, 호출자(make.ts)가 사진 · 스톡 컷으로 만든다.
+// 제작 방식 선택은 기존 방식(auto-video)을 고르지 않는다(lemo로 정해 둠). lemo가 실패하면 kit 없이 돌아오고, 호출자(make.ts)가 경고와 함께 사진 · 스톡 컷으로 만든다.
 // 러너 변수 AUTO_VIDEO_ENGINE=kit이면 이 경로를 아예 부르지 않는다(worker/make-auto-videos.ts).
 
 type Service = ReturnType<typeof createServiceClient>;

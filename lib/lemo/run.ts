@@ -19,7 +19,7 @@ import { existingDuration, voiceFromExisting, voiceFromScript } from "./voice";
 // lemo 한 편 만들기 — worker/lemo-video.ts(수동 실행)와 worker/make-auto-videos.ts(AI 자동 영상 기본 경로)가 함께 쓴다.
 //   선택(select) → 캐릭터(characters) → 음성 확정(voice) → 장면 계획(direct) → 코드 구성(project) → 렌더(render)
 //   → 자동 검사(checks) → 합성(compose: 기존 편집 키트, 모션 자막 스킬 필수) → 결과
-// 제작 방식 선택이 lemo-code가 아니면 final 없이 돌아온다(호출자가 기존 경로로 만든다).
+// 제작 방식 선택은 lemo-code로 정해져 있다(select.ts lemoOnly). lemo가 실패하면 throw하고, AI 자동 영상 호출자가 경고와 함께 기존 경로로 만든다.
 
 export const FPS = 30;
 export const SIZE = { w: 1080, h: 1920 };

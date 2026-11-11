@@ -8,7 +8,8 @@ import { BACKENDS, productionChoiceSchema, type AccountContext, type AiUsage, ty
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import type OpenAI from "openai";
 
-// 제작 방식 선택 — 규칙으로 좁힌 스타일 후보(catalog.ts)와 기존 AI 자동 영상(auto-video) 중에서 AI가 하나를 고르고 이유를 남긴다.
+// 제작 방식 선택 — 기본은 lemo-code로 정해 두고 스타일 후보(catalog.ts, 구현된 스타일 전부 포함) 중에서 AI가 스타일 · 배역을 고르고 이유를 남긴다.
+// 기존 AI 자동 영상(auto-video)은 allowAutoVideo일 때만 후보가 된다(2026-11-11 사용자 결정: AI 자동 영상은 lemo로).
 // 외부 영상 생성 모델은 이 프로젝트에 연결된 경로가 없어 후보로 만들지 않는다(contract.ts BACKENDS).
 // 캐릭터 라이브러리는 호출자가 그 계정 것만 넘긴다는 전제다. 다른 계정 캐릭터가 섞여 들어오면 바로 throw한다.
 
@@ -118,6 +119,27 @@ export function librarySummary(library: CharacterSpec[]): string {
 
 // ── 제작 방식 선택 ────────────────────────────────────────────────────────────
 
+// lemo로만 만들 때(기본 — 2026-11-11 사용자 결정 "AI 자동 영상은 스톡이 아니라 lemo로"): 방식은 고르지 않고 스타일 · 배역만 고른다.
+const SYSTEM_LEMO_ONLY = `너는 인스타 릴스 제작 감독이다. 이 영상 한 편은 lemo 코드 애니메이션으로 만든다(정해진 방식이다). 어떤 스타일 · 배역으로 만들지 고른다.
+
+lemo-code: 코드로 그리는 애니메이션. 계정 라이브러리 캐릭터나 새로 만드는 캐릭터가 표정 · 동작으로 연기한다. 설명형 대본이라도 캐릭터가 설명하고 반응하는 장면으로 풀어 만든다.
+
+따질 기준(이 순서로):
+1. 계정 분위기와 시청자 — 계정 설정에 적힌 방향을 참고한다.
+2. 대본 핵심과 흐름 — 캐릭터 이야기인지, 상식 · 원리 설명인지, 순서 안내인지. 처음 3초와 꺾이는 지점이 화면으로 무엇이 되어야 하는지.
+3. 필요한 표정 · 동작 · 설명 방식 — 어떤 배역이 어떻게 연기하면 대본이 사는지.
+4. 시각 일관성 — 같은 계정 영상끼리 이어지는 인상, 라이브러리 캐릭터 재사용.
+5. 예상 비용 — 앞 기준이 비슷할 때만 가른다.
+
+규칙:
+- backend는 반드시 lemo-code다.
+- style은 selectable=true 후보 중 대본에 가장 맞는 것을 고른다. 점수가 낮아도 selectable=true면 고를 수 있다. selectable=false 후보가 더 맞다고 판단하면 rejected에 "엔진 작업 필요"와 이유를 적는다.
+- rejected에는 고르지 않은 후보 스타일 전부(slug 그대로)를 넣고 이유를 쓴다.
+- characters: 대본에 필요한 배역마다 하나(주인공 · 상대역 · 무리 등). 라이브러리 캐릭터가 그 배역과 대본 분위기에 맞으면 reuse에 id를 쓰고, 맞지 않거나 없으면 null(새로 만든다). 맞는 캐릭터가 있으면 재사용을 우선한다. 사람 중심 계정이면 사람 배역을 우선 검토한다.
+- 이유는 짧은 문장으로, 대본 · 계정 설정 · 상품 자료에 있는 근거로 쓴다.
+
+${CLAIM_RULES}`;
+
 const SYSTEM = `너는 인스타 릴스 제작 감독이다. 이 영상 한 편을 어떤 방식으로 만들지 고른다.
 
 방식:
@@ -169,8 +191,9 @@ ${styleNotes(c.slug)}`,
     .join("\n\n");
 }
 
-function choiceProblems(ai: AiChoice, cands: StyleCandidate[], library: CharacterSpec[]): string[] {
+function choiceProblems(ai: AiChoice, cands: StyleCandidate[], library: CharacterSpec[], lemoOnly: boolean): string[] {
   const out: string[] = [];
+  if (lemoOnly && ai.backend !== "lemo-code") out.push("이 영상은 lemo-code로 만들기로 정해져 있어요. backend는 lemo-code여야 해요");
   if (ai.backend === "lemo-code") {
     const c = cands.find((x) => x.slug === ai.style);
     if (!ai.style) out.push("lemo-code를 골랐는데 style이 비어 있어요");
@@ -186,13 +209,15 @@ function choiceProblems(ai: AiChoice, cands: StyleCandidate[], library: Characte
   const rejected = new Set(ai.rejected.map((r) => r.option));
   const missing = cands.filter((c) => c.slug !== ai.style && !rejected.has(c.slug)).map((c) => c.slug);
   const otherBackend = BACKENDS.find((b) => b !== ai.backend);
-  if (otherBackend && !rejected.has(otherBackend)) missing.push(otherBackend);
+  if (!lemoOnly && otherBackend && !rejected.has(otherBackend)) missing.push(otherBackend);
   if (missing.length) out.push(`rejected에 이유가 빠진 선택지: ${missing.join(", ")}`);
   return out;
 }
 
 /**
- * 제작 방식을 고른다. 규칙으로 좁힌 후보(3~5개)와 auto-video 사이에서 AI가 고르고, 형식 · 후보 위반은 한 번 되먹여 다시 고르게 한다.
+ * 제작 방식을 고른다. 형식 · 후보 위반은 한 번 되먹여 다시 고르게 한다.
+ * - 기본(lemoOnly): lemo-code로 정해져 있고, 구현된 스타일을 모두 넣은 후보에서 스타일 · 배역만 고른다(2026-11-11 사용자 결정).
+ * - allowAutoVideo: 규칙으로 좁힌 후보와 기존 AI 자동 영상(auto-video) 사이에서 고른다(예전 동작 — 지금 부르는 곳은 없다).
  * library는 그 계정 캐릭터만 들어와야 한다(호출자: loadAccountLibrary(account.accountKey)). 다른 계정 것이 있으면 throw.
  */
 export async function chooseProduction(input: {
@@ -201,12 +226,15 @@ export async function chooseProduction(input: {
   script: string[];
   library: CharacterSpec[];
   sources: { photos: number; gifs: number; archive: number };
+  allowAutoVideo?: boolean;
 }): Promise<{ choice: ProductionChoice; candidates: StyleCandidate[]; usage: AiUsage }> {
   assertAccountLibrary(input.account.accountKey, input.library, "chooseProduction");
   if (!input.script.length) throw new Error("chooseProduction: 대본이 비어 있어요");
+  const lemoOnly = !input.allowAutoVideo;
 
   const ctx = { account: input.account, facts: input.facts, script: input.script, sources: input.sources, library: input.library };
-  const candidates = shortlistStyles(ctx);
+  const candidates = shortlistStyles(ctx, { lemoOnly });
+  if (lemoOnly && !candidates.some((c) => c.selectable)) throw new Error("chooseProduction: 엔진에 구현된 lemo 스타일이 없어요(lib/lemo/engine/manifest.json)");
   const needs = analyzeNeeds(ctx);
   const needLine = (Object.entries(needs.kinds) as [keyof typeof STORY_KIND_LABEL, number][])
     .filter(([, v]) => v >= 0.3)
@@ -230,7 +258,7 @@ ${librarySummary(input.library)}
 ${candidateBlock(candidates)}`;
 
   const messages: Message[] = [
-    { role: "system", content: SYSTEM },
+    { role: "system", content: lemoOnly ? SYSTEM_LEMO_ONLY : SYSTEM },
     { role: "user", content: user },
   ];
   const usages: AiUsage[] = [];
@@ -240,7 +268,7 @@ ${candidateBlock(candidates)}`;
     const r = await lemoParse({ stage: "lemo.select", schema: aiChoiceSchema, name: "production_choice", messages, maxTokens: 2500 });
     usages.push(r.usage);
     ai = r.parsed;
-    problems = choiceProblems(ai, candidates, input.library);
+    problems = choiceProblems(ai, candidates, input.library, lemoOnly);
     if (!problems.length) break;
     messages.push({ role: "assistant", content: r.content }, { role: "user", content: `이 답에 문제가 있어요. 고쳐서 다시 답해 주세요:\n${problems.map((p) => `- ${p}`).join("\n")}` });
   }
@@ -252,7 +280,7 @@ ${candidateBlock(candidates)}`;
   const rejected = [...ai.rejected];
   const have = new Set(rejected.map((r) => r.option));
   for (const c of candidates) if (c.slug !== ai.style && !have.has(c.slug)) rejected.push({ option: c.slug, why: `AI가 이유를 남기지 않음(규칙 점수 ${c.score}${c.selectable ? "" : ", 선택 불가"})` });
-  for (const b of BACKENDS) if (b !== ai.backend && !have.has(b)) rejected.push({ option: b, why: "AI가 이유를 남기지 않음" });
+  for (const b of BACKENDS) if (b !== ai.backend && !have.has(b)) rejected.push({ option: b, why: lemoOnly ? "lemo로 만들기로 정해져 있어 고르지 않음" : "AI가 이유를 남기지 않음" });
 
   const profile = ai.style ? styleProfile(ai.style) : undefined;
   const newChars = ai.characters.filter((c) => !c.reuse).length;

@@ -296,8 +296,30 @@ function scoreStyle(p: StyleProfile, needs: ScriptNeeds, preferred: Set<string>)
  * - 기준 점수를 넘은 스타일이 3개보다 적으면 다음 점수로 채우되 "기준 점수 미달"을 단다.
  * - 엔진 모듈이 없는 스타일도 후보로 보이되 selectable=false와 막는 이유를 단다.
  *   기준을 넘은 구현 스타일이 목록에 없으면 마지막 자리를 그것으로 바꾼다(맞지 않는 구현 스타일은 넣지 않는다).
+ * - lemoOnly(기본 — AI 자동 영상은 lemo로 만든다, 2026-11-11 사용자 결정): 구현된 스타일은 기준 점수에 못 미쳐도
+ *   전부 목록에 넣고 고를 수 있게 둔다. 기존 사진 · 스톡 방식으로 넘기지 않기 위해서다. 점수 미달은 막는 점이 아니라 맞는 점 옆에 사실대로 적는다.
  */
-export function shortlistStyles(ctx: StyleContext): StyleCandidate[] {
+export function shortlistStyles(ctx: StyleContext, opts: { lemoOnly?: boolean } = {}): StyleCandidate[] {
+  const list = shortlistByScore(ctx);
+  if (opts.lemoOnly === false) return list;
+  const below = `기준 점수(${PASS_SCORE}) 미달`;
+  for (const c of [...list, ...shortlistByScore(ctx, true)]) {
+    if (!c.implemented) continue;
+    const have = list.find((x) => x.slug === c.slug);
+    const target = have ?? c;
+    if (!have) list.push(target);
+    if (!target.selectable) {
+      target.selectable = true;
+      target.blockers = target.blockers.filter((b) => !b.startsWith(below));
+    }
+    if (target.score < PASS_SCORE && !target.reasons.some((r) => r.startsWith(below))) {
+      target.reasons.push(`${below} — lemo로 만들기로 해서 구현된 스타일은 늘 고를 수 있음`);
+    }
+  }
+  return list;
+}
+
+function shortlistByScore(ctx: StyleContext, all = false): StyleCandidate[] {
   const needs = analyzeNeeds(ctx);
   const preferred = new Set(ctx.account.preferredStyles);
   const impl = implementedSet();
@@ -322,6 +344,7 @@ export function shortlistStyles(ctx: StyleContext): StyleCandidate[] {
     return c;
   });
   scored.sort((a, b) => (Math.abs(a.score - b.score) < 0.25 ? COST_ORDER[a.cost] - COST_ORDER[b.cost] : b.score - a.score));
+  if (all) return scored;
 
   const passed = scored.filter((c) => c.score >= PASS_SCORE);
   const list = passed.slice(0, 5);

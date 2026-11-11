@@ -1,6 +1,6 @@
 # lemo 제작 경로 (코드 기반 애니메이션)
 
-**AI 자동 영상의 기본 영상 단계다(2026-11-11).** `lib/auto-video/make.ts`가 장면표를 저장한 뒤 `lib/auto-video/lemo.ts` → `run.ts`로 먼저 만들고, 제작 방식 선택(select.ts)이 기존 방식을 고르거나 lemo가 실패하면 사진 · 스톡 컷으로 만든다(실패는 경고로 남아 자동 발행을 멈춘다). 러너 변수 `AUTO_VIDEO_ENGINE=kit`이면 lemo를 부르지 않는다. 수동 실행(`worker/lemo-video.ts`, `lemo-video.yml`)도 같은 `run.ts`를 쓴다.
+**AI 자동 영상의 기본 영상 단계다(2026-11-11).** `lib/auto-video/make.ts`가 장면표를 저장한 뒤 `lib/auto-video/lemo.ts` → `run.ts`로 먼저 만들고, 제작 방식 선택(select.ts)은 기존 방식을 고르지 않고 구현된 lemo 스타일 중에서만 고른다(사용자 결정 2026-11-11 — 설명형 대본도 lemo). lemo가 실패할 때만 사진 · 스톡 컷으로 만든다(실패는 경고로 남아 자동 발행을 멈춘다). 러너 변수 `AUTO_VIDEO_ENGINE=kit`이면 lemo를 부르지 않는다. 수동 실행(`worker/lemo-video.ts`, `lemo-video.yml`)도 같은 `run.ts`를 쓴다.
 
 ## 역할 나누기
 
