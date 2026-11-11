@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CalendarCheck } from "lucide-react";
+import { Bell, CalendarCheck, Clock, SkipForward, Upload } from "lucide-react";
 import { ConfirmAllButton, PlanCard, type PlanCardData } from "@/components/auto/plan-card";
+import { AccountTabs } from "@/components/shoot/account-tabs";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { usedEvidence, type VideoKnowledge } from "@/lib/agents/knowledge";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
@@ -79,16 +79,20 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   // 안내 문구의 칸 시각 — 자동 콘텐츠 설정에서 바뀐다
   const times = await loadTrackTimes(supabase);
 
-  let plansQuery = supabase
+  // 그날 칸은 계정과 상관없이 모두 읽어 계정 탭 숫자를 내고, 계정을 골랐으면 그 계정 칸만 보여 준다
+  const { data: dayPlans } = await supabase
     .from("content_plans")
     .select("id, social_account_id, slot_time, status, product_id, proposal, product_changed, note, error, script, check_result, video, board_at:storyboard->>writtenAt, board_scenes:storyboard->board->scenes, board_knowledge:storyboard->knowledge, publish_jobs(status), social_accounts(display_name)")
     .eq("slot_date", slotDate)
     .eq("track", "B")
     .order("slot_time", { ascending: true });
-  if (account) plansQuery = plansQuery.eq("social_account_id", account);
-  const { data: plans } = await plansQuery;
   // 탭에 칸 설정이 없어진 계정이라도 그날 칸이 있으면 보인다
-  for (const p of plans ?? []) if (!accountTabs.has(p.social_account_id)) accountTabs.set(p.social_account_id, p.social_accounts?.display_name ?? "(이름 없음)");
+  const perAccount = new Map<string, number>();
+  for (const p of dayPlans ?? []) {
+    if (!accountTabs.has(p.social_account_id)) accountTabs.set(p.social_account_id, p.social_accounts?.display_name ?? "(이름 없음)");
+    perAccount.set(p.social_account_id, (perAccount.get(p.social_account_id) ?? 0) + 1);
+  }
+  const plans = account ? (dayPlans ?? []).filter((p) => p.social_account_id === account) : (dayPlans ?? []);
 
   const productIds = new Set<string>();
   for (const p of plans ?? []) {
@@ -179,57 +183,105 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
   }
 
   // 올릴 시각 전인 제안만 — 시각이 지나면 하나씩도, 모두도 확인할 수 없다
-  const proposed = (plans ?? []).filter(
-    (p) => p.status === "PROPOSED" && !isPastSlot(slotDate, p.slot_time as string),
-  ).length;
+  const proposed = plans.filter((p) => p.status === "PROPOSED" && !isPastSlot(slotDate, p.slot_time as string)).length;
+  // 숫자 카드 — 사람 차례(상품 확인 · 완성본 확인)와 멈춘 칸이 먼저 읽히게
+  const count = (fn: (p: (typeof plans)[number]) => boolean) => plans.filter(fn).length;
+  const jobOf = (p: (typeof plans)[number]) => p.publish_jobs?.status ?? null;
+  const summary: { label: string; value: number; tone: "turn" | "risk" | "plain"; foot: string }[] = [
+    { label: "상품 확인", value: proposed, tone: "turn", foot: proposed ? "올릴 시각 전에 확인해 주세요" : "없어요" },
+    { label: "완성본 확인", value: count((p) => p.status === "RENDERED"), tone: "turn", foot: "보고 올리거나 다시 만들어요" },
+    { label: "멈춤 · 오류", value: count((p) => p.status === "BLOCKED" || p.status === "FAILED" || !!p.error || jobOf(p) === "FAILED"), tone: "risk", foot: "점검 · 제작 · 발행" },
+    { label: "만드는 중", value: count((p) => p.status === "CONFIRMED" || p.status === "SCRIPTED"), tone: "plain", foot: "대본 · 영상" },
+    { label: "예약 · 발행", value: count((p) => p.status === "SCHEDULED" || p.status === "PUBLISHED"), tone: "plain", foot: "올릴 시각에 올라가요" },
+  ];
   // 상품 제안은 내일 칸까지만 만든다 — 모레 탭은 늘 비어 있어 뺐다(주소로 다른 날짜를 열면 그 날짜도 탭에 보인다)
   // 오늘 · 내일 + 볼 칸이 남은 날 + 주소로 연 날
-  const dates = [...new Set([...attention.keys(), kstDate(0), tomorrow, slotDate])].sort();
+  const today = kstDate(0);
+  const dates = [...new Set([...attention.keys(), today, tomorrow, slotDate])].sort();
   const href = (date: string, acc: string | null) => `/auto/confirm?date=${date}${acc ? `&account=${acc}` : ""}`;
   const accountName = account ? accountTabs.get(account) : undefined;
 
   return (
-    <main className="space-y-6 p-4 sm:p-6">
+    <main className="space-y-5 p-4 sm:p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-bold tracking-[-0.01em]">AI 자동 업로드</h1>
-            {times.B !== "칸 없음" && <Badge variant="outline">매일 {times.B}</Badge>}
+            {times.B !== "칸 없음" && (
+              <Badge variant="outline">
+                <Clock /> 매일 {times.B}
+              </Badge>
+            )}
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            AI 자동 업로드 칸({times.B})의 <b>상품을 확인</b>하면 AI가 대본 · 캡션을 쓰고 점검해요. 올리기 {CONFIRM_NOTICE_HOURS}시간 전에 알려 드리고, 올릴 시각까지 확인하지 않은 칸은 건너뛰어요. 확인한 칸은 영상 만들기가 늦어져도 끝나는 즉시 올라가요.{" "}
-            <b>확인한 상품은 대본과 영상까지 자동으로 만들어요.</b> 완성본은 여기서 보고 올려요.
-          </p>
+          <p className="max-w-3xl text-sm text-muted-foreground">AI가 고른 상품을 확인하면 대본과 영상을 자동으로 만들어요. 완성본을 보고 올리면 올릴 시각에 올라가요.</p>
+          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            <li className="inline-flex items-center gap-1">
+              <Bell className="size-3.5" /> 올리기 {CONFIRM_NOTICE_HOURS}시간 전에 알려요
+            </li>
+            <li className="inline-flex items-center gap-1">
+              <SkipForward className="size-3.5" /> 올릴 시각까지 확인하지 않은 칸은 건너뛰어요
+            </li>
+            <li className="inline-flex items-center gap-1">
+              <Upload className="size-3.5" /> 확인한 칸은 늦어져도 끝나는 즉시 올라가요
+            </li>
+          </ul>
         </div>
         {canManage && proposed > 0 && <ConfirmAllButton slotDate={slotDate} count={proposed} accountId={account} accountName={accountName ?? null} />}
       </header>
 
-      <div className="space-y-2">
-        <nav className="flex flex-wrap gap-2" aria-label="날짜">
-          {dates.map((d) => (
-            <Link
-              key={d}
-              href={href(d, account)}
-              className={cn(buttonVariants({ variant: d === slotDate ? "default" : "outline", size: "sm" }))}
-            >
-              {d === kstDate(0) ? "오늘" : d === tomorrow ? "내일" : ""} {d.slice(5)}
-              {attention.get(d) ? <Badge variant={d === slotDate ? "secondary" : "default"}>확인 {attention.get(d)}</Badge> : null}
-            </Link>
-          ))}
+      <div className="flex flex-wrap items-center gap-3">
+        <nav className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0" aria-label="날짜">
+          <div className="inline-flex rounded-lg border bg-surface-2 p-1">
+            {dates.map((d) => {
+              const on = d === slotDate;
+              const n = attention.get(d);
+              return (
+                <Link
+                  key={d}
+                  href={href(d, account)}
+                  aria-current={on ? "page" : undefined}
+                  className={cn(
+                    "inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-sm whitespace-nowrap tabular-nums transition-colors",
+                    on ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {d === today ? "오늘" : d === tomorrow ? "내일" : null}
+                  <span className={cn(d === today || d === tomorrow ? "text-xs text-muted-foreground" : undefined)}>{d.slice(5).replace("-", ".")}</span>
+                  {n ? <span className="rounded-full bg-warn px-1.5 text-xs leading-5 font-semibold text-white">확인 {n}</span> : null}
+                </Link>
+              );
+            })}
+          </div>
         </nav>
         {accountTabs.size > 1 && (
-          <nav className="flex flex-wrap gap-1.5" aria-label="계정">
-            <Link href={href(slotDate, null)} className={cn(buttonVariants({ variant: account ? "ghost" : "secondary", size: "sm" }))}>
-              전체
-            </Link>
-            {[...accountTabs].map(([id, name]) => (
-              <Link key={id} href={href(slotDate, id)} className={cn(buttonVariants({ variant: account === id ? "secondary" : "ghost", size: "sm" }))}>
-                @{name}
-              </Link>
-            ))}
-          </nav>
+          <AccountTabs
+            label="계정"
+            active={account ?? "all"}
+            tabs={[
+              { key: "all", label: "전체", count: dayPlans?.length ?? 0, href: href(slotDate, null) },
+              ...[...accountTabs].map(([id, name]) => ({ key: id, label: `@${name}`, count: perAccount.get(id) ?? 0, href: href(slotDate, id) })),
+            ]}
+          />
         )}
       </div>
+
+      {plans.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+          {summary.map((c) => {
+            const hot = c.value > 0 && c.tone !== "plain";
+            return (
+              <div key={c.label} className={cn("min-w-0 rounded-lg border bg-card px-[18px] py-4", hot && c.tone === "risk" && "border-risk", hot && c.tone === "turn" && "border-primary/50")}>
+                <p className="text-xs font-medium text-muted-foreground">{c.label}</p>
+                <p className={cn("mt-1.5 mb-1 text-2xl leading-tight font-bold tracking-[-0.02em] tabular-nums", hot && (c.tone === "risk" ? "text-risk" : "text-primary"))}>
+                  {c.value}
+                  <small className="ml-0.5 text-sm font-semibold text-muted-foreground">칸</small>
+                </p>
+                <p className="truncate text-xs text-muted-foreground">{c.foot}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {byAccount.size === 0 ? (
         <Card className="border-dashed">
@@ -244,8 +296,11 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       ) : (
         [...byAccount.values()].map((g) => (
           <section key={g.name} className="space-y-3">
-            <h2 className="text-base font-semibold">@{g.name}</h2>
-            <div className="grid gap-3 md:grid-cols-2">
+            <h2 className="flex items-baseline gap-2 text-base font-semibold">
+              @{g.name}
+              <span className="text-xs font-medium text-muted-foreground tabular-nums">{g.plans.length}칸</span>
+            </h2>
+            <div className="grid gap-4 2xl:grid-cols-2">
               {g.plans.map((p) => (
                 <PlanCard key={p.id} plan={p} canManage={canManage} />
               ))}
