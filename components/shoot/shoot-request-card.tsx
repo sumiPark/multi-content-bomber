@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
+import { EDIT_RESTART_REASON, type EditRestart } from "@/lib/shoot/edit-sig";
 import { REQUEST_STATUS } from "@/lib/shoot/request-data";
 import { createClient } from "@/lib/supabase/client";
 import { HookFields } from "@/components/shoot/hook-fields";
@@ -31,6 +32,9 @@ export interface ShootRequestCardData {
   brief: string | null;
   // 추천 대본을 쓴 뒤에 하고 싶은 말이 바뀌었는지
   briefChanged: boolean;
+  // 편집 계획이 있는 완성본을 되돌려 다시 올리는 중이면 — 지난 편집에 쓴 하고 싶은 말(예전 완성본은 null)과,
+  // 지금 편집을 시작하면 처음부터 새로 편집하게 되는 이유(지난 계획을 그대로 쓰면 null). 그런 완성본이 없으면 null
+  lastEdit: { brief: string | null; restart: EditRestart | null } | null;
   // 촬영 가이드를 다시 쓰는 중인지
   remaking: boolean;
   hook: { spoken: string; onScreen: string; score: number | null } | null;
@@ -136,7 +140,7 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
           </a>
         </div>
       )}
-      {open ? <BriefField planId={request.planId} brief={request.brief ?? ""} /> : request.brief && <p className="text-xs">하고 싶은 말: {request.brief}</p>}
+      {open ? <BriefField planId={request.planId} brief={request.brief ?? ""} lastEditBrief={request.lastEdit?.brief ?? null} /> : request.brief && <p className="text-xs">하고 싶은 말: {request.brief}</p>}
       {open && <GuideRemake request={request} />}
       {request.hook && (
         <p className="rounded-md bg-muted/40 px-3 py-2 text-sm">
@@ -207,6 +211,12 @@ export function ShootRequestCard({ request, orgId, userId }: { request: ShootReq
       )}
       {open && (
         <div className="flex flex-col items-start gap-1">
+          {/* 완성본을 되돌려 다시 올리는 중 — 편집 서버는 촬영본 · 하고 싶은 말이 지난 편집과 같을 때만 지난 계획을 다시 쓴다 */}
+          {request.lastEdit?.restart && request.clips.length > 0 && (
+            <p className="mb-1 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs font-medium text-warn">
+              {EDIT_RESTART_REASON[request.lastEdit.restart]} 편집을 시작하면 지난 편집을 이어 쓰지 않고 처음부터 새로 편집해요. 완성본 고치기로 고친 내용도 남지 않아요.
+            </p>
+          )}
           <Button disabled={isPending || !request.clips.length} onClick={() => run(() => finishUploadAction({ requestId: request.id }), "다 올렸어요. 자동 편집을 시작해요.")}>
             <CheckCircle2 className="size-4" /> 다 올렸어요 · 편집 시작
           </Button>
@@ -261,11 +271,16 @@ function GuideRemake({ request }: { request: ShootRequestCardData }) {
   );
 }
 
-/** 이 상품으로 하고 싶은 말 — 기획 고를 때 넣은 것을 촬영 중에 고친다. */
-function BriefField({ planId, brief }: { planId: string; brief: string }) {
+/**
+ * 이 상품으로 하고 싶은 말 — 기획 고를 때 넣은 것을 촬영 중에 고친다.
+ * lastEditBrief = 지난 편집에 쓴 말(편집 계획이 있는 완성본을 되돌려 다시 올리는 중일 때만). 이 말과 달라지면
+ * 편집 서버가 지난 계획을 쓰지 않으므로, 저장하기 전에 미리 알린다.
+ */
+function BriefField({ planId, brief, lastEditBrief }: { planId: string; brief: string; lastEditBrief: string | null }) {
   const { isPending, error, run } = useRun();
   const [text, setText] = useState(brief);
   const changed = text.trim() !== brief.trim();
+  const differsFromLastEdit = lastEditBrief !== null && text.trim() !== lastEditBrief;
   return (
     <div className="space-y-1.5 rounded-md border px-3 py-2.5">
       <label className="block space-y-1 text-xs font-semibold">
@@ -279,6 +294,14 @@ function BriefField({ planId, brief }: { planId: string; brief: string }) {
         />
       </label>
       <p className="text-xs text-muted-foreground">뜻은 그대로 두고 AI가 영상 길이 · 계정 말투에 맞게 다듬어요. 광고 문구 규칙에 어긋나거나 상품 정보에 없는 효능은 고쳐 쓰고 경고로 알려요.</p>
+      {lastEditBrief !== null &&
+        (differsFromLastEdit ? (
+          <p className="rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs font-medium text-warn">
+            지난 편집에 쓴 말과 달라요. 이 말로 편집을 시작하면 처음부터 새로 편집하고, 완성본 고치기로 고친 내용도 남지 않아요.
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">이미 편집한 완성본이 있어요. 하고 싶은 말을 바꾸면 처음부터 새로 편집하고, 완성본 고치기로 고친 내용도 남지 않아요.</p>
+        ))}
       {changed && (
         <Button size="sm" variant="outline" disabled={isPending} onClick={() => run(() => saveBriefAction({ planId, brief: text.trim() }), "저장했어요. 편집할 때 이 말을 먼저 따라요.")}>
           <Save className="size-4" /> 저장

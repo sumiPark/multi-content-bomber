@@ -1,4 +1,5 @@
 import type { ShootRequestCardData } from "@/components/shoot/shoot-request-card";
+import { editRestart, lastEditBrief } from "@/lib/shoot/edit-sig";
 import type { Json } from "@/types/database";
 
 // 촬영 · 올리기 목록과 상세가 같이 읽는 값.
@@ -11,8 +12,9 @@ export const REQUEST_STATUS: Record<string, { label: string; variant: "default" 
   FAILED: { label: "편집 실패", variant: "destructive" },
 };
 
+// last_sig = 지난 편집 계획의 서명(edit.kit.clipsSig)만 꺼낸다 — 편집 결과 전체는 크고 이 화면에 필요 없다
 export const REQUEST_SELECT =
-  "id, status, cuts, clips, created_at, error, content_plans!inner(id, status, social_account_id, proposal, human_brief, script, check_result, social_accounts(display_name), products(name, url, represent_image_url))";
+  "id, status, cuts, clips, created_at, error, last_sig:edit->kit->>clipsSig, content_plans!inner(id, status, social_account_id, proposal, human_brief, script, check_result, social_accounts(display_name), products(name, url, represent_image_url))";
 
 type Cut = { no: number; seconds: number; shot: string; how: string; on_screen: string; voice: string; narration?: string; skipped?: boolean };
 type Clip = { cut: number; path: string; name: string; size: number };
@@ -34,6 +36,8 @@ export interface RequestRow {
   cuts: Json;
   clips: Json;
   error: string | null;
+  // 편집 계획 없이(기본 편집 · 아직 편집 전) 만든 요청은 null
+  last_sig: string | null;
   content_plans: {
     id: string;
     status: string;
@@ -56,6 +60,7 @@ export function toRequestCard(r: RequestRow, liveVoice: boolean): ShootRequestCa
   const plan = r.content_plans;
   const script = (plan.script ?? {}) as SavedShotlist;
   const hook = script.hooks?.[script.chosen_hook ?? 0];
+  const clips = (r.clips ?? []) as unknown as Clip[];
   return {
     id: r.id,
     status: r.status,
@@ -65,6 +70,8 @@ export function toRequestCard(r: RequestRow, liveVoice: boolean): ShootRequestCa
     brief: plan.human_brief,
     // 추천 대본을 쓴 뒤에 하고 싶은 말이 바뀌었는지 — 추천 대본은 그대로고 편집에는 바뀐 말이 반영된다
     briefChanged: script.brief !== undefined && (script.brief ?? "").trim() !== (plan.human_brief ?? "").trim(),
+    // 편집 계획이 있는 완성본을 되돌려 다시 올리는 중인지 — 촬영본 · 하고 싶은 말이 바뀌면 처음부터 새로 편집한다
+    lastEdit: r.last_sig ? { brief: lastEditBrief(r.last_sig), restart: editRestart(r.last_sig, clips, plan.human_brief) } : null,
     // 촬영 가이드를 다시 쓰는 중(기획이 CONFIRMED로 돌아감)
     remaking: plan.status === "CONFIRMED",
     hook: hook ? { spoken: hook.spoken, onScreen: hook.on_screen, score: hook.score ?? null } : null,
@@ -87,7 +94,7 @@ export function toRequestCard(r: RequestRow, liveVoice: boolean): ShootRequestCa
         voice: liveVoice ? c.voice : "",
         narration: liveVoice ? "" : c.narration || c.voice || "",
       })),
-    clips: ((r.clips ?? []) as unknown as Clip[])
+    clips: clips
       .slice()
       .sort((a, b) => a.cut - b.cut)
       .map((c) => ({ path: c.path, name: c.name, size: c.size })),

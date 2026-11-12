@@ -27,6 +27,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
+import { EDIT_RESTART_REASON, type EditRestart } from "@/lib/shoot/edit-sig";
 import { saveZip } from "@/lib/shoot/zip-download";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +53,8 @@ export interface ReviewCardData {
   caption: string;
   // 저장된 편집 계획이 있는지 — 있어야 고칠 내용을 적어 고칠 수 있다(기본 편집으로 만든 완성본 · 실패한 편집은 없다)
   hasPlan: boolean;
+  // 편집 계획이 있어도 다시 편집하면 그 계획을 못 쓰고 처음부터 새로 편집하게 되는 이유(계획을 세운 뒤 촬영본 · 하고 싶은 말이 바뀜). 그대로 쓸 수 있으면 null
+  planRestart: EditRestart | null;
   // 찍지 못해 뺀 컷 번호
   skippedCuts: number[];
   // 받기 전에 확인할 것(광고 문구 규칙 · 판매 상태) / 사람이 판단할 것(AI 점검)
@@ -393,6 +396,11 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
 
         {canManage && canRevise && revising && (
           <div className="space-y-2 rounded-md border border-dashed p-2.5">
+            {card.planRestart && (
+              <p className="rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs font-medium text-warn">
+                {EDIT_RESTART_REASON[card.planRestart]} 다시 편집하면 지난 편집을 이어 쓰지 않고 처음부터 새로 편집해요. 따옴표 안에 적은 후킹 · 표지 글자만 남고, 나머지 고칠 내용은 반영되지 않아요.
+              </p>
+            )}
             <label className="block space-y-1 text-xs font-semibold">
               고칠 내용
               <Textarea
@@ -614,6 +622,7 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
           }}
         >
           <p>올린 촬영본은 남아 있어요. 바꿀 컷만 다시 올리고 &lsquo;다 올렸어요&rsquo;를 누르면 다시 편집해요.</p>
+          {card.hasPlan && <p>촬영본이나 하고 싶은 말을 바꾸면 처음부터 새로 편집해요. 완성본 고치기로 고친 내용도 남지 않아요.</p>}
         </ConfirmDialog>
         <ConfirmDialog
           open={ask === "unlink"}

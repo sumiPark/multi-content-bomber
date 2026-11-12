@@ -8,6 +8,7 @@ import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth
 import { groupNameOf, shopTagForGroup, withShopTagText } from "@/lib/products/shop-tag";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
+import { editRestart } from "@/lib/shoot/edit-sig";
 import { certifiedFunctionsOf, finalBlocking } from "@/lib/shoot/final-check";
 import { deleteNoticeDays, POSTED_KEEP_DAYS, shootFilesDeleteAt, UNPOSTED_KEEP_DAYS } from "@/lib/shoot/retention";
 import { AutoRefresh } from "@/components/ui/auto-refresh";
@@ -28,7 +29,8 @@ type Edit = {
   editedAt?: string | null;
   segments?: { cut: number; onScreen: string; subtitles: { text: string }[] }[];
   // 편집 키트로 만든 완성본에만 편집 계획이 있다(기본 편집이면 null)
-  kit?: { plan?: { beats?: unknown[] } } | null;
+  // clipsSig = 그 계획을 세울 때의 촬영본 · 하고 싶은 말 서명(lib/shoot/edit-sig.ts)
+  kit?: { plan?: { beats?: unknown[] }; clipsSig?: string } | null;
   check?: { issues?: { kind: string; detail: string }[] };
 };
 type Proposal = { ideas?: { title: string }[]; chosen?: number | null };
@@ -50,7 +52,7 @@ export default async function ShootReviewPage() {
   const { data: rows } = await supabase
     .from("content_plans")
     .select(
-      "id, status, product_id, script, proposal, warnings_ack, posted_at, posted_permalink, social_accounts(display_name, account_groups(name)), products(name, kind, stock_status, represent_image_url, product_analyses(health_functional, summary)), shoot_requests(id, status, rendered_path, edit, cuts, clips, error, updated_at)",
+      "id, status, product_id, script, proposal, human_brief, warnings_ack, posted_at, posted_permalink, social_accounts(display_name, account_groups(name)), products(name, kind, stock_status, represent_image_url, product_analyses(health_functional, summary)), shoot_requests(id, status, rendered_path, edit, cuts, clips, error, updated_at)",
     )
     .eq("track", "A")
     .in("status", ["SHOT", "RENDERED", "PUBLISHED"])
@@ -110,6 +112,7 @@ export default async function ShootReviewPage() {
     const acked = new Set((p.warnings_ack ?? []) as string[]);
     const proposal = (p.proposal ?? {}) as Proposal;
     const hasFiles = !!r?.rendered_path || ((r?.clips ?? []) as unknown[]).length > 0;
+    const hasPlan = Array.isArray(edit.kit?.plan?.beats) && edit.kit.plan.beats.length > 0;
     return {
       planId: p.id,
       requestId: r?.id ?? null,
@@ -124,7 +127,9 @@ export default async function ShootReviewPage() {
       seconds: edit.seconds ?? null,
       // 계정 그룹의 상점 태그(#오늘과일 등)를 해시태그 줄 끝에 — 이미 있으면 그대로
       caption: withShopTagText(caption, shopTagForGroup(groupNameOf(p.social_accounts?.account_groups))),
-      hasPlan: Array.isArray(edit.kit?.plan?.beats) && edit.kit.plan.beats.length > 0,
+      hasPlan,
+      // 편집 서버는 촬영본 · 하고 싶은 말이 그 계획을 세울 때와 같아야만 계획을 다시 쓴다 — 다르면 고칠 내용을 적어도 처음부터 새로 편집한다
+      planRestart: hasPlan ? editRestart(edit.kit?.clipsSig, (r?.clips ?? []) as { cut: number; path: string }[], p.human_brief) : null,
       skippedCuts: cuts.filter((c) => c.skipped).map((c) => c.no),
       blocking,
       warnings: (edit.check?.issues ?? []).filter((i) => i.kind !== "rules" && i.kind !== "stock").map((i) => i.detail),

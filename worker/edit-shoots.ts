@@ -13,6 +13,7 @@ import { loadProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import type { ContentRule } from "@/lib/rules/check";
+import { editSig } from "@/lib/shoot/edit-sig";
 import { PACE, type EditStyle } from "@/lib/shoot/edit-style";
 import { concatSegments, extractAudio, probe, renderSegment, snapshot, type SegmentSpec } from "@/lib/shoot/ffmpeg";
 import { readClip, renderKitEdit, type KitClip, type KitResult } from "@/lib/shoot/video-kit/pipeline";
@@ -303,7 +304,7 @@ async function main() {
       // 편집 키트 — 실패하면 아래 기본 편집으로 넘어간다
       // 촬영본 · 순서 · 하고 싶은 말이 같을 때만 지난 계획을 다시 쓴다
       const brief = plan.human_brief?.trim() || null;
-      const clipsSig = [...units.map((u) => u.clip.path), `brief:${brief ?? ""}`].join("|");
+      const clipsSig = editSig(clips, brief);
       const prevKit = (req.edit as { kit?: { plan?: EditPlan; clipsSig?: string; replan?: { request?: string; items?: string[] } } } | null)?.kit;
       const prevPlan = prevKit?.clipsSig === clipsSig ? (prevKit.plan ?? null) : null;
       // 완성본 고치기에서 촬영본을 다시 봐야 하는 요청이 있으면(replan) 지난 계획을 그대로 쓰지 않고, 프레임을 다시 보고 요청한 것만 바꾼다
