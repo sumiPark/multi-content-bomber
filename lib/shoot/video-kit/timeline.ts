@@ -6,8 +6,14 @@ import type { Spoken } from "@/lib/shoot/video-kit/tools";
 export const FPS = 30;
 const GAP = 0.14;
 const HEAD = 0.05;
-const TAIL_END_CARD = 1.1;
-const TAIL_PLAIN = 0.5;
+// 마지막 말이 끝나면 바로 끝낸다. 끝 화면은 마지막 말이 시작할 때 나오므로 읽을 시간은 말 길이로 충분하다
+const TAIL_END_CARD = 0.5;
+const TAIL_PLAIN = 0.2;
+// 자막 한 묶음이 화면에 머무는 최소 시간(초). 이보다 짧은 묶음은 옆 묶음과 합친다
+const MIN_CAPTION_SHOW = 0.8;
+// 비트 안의 컷 경계를 낱말 시작에 맞출 때 옮기는 한도와, 옮긴 뒤 남겨야 하는 컷 길이(초)
+const SNAP_REACH = 0.4;
+const SNAP_MIN_CUT = 0.4;
 // 재생 속도 한계 — 넘으면 구간을 줄이거나 마지막 프레임을 잠시 둔다
 const MIN_RATE = 0.55;
 const MAX_RATE = 2.4;
@@ -43,6 +49,10 @@ export interface TimedCaption {
   start: number;
   end: number;
   beat: number;
+  // 말한 문장을 그대로 보여 주는 자막(caption_style sentence). 같은 자리 · 같은 크기로 놓는다
+  sentence?: boolean;
+  // sentence 영상에서 크게 강조하는 자막
+  big?: boolean;
 }
 
 export interface TimedGraphic {
@@ -147,6 +157,55 @@ export function layoutBeats(plan: EditPlan, voices: VoiceClip[], clipSeconds: Ma
   return { duration, lines, cuts };
 }
 
+/**
+ * 한 비트에 컷이 여럿이면 컷이 바뀌는 시각을 가까운 낱말 시작으로 옮긴다. 컷 길이를 원본 구간 길이 비율로만 나누면
+ * 말 중간에 장면이 바뀌어 소리와 화면이 따로 논다. 비트 사이 경계는 다음 줄 시작에 이미 맞아 있어 건드리지 않는다.
+ * 재생 속도는 그대로 두고 원본 구간의 끝만 길이에 맞춰 옮긴다.
+ */
+export function snapCuts<T extends Pick<Timeline, "lines" | "cuts">>(base: T, words: Spoken[], clipSeconds: Map<number, number>): T {
+  if (!words.length) return base;
+  const cuts = base.cuts.map((c) => ({ ...c }));
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const a = cuts[i];
+    const b = cuts[i + 1];
+    if (a.beat !== b.beat || a.hasAudio) continue;
+    const line = base.lines[a.beat];
+    const near = words
+      .map((w) => toFrame(w.start))
+      .filter((t) => t > line.start + 0.1 && t < line.end && Math.abs(t - a.end) <= SNAP_REACH && t - a.start >= SNAP_MIN_CUT && b.end - t >= SNAP_MIN_CUT)
+      .sort((x, y) => Math.abs(x - a.end) - Math.abs(y - a.end))[0];
+    if (near == null || near === a.end) continue;
+    a.end = near;
+    b.start = near;
+    for (const c of [a, b]) {
+      c.duration = round(c.end - c.start);
+      const seconds = clipSeconds.get(c.clip) ?? c.out;
+      c.out = round(Math.min(seconds, c.in + c.duration * c.rate));
+      c.rate = round(Math.min(MAX_RATE, Math.max(MIN_RATE, (c.out - c.in) / Math.max(0.05, c.duration))));
+    }
+  }
+  return { ...base, cuts };
+}
+
+/** 너무 짧게 지나가는 자막 묶음을 옆 묶음과 합친다. 글자는 빼지 않는다. */
+function mergeShortGroups(groups: string[], bounds: number[]): { groups: string[]; bounds: number[] } {
+  const g = [...groups];
+  const b = [...bounds];
+  let i = 0;
+  while (g.length > 1 && i < g.length) {
+    if (b[i + 1] - b[i] >= MIN_CAPTION_SHOW) {
+      i++;
+      continue;
+    }
+    // 마지막 묶음은 앞과, 나머지는 뒤와 합친다
+    const at = i === g.length - 1 ? i - 1 : i;
+    g.splice(at, 2, `${g[at]} ${g[at + 1]}`);
+    b.splice(at + 1, 1);
+    i = 0;
+  }
+  return { groups: g, bounds: b };
+}
+
 const squash = (s: string) => s.replace(/[\s.,!?~·]+/g, "");
 
 /** 낱말이 비트 안 어디서 시작하는지. 받아쓰기가 틀릴 수 있어 못 찾으면 null. */
@@ -177,7 +236,7 @@ function captionBounds(line: TimedLine, groups: string[], words: Spoken[]): numb
   return bounds;
 }
 
-export function timeText(plan: EditPlan, base: Omit<Timeline, "captions" | "graphics" | "sfx" | "hook">, words: Spoken[], liveCaptions: Map<number, Spoken[]>): Timeline {
+export function timeText(plan: EditPlan, base: Omit<Timeline, "captions" | "graphics" | "sfx" | "hook">, words: Spoken[], liveCaptions: Map<number, Spoken[]>, opts: { keepEndCardCaptions?: boolean } = {}): Timeline {
   const captions: TimedCaption[] = [];
   const graphics: TimedGraphic[] = [];
   const sfx: TimedSfx[] = [];
@@ -185,10 +244,14 @@ export function timeText(plan: EditPlan, base: Omit<Timeline, "captions" | "grap
   plan.beats.forEach((beat: EditBeat, i) => {
     const line = base.lines[i];
     const at = (word: string, fraction: number) => wordTime(words, line, word) ?? round(line.start + (line.end - line.start) * clamp(fraction, 0, 1));
-    const groups = beat.mode === "live" ? [] : beat.captions.map((c) => c.trim()).filter(Boolean);
-    if (groups.length) {
-      const bounds = captionBounds(line, groups, words);
-      groups.forEach((text, g) => captions.push({ id: `c${i}_${g}`, text, emphasis: beat.emphasis, start: bounds[g], end: bounds[g + 1], beat: i }));
+    // 끝 화면이 있는 비트는 끝 화면이 그 말을 대신한다. 자막까지 내면 같은 말이 두 군데에 겹쳐 보인다
+    // (끝 화면을 화면에 내지 않는 경로는 keepEndCardCaptions로 자막을 남긴다)
+    const endCard = !opts.keepEndCardCaptions && beat.graphics.some((g) => g.type === "end_card");
+    const sentence = plan.caption_style === "sentence";
+    const raw = beat.mode === "live" || endCard ? [] : beat.captions.map((c) => c.trim()).filter(Boolean);
+    if (raw.length) {
+      const { groups, bounds } = mergeShortGroups(raw, captionBounds(line, raw, words));
+      groups.forEach((text, g) => captions.push({ id: `c${i}_${g}`, text, emphasis: beat.emphasis, start: bounds[g], end: bounds[g + 1], beat: i, ...(sentence ? { sentence: true, big: !!beat.big } : {}) }));
     }
     for (const [g, s] of (liveCaptions.get(i) ?? []).entries()) {
       captions.push({ id: `c${i}_l${g}`, text: s.text, emphasis: beat.emphasis, start: round(s.start), end: round(s.end), beat: i });

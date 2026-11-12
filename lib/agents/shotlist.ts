@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { conceptBlock } from "@/lib/agents/concept";
+import { SHOW_SECONDS } from "@/lib/agents/edit-plan";
 import { editKit } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { runAgent, type AgentResult } from "@/lib/agents/runner";
+import { breakCaptionLines, CAPTION_LINE_RULE } from "@/lib/ai/caption-layout";
 import { writerSkills } from "@/lib/agents/script";
 import type { ContentRule } from "@/lib/rules/check";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -40,10 +42,10 @@ export const shotlistSchema = z.object({
         narration: z.string().describe("말하지 않는 계정의 AI 음성 내레이션 초안. 이 컷에서 보이는 것에 맞는 구어체 한 문장. 사람이 말하는 컷이면 빈 문자열"),
       }),
     )
-    .describe("컷 5~8개, 첫 컷 = 고른 훅"),
+    .describe("보여 주는 기획은 컷 8~12개, 사람이 설명하는 기획은 10~24개. 첫 컷 = 고른 훅"),
   loop_word: z.string().describe("마지막 컷이 되받는 훅의 낱말"),
   caption: z.object({
-    text: z.string().describe("캡션 전체 — 첫 줄(40자 이내) · 본문 · 요청 하나 · 해시태그 3개"),
+    text: z.string().describe("캡션 전체 — 첫 줄(40자 이내) · 본문 · 요청 하나 · 해시태그 3개. 한 줄에 한 문장, 문단 사이 빈 줄"),
     keywords: z.array(z.string()).describe("찾히고 싶은 검색어 2~4개"),
   }),
 });
@@ -94,11 +96,12 @@ ${what}
 ${kit.hook_rules.map((r) => `   - ${r}`).join("\n")}
    표지 규칙(thumbnail):
 ${kit.thumbnail_rules.map((r) => `   - ${r}`).join("\n")}
-3. 컷 리스트: 보여 주는 기획은 컷 5~8개, 합계 15~30초. 사람이 설명하는 기획은 컷 10~24개, 합계 30~85초로 내용에 맞춘다. 컷마다 1.5~5초. 첫 컷은 후킹 글자와 함께 궁금증을 만드는 장면이다(결과 · 단면 · 움직임 · 의외의 행동). 편집에서 잘라 쓰게 컷마다 동작을 2~3초 더 길게 찍으라고 how에 적는다.
+3. 컷 리스트: 보여 주는 기획은 컷 8~12개, 합계 ${SHOW_SECONDS.min}~${SHOW_SECONDS.max}초. 사람이 설명하는 기획은 컷 10~24개, 합계 30~85초로 내용에 맞춘다. 컷마다 1.5~5초. 첫 컷은 후킹 글자와 함께 궁금증을 만드는 장면이다(결과 · 단면 · 움직임 · 의외의 행동). 편집에서 잘라 쓰게 컷마다 동작을 2~3초 더 길게 찍으라고 how에 적는다.
    컷마다 장면이 바뀌어야 한다(같은 각도 연속 금지). 마지막 컷은 훅의 낱말을 되받아 다시 보게.
    how는 찍는 사람이 그대로 따라 할 수 있게 구체적으로: 위에서 · 옆에서 · 손 클로즈업 · 흰 배경 · 창가 빛 등.
 4. ${ctx.liveVoice ? "voice: 사람이 카메라 보고 말할 짧은 대사. 컷 길이 안에 말할 수 있게(1초에 6음절 안팎). time_script로 재고 경고를 없앤다." : "voice는 모두 빈 문자열이다. 찍는 사람은 말하지 않고, narration을 AI 음성이 읽는다. 말투는 친근한 수다체, 컷 길이 안에 읽을 수 있게(1초에 6음절 안팎). 말은 그 컷에서 보이는 것에 맞춘다. time_script로 재고 경고를 없앤다."}
 5. 캡션을 쓰고 check_caption으로 점검한다. 첫 줄 40자 이내, 요청은 하나, 해시태그 정확히 3개.
+   ${CAPTION_LINE_RULE}
 6. 화면 문구 · 대사 · 캡션 전체를 check_ai_tone, check_rules로 점검하고 걸린 것을 고친다.
 
 절대 규칙:
@@ -114,7 +117,7 @@ export async function writeShotlist(ctx: ShotlistContext, opts: { log: boolean }
   const fix = ctx.fixRequests?.length
     ? `\n\n이전 컷 리스트가 점검에서 걸렸다. 이것을 반드시 고쳐서 다시 써라:\n${ctx.fixRequests.map((r) => `- ${r}`).join("\n")}`
     : "";
-  return runAgent({
+  const result = await runAgent({
     agent: "plan",
     system: systemPrompt(ctx),
     user: `${ctx.facts.name}로 릴스 촬영 컷 리스트 · 화면 문구 · 캡션을 써 줘.${fix}`,
@@ -127,6 +130,8 @@ export async function writeShotlist(ctx: ShotlistContext, opts: { log: boolean }
     planId: ctx.planId,
     input: { track: "A", product: ctx.facts.name, idea: ctx.idea, brief: ctx.brief, fixRequests: ctx.fixRequests ?? [], concept: ctx.concept ?? null, tone: ctx.tone ?? null, editStyle: ctx.editStyle ?? null },
   });
+  result.output.caption.text = breakCaptionLines(result.output.caption.text);
+  return result;
 }
 
 /** 컷 리스트를 점검 에이전트(4)가 읽는 대본 모양으로 — 말하는 줄은 대사, 없으면 화면 문구. */

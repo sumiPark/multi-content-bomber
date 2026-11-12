@@ -96,9 +96,24 @@ AI 이미지(visuals) — 말로 성분 · 원료 · 원리를 설명하는데 �
 
 export const editPlanSchema = z.object({
   look: lookSchema.describe("이 영상의 자막 · 큰 글자 디자인과 음악. 계정 설정을 읽고 영상마다 만든다"),
+  caption_style: z
+    .enum(["sentence", "keyword"])
+    .describe("자막 방식. sentence = 과정 · 방법 · 순서를 설명하는 영상이라 말한 문장을 그대로 같은 자리 · 같은 크기로 보여 준다. keyword = 분위기 위주 영상이라 핵심어를 크게 보여 준다"),
   analysis: z
     .array(z.object({ clip: z.number().int(), good: z.string().describe("쓸 만한 구간과 내용"), avoid: z.string().describe("뺄 구간 · 이유") }))
     .describe("촬영본마다 한 줄"),
+  components: z
+    .array(
+      z.object({
+        name: z.string().describe("구성품 이름(get_product_facts 기준)"),
+        seen: z.boolean().describe("촬영본에서 이 구성품을 알아볼 수 있는 구간을 찾았는지"),
+        clip: z.number().int().describe("보이는 촬영본 번호. 못 찾았으면 0"),
+        from: z.number().describe("보이기 시작하는 시각(초). 못 찾았으면 0"),
+        to: z.number().describe("보이는 구간의 끝(초). 못 찾았으면 0"),
+        where: z.string().describe("화면의 어디에 어떻게 보이는지(예: 접시 왼쪽 위에 크게). 못 찾았으면 빈 문자열"),
+      }),
+    )
+    .describe("구성품이 여럿인 상품을 사람이 찍은 촬영본에서, 구성품마다 프레임에서 찾은 구간. 따로 찍은 컷이 아니어도 된다. 구성품이 하나이거나 사람이 찍은 촬영본이 아니면 빈 배열"),
   hook: z.object({
     on_screen: z.string().describe("첫 프레임부터 보이는 큰 글자, 12자 안팎. 두 줄로 나누려면 줄바꿈"),
     highlight: z.string().describe("on_screen에서 강조할 낱말, 없으면 빈 문자열"),
@@ -118,7 +133,8 @@ export const editPlanSchema = z.object({
       z.object({
         mode: z.enum(["tts", "live"]).describe("tts = AI 음성으로 읽기, live = 촬영본의 사람 말을 그대로"),
         tts: z.string().describe("TTS 읽기용 원고, 말하는 대로. live면 빈 문자열"),
-        captions: z.array(z.string()).describe("화면 자막. 의미 단위 16자 이내. 첫 비트가 후킹 글자와 같으면 빈 배열, live면 빈 배열"),
+        captions: z.array(z.string()).describe("화면 자막. sentence면 말한 문장 그대로 두 줄(28자 안팎)까지, keyword면 의미 단위 16자 이내. 첫 비트가 후킹 글자와 같으면 빈 배열, live면 빈 배열"),
+        big: z.boolean().describe("이 비트의 자막을 큰 강조 글자로 보여 줄지. sentence 영상에서 두 번째 약속 · 완성 · 반전처럼 2~3개 비트만 true. keyword 영상은 false"),
         emphasis: z.array(z.string()).describe("자막에서 강조할 핵심어"),
         cuts: z
           .array(z.object({ clip: z.number().int(), in: z.number(), out: z.number(), what: z.string().describe("이 구간에 보이는 것") }))
@@ -127,14 +143,25 @@ export const editPlanSchema = z.object({
         sfx: z.array(z.object({ name: z.enum(sfxNames), at_word: z.string(), at: z.number() })),
       }),
     )
-    .describe("비트 5~12개. 첫 비트 = 후킹"),
+    .describe("비트 5~14개. 첫 비트 = 후킹"),
   visuals: z.array(visualSchema).describe("AI 이미지. 없으면 빈 배열"),
   warnings: z
     .array(z.string())
     .describe("사람이 확인할 문제만 시각과 함께: 구성품이 아닌 소품, 주의사항과 부딪히는 장면, 근거가 약한 말, 관리자가 쓴 말을 고친 이유. 편집 과정이나 지시 사항은 쓰지 않는다. 없으면 빈 배열"),
 });
-export type EditPlan = z.infer<typeof editPlanSchema>;
+type ParsedEditPlan = z.infer<typeof editPlanSchema>;
+// caption_style · big · components는 나중에 생긴 값이라 그 전에 저장된 계획(다시 편집)과 코드가 만든 계획(lemo)에는 없다. 없으면 예전 방식(keyword)이다
+export type EditPlan = Omit<ParsedEditPlan, "caption_style" | "beats" | "components"> & {
+  caption_style?: ParsedEditPlan["caption_style"];
+  components?: ParsedEditPlan["components"];
+  beats: (Omit<ParsedEditPlan["beats"][number], "big"> & { big?: boolean })[];
+};
 export type EditBeat = EditPlan["beats"][number];
+
+// 사람이 말하지 않는 직접 촬영 영상(보여 주는 영상)의 길이 기준. 촬영 기획(plan-a · shotlist) · 편집 지시문 · 편집 점검(planProblems)이 같은 값을 쓴다
+export const SHOW_SECONDS = { min: 25, max: 40 };
+// 읽는 글자 수(띄어쓰기 · 문장부호 제외)로 영상 길이를 어림하는 빠르기. 줄 사이 쉼까지 넣은 값이다(2026-11-12 실측: 149자 → 21.1초)
+export const SHOW_SYLLABLES_PER_SECOND = 7;
 export type EditGraphic = z.infer<typeof graphicSchema>;
 
 export interface EditClipInfo {
@@ -217,6 +244,16 @@ ${order.map((o, i) => `${i + 1}. ${o}`).join("\n")}${conflict}
 촬영본 개수와 순서는 사람이 정했다. 흐름은 촬영본 순서를 기본으로 하되, 첫 컷은 가장 궁금한 장면으로 당겨도 된다. 쓸 장면이 없는 촬영본은 빼도 된다.`;
 }
 
+// 가격 · 할인 표현. 관리자가 영상을 만들 때 넣은 문구에 있을 때만 쓸 수 있다(2026-11-12 사용자 결정)
+const PRICE_WORDS = /특가|할인|세일|쿠폰|반값|최저가|[0-9][0-9,]*\s*(?:원|만\s*원|천\s*원|%|퍼센트)/;
+
+/** 관리자가 넣은 문구(하고 싶은 말 · 후킹 · 마지막 말 · 표지) 중 가격 · 할인 표현이 있는 것. */
+export function humanPriceLines(ctx: Pick<EditPlanContext, "brief" | "humanHook" | "fixedHook" | "fixedEnding" | "humanThumbnail">): string[] {
+  return [ctx.brief, ctx.humanHook, ctx.fixedHook, ctx.fixedEnding, ctx.humanThumbnail]
+    .map((t) => t?.trim() ?? "")
+    .filter((t) => t && PRICE_WORDS.test(t));
+}
+
 function systemPrompt(ctx: EditPlanContext): string {
   const kit = editKit();
   const f = ctx.facts;
@@ -228,15 +265,31 @@ function systemPrompt(ctx: EditPlanContext): string {
     ? `사람이 정한 표지 글자가 있다: "${ctx.humanThumbnail.trim()}". 글자를 바꾸지 말고 thumbnail.title에 쓰고, 어울리는 프레임만 고른다.`
     : `표지도 네가 만든다.${ctx.shotlistThumbnail?.title ? ` 컷 리스트의 표지 문구 "${ctx.shotlistThumbnail.title}"를 참고한다.` : ""}`;
   const auto = ctx.source === "auto";
+  const priceLines = humanPriceLines(ctx);
+  const priceRule = priceLines.length
+    ? `재고 · 품절 · 배송은 말하지 않는다. 특가 · 할인 · 금액은 관리자가 넣은 아래 문구에 있는 표현과 숫자 그대로만 쓸 수 있다(끝맺음의 이유로 쓰기 좋다). 문구에 없는 할인율 · 금액 · 기간 · "오늘만" 같은 조건은 만들지 않는다.\n${priceLines.map((l) => `  · "${l}"`).join("\n")}`
+    : "재고 · 품절 · 할인 · 특가 · 배송 · 가격은 말하지 않는다.";
+  // 구성품은 하나씩 따로 찍게 하지 않고, 편집 에이전트가 촬영본에서 찾아 쓴다(2026-11-12 사용자 결정). AI 자동 영상은 예전 지시 그대로다
+  const findComponents = auto
+    ? ""
+    : " 구성품이 여럿인 상품은 구성품 하나하나가 촬영본의 어느 구간에 보이는지도 프레임에서 찾아 components에 적는다. 하나씩 따로 찍은 컷이 없어도 된다. 팩을 연 장면, 그릇에 담은 장면, 재료를 올리는 장면처럼 여러 구성품이 함께 보이는 구간에서 찾고, 작게 보이면 look_closer로 확인한다. 알아볼 수 없으면 seen을 false로 둔다.";
+  const componentCuts = auto
+    ? "이름을 부를 때 그 구성품이 크게 보이는 컷을 쓴다(그런 장면이 촬영본에 있을 때만)"
+    : "components에서 찾은 구간을 쓴다. 구성품이 크게 보이는 컷이 따로 있으면 이름을 부르는 차례대로 하나씩 쓰고, 없으면 여러 구성품이 함께 보이는 구간을 쓰면서 이름을 부를 때 그 구성품을 ring이나 arrow로 짚는다(그 구간에서 멈춰 있을 때만). 촬영본에서 찾지 못한 구성품은 이름을 하나씩 짚어 부르지 않고, 찾지 못한 구성품 이름을 warnings에 남긴다. 찾은 구성품이 없으면 이 구간을 뺀다";
+  const showLength =
+    auto || ctx.liveVoice
+      ? ""
+      : ` 보여 주는 영상의 길이는 tts 전체의 읽는 글자 수(띄어쓰기 · 문장부호 제외)로 맞춘다: ${SHOW_SECONDS.min * SHOW_SYLLABLES_PER_SECOND}~${SHOW_SECONDS.max * SHOW_SYLLABLES_PER_SECOND}자가 ${SHOW_SECONDS.min}~${SHOW_SECONDS.max}초다. 촬영본 합계가 ${SHOW_SECONDS.min}초보다 짧으면 촬영본 합계만큼이면 된다. 짧다고 같은 말을 늘이지 않고, 상품 구성 · 약속 · 결과를 떠올리게 하는 말처럼 빠진 내용을 채운다.`;
   return `너는 인스타그램 @${ctx.accountName}의 릴스 편집자다. ${auto ? "제품 사진을 움직인 컷, 설명 모션, 스톡 분위기 영상으로 된 소재를 보고" : "사람이 찍은 원본을 보고"}, 직접 만든 것처럼 보이는 편집 계획을 세운다. 계획은 코드가 그대로 만든다.
 상품: ${f.shop} ${f.kindLabel} "${f.name}"
 ${ctx.liveVoice ? "이 계정은 사람이 나와 말한다. 촬영본에 말이 있는 구간은 mode live로 그대로 쓰고, 말이 없는 구간에만 tts를 쓴다." : `이 계정의 소재에는 쓸 말이 없다. 모든 비트를 mode tts로 쓴다.${ctx.tone?.trim() ? " 말투는 아래 계정 설정을 따른다." : " 계정 말투 설정이 없으니 친근한 수다체로 쓴다."}`}
 
 순서 (스킬을 실제로 써라):
-1. get_product_facts를 읽고, 프레임 묶음에서 촬영본마다 쓸 구간과 뺄 구간을 판단한다(analysis). 시각이 애매하면 look_closer로 확인한다.
+1. get_product_facts를 읽고, 프레임 묶음에서 촬영본마다 쓸 구간과 뺄 구간을 판단한다(analysis). 시각이 애매하면 look_closer로 확인한다.${findComponents}
 2. ${hookAsk}
 3. ${thumbAsk}
-4. 대본과 컷: 첫 비트는 후킹이고 첫 컷은 가장 궁금한 장면이다. 그 뒤로 비트마다 한 가지만 말하고 장면과 말이 맞게 한다. 합계는 촬영본과 기획에 맞춘다. 보여 주는 영상은 15~30초, 사람이 설명하는 영상은 내용에 맞게 30~85초.
+4. 대본과 컷: 첫 비트는 후킹이고 첫 컷은 가장 궁금한 장면이다. 그 뒤로 비트마다 한 가지만 말하고 장면과 말이 맞게 한다. 합계는 촬영본과 기획에 맞춘다. 보여 주는 영상은 ${SHOW_SECONDS.min}~${SHOW_SECONDS.max}초, 사람이 설명하는 영상은 내용에 맞게 30~85초.${showLength}
+   만드는 과정 · 방법을 보여 주는 영상은 후킹 → 상품 구성 → 약속 → 과정 → 완성 → 제안 순서로 짠다. 상품 구성은 과정에 들어가기 전에 이 상품에 무엇이 들어 있는지 구성품 이름을 하나씩 부르는 구간이고, ${componentCuts}. 약속은 이 영상에서 무엇을 알려 주는지 한 번 더 말하는 줄이다. 과정 설명 사이에는 맛 · 식감 · 쓰는 느낌처럼 결과를 떠올리게 하는 말을 넣는다.
 5. 자막 · 그래픽 · 효과음을 정한다. 쓰는 말 전체를 check_ai_tone, check_rules로 점검하고 read_tts로 읽기용 원고를 확인한다.
 6. look을 정한다. 아래 계정 설정과 상품 · 장면을 읽고 이 영상에 맞는 글자 디자인과 음악을 직접 만든다.${auto && ctx.scriptLines?.length ? `
 
@@ -281,10 +334,10 @@ ${bullets(kit.sfx_rules)}${visualRules(f.kind, ctx.visualLibrary ?? [])}
 절대 규칙:
 - 사실(숫자 · 성분 · 효과 · 구성 · 사용법)은 get_product_facts와 화면에서 읽히는 제품 표기에만 근거한다. 없는 내용은 말하지 않는다. uncertainties에 있는 건 말하지 않는다.
 - 체험담처럼 들리는 말("써 봤는데", "제가 해 보니")을 지어내지 않는다. 화면에서 실제로 보여 주는 것만 말한다.
-- 건강기능식품 기능성 표현은 approvedClaims 문장 그대로만. 재고 · 품절 · 할인 · 배송 · 가격은 말하지 않는다.${f.kind === "COSMETIC" ? "\n- 화장품: 치료 · 재생 · 염증 같은 표현을 쓰지 않고, 효과를 단정하지 않는다." : ""}
+- 건강기능식품 기능성 표현은 approvedClaims 문장 그대로만. ${priceRule}${f.kind === "COSMETIC" ? "\n- 화장품: 치료 · 재생 · 염증 같은 표현을 쓰지 않고, 효과를 단정하지 않는다." : ""}
 - 제품 설명에 안전 주의가 있으면 그에 어긋나는 사용을 권하지 않고, 영상에 꼭 필요한 주의를 넣는다.
 - 인사 · 자기소개 · "오늘은 ~ 소개해 드릴게요"로 시작하지 않는다. 최고 · 유일 · 100% 같은 단정을 쓰지 않는다.
-- 마지막 비트에는 end_card를 넣는다. 끝맺음은 강매 없이 짧게 한다.${ctx.fixedEnding?.trim() ? `\n- 마지막 말은 사람이 정한 "${ctx.fixedEnding.trim()}"을 그대로 쓴다.` : ""}
+- 끝맺음은 강매 없이 짧게 하고, 마지막 말이 끝나면 영상도 끝난다. end_card는 선택이다. 넣으면 그 비트의 자막은 화면에 나오지 않으니 제안을 end_card에 담고, 넣지 않으면 상품이 보이는 컷 위에 자막으로 끝낸다.${ctx.fixedEnding?.trim() ? `\n- 마지막 말은 사람이 정한 "${ctx.fixedEnding.trim()}"을 그대로 쓴다.` : ""}
 - 구간은 촬영본 길이 안에서만 고른다.${conceptBlock("이 계정의 말투 · 분위기", ctx.tone, "말과 글의 말투를 이것에 맞춘다.")}${conceptBlock("이 계정의 편집 스타일", ctx.editStyle, "컷 속도 · 그래픽 양을 이 방향에 맞춘다.")}`;
 }
 

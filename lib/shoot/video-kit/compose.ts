@@ -151,6 +151,8 @@ export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
     const busy: Zone[] = [];
     if (c.start < tl.hook.end) busy.push(hookAt);
     if (tl.graphics.some((g) => TOP_GRAPHICS.has(g.type) && g.start < c.end && g.end > c.start)) busy.push("top");
+    // 문장 자막은 늘 같은 자리(아래)에 둔다. 후킹 글자가 그 자리를 쓰는 동안만 다른 자리로 피한다
+    if (c.sentence && !c.big && !busy.includes("lower")) return "lower";
     return captionZone(zones, c.start, c.end, busy);
   });
 }

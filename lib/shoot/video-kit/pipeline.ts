@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
-import { writeEditPlan, type EditClipInfo, type EditPlan, type EditPlanContext, type VisualPolicy } from "@/lib/agents/edit-plan";
+import { SHOW_SECONDS, SHOW_SYLLABLES_PER_SECOND, writeEditPlan, type EditClipInfo, type EditPlan, type EditPlanContext, type VisualPolicy } from "@/lib/agents/edit-plan";
 import { editKit, editKitAsset, ttsReading } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
@@ -21,7 +21,7 @@ import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/v
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
 import { captionZones, writeCoverProject, writeProject, type BehindWord, type VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
-import { layoutBeats, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
+import { layoutBeats, snapCuts, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
 import type { createServiceClient } from "@/lib/supabase/service";
 
@@ -120,6 +120,21 @@ function similarity(a: string, b: string): number {
   return (2 * hit) / (x.size + y.size);
 }
 
+// 음성이 없을 때 말 길이를 어림하는 빠르기(초당 음절)
+const SYLLABLES_PER_SECOND = 6.5;
+// 만든 음성을 받아쓰기와 대조해 이보다 덜 비슷하면 그 줄만 한 번 다시 만든다(같은 무료 모델). 숫자를 읽는 줄은 받아쓰기가 숫자로 적어 낮게 나올 수 있어 한 번만 다시 만든다
+const VOICE_MATCH_MIN = 0.6;
+
+/** 만든 음성 한 줄을 받아써 원고와 얼마나 비슷한지 잰다. 받아쓰기를 못 하면 null(확인하지 못함). */
+async function voiceMatch(file: string, text: string, workDir: string): Promise<number | null> {
+  try {
+    const heard = (await transcribeWords(file, workDir)).text;
+    return heard.trim() ? similarity(heard, text) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 사람이 넣은 문구는 AI 답과 상관없이 글자 그대로 쓴다. */
 export function applyHumanText(plan: EditPlan, input: Pick<KitInput, "humanHook" | "humanThumbnail" | "fixedHook" | "fixedEnding" | "overrides">): EditPlan {
   const out: EditPlan = JSON.parse(JSON.stringify(plan));
@@ -197,8 +212,12 @@ export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolea
   return { ...plan, beats, visuals, thumbnail: thumb };
 }
 
-/** 코드로 재는 계획 문제. 걸리면 에이전트가 한 번 다시 쓴다. */
-export function planProblems(plan: EditPlan): string[] {
+/**
+ * 코드로 재는 계획 문제. 걸리면 에이전트가 한 번 다시 쓴다.
+ * show를 주면(사람이 말하지 않는 직접 촬영) 대본 길이를 보여 주는 영상 기준(SHOW_SECONDS)으로 잰다.
+ * 촬영본 합계가 기준보다 짧으면 촬영본 합계까지만 요구한다 — 없는 장면을 느리게 늘이지 않게.
+ */
+export function planProblems(plan: EditPlan, show?: { footageSeconds: number }): string[] {
   const problems: string[] = [];
   const all = plan.beats.flatMap((b) => b.cuts);
   for (const [i, a] of all.entries()) {
@@ -206,10 +225,27 @@ export function planProblems(plan: EditPlan): string[] {
     if (twin) problems.push(`${a.clip}번 촬영본의 ${a.in}~${a.out}초와 ${twin.in}~${twin.out}초가 겹쳐요. 같은 구간을 두 번 쓰지 말고 다른 구간이나 다른 촬영본을 쓰세요.`);
   }
   const syllables = plan.beats.reduce((s, b) => s + squash(b.tts).length, 0);
-  if (plan.beats.some((b) => b.mode === "tts") && syllables < 60) problems.push("대본이 너무 짧아요. 15초 이상 나오게 쓰세요.");
-  if (syllables > 630) problems.push("대본이 너무 길어요. 85초 안에 들어오게 줄이세요.");
+  if (show) {
+    // 어림값이라 기준에서 10%까지는 넘어간다
+    const seconds = syllables / SHOW_SYLLABLES_PER_SECOND;
+    const min = Math.min(SHOW_SECONDS.min, Math.floor(show.footageSeconds));
+    const range = `${min}~${SHOW_SECONDS.max}초(읽는 글자 ${min * SHOW_SYLLABLES_PER_SECOND}~${SHOW_SECONDS.max * SHOW_SYLLABLES_PER_SECOND}자)`;
+    if (seconds < min * 0.9)
+      problems.push(`대본이 약 ${Math.round(seconds)}초 분량(읽는 글자 ${syllables}자)이라 짧아요. ${range}가 되게 늘리세요. 같은 말을 늘이지 말고 상품 구성 · 약속 · 결과를 떠올리게 하는 말처럼 빠진 내용을 채우고, 늘어난 말에 맞는 컷을 더 쓰세요.`);
+    else if (seconds > SHOW_SECONDS.max * 1.1) problems.push(`대본이 약 ${Math.round(seconds)}초 분량(읽는 글자 ${syllables}자)이라 길어요. ${range} 안에 들어오게 줄이세요.`);
+  } else {
+    if (plan.beats.some((b) => b.mode === "tts") && syllables < 60) problems.push("대본이 너무 짧아요. 15초 이상 나오게 쓰세요.");
+    if (syllables > 630) problems.push("대본이 너무 길어요. 85초 안에 들어오게 줄이세요.");
+  }
   if (all.length < 6) problems.push(`컷이 ${all.length}개뿐이에요. 비트를 나눠 컷을 더 쓰세요.`);
-  if (!plan.beats[plan.beats.length - 1]?.graphics.some((g) => g.type === "end_card")) problems.push("마지막 비트에 end_card가 없어요.");
+  // 효과음은 15초에 2~3개(kit.json sfx_rules). 말 길이는 음절 수로 어림한다
+  const sfxCount = plan.beats.reduce((s, b) => s + b.sfx.length, 0);
+  const sfxMax = Math.max(3, Math.ceil((syllables / SYLLABLES_PER_SECOND / 15) * 3) + 1);
+  if (sfxCount > sfxMax) problems.push(`효과음이 ${sfxCount}개예요. ${sfxMax}개 이하로 줄여 시작 · 완성 · 반전처럼 힘을 줄 곳에만 남기세요.`);
+  if (plan.caption_style === "sentence") {
+    const big = plan.beats.filter((b) => b.big).length;
+    if (big > 3) problems.push(`큰 강조 자막(big)이 ${big}곳이에요. 두 번째 약속 · 완성 · 반전처럼 2~3곳만 남기세요.`);
+  }
   if (squash(plan.hook.on_screen).length > 22) problems.push("후킹 글자가 너무 길어요. 12자 안팎으로 줄이세요.");
   return [...new Set(problems)];
 }
@@ -249,11 +285,23 @@ export async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: stri
     if (!buf) {
       noVoice = true;
       // 음성이 없으면 말 길이를 어림해 자막만 맞춘다
-      voices.push({ file: null, fileIn: 0, fileOut: 0, estimated: Math.max(1.2, squash(texts[i]).length / 6.5) });
+      voices.push({ file: null, fileIn: 0, fileOut: 0, estimated: Math.max(1.2, squash(texts[i]).length / SYLLABLES_PER_SECOND) });
       continue;
     }
     const file = join(workDir, `line${i}.wav`);
     writeFileSync(file, buf);
+    // 모든 줄을 받아쓰기와 대조한다. 원고와 다르게 읽은 줄은 한 번 다시 만들어 더 비슷한 쪽을 쓴다
+    const first = await voiceMatch(file, texts[i], workDir);
+    if (first != null && first < VOICE_MATCH_MIN) {
+      const retry = await fishTts(texts[i], voiceSetting).catch(() => null);
+      if (retry) {
+        const again = join(workDir, `line${i}-retry.wav`);
+        writeFileSync(again, retry);
+        const second = await voiceMatch(again, texts[i], workDir);
+        if (second != null && second > first) writeFileSync(file, retry);
+        console.log(`[video-kit] 음성 ${i}번 줄 다시 만들기: ${first.toFixed(2)} → ${second == null ? "확인 못 함" : second.toFixed(2)}`);
+      }
+    }
     const span = voicedSpan(file);
     voices.push({ file, fileIn: span.from, fileOut: span.to });
     usedVoice = true;
@@ -454,7 +502,7 @@ function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditP
 }
 
 function motionBlocks(tl: Timeline, zones: CutZones[] | null, design: CaptionDesign): SkillBlock[] {
-  const blocks: SkillBlock[] = [{ start: 0, end: tl.hook.end, zone: hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position), fx: design.key_fx, highlight: tl.hook.highlight, rows: readableRows(tl.hook.onScreen).map((text) => ({ text, role: "key" })) }];
+  const blocks: SkillBlock[] = [{ start: 0, end: tl.hook.end, zone: hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position), fx: design.key_fx, highlight: tl.hook.highlight, big: true, rows: readableRows(tl.hook.onScreen).map((text) => ({ text, role: "key" })) }];
   const endCard = tl.graphics.find((g) => g.type === "end_card");
   if (endCard) {
     const p = endCard.g;
@@ -514,14 +562,16 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     tokens.input += res.tokens.input;
     tokens.output += res.tokens.output;
     plan = res.output;
-    const problems = planProblems(applyHumanText(plan, input));
+    // 길이 기준은 사람이 말하지 않는 직접 촬영에만 건다. AI 자동 영상은 장면표가, 말하는 영상은 촬영본이 길이를 정한다
+    const show = input.source !== "auto" && !input.liveVoice ? { footageSeconds: clips.reduce((s, c) => s + c.duration, 0) } : undefined;
+    const problems = planProblems(applyHumanText(plan, input), show);
     if (problems.length) {
       console.log(`[video-kit] 계획 다시 쓰기: ${problems.join(" / ")}`);
       const again = await ask({ plan, problems });
       tokens.input += again.tokens.input;
       tokens.output += again.tokens.output;
       plan = again.output;
-      for (const p of planProblems(applyHumanText(plan, input))) warnings.push(`편집 계획: ${p}`);
+      for (const p of planProblems(applyHumanText(plan, input), show)) warnings.push(`편집 계획: ${p}`);
     }
   }
   plan = sanitizePlan(applyHumanText(plan, input), clips, input.liveVoice);
@@ -533,7 +583,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const renderer = selectCaptionRenderer(!!skillDir);
   // 직접 촬영은 예전처럼 조용히 기본 자막으로 만든다. 자동 영상은 경고를 남겨 자동 발행을 멈춘다
   if (renderer === "basic" && readable) warnings.push(`${CAPTION_FALLBACK_WARNING} (스킬 파일을 받지 못함)`);
-  const look = normalizeLook(plan.look);
+  // 문장 자막 영상은 스킬 없이 기본 자막으로 만들 때도 한 흐름 · 한 번에 나오는 자막으로 둔다
+  const look = normalizeLook(plan.caption_style === "sentence" ? { ...plan.look, layout: "inline", reveal: "line" } : plan.look);
 
   // 2. 음성 → 시각표
   const preset = input.presetVoices;
@@ -590,7 +641,9 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       .map((s) => ({ text: s.text, start: line.start + Math.max(0, s.start - c.in), end: line.start + Math.min(c.out, s.end) - c.in }));
     live.set(line.beat, shifted);
   }
-  let tl = timeText(plan, base, words, live);
+  // 비트 안에서 컷이 바뀌는 시각을 낱말 시작에 맞춘다. 줄 시각이 미리 정해진 경로(lemo)는 그대로 둔다
+  // AI 자동 영상은 아래에서 끝 화면을 빼고 마지막 자막을 끝까지 두므로, 끝 화면이 있는 비트의 자막도 남긴다
+  let tl = timeText(plan, preset ? base : snapCuts(base, words, seconds), words, live, { keepEndCardCaptions: readable });
   if (input.presetSfx) tl = { ...tl, sfx: input.presetSfx.filter((s) => s.t >= 0 && s.t < tl.duration) };
   if (readable) tl = { ...tl, captions: readableCaptions(tl.captions) };
   // 사람이 볼 수 있게 어디에 들어갔는지 남긴다. 경고가 있으면 자동 발행도 멈춘다

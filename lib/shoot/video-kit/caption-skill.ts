@@ -71,6 +71,11 @@ const lookOf = (name: string | null | undefined): string | null => (name && LOOK
 const SMALL_SIZE = 96;
 const PLAIN_SMALL_SIZE = 80;
 const KEY_MAX = 132;
+// 후킹 글자는 영상에서 가장 큰 글자다. 자막의 강조어 줄보다 크게 둔다
+const HOOK_MAX = 156;
+// 흰 글자 자막 자리 배경의 밝은 쪽 휘도(0~1)가 이보다 높으면 글자 일부가 밝은 곳에 놓인다. 평균이 어두워 흰 글자로 두는 자막도 그림자를 진하게 한다
+const MIXED_BG = 0.45;
+const STRONG_GLOW = "rgba(0,0,0,.92)";
 const KEY_WIDTH = 900;
 const ROW_GAP = 18;
 // 자막 자리의 평균 밝기(0~255)가 이보다 높으면 어두운 글자를 쓴다
@@ -180,9 +185,9 @@ ${fontChoiceLines(loadSkillFonts(input.dir))}${conceptBlock("이 계정의 말�
 const squash = (t: string) => t.replace(/\s+/g, "");
 
 /** 글자 폭에 맞춘 강조어 크기. 한 줄이 화면을 넘지 않게 한다. */
-function keySize(text: string): number {
+function keySize(text: string, max = KEY_MAX): number {
   const units = [...text].reduce((sum, c) => sum + (c === " " ? 0.3 : /[가-힣]/.test(c) ? 1 : 0.62), 0);
-  return Math.round(Math.min(KEY_MAX, Math.max(SMALL_SIZE, KEY_WIDTH / Math.max(units, 1))));
+  return Math.round(Math.min(max, Math.max(SMALL_SIZE, KEY_WIDTH / Math.max(units, 1))));
 }
 
 /** 스킬에 넘길 모션 이름과 그 모션에 꼭 필요한 값. 목록에 없는 이름은 스킬이 렌더를 멈추므로 cut으로 바꾼다. */
@@ -205,7 +210,13 @@ export interface SubtitleFonts {
 const keyWeightOf = (fonts: SubtitleFonts) => (fonts.keyWeight ? { weight: fonts.keyWeight } : {});
 
 /** AI가 나눈 줄이 자막과 글자가 다르면 쓰지 않고 자막 전체를 큰 줄 하나로 둔다. accent는 이 자막 배경에 맞춘 강조색(재지 못하면 null). */
-function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, fonts: SubtitleFonts, accent: string | null) {
+function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefined, design: CaptionDesign, last: boolean, bright: boolean, fonts: SubtitleFonts, accent: string | null, mixed = false) {
+  // 밝은 배경은 어두운 글자, 밝은 곳이 섞인 배경은 흰 글자에 진한 그림자
+  const shade = bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : mixed ? { glow: STRONG_GLOW } : {};
+  // 문장 자막: 말한 문장을 그대로, 같은 크기의 움직이지 않는 줄로 보여 준다(큰 강조 자막은 아래의 디자인을 그대로 쓴다)
+  if (c.sentence && !c.big) {
+    return readableRows(c.text).map((text, i) => ({ text, ...motion("cut", false), size: fonts.smallSize, ...shade, ...(i > 0 ? { gapPx: ROW_GAP } : {}) }));
+  }
   const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
   const rows = usable ? line.rows : readableRows(c.text).map((text) => ({ text, role: "key" as const }));
   const delays = rowDelays(c, rows.map((r) => r.text));
@@ -224,7 +235,7 @@ function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefine
     // 강조어 줄은 이 자막 배경에 맞춘 강조색으로. 재지 못한 자막은 전체 강조색(tone hi = style.accent). 예능 모양을 입힌 줄은 모양의 색을, 테이프 위 줄은 어두운 글자를 쓴다
     ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts), ...(onTape ? ON_TAPE : lookFields ?? (bright ? {} : accent ? { color: accent } : { tone: "hi" })) } : {}),
     // 밝은 배경에서는 흰 글자와 노란 강조색이 안 읽혀 어두운 글자와 밝은 그림자로 바꾼다
-    ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
+    ...shade,
     ...(i > 0 ? { gapPx: onTape ? TAPE_GAP : ROW_GAP } : {}),
     ...(delays[i] ? { delay: delays[i] } : {}),
   }));
@@ -257,6 +268,8 @@ export interface SkillBlock {
   rows: { text: string; role: "key" | "small" }[];
   fx: string;
   highlight?: string;
+  // 후킹 글자처럼 영상에서 가장 크게 보여 줄 글자
+  big?: boolean;
 }
 
 /** 긴 문구를 글자 수에 맞춰 줄로 나눈다. 줄바꿈이 있으면 그대로 따른다. */
@@ -288,7 +301,7 @@ function blockLine(b: SkillBlock, bright: boolean, fonts: SubtitleFonts) {
       return {
         text: marked,
         ...motion(r.role === "key" ? b.fx : "cut", r.role === "key"),
-        size: r.role === "key" ? keySize(r.text) : fonts.smallSize,
+        size: r.role === "key" ? keySize(r.text, b.big ? HOOK_MAX : KEY_MAX) : fonts.smallSize,
         ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts) } : {}),
         ...(onTape ? ON_TAPE : {}),
         ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
@@ -333,7 +346,7 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
     lines: [...blocks.map((b, i) => blockLine(b, (blockBrightness[i] ?? 0) > BRIGHT, fonts)), ...captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
-      const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT, fonts, captionAccent(i));
+      const rows = rowsOf(c, line, design, i === captions.length - 1, (brightness[i] ?? 0) > BRIGHT, fonts, captionAccent(i), (backgrounds.captions?.[i] ?? 0) >= MIXED_BG);
       const keyRow = rows.findIndex((r) => "key" in r);
       return {
         t0: Number(c.start.toFixed(3)),
@@ -341,7 +354,7 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
         cy: box.top + Math.round(box.height / 2),
         rows,
         // 반짝이는 강조어 줄이 나온 뒤에 붙인다(스킬 기본: 자막 시작 0.15초 뒤)
-        ...(line?.spark && keyRow >= 0 ? { deco: [{ type: "spark", at: Number(((rows[keyRow].delay ?? 0) + 0.15).toFixed(2)), items: [{ row: keyRow, corner: "tr", s: 44 }] }] } : {}),
+        ...(line?.spark && keyRow >= 0 ? { deco: [{ type: "spark", at: Number((((rows[keyRow] as { delay?: number }).delay ?? 0) + 0.15).toFixed(2)), items: [{ row: keyRow, corner: "tr", s: 44 }] }] } : {}),
       };
     })].sort((a, b) => a.t0 - b.t0),
   };
