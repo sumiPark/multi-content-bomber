@@ -207,7 +207,8 @@ export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: { 
         : { data: [] };
       const m = new Map((metrics ?? []).map((x) => [x.post_id, x]));
       return (posts ?? []).map((p) => ({
-        caption: p.caption?.split("\n")[0]?.slice(0, 80) ?? null,
+        // 글자(코드 포인트) 단위로 자른다. slice로 자르면 이모지가 반으로 잘려 OpenAI 요청이 400으로 거절된다
+        caption: p.caption == null ? null : Array.from(p.caption.split("\n")[0] ?? "").slice(0, 80).join(""),
         type: p.media_product_type,
         postedAt: p.posted_at,
         ...(m.get(p.id) ?? {}),

@@ -59,7 +59,8 @@ function styleLine(style: ReelStyle | null): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
-const snippet = (caption: string | null) => (caption ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+// 글자(코드 포인트) 단위로 자른다. slice로 자르면 이모지가 반으로 잘려 OpenAI 요청이 400으로 거절된다
+const snippet = (caption: string | null) => Array.from((caption ?? "").replace(/\s+/g, " ").trim()).slice(0, 120).join("");
 
 /** 상품군으로 거르기 전 후보. 다른 계정은 영상 분석이 있는 릴스만, 한 계정 개수 제한은 거른 뒤(pickSameCategory)에 건다. */
 export async function loadReelReferences(service: Service, socialAccountId: string, now = Date.now()): Promise<ReelReferences> {
