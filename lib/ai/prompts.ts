@@ -1,6 +1,7 @@
 import "server-only";
 import { conceptBlock } from "@/lib/agents/concept";
 import type { ContentPlatform as Platform } from "@/lib/platforms";
+import { CAPTION_LINE_RULE } from "./caption-layout";
 
 // 단일 출처: docs/caption-engine.md
 // Instagram 규칙의 출처는 한국어 인스타 스킬 ig-caption-ko · ig-human-ko(.claude/skills)다.
@@ -76,10 +77,11 @@ caption 모양 (600자 안쪽. 2200자 한도를 채우지 않는다):
 - 첫 문장: 공백 포함 40자 안에서 끝낸다. 피드에서 "더 보기" 전에 보이는 자리다. 인사·해시태그·이모지로 시작하지 않는다.${
     reel ? " 이 영상이 무엇인지 또는 요청을 그냥 말한다. 강한 감정·충격·궁금증으로 또 후킹하지 않는다." : ""
   }
-- 본문: 짧은 문단 2~6개, 문단 사이 빈 줄 하나. 사람들이 인스타 검색창에 실제로 칠 말 2~3개(품목·상품명·고민)를 평범한 문장 안에 넣는다.
+- 본문: 짧은 문단 2~6개. 사람들이 인스타 검색창에 실제로 칠 말 2~3개(품목·상품명·고민)를 평범한 문장 안에 넣는다.
 - 요청: 전체에서 딱 하나. 저장, 댓글 키워드(공백 없는 한 단어), DM 중에서 고른다. 저장하라고 하면서 질문까지 붙이지 않는다. 첫 문장에 썼으면 끝에서 반복하지 않는다.
 - 해시태그는 caption에 넣지 않는다. 게시할 때 hashtags 배열이 본문 뒤에 자동으로 붙는다.
 - 링크·URL을 넣지 않는다. 캡션 링크는 눌리지 않는다.
+- ${CAPTION_LINE_RULE}
 
 말투:
 - 말하듯 짧은 구어체. 같은 어미를 세 문장 연속 쓰지 않는다.

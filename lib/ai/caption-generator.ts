@@ -5,6 +5,7 @@ import type { ContentPlatform as Platform } from "@/lib/platforms";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import type { MediaItemKind } from "@/lib/upload/media-kind";
+import { breakCaptionLines } from "./caption-layout";
 import {
   checkInstagramCaption,
   cleanInstagramHashtags,
@@ -347,7 +348,7 @@ function postProcessInstagram(
 ): NonNullable<Captions["instagram"]> {
   return {
     caption: trimByParagraph(
-      stripTrailingHashtags(c.caption).replace(/\s*[—―]\s*/g, ", "),
+      breakCaptionLines(stripTrailingHashtags(c.caption).replace(/[ \t]*[—―][ \t]*/g, ", ")),
       LIMITS.instagram.caption,
     ),
     hashtags: cleanInstagramHashtags(ensureHash(c.hashtags)),

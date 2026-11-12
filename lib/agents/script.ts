@@ -3,6 +3,7 @@ import { conceptBlock } from "@/lib/agents/concept";
 import { checkCaption, checkTone, hookFormulas, scoreHooks, timeScript } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner";
+import { breakCaptionLines, CAPTION_LINE_RULE } from "@/lib/ai/caption-layout";
 import { checkText, type ContentRule } from "@/lib/rules/check";
 import type { createServiceClient } from "@/lib/supabase/service";
 
@@ -35,7 +36,7 @@ export const scriptSchema = z.object({
     .describe("비트 5~9개, 한 비트 4초 이내"),
   loop_word: z.string().describe("마지막 비트가 되받는 훅의 낱말"),
   caption: z.object({
-    text: z.string().describe("캡션 전체 — 첫 줄(40자 이내) · 본문 · 요청 하나 · 해시태그 3개"),
+    text: z.string().describe("캡션 전체 — 첫 줄(40자 이내) · 본문 · 요청 하나 · 해시태그 3개. 한 줄에 한 문장, 문단 사이 빈 줄"),
     keywords: z.array(z.string()).describe("찾히고 싶은 검색어 2~4개"),
   }),
 });
@@ -143,6 +144,7 @@ function systemPrompt(ctx: ScriptContext): string {
 3. 1등 훅으로 대본을 쓴다: 훅(0~2초) → 왜 중요한지 한 줄 → 본문(비트마다 한 가지, 장면이 바뀜) → 약속 갚기 + 요청 하나 → 마지막 줄은 훅의 낱말을 되받아 다시 보게.
    목표 15~25초. time_script로 재고 경고를 다 없앤다.
 4. 캡션을 쓰고 check_caption으로 점검한다. 첫 줄 40자 이내, 요청은 하나, 해시태그 정확히 3개.
+   ${CAPTION_LINE_RULE}
 5. 내레이션 전체와 캡션을 check_ai_tone, check_rules로 점검한다. check_rules에 걸린 것은 고친다. check_ai_tone은 한 번만 쓰고, 번역투 · 상투어 · 같은 어미 반복만 고친 뒤 점수가 낮아도 넘어간다.
 
 절대 규칙:
@@ -162,7 +164,7 @@ export async function writeScript(ctx: ScriptContext, opts: { log: boolean }): P
   const fix = ctx.fixRequests?.length
     ? `\n\n이전 대본이 점검에서 걸렸다. 이것을 반드시 고쳐서 다시 써라:\n${ctx.fixRequests.map((r) => `- ${r}`).join("\n")}`
     : "";
-  return runAgent({
+  const result = await runAgent({
     agent: "plan",
     system: systemPrompt(ctx),
     user: `${ctx.facts.name}로 ${ctx.slotTime} 릴스 대본 · 화면 문구 · 캡션을 써 줘.${fix}`,
@@ -175,4 +177,6 @@ export async function writeScript(ctx: ScriptContext, opts: { log: boolean }): P
     planId: ctx.planId,
     input: { product: ctx.facts.name, slotTime: ctx.slotTime, fixRequests: ctx.fixRequests ?? [], notes: ctx.notes ?? null },
   });
+  result.output.caption.text = breakCaptionLines(result.output.caption.text);
+  return result;
 }

@@ -9,6 +9,7 @@ import { EMPTY_REFERENCES, referenceBlock, type ReelReferences } from "@/lib/age
 import { agentModel, runAgent, type AgentResult } from "@/lib/agents/runner";
 import { writerSkills } from "@/lib/agents/script";
 import { motionSchema, type MotionSpec } from "@/lib/agents/source-plan";
+import { breakCaptionLines, CAPTION_LINE_RULE } from "@/lib/ai/caption-layout";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
@@ -122,7 +123,7 @@ export const storyboardSchema = z.object({
     scene: z.number().int().describe("표지로 쓸 장면 번호(0부터)"),
   }),
   caption: z.object({
-    text: z.string().describe("캡션 전체 — 첫 줄(40자 이내) · 본문 · 요청 하나 · 해시태그 3개"),
+    text: z.string().describe("캡션 전체 — 첫 줄(40자 이내) · 본문 · 요청 하나 · 해시태그 3개. 한 줄에 한 문장, 문단 사이 빈 줄"),
     keywords: z.array(z.string()).describe("찾히고 싶은 검색어 2~4개"),
   }),
   look: lookSchema,
@@ -360,6 +361,7 @@ ${tale ? "시청자가 첫 문장의 작은 사건에 멈춘 뒤, 그 사건이 
 2. 이 영상의 단 한 가지(one_thing)와 첫 장면이 여는 것(situation) · 궁금증(worry)을 정한다. 그 답이 이 상품의 특징이나 우리 차이로 이어지는 것을 고른다(question_reason). 상품과 상관없는 일반 상식에서 시작해 상품을 끼워 넣지 않는다.
 3. 아래 구조로 장면을 나누고, 장면마다 화면 하나와 그 화면을 보며 할 말을 정한다. check_rules로 금지 표현을 확인한다.
 4. 게시물 캡션은 check_caption으로 검사하고 경고를 고친다. 첫 40자에 상품의 짧은 이름과 주제를 넣고, 검색어는 해시태그 외 본문에도 쓴다. 행동 요청은 꼭 넣지 않아도 되고, 넣으면 하나만 쓴다. 구매 유도는 필요 없다.
+   ${CAPTION_LINE_RULE}
 
 구조와 분량:
 - 길이는 내용이 정한다. 말 전체(tts를 이어 붙인 글자, 띄어쓰기 제외)가 ${ctx.charLimits[0]}~${ctx.charLimits[1]}자(30~85초) 안이면 된다. 1분을 채우려고 문장을 늘리지 않는다. 할 말이 끝나면 끝낸다.
@@ -436,7 +438,7 @@ ${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의
       ? `\n\n먼저 쓴 장면표:\n${JSON.stringify({ hook: ctx.retry.board.hook, scenes: ctx.retry.board.scenes.map((s) => ({ part: s.part, source: s.source, source_id: s.source_id, stock_query: s.stock_query, say: s.say })), visuals: ctx.retry.board.visuals.map((v) => ({ beat: v.beat, subject: v.subject })) })}\n\n이 문제를 고쳐 전체를 다시 내라:\n${bullets(ctx.retry.problems)}${ctx.retry.earlier?.length ? `\n\n앞 회차에서 지적돼 고친 것이다. 이번에 고치면서 다시 생기지 않게 함께 지킨다:\n${bullets(ctx.retry.earlier)}` : ""}`
       : ""
   }`;
-  return runAgent({
+  const result = await runAgent({
     agent: "plan",
     system,
     user,
@@ -450,6 +452,8 @@ ${bullets(kit.look_rules)}${ctx.fontChoices?.length ? `\n\n글꼴: 이 영상의
     planId: ctx.planId,
     input: { product: f.name, candidates: ctx.candidates.length, gifs: gifs.length, archive: ctx.archive.length, cards: ctx.knowledge.cards.map((c) => c.ref), differences: ctx.knowledge.differences.map((d) => d.ref), retry: ctx.retry?.problems ?? [] },
   });
+  result.output.caption.text = breakCaptionLines(result.output.caption.text);
+  return result;
 }
 
 const squash = (t: string) => t.replace(/[\s.,!?~·…'"]+/g, "");
