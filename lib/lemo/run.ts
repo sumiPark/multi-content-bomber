@@ -5,6 +5,7 @@ import { agentModel } from "@/lib/agents/runner";
 import type { ContentRule } from "@/lib/rules/check";
 import type { KitInput, KitResult } from "@/lib/shoot/video-kit/pipeline";
 import type { createServiceClient } from "@/lib/supabase/service";
+import type { BoardBrief } from "./board-brief";
 import { loadAccountLibrary, prepareCharacters } from "./characters";
 import { checkFinal, checkSilentRender, type FinalChecks, type RenderChecks } from "./checks";
 import { composeLemoVideo } from "./compose";
@@ -41,6 +42,8 @@ export interface LemoJob {
   // 음성으로 읽을 원고(숫자 · 영문을 말하는 대로 바꾼 줄, script와 줄 수가 같다). 없으면 script를 읽는다. 자막은 script로 쓴다
   speech?: string[];
   hook: { spoken: string; on_screen: string } | null;
+  // 장면표에서 추린 값(board-brief.ts): 장면별 화면 지시 · 화면 글자 · 자막 줄 · 강조어 · 글자 디자인 · 글꼴 · 끝 화면. 장면표 없이 만드는 실행은 비운다
+  brief?: BoardBrief | null;
   sources: LemoSources;
   tone: string | null;
   service: Service | null;
@@ -126,6 +129,8 @@ export async function runLemoJob(job: LemoJob, ledger: UsageLedger): Promise<Lem
       console.warn(`[lemo] 캐릭터 준비 경고: ${prepared.problems.join(" / ")}`);
       outcome.review.push(...prepared.problems.map((p) => `캐릭터: ${p}`));
     }
+    // 합격한 시트가 없는 캐릭터가 있으면 여기서 멈춘다(사용량은 위에서 장부에 넣었다). AI 자동 영상 호출자가 경고와 함께 기존 경로로 만든다
+    if (prepared.failed.length) throw new Error(`캐릭터 준비 실패 — ${prepared.failed.join(" / ")}`);
     library = prepared.characters;
     // 3. 음성 확정 — 새 대본은 기존 TTS. 실패하면 던진다(무음 완료 금지)
     const made = await ledger.time("voice", () => voiceFromScript({ lines: job.speech ?? job.script, voiceId: job.account.voiceId, workDir: join(job.out, "voice") }));
@@ -134,12 +139,14 @@ export async function runLemoJob(job: LemoJob, ledger: UsageLedger): Promise<Lem
     for (const w of made.warnings) console.warn(`[lemo] 음성: ${w}`);
     // 4. 장면 계획 — 확정된 음성 시각에 맞춘다
     const directed = await ledger.time("direct", () =>
-      directProduction({ choice: chosen.choice, account: job.account, profile: lib.profile, characters: library, voice, script: job.script, facts: job.facts, size: SIZE, fps: FPS }),
+      directProduction({ choice: chosen.choice, account: job.account, profile: lib.profile, characters: library, voice, script: job.script, facts: job.facts, brief: job.brief, size: SIZE, fps: FPS }),
     );
     ledger.add(directed.usage);
     const attempts: unknown = directed.attempts;
     const tries = typeof attempts === "number" ? attempts : Array.isArray(attempts) ? attempts.length : 1;
     if (tries > 1) ledger.retry({ stage: "direct", attempt: tries, scope: "장면 계획", reason: directed.problems.join(" / ") || "계약 검사 통과까지 다시 씀" });
+    // 다시 써도 남은 문제(자막 겹침, 상품 캐릭터 미등장 등)는 사람이 확인하게 남긴다
+    if (directed.problems.length) outcome.review.push(...directed.problems.map((p) => `연출: ${p}`));
     production = directed.production;
   }
 
@@ -173,6 +180,7 @@ export async function runLemoJob(job: LemoJob, ledger: UsageLedger): Promise<Lem
     production,
     script: job.script.length ? job.script : voice.map((v) => v.text),
     hook: job.hook,
+    brief: job.brief,
     facts: job.facts,
     rules: job.rules,
     accountName: job.account.accountName,

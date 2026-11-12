@@ -109,6 +109,8 @@ export const characterSpecSchema = z.object({
   props: z.array(z.string()),
   made_for: z.string().describe("처음 만든 대본 · 영상"),
   sheet: z.string().nullable().describe("캐릭터 시트 그림 파일(검수 기록)"),
+  // 상품 캐릭터만: 그 상품(products.id). 같은 상품 영상에서 이 키로 찾아 재사용한다. 예전 명세에는 없다
+  product_id: z.string().nullable().optional().describe("이 캐릭터가 그린 상품 id. 상품 캐릭터가 아니면 없음"),
 });
 export type CharacterSpec = z.infer<typeof characterSpecSchema>;
 
@@ -135,11 +137,19 @@ export const productionChoiceSchema = z.object({
       role: z.string(),
       reuse: z.string().nullable().describe("재사용할 라이브러리 캐릭터 id, 새로 만들면 null"),
       why: z.string(),
+      // 상품 자료가 있는 영상은 배역 중 하나만 true(select.ts withProductRole). 예전 기록에는 없다
+      product: z.boolean().optional().describe("소개하는 상품 자체를 그린 배역이면 true"),
     }),
   ),
   cost_class: z.enum(["low", "mid", "high"]).describe("렌더 시간 · AI 사용량 어림"),
 });
 export type ProductionChoice = z.infer<typeof productionChoiceSchema>;
+
+/** 이 영상의 상품 캐릭터 — 배역 계획이 상품 배역으로 재사용한 것, 없으면 그 상품 키(product_id)로 만든 것. 없으면 null. */
+export function productCharacter(choice: ProductionChoice, characters: CharacterSpec[], productId: string | null): CharacterSpec | null {
+  const reuse = choice.characters.find((c) => c.product)?.reuse;
+  return (reuse ? characters.find((c) => c.id === reuse) : undefined) ?? (productId ? characters.find((c) => c.product_id === productId) : undefined) ?? null;
+}
 
 /** AI 호출 한 번(또는 같은 단계 묶음)의 사용량. 비용 계산은 usage.ts가 단가표로 한다. */
 export interface AiUsage {

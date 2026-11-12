@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { loadEngineManifest, manifestPropNames, styleNotes, type EngineManifest } from "./catalog";
-import { productionProblems, productionSchema, type AccountContext, type AiUsage, type CharacterSpec, type Production, type ProductionChoice, type Scene, type VoiceLine } from "./contract";
+import { productCharacter, productionProblems, productionSchema, type AccountContext, type AiUsage, type CharacterSpec, type Production, type ProductionChoice, type Scene, type VoiceLine } from "./contract";
 import { accountBlock, assertAccountLibrary, CLAIM_RULES, factsBlock, lemoParse } from "./select";
 import type { AccountProfile } from "./characters";
+import { allowedScreenTexts, boardScreenLines, isBoardText, type BoardBrief } from "./board-brief";
 import type { ProductFacts } from "@/lib/agents/product-facts";
+import { ZONE_BOX, ZONE_FRAME_HEIGHT } from "@/lib/shoot/video-kit/caption-style";
 import type OpenAI from "openai";
 
 // 장면 연출 — 영상마다 새로 설계한 production.json(contract.ts productionSchema)을 만든다.
@@ -21,8 +23,42 @@ const CONTRACT_TRANSITIONS = ["cut", "fade", "wipe", "page-turn", "match"] as co
 // 장면 경계: 다음 줄 음성보다 조금 먼저 그림을 바꾸고, 마지막 줄 뒤에는 여유를 둔다
 const LEAD = 0.15;
 const TAIL = 0.6;
-// 모션 자막 자리(화면 높이 비율) — 이 안에 얼굴을 두지 않는다
-const CAPTION_ZONE = { top: [0, 0.22], lower: [0.72, 1] } as const;
+// 모션 자막 자리(화면 높이 비율) — 이 안에 얼굴 · 몸 · 소품을 두지 않는다.
+// 수치는 실제 자막이 놓이는 편집 키트의 자리(caption-style.ts ZONE_BOX)에서 가져온다. 여기서 따로 정하지 않는다
+const zoneSpan = (place: "top" | "lower"): [number, number] => [ZONE_BOX[place].top / ZONE_FRAME_HEIGHT, (ZONE_BOX[place].top + ZONE_BOX[place].height) / ZONE_FRAME_HEIGHT];
+export const CAPTION_ZONE: Record<"top" | "lower", [number, number]> = { top: zoneSpan("top"), lower: zoneSpan("lower") };
+// 자막 자리 높이 가운데 이 비율 넘게 몸 · 소품이 들어오면 겹친 것으로 본다. 글자는 자리 가운데에 놓여 가장자리는 조금 닿아도 된다
+const ZONE_OVERLAP = 0.2;
+// 화면 글자 소품(엔진 props.js word). 장면표가 정한 글자만 쓴다
+const WORD_PROP = "word";
+// 소품의 세로 반 크기 어림(1080 폭 기준 px, scale 1). 엔진 manifest에 크기가 없어 공용 소품(양동이 · 구름)과 글자 높이로 잡는다
+const PROP_HALF = 75;
+const WORD_HALF = 35;
+
+/** 화면 세로 구간 a~b가 자막 자리를 얼마나 차지하는지(자리 높이 대비 0~1). */
+function zoneShare(a: number, b: number, zone: [number, number]): number {
+  return Math.max(0, Math.min(Math.max(a, b), zone[1]) - Math.max(Math.min(a, b), zone[0])) / (zone[1] - zone[0]);
+}
+
+/** 소품 state '글자' 또는 '글자@초'에서 글자와 시각을 나눈다(엔진 geom.js parseState와 같은 규칙). */
+function wordState(state: string | null): { text: string; at: number | null } {
+  const raw = (state ?? "").trim();
+  const i = raw.lastIndexOf("@");
+  const at = i >= 0 ? Number.parseFloat(raw.slice(i + 1)) : Number.NaN;
+  return Number.isFinite(at) ? { text: raw.slice(0, i).trim(), at } : { text: raw, at: null };
+}
+
+/** 엔진 manifest의 소품 층(bg · obj · fx). 계정 소품처럼 적혀 있지 않은 것은 없다. */
+function propLayers(manifest: EngineManifest): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const p of manifest.props) {
+    if (!p || typeof p !== "object") continue;
+    const o = p as Record<string, unknown>;
+    const name = o.kind ?? o.name ?? o.id;
+    if (typeof name === "string" && typeof o.layer === "string") out.set(name, o.layer);
+  }
+  return out;
+}
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -119,7 +155,15 @@ function coverageProblems(voice: VoiceLine[], scenes: AiProduction["scenes"]): s
 
 const inRange = (n: number, lo: number, hi: number) => n >= lo && n <= hi;
 
-function extraProblems(ai: AiProduction, p: Production, characters: CharacterSpec[], styleEntry: EngineManifest["styles"][string], props: string[]): string[] {
+function extraProblems(
+  ai: AiProduction,
+  p: Production,
+  characters: CharacterSpec[],
+  styleEntry: EngineManifest["styles"][string],
+  props: string[],
+  // layers: 소품 층(배경 층 소품은 자막 뒤에 있어도 된다). brief: 장면표(있으면 화면 글자를 장면표 글자로만 쓰는지 본다)
+  opts: { layers: Map<string, string>; brief: BoardBrief | null },
+): string[] {
   const out: string[] = [];
   const castIds = new Set<string>();
   for (const c of ai.cast) {
@@ -153,28 +197,61 @@ function extraProblems(ai: AiProduction, p: Production, characters: CharacterSpe
       if (!fxSet.has(f.kind)) out.push(`${tag}: 효과 ${f.kind}는 이 스타일이 모르는 효과예요`);
       if (!inRange(f.at_frac, 0, 1)) out.push(`${tag}: 효과 at_frac ${f.at_frac}가 0~1 밖이에요`);
     }
-    for (const pr of s.props) if (!propSet.has(pr.kind)) out.push(`${tag}: 소품 ${pr.kind}는 엔진 · 캐릭터 소품 목록에 없어요`);
+    const zone = CAPTION_ZONE[s.caption_place];
+    const zoneText = `${s.caption_place}, 화면 y ${zone[0].toFixed(2)}~${zone[1].toFixed(2)}`;
+    for (const pr of s.props) {
+      if (!propSet.has(pr.kind)) out.push(`${tag}: 소품 ${pr.kind}는 엔진 · 캐릭터 소품 목록에 없어요`);
+      const isWord = pr.kind === WORD_PROP;
+      if (isWord && opts.brief) {
+        // 화면 글자는 장면표가 그 장면에 정한 글자만 쓴다(점검을 통과한 글자다)
+        const word = wordState(pr.state);
+        const allowed = allowedScreenTexts(opts.brief, s.from_beat, s.to_beat);
+        if (!word.text) out.push(`${tag}: word 소품에 쓸 글자(state)가 없어요`);
+        else if (!isBoardText(word.text, allowed)) out.push(`${tag}: 화면 글자 "${word.text}"는 장면표가 이 장면에 정한 글자가 아니에요(쓸 수 있는 글자: ${allowed.length ? allowed.map((t) => `"${t}"`).join(" · ") : "없음 — word 소품을 빼요"})`);
+        if (word.at !== null && word.at >= sc.end - sc.start) out.push(`${tag}: 화면 글자 "${word.text}"가 나오는 시각(${word.at}초)이 장면 길이(${(sc.end - sc.start).toFixed(1)}초)를 넘어요`);
+      }
+      // 소품이 자막 자리에 들어가는지 — 해 · 구름 같은 배경 층 · 효과 층 소품은 자막 뒤에 있어도 되고, 화면 글자와 물건은 안 된다
+      const layer = opts.layers.get(pr.kind) ?? "obj";
+      if (!isWord && (layer === "bg" || layer === "fx")) continue;
+      const half = ((isWord ? WORD_HALF : PROP_HALF) * pr.scale * (p.size.w / 1080)) / p.size.h;
+      for (const cam of [s.camera.from, s.camera.to]) {
+        const sy = (pr.at.y - cam.y) * cam.zoom + 0.5;
+        const sx = (pr.at.x - cam.x) * cam.zoom + 0.5;
+        if (sx < -0.1 || sx > 1.1) continue;
+        if ((sy >= zone[0] && sy <= zone[1]) || zoneShare(sy - half * cam.zoom, sy + half * cam.zoom, zone) > ZONE_OVERLAP) {
+          out.push(`${tag}: ${isWord ? `화면 글자 "${wordState(pr.state).text}"` : `소품 ${pr.kind}`}(화면 y ${sy.toFixed(2)})가 자막 자리(${zoneText})에 들어가요. 자리 밖으로 옮기거나 caption_place를 바꿔요`);
+          break;
+        }
+      }
+    }
     for (const x of s.sfx) if (!inRange(x.at_frac, 0, 1)) out.push(`${tag}: 효과음 at_frac ${x.at_frac}가 0~1 밖이에요`);
     for (const a of s.actors) {
       for (const v of [a.expr_at, a.enter_at, a.exit_at]) if (v !== null && !inRange(v, 0, 1)) out.push(`${tag}: ${a.cast}의 시각 비율 ${v}가 0~1 밖이에요`);
       if (a.expr_to && a.expr_at === null) out.push(`${tag}: ${a.cast}는 expr_to가 있는데 expr_at이 없어요`);
       if (a.look_cast && !castIds.has(a.look_cast)) out.push(`${tag}: ${a.cast}가 보는 ${a.look_cast}는 배역이 아니에요`);
       for (const pl of [a.from, a.to]) if (pl && (!inRange(pl.scale, 0.2, 3) || !inRange(pl.x, -0.3, 1.3) || !inRange(pl.y, -0.3, 1.5))) out.push(`${tag}: ${a.cast} 위치 · 크기가 범위 밖이에요`);
-      // 얼굴이 자막 자리에 들어가는지 — 카메라 시작 · 끝 두 시점에서 화면 좌표로 본다
+      // 얼굴 · 몸이 자막 자리에 들어가는지 — 카메라 시작 · 끝 두 시점에서 화면 좌표로 본다
       const spec = charOf.get(a.cast);
       if (!spec) continue;
-      const zone = CAPTION_ZONE[s.caption_place];
       const checks: [typeof a.from, typeof s.camera.from][] = [
         [a.from, s.camera.from],
         [a.to ?? a.from, s.camera.to],
       ];
       for (const [pl, cam] of checks) {
         const hFrac = (spec.body.height * pl.scale * (p.size.w / 1080)) / p.size.h;
-        const faceY = pl.y - hFrac * (1 - spec.body.head_ratio / 2);
-        const sy = (faceY - cam.y) * cam.zoom + 0.5;
+        const screenY = (y: number) => (y - cam.y) * cam.zoom + 0.5;
+        const sy = screenY(pl.y - hFrac * (1 - spec.body.head_ratio / 2));
         const sx = (pl.x - cam.x) * cam.zoom + 0.5;
         if (sy >= zone[0] && sy <= zone[1]) {
-          out.push(`${tag}: ${a.cast} 얼굴(화면 y ${sy.toFixed(2)})이 자막 자리(${s.caption_place})에 들어가요. 반대쪽으로 옮기거나 caption_place를 바꿔요`);
+          out.push(`${tag}: ${a.cast} 얼굴(화면 y ${sy.toFixed(2)})이 자막 자리(${zoneText})에 들어가요. 반대쪽으로 옮기거나 caption_place를 바꿔요`);
+          break;
+        }
+        // 몸(머리 끝 ~ 발). 자막은 가로를 거의 다 쓰므로 가로로 화면 안에 있으면 세로 겹침만 본다
+        const head = screenY(pl.y - hFrac);
+        const feet = screenY(pl.y);
+        const share = zoneShare(head, feet, zone);
+        if (sx > -0.1 && sx < 1.1 && share > ZONE_OVERLAP) {
+          out.push(`${tag}: ${a.cast} 몸(화면 y ${head.toFixed(2)}~${feet.toFixed(2)})이 자막 자리(${zoneText})를 ${Math.round(share * 100)}% 가려요. 캐릭터 위치 · 크기나 카메라를 바꿔 자리 밖에 두거나 caption_place를 반대쪽으로 바꿔요`);
           break;
         }
         if (a.enter_at === null && a.exit_at === null && (sy < 0 || sy > 1 || sx < 0 || sx > 1)) {
@@ -241,7 +318,24 @@ function buildProduction(
   });
 }
 
-function systemPrompt(style: string, styleEntry: EngineManifest["styles"][string], props: string[], characters: CharacterSpec[], size: { w: number; h: number }): string {
+// board: 장면표가 정한 화면을 받았는지. 받았으면 그 화면을 따르는 법과 화면 글자(word 소품) 쓰는 법을 넣는다
+function systemPrompt(style: string, styleEntry: EngineManifest["styles"][string], props: string[], characters: CharacterSpec[], size: { w: number; h: number }, board: boolean): string {
+  const pct = (z: [number, number]) => `${Math.round(z[0] * 100)}~${Math.round(z[1] * 100)}%`;
+  const canWrite = board && props.includes(WORD_PROP);
+  const textRule = canWrite
+    ? `- 나레이션 자막과 첫 장면의 후킹 큰 글자는 편집 키트가 얹으니 화면에 그리지 않는다. 화면 글자는 아래 "장면표가 정한 화면"에 화면 글자 · 끝 화면이 적힌 줄의 장면에서만, 거기 적힌 글자만 ${WORD_PROP} 소품으로 쓴다. state에 쓸 글자를 넣고("글자@초"로 쓰면 장면 시작 그 초부터 한 글자씩 써진다. 초는 그 장면 길이보다 짧아야 한다), at은 글자 가운데 위치, scale 1이면 한 글자 높이가 화면 폭의 약 5%다. 소품 하나에 10자 이내로 쓰고 길면 나눈다. 말의 문장을 글자로 옮기지 않는다.`
+    : "- 화면에 글자를 그리지 않는다(나레이션 자막은 편집 키트가 얹는다).";
+  const boardRules = board
+    ? `
+
+장면표를 따르는 법(아래 "장면표가 정한 화면"):
+- 장면표는 이 영상의 말과 화면을 함께 정한 계획이다. 줄마다 적힌 "보이는 것"과 설명 화면 · 그래픽의 내용을, 그 줄을 맡은 장면이 보여 줘야 한다. 캐릭터가 가만히 서 있기만 하는 장면으로 바꾸지 않는다.
+- 장면표는 사진 · 스톡 영상 · 코드 도식 기준으로 쓰였다. 사진이나 영상 자체를 흉내 내지 말고, 그 화면이 전하려는 내용(무엇을 보여 주는지, 무엇과 무엇이 다른지, 어떤 순서 · 숫자인지)을 캐릭터의 행동 · 소품 · 배치 · 카메라로 옮긴다.
+- 제품 사진 · 자사 촬영 · 움직이는 이미지 줄은 상품이 화면에 보여야 한다. 배역에 상품을 그린 캐릭터가 있으면 그 캐릭터를 그 장면에 세운다.
+- 비교 화면 · 둘 비교 그래픽: 두 쪽을 화면 좌우로 나눠 서로 다른 행동으로 보여 주고${canWrite ? ", 각 쪽의 이름 · 값을 그 쪽 가까이에 화면 글자로 쓴다" : ""}.
+- 순서 · 목록 화면: 항목이 말에 맞춰 하나씩 나타나게 한다.${canWrite ? " 숫자 화면 · 큰 글자 화면: 그 숫자 · 낱말을 화면 글자로 크게 쓴다." : ""}
+- 끝 화면: 마지막 줄의 장면은 처음 장면과 이어지게 마무리한다.${canWrite ? " 끝 화면 문구가 있으면 화면 글자로 보여 준다." : ""}`
+    : "";
   const charLines = characters
     .map((c) => {
       const hFrac = (c.body.height * (size.w / 1080)) / size.h;
@@ -257,12 +351,13 @@ function systemPrompt(style: string, styleEntry: EngineManifest["styles"][string
 - 설명형이면 한 장면에 한 생각만 보여 주고, 캐릭터는 그 생각을 몸으로 보여 주는 역할을 한다.
 - 카메라는 영상 전체에서 네 가지 이상 움직임(밀어 들어가기 · 빠지기 · 팬 · 틸트 · 따라가기 · 고정)을 쓰고, 움직일 때마다 이유가 있어야 한다. 빠른 구간과 숨 돌리는 구간을 섞는다.
 - 중요한 순간에는 주인공이 화면 높이의 3분의 1 이상이 되게 크게 잡는다. 화면 가장자리에 붙이지 않는다. 같은 색 위에 같은 색을 두지 않는다.
-- caption_place는 그 장면에 모션 자막이 들어갈 자리다. 캐릭터 얼굴과 중요한 행동은 그 반대쪽에 둔다. 자막 자리: top = 화면 위 22%, lower = 화면 아래 28%.
-- 좌표: 위치는 0~1 페이지 좌표(가로 · 세로), 캐릭터 위치는 발 기준이다. 화면 좌표 = (위치 − 카메라 중심) × zoom + 0.5. 얼굴 높이 ≈ 발 y − 키 × (1 − 머리비율 / 2).
+- 배역 계획에 [상품 배역]으로 표시된 캐릭터가 있으면, 상품을 소개하거나 상품 이름 · 특징 · 쓰는 법을 말하는 줄의 장면에 그 캐릭터를 세운다. 상품을 다른 소품(양동이 등)으로 대신 보여 주지 않는다.
+- caption_place는 그 장면에 모션 자막(첫 장면은 후킹 큰 글자도)이 들어갈 자리다. 자막 자리(화면 위에서부터 높이 기준): top = ${pct(CAPTION_ZONE.top)}, lower = ${pct(CAPTION_ZONE.lower)} 구간이고, 자막은 화면 가로를 거의 다 쓴다. 그 장면의 캐릭터 얼굴 · 몸 · 물건 소품 · 화면 글자는 이 띠 밖에 둔다(해 · 구름 같은 배경 소품은 띠 안에 있어도 된다). 캐릭터가 바닥에 서 있으면 보통 top이 맞고, lower는 캐릭터와 소품이 그 띠보다 위에 있을 때 쓴다. 띠를 피할 수 없으면 카메라나 캐릭터 크기 · 위치를 바꾼다. 후킹 큰 글자는 첫 줄이 끝날 때까지(2초 안팎) 첫 장면의 자리에 떠 있다.
+- 좌표: 위치는 0~1 페이지 좌표(가로 · 세로), 캐릭터 위치는 발 기준이다. 화면 좌표 = (위치 − 카메라 중심) × zoom + 0.5. 얼굴 높이 ≈ 발 y − 키 × (1 − 머리비율 / 2), 머리 끝 ≈ 발 y − 키. 화면에서 키는 zoom만큼 커진다.
 - 표정 · 동작은 그 캐릭터 목록에 있는 것만 쓴다. 배경 kind · 효과 · 전환 · 소품도 아래 목록에 있는 것만 쓴다.
 - sfx는 보이는 움직임(등장 · 착지 · 뚜껑 · 넘김 · 답이 나오는 순간)에만 맞춘다. 장면마다 넣지 않는다. 15초에 6~10개 안팎.
-- 화면에 글자를 그리지 않는다(나레이션 자막은 편집 키트가 얹는다).
-- purpose에는 그 장면이 이야기에서 하는 일만 쓴다. 표현 기준을 지켰다는 메모는 쓰지 않는다(지키기만 한다).
+${textRule}
+- purpose에는 그 장면이 이야기에서 하는 일만 쓴다. 표현 기준을 지켰다는 메모는 쓰지 않는다(지키기만 한다).${boardRules}
 
 이 영상의 스타일(${style}):
 ${styleNotes(style, 2000)}
@@ -281,6 +376,29 @@ ${CLAIM_RULES}
 - 상품 자료에 없는 효능을 그림 · 행동으로 주장하지 않는다(예: 근거 없이 피부가 '치료'되는 장면).`;
 }
 
+/** 장면 데이터의 화면 글자(word 소품)와 그 장면이 시작하는 음성 줄 번호. 완성본 글자 점검에 쓴다. */
+export function screenWords(p: Production): { beat: number; text: string }[] {
+  return p.scenes.flatMap((s) => s.props.filter((pr) => pr.kind === WORD_PROP).map((pr) => ({ beat: s.beat, text: wordState(pr.state).text }))).filter((w) => w.text);
+}
+
+/** 장면표가 그 장면에 정한 글자가 아닌 화면 글자를 뺀다. */
+function dropForeignWords(p: Production, brief: BoardBrief): { production: Production; dropped: string[] } {
+  const dropped: string[] = [];
+  const scenes = p.scenes.map((s, k) => {
+    const to = k + 1 < p.scenes.length ? p.scenes[k + 1].beat - 1 : brief.scenes.length - 1;
+    const allowed = allowedScreenTexts(brief, s.beat, Math.max(s.beat, to));
+    const props = s.props.filter((pr) => {
+      if (pr.kind !== WORD_PROP) return true;
+      const text = wordState(pr.state).text;
+      const ok = !!text && isBoardText(text, allowed);
+      if (!ok) dropped.push(`${s.id}: 장면표에 없는 화면 글자 "${text}"를 뺐어요`);
+      return ok;
+    });
+    return props.length === s.props.length ? s : { ...s, props };
+  });
+  return { production: dropped.length ? { ...p, scenes } : p, dropped };
+}
+
 /**
  * 장면 계획을 쓴다. 시각은 voice에서 코드가 채우고, AI는 장면 내용만 쓴다.
  * 문제가 있으면 문제 목록을 되먹여 최대 2번 다시 쓰고, 문제가 가장 적은 결과와 남은 문제를 돌려준다.
@@ -293,6 +411,8 @@ export async function directProduction(input: {
   voice: VoiceLine[];
   script: string[];
   facts: ProductFacts | null;
+  // 장면표에서 추린 화면 지시(board-brief.ts). 있으면 장면표가 정한 화면 · 화면 글자 · 끝 화면을 따른다. 없으면(수동 대본 실행) 음성 줄만 보고 짠다
+  brief?: BoardBrief | null;
   size?: { w: number; h: number };
   fps?: number;
 }): Promise<{ production: Production; usage: AiUsage[]; attempts: number; problems: string[] }> {
@@ -312,8 +432,17 @@ export async function directProduction(input: {
   const size = input.size ?? { w: 1080, h: 1920 };
   const fps = input.fps ?? 24;
   const schema = aiSchema(characters, styleEntry, props);
+  const layers = propLayers(manifest);
+  // 장면표의 장면 번호 = 음성 줄 번호여야 화면 지시를 줄에 붙일 수 있다. 어긋나면 장면표 없이 짠다
+  let brief = input.brief ?? null;
+  if (brief && (brief.scenes.length !== voice.length || voice.some((v, i) => v.beat !== i))) {
+    console.warn(`[lemo] 장면표 ${brief.scenes.length}장면과 음성 ${voice.length}줄이 맞지 않아 장면표 화면 지시 없이 장면을 짜요`);
+    brief = null;
+  }
 
-  const roleLines = choice.characters.map((c) => `- ${c.role}: ${c.reuse ?? "새로 만든 캐릭터"} — ${c.why}`).join("\n");
+  // 상품 배역(select.ts withProductRole)이 어느 캐릭터인지 알려 준다 — 상품을 보여 줄 수단은 이 캐릭터뿐이다
+  const product = productCharacter(choice, characters, input.facts?.id ?? null);
+  const roleLines = choice.characters.map((c) => `- ${c.role}${c.product && product ? ` [상품 배역 = ${product.id}]` : ""}: ${c.reuse ?? "새로 만든 캐릭터"} — ${c.why}`).join("\n");
   const user = `${accountBlock(account)}
 
 ${factsBlock(input.facts)}
@@ -324,10 +453,10 @@ ${roleLines}
 
 확정된 음성(줄 번호 · 말하는 구간 · 문장):
 ${voice.map((v) => `${v.beat}. [${v.start.toFixed(2)}–${v.end.toFixed(2)}초, ${(v.end - v.start).toFixed(1)}초] ${v.text}`).join("\n")}
-영상 길이: ${(voice[voice.length - 1].end + TAIL).toFixed(2)}초${input.script.length && input.script.length !== voice.length ? `\n(원래 대본 ${input.script.length}줄 — 음성 줄을 기준으로 한다)` : ""}`;
+영상 길이: ${(voice[voice.length - 1].end + TAIL).toFixed(2)}초${input.script.length && input.script.length !== voice.length ? `\n(원래 대본 ${input.script.length}줄 — 음성 줄을 기준으로 한다)` : ""}${brief ? `\n\n장면표가 정한 화면(번호 = 음성 줄 번호):\n${boardScreenLines(brief)}` : ""}`;
 
   const messages: Message[] = [
-    { role: "system", content: systemPrompt(style, styleEntry, props, characters, size) },
+    { role: "system", content: systemPrompt(style, styleEntry, props, characters, size, !!brief) },
     { role: "user", content: user },
   ];
   const usage: AiUsage[] = [];
@@ -343,7 +472,12 @@ ${voice.map((v) => `${v.beat}. [${v.start.toFixed(2)}–${v.end.toFixed(2)}초, 
     if (!problems.length) {
       try {
         production = buildProduction(ai, { voice, choice, account, profile, size, fps, style });
-        problems = [...productionProblems(production, characters, voice), ...extraProblems(ai, production, characters, styleEntry, props)];
+        problems = [...productionProblems(production, characters, voice), ...extraProblems(ai, production, characters, styleEntry, props, { layers, brief })];
+        // 상품 캐릭터가 한 장면에도 안 나오면 다시 쓰게 한다
+        const shown = product ? new Set(production.cast.filter((c) => c.character === product.id).map((c) => c.id)) : null;
+        if (product && shown && !production.scenes.some((s) => s.actors.some((a) => shown.has(a.cast)))) {
+          problems.push(`상품 캐릭터 ${product.id}가 어느 장면에도 나오지 않아요. cast에 넣고, 상품을 소개하는 줄의 장면에 세워 주세요`);
+        }
       } catch (e) {
         problems = [`계약 형식 검사 실패: ${e instanceof Error ? e.message.slice(0, 600) : String(e)}`];
       }
@@ -354,5 +488,8 @@ ${voice.map((v) => `${v.beat}. [${v.start.toFixed(2)}–${v.end.toFixed(2)}초, 
     else if (!best) throw new Error(`directProduction: 세 번 모두 장면을 음성 줄에 맞추지 못했어요 — ${problems.join(" / ")}`);
   }
   if (!best) throw new Error("directProduction: 결과 없음");
-  return { production: best.production, usage, attempts, problems: best.problems };
+  // 다시 써도 남은 장면표 밖 화면 글자는 그리지 않는다. 화면에 나가는 글자는 점검을 통과한 장면표 글자뿐이어야 한다
+  const kept = brief ? dropForeignWords(best.production, brief) : { production: best.production, dropped: [] };
+  for (const d of kept.dropped) console.warn(`[lemo] ${d}`);
+  return { production: kept.production, usage, attempts, problems: best.problems };
 }

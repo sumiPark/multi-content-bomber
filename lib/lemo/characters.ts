@@ -6,17 +6,22 @@ import { lemoRoot, loadEngineManifest, manifestPropNames, styleNotes, type Engin
 import { characterSpecSchema, type AccountContext, type AiUsage, type CharacterSpec, type Production, type ProductionChoice } from "./contract";
 import { buildSheetProject } from "./project";
 import { renderStills } from "./render";
-import { accountBlock, assertAccountLibrary, CLAIM_RULES, factsBlock, lemoParse, librarySummary } from "./select";
+import { accountBlock, assertAccountLibrary, CLAIM_RULES, factsBlock, lemoParse, librarySummary, productKey, withProductRole } from "./select";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import type OpenAI from "openai";
 
 // 캐릭터 준비 — 계정 라이브러리(lib/lemo/library/accounts/<account_key>/)만 읽고, 맞는 캐릭터가 없으면
 // 그 계정 이름공간으로 parametric 리그용 명세를 새로 만든다. 새 캐릭터는 작업 폴더에만 쓰고(라이브러리 저장은 사람이 확인한 뒤 따로),
-// 시트를 실제 엔진으로 렌더해 비전 검수를 거친다. 불합격은 한 번 다시 만들고, 그래도 안 되면 problems에 남긴다.
+// 시트를 실제 엔진으로 렌더해 비전 검수를 거친다. 불합격은 이유를 되먹여 다시 만들고(모두 SHEET_ATTEMPTS번),
+// 그래도 합격한 시트가 없으면 failed로 돌려준다 — 호출자(run.ts)가 사용량을 장부에 넣은 뒤 lemo 제작을 멈춘다(2026-11-11 사용자 결정).
+// 상품 자료가 있는 영상은 상품 배역을 하나 꼭 준비한다(select.ts withProductRole).
 // 라이브러리 폴더 · account.json · rig.js는 사람이 확인한 뒤 따로 저장한다. 여기서는 읽기만 한다.
 
 type Message = OpenAI.Chat.Completions.ChatCompletionMessageParam;
 type Brand = Production["brand"];
+
+/** 새 캐릭터 한 명의 시트를 만들어 검수하는 총 횟수(처음 1번 + 불합격 이유를 되먹인 다시 만들기 2번). */
+export const SHEET_ATTEMPTS = 3;
 
 // ── 계정 프로필 · 라이브러리 ───────────────────────────────────────────────────
 
@@ -121,6 +126,8 @@ async function sheetTools(): Promise<SheetTools> {
 // ── 새 캐릭터 설계 ────────────────────────────────────────────────────────────
 
 const CONTRACT_SHAPES = ["drop", "blob", "bottle", "fruit", "human", "animal"] as const;
+// 상품 배역이 쓸 수 있는 몸 모양 — 용기 · 포장(bottle), 과일 원물(fruit), 그 밖의 둥근 원물(blob)
+const PRODUCT_SHAPES = ["bottle", "fruit", "blob"];
 
 function enumOf(values: string[], what: string) {
   const uniq = [...new Set(values)];
@@ -162,8 +169,9 @@ type Design = z.infer<ReturnType<typeof designSchema>>["characters"][number];
 
 const HEX = /^#[0-9a-f]{6}$/i;
 
-function designProblems(d: Design, m: EngineManifest): string[] {
+function designProblems(d: Design, m: EngineManifest, product: boolean): string[] {
   const out: string[] = [];
+  if (product && !PRODUCT_SHAPES.includes(d.shape)) out.push(`${d.role}: 상품 배역의 몸 모양은 ${PRODUCT_SHAPES.join(" · ")} 중 하나여야 해요("${d.shape}")`);
   if (!/^[a-z0-9][a-z0-9-]{1,23}$/.test(d.slug)) out.push(`${d.role}: slug "${d.slug}"는 영문 소문자 · 숫자 · 하이픈 2~24자가 아니에요`);
   for (const [k, v] of Object.entries(d.colors)) if (v !== null && !HEX.test(v)) out.push(`${d.role}: colors.${k} "${v}"가 #rrggbb가 아니에요`);
   if (new Set(d.expressions).size < 3) out.push(`${d.role}: 표정이 3개보다 적어요(모델 시트는 표정 3~4개가 필요)`);
@@ -178,9 +186,20 @@ function designProblems(d: Design, m: EngineManifest): string[] {
       if (!keys.includes(f.key)) out.push(`${d.role}: 특징 키 ${f.key}는 ${d.shape} 리그에 없어요(${keys.join(", ")})`);
       // 리그는 색 칸을 그대로 칠한다. 설명 글이 들어가면 색이 깨진다(예: 머리가 흰색으로 나옴)
       else if (/#hex/.test(String(known![f.key])) && typeof f.value === "string" && !HEX.test(f.value) && f.value !== "false") out.push(`${d.role}: ${f.key}는 #rrggbb 색 값이어야 해요("${f.value}")`);
+      // 상품 배역은 용기 · 과일 종류가 생김새를 정한다. 목록 밖 값이면 리그가 기본 모양으로 그린다
+      else if (product && (f.key === "container" || f.key === "kind")) {
+        const allowed = featureOptions(known![f.key]);
+        if (allowed.length && !allowed.includes(String(f.value))) out.push(`${d.role}: ${f.key}는 ${allowed.join(" · ")} 중 하나여야 해요("${f.value}")`);
+      }
     }
   }
   return out;
+}
+
+/** manifest 특징 설명의 "a | b | c (설명)"에서 고를 수 있는 값만 뽑는다. */
+function featureOptions(desc: string): string[] {
+  const head = String(desc).split("(")[0];
+  return head.includes("|") ? head.split("|").map((s) => s.trim()).filter(Boolean) : [];
 }
 
 /** manifest의 모양별 특징 칸(shape_features). 예전 형식(features)도 받는다. */
@@ -190,7 +209,9 @@ function shapeFeatures(m: EngineManifest): Record<string, Record<string, string>
   return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, Record<string, string>>) : {};
 }
 
-function toSpec(d: Design, id: string, accountKey: string, series: string | null, madeFor: string): CharacterSpec {
+/** productId가 있으면 상품 캐릭터다: 상품 키를 남기고 라벨 글자를 뺀다(그림 속 글자 · 상표를 그리지 않는다). */
+function toSpec(d: Design, id: string, accountKey: string, series: string | null, madeFor: string, productId: string | null): CharacterSpec {
+  const features = Object.fromEntries(d.features.filter((f) => !(productId && f.key === "label")).map((f) => [f.key, f.value]));
   return characterSpecSchema.parse({
     id,
     account_key: accountKey,
@@ -203,7 +224,7 @@ function toSpec(d: Design, id: string, accountKey: string, series: string | null
       height: d.height,
       head_ratio: d.head_ratio,
       colors: d.colors,
-      features: Object.fromEntries(d.features.map((f) => [f.key, f.value])),
+      features,
     },
     expressions: [...new Set(d.expressions)],
     actions: [...new Set(d.actions)],
@@ -211,11 +232,37 @@ function toSpec(d: Design, id: string, accountKey: string, series: string | null
     props: [...new Set(d.props)],
     made_for: madeFor,
     sheet: null,
+    ...(productId ? { product_id: productId } : {}),
   });
+}
+
+// 상품 배역 생김새 단서 — lemo에는 상품 사진이 넘어오지 않는다. 글 자료에서만 찾으므로 용기 · 색은 추정이다
+const LOOK_KEYS = ["productType", "texture", "productForm", "packaging", "variety", "weightOrCount", "sizeGrade", "colors", "material"];
+const LOOK_WORDS = /튜브|펌프|병|단지|용기|뚜껑|캡|스틱|파우치|상자|박스|봉지|포장|캔|앰플|스포이드|색상|컬러|빛깔/;
+
+function productLookBlock(facts: ProductFacts): string {
+  const details = LOOK_KEYS.flatMap((k) => {
+    const v = facts.details[k];
+    const text = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").join(", ") : typeof v === "string" ? v : "";
+    return text ? [`${k}: ${text.slice(0, 80)}`] : [];
+  });
+  const lines = facts.sourceText
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter((l) => l.length <= 120 && LOOK_WORDS.test(l))
+    .slice(0, 6);
+  return [
+    `[상품 배역]이 그릴 상품: ${facts.name} (${facts.kindLabel})${facts.oneLine ? ` — ${facts.oneLine}` : ""}`,
+    "생김새 단서(상품 사진은 없다. 아래 글에서 용기 · 포장 · 색을 찾고, 없으면 이 종류 상품에 흔한 용기와 계정 브랜드 색으로 정한다):",
+    `- 자료 항목: ${details.join(" / ") || "없음"}`,
+    `- 상세페이지 글: ${lines.join(" / ") || "용기 · 포장 · 색을 말한 줄 없음"}`,
+  ].join("\n");
 }
 
 function designSystem(m: EngineManifest, style: string): string {
   const sf = shapeFeatures(m);
+  const containers = featureOptions(sf.bottle?.container ?? "");
+  const fruits = featureOptions(sf.fruit?.kind ?? "");
   const featureInfo = Object.keys(sf).length ? `${JSON.stringify(sf).slice(0, 1800)} — 고른 몸 모양의 키만 쓴다. "#hex"라고 적힌 칸은 #rrggbb 색 값만 넣는다(설명 글 금지)` : null;
   return `너는 릴스 애니메이션 캐릭터 디자이너다. 공용 매개변수 리그(parametric)로 그릴 캐릭터 명세를 쓴다. 그림 코드는 쓰지 않는다.
 
@@ -236,6 +283,8 @@ ${styleNotes(style, 1600)}
 - 실제 상품을 의인화할 때 상품 자료에 없는 효능을 생김새로 주장하지 않는다(예: 근거 없는 '치료' 도구, 의약품처럼 보이는 모양).
 - 기존 만화 · 게임 · 브랜드 캐릭터를 닮게 만들지 않는다.
 - 같은 계정 라이브러리 캐릭터와 겹치지 않는 이름 · 생김새로 만든다.
+- [상품 배역] 표시가 있는 배역은 소개하는 상품 자체다. 실제 사진을 쓰지 않고, 그 상품의 용기 · 생김새와 비슷한 결로 이 스타일에 맞게 그린다. 몸 모양은 ${PRODUCT_SHAPES.join(" · ")} 중에서만 고른다: bottle은 용기 · 포장${containers.length ? `(features.container에 ${containers.join(" · ")} 중 가장 가까운 것)` : ""}, fruit는 과일 원물${fruits.length ? `(features.kind에 ${fruits.join(" · ")} 중 가까운 것)` : ""}, blob은 그 밖의 둥근 원물. 사람 · 동물 · 물방울로 만들지 않는다. 색은 상품 자료에서 알 수 있는 용기 · 내용물 색에 가깝게, 알 수 없으면 계정 브랜드 색에서 고른다.
+- 상품 배역에는 라벨 글자 · 로고 · 상표를 넣지 않는다(features.label을 쓰지 않는다. 라벨 띠 색은 label_color). description에는 "〈상품 이름〉과 비슷한 결의 …"처럼 생김새만 적는다. 상품 배역도 대본에 필요한 표정 3개 이상과 동작(상품을 소개하는 줄에서 인사 · 가리키기 등)을 갖는다.
 
 ${CLAIM_RULES}`;
 }
@@ -291,11 +340,16 @@ function reviewText(r: Review): string {
 
 // ── 준비 ─────────────────────────────────────────────────────────────────────
 
+type NewRole = { role: string; why: string; product: boolean };
+
 /**
  * 제작 방식 선택 결과의 배역대로 캐릭터를 준비한다.
  * - reuse id가 이 계정 라이브러리에 있으면 그대로 쓴다(없으면 새로 만들고 problems에 남긴다).
  * - 새 배역은 OpenAI로 parametric 명세를 만들어 workDir/new-characters/<id>/spec.json에 쓰고, 시트를 렌더 · 비전 검수한다.
+ * - 상품 자료가 있으면 상품 배역을 하나 꼭 둔다. 같은 상품 키의 라이브러리 캐릭터가 있으면 재사용, 없으면 새로 만든다.
  * - library는 그 계정 것만(다른 계정 캐릭터가 있으면 throw).
+ * failed가 비어 있지 않으면 합격한 시트를 얻지 못한 캐릭터가 있다는 뜻이다 — 호출자는 이 결과로 영상을 만들면 안 된다(사용량을 남기고 멈춘다).
+ * created에는 검수에 합격한 캐릭터만 들어간다.
  */
 export async function prepareCharacters(input: {
   choice: ProductionChoice;
@@ -306,17 +360,25 @@ export async function prepareCharacters(input: {
   facts: ProductFacts | null;
   workDir: string;
   style: string;
-}): Promise<{ characters: CharacterSpec[]; reused: string[]; created: { spec: CharacterSpec; dir: string; sheet: string }[]; usage: AiUsage[]; problems: string[] }> {
+}): Promise<{ characters: CharacterSpec[]; reused: string[]; created: { spec: CharacterSpec; dir: string; sheet: string }[]; usage: AiUsage[]; problems: string[]; failed: string[] }> {
   const { account, profile, library } = input;
   assertAccountLibrary(account.accountKey, library, "prepareCharacters");
   if (profile.accountKey !== account.accountKey) throw new Error(`prepareCharacters: 프로필(${profile.accountKey})과 계정(${account.accountKey})이 달라요`);
-  const out = { characters: [] as CharacterSpec[], reused: [] as string[], created: [] as { spec: CharacterSpec; dir: string; sheet: string }[], usage: [] as AiUsage[], problems: [] as string[] };
+  const out = {
+    characters: [] as CharacterSpec[],
+    reused: [] as string[],
+    created: [] as { spec: CharacterSpec; dir: string; sheet: string }[],
+    usage: [] as AiUsage[],
+    problems: [] as string[],
+    failed: [] as string[],
+  };
   if (input.choice.backend !== "lemo-code") return out;
 
   const manifest = loadEngineManifest();
   const byId = new Map(library.map((c) => [c.id, c]));
-  const toCreate: { role: string; why: string }[] = [];
-  for (const role of input.choice.characters) {
+  const toCreate: NewRole[] = [];
+  // 선택 단계가 이미 맞췄지만, 다른 경로로 온 배역 계획에도 상품 배역이 빠지지 않게 한 번 더 맞춘다
+  for (const role of withProductRole(input.choice.characters, input.facts, library)) {
     const spec = role.reuse ? byId.get(role.reuse) : undefined;
     if (role.reuse && !spec) out.problems.push(`배역 ${role.role}: 재사용으로 고른 ${role.reuse}가 라이브러리에 없어 새로 만들어요`);
     if (spec) {
@@ -331,9 +393,10 @@ export async function prepareCharacters(input: {
       }
       continue;
     }
-    toCreate.push({ role: role.role, why: role.why });
+    toCreate.push({ role: role.role, why: role.why, product: !!role.product });
   }
   if (!toCreate.length) return out;
+  const productId = productKey(input.facts);
 
   const tools = await sheetTools();
   const schema = designSchema(manifest);
@@ -356,7 +419,8 @@ ${input.script.map((l, i) => `${i}. ${l}`).join("\n")}
 
 ${librarySummary(library)}`;
 
-  const design = async (roles: { role: string; why: string }[], feedback: string | null): Promise<Design[]> => {
+  const design = async (roles: NewRole[], feedback: string | null): Promise<Design[]> => {
+    const look = input.facts && roles.some((r) => r.product) ? `\n\n${productLookBlock(input.facts)}` : "";
     const messages: Message[] = [
       { role: "system", content: designSystem(manifest, input.style) },
       {
@@ -364,7 +428,7 @@ ${librarySummary(library)}`;
         content: `${baseUser}
 
 만들 배역:
-${roles.map((r) => `- ${r.role}: ${r.why}`).join("\n")}${feedback ? `\n\n앞서 만든 명세의 문제(고쳐서 다시 만든다):\n${feedback}` : ""}`,
+${roles.map((r) => `- ${r.role}${r.product ? " [상품 배역]" : ""}: ${r.why}`).join("\n")}${look}${feedback ? `\n\n앞서 만든 명세의 문제(고쳐서 다시 만든다):\n${feedback}` : ""}`,
       },
     ];
     let last: Design[] = [];
@@ -374,7 +438,7 @@ ${roles.map((r) => `- ${r.role}: ${r.why}`).join("\n")}${feedback ? `\n\n앞서 
       last = r.parsed.characters;
       const problems = [
         ...roles.filter((x) => !last.some((d) => d.role === x.role)).map((x) => `배역 ${x.role}의 명세가 없어요`),
-        ...last.flatMap((d) => designProblems(d, manifest)),
+        ...last.flatMap((d) => designProblems(d, manifest, roles.some((x) => x.product && x.role === d.role))),
       ];
       if (!problems.length) return last;
       if (attempt === 1) {
@@ -386,7 +450,8 @@ ${roles.map((r) => `- ${r.role}: ${r.why}`).join("\n")}${feedback ? `\n\n앞서 
     return last;
   };
 
-  const renderAndReview = async (spec: CharacterSpec, dir: string): Promise<{ sheet: string | null; review: Review | null }> => {
+  // 시트를 렌더해 검수한다. 렌더하지 못하면 검수 없이 넘기지 않고 이유(error)를 돌려준다
+  const renderAndReview = async (spec: CharacterSpec, dir: string): Promise<{ sheet: string; review: Review } | { error: string }> => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "spec.json"), JSON.stringify(spec, null, 2));
     let files: string[];
@@ -394,13 +459,9 @@ ${roles.map((r) => `- ${r.role}: ${r.why}`).join("\n")}${feedback ? `\n\n앞서 
       const film = tools.buildSheetProject({ workDir: join(input.workDir, "sheet-projects", spec.id), accountKey: account.accountKey, character: spec, characterDir: dir, style: input.style, brand: profile.brand });
       files = (await tools.renderStills(film, [0.5], join(dir, "sheet"), { sheet: spec.id })).files;
     } catch (e) {
-      out.problems.push(`${spec.id}: 시트 렌더 실패 — ${e instanceof Error ? e.message : String(e)}`);
-      return { sheet: null, review: null };
+      return { error: `시트 렌더 실패 — ${e instanceof Error ? e.message : String(e)}` };
     }
-    if (!files.length) {
-      out.problems.push(`${spec.id}: 시트 렌더 결과 그림이 없어요`);
-      return { sheet: null, review: null };
-    }
+    if (!files.length) return { error: "시트 렌더 결과 그림이 없어요" };
     const sheet = files[0];
     writeFileSync(join(dir, "spec.json"), JSON.stringify({ ...spec, sheet }, null, 2));
     const { review, usage } = await reviewSheet(spec, files);
@@ -408,31 +469,62 @@ ${roles.map((r) => `- ${r.role}: ${r.why}`).join("\n")}${feedback ? `\n\n앞서 
     return { sheet, review };
   };
 
+  // 합격한 시트를 얻지 못한 캐릭터: 작업 폴더에 불합격 표시를 남기고(라이브러리로 옮기지 않게) failed로 돌려준다
+  const reject = (id: string, role: NewRole, dir: string | null, fails: string[]) => {
+    if (dir) writeFileSync(join(dir, "rejected.json"), JSON.stringify({ id, role: role.role, attempts: fails }, null, 2));
+    out.problems.push(`${id}: 합격한 시트가 없어 lemo 제작을 멈춰요 — ${fails.map((f, i) => `${i + 1}차 ${f}`).join(" | ")}`);
+    // 호출자 경고는 300자에서 잘린다 — 캐릭터 id와 마지막 사유를 앞에 짧게 둔다
+    out.failed.push(`${id}(${role.product ? "상품 배역" : role.role}) 시트 ${fails.length}번 불합격: ${fails[fails.length - 1].slice(0, 150)}`);
+  };
+
   const designs = await design(toCreate, null);
   for (const role of toCreate) {
-    const d = designs.find((x) => x.role === role.role);
-    if (!d) continue;
+    let first: Design | undefined = designs.find((x) => x.role === role.role);
+    // 상품 배역은 빠지면 안 된다 — 명세가 없으면 그 배역만 한 번 더 요청하고, 그래도 없으면 멈춘다
+    if (!first && role.product) first = (await design([role], null)).find((x) => x.role === role.role);
+    if (!first) {
+      if (!role.product) continue;
+      out.failed.push(`상품 배역(${role.role}) 명세를 만들지 못했어요`);
+      return out;
+    }
+    let d: Design = first;
     const id = idFor(d.slug);
     const dir = join(input.workDir, "new-characters", id);
-    let spec = toSpec(d, id, account.accountKey, profile.series, madeFor);
-    let res = await renderAndReview(spec, dir);
-    if (res.review && !passed(res.review)) {
-      const first = reviewText(res.review);
-      const redo = await design([role], `${JSON.stringify({ ...d, why: undefined })}\n검수 결과: ${first}`);
-      const d2 = redo.find((x) => x.role === role.role);
-      if (d2) {
-        spec = toSpec(d2, id, account.accountKey, profile.series, madeFor);
-        res = await renderAndReview(spec, dir);
-        if (res.review && !passed(res.review)) out.problems.push(`${id}: 시트 검수 두 번 불합격 — ${reviewText(res.review)}`);
-      } else out.problems.push(`${id}: 시트 검수 불합격(${first}) 후 다시 만든 명세가 없어요`);
-    } else if (res.review && res.review.issues.length) {
-      // 합격이어도 지적은 남긴다(조용히 넘기지 않음)
-      out.problems.push(`${id}: 시트 검수 합격, 참고 지적 — ${res.review.issues.join(" / ")}`);
+    const fails: string[] = [];
+    let made: { spec: CharacterSpec; sheet: string; review: Review } | null = null;
+    for (let attempt = 1; attempt <= SHEET_ATTEMPTS; attempt++) {
+      const spec = toSpec(d, id, account.accountKey, profile.series, madeFor, role.product ? productId : null);
+      const res = await renderAndReview(spec, dir);
+      if ("error" in res) {
+        // 렌더 실패는 다시 만들어도 같을 가능성이 높다 — 검수 없이 넘기지 않고 여기서 멈춘다
+        fails.push(res.error);
+        break;
+      }
+      if (passed(res.review)) {
+        made = { spec: { ...spec, sheet: res.sheet }, sheet: res.sheet, review: res.review };
+        break;
+      }
+      fails.push(reviewText(res.review));
+      if (attempt === SHEET_ATTEMPTS) break;
+      // 불합격 이유를 모두 되먹여 다시 만든다
+      const feedback: string = `가장 최근 명세:${JSON.stringify({ ...d, why: undefined })}\n${fails.map((f, i) => `${i + 1}차 검수 결과: ${f}`).join("\n")}\n지적된 값을 실제로 바꿔 다시 만든다(같은 명세를 되풀이하지 않는다).`;
+      const next: Design | undefined = (await design([role], feedback)).find((x) => x.role === role.role);
+      if (!next) {
+        fails.push("다시 만든 명세가 없어요");
+        break;
+      }
+      d = next;
     }
-    if (res.sheet) spec = { ...spec, sheet: res.sheet };
-    out.characters.push(spec);
-    if (res.sheet) out.created.push({ spec, dir, sheet: res.sheet });
-    else out.problems.push(`${id}: 시트가 없어 검수하지 못한 캐릭터예요 — 사람 확인 전에는 쓰지 마세요`);
+    if (!made) {
+      reject(id, role, dir, fails);
+      return out;
+    }
+    // 합격이어도 지적은 남긴다(조용히 넘기지 않음). 다시 만들어 합격한 경우도 같다
+    if (made.review.issues.length) out.problems.push(`${id}: 시트 검수 합격${fails.length ? `(${fails.length + 1}번째 시도)` : ""}, 참고 지적 — ${made.review.issues.join(" / ")}`);
+    // 상품 사진 없이 글 자료로 그린 것이라 용기 모양 · 색은 추정이다 — 사람이 확인하게 남긴다
+    if (role.product) out.problems.push(`${id}: 상품 캐릭터의 용기 모양 · 색은 상품 글 자료로 추정해 그렸어요(상품 사진은 참고하지 않음). 실제 상품과 비슷한지 확인해 주세요`);
+    out.characters.push(made.spec);
+    out.created.push({ spec: made.spec, dir, sheet: made.sheet });
   }
   return out;
 }

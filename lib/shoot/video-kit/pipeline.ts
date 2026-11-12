@@ -76,6 +76,9 @@ export interface KitInput {
   presetVoices?: { clips: VoiceClip[]; layout?: FixedLayout["lines"]; duration?: number };
   // 영상 기준 시각이 정해진 효과음(lemo 장면 데이터). 있으면 비트의 sfx 대신 이 시각을 그대로 쓴다 — 말 사이 효과음도 그림과 맞는다
   presetSfx?: TimedSfx[];
+  // 글자 자리가 이미 정해진 경우(lemo 장면 데이터의 caption_place). 있으면 화면에서 상품 · 사람 자리를 읽지 않고 이 값으로 후킹 · 자막 자리를 고른다.
+  // 직접 촬영 · AI 자동(사진 경로)은 넘기지 않는다
+  presetZones?: CutZones[];
 }
 
 export interface KitSegment {
@@ -611,7 +614,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   console.log(`[video-kit] 음악: ${music.name}${music.source ? ` (${music.source.creator}, ${music.source.license}, 검색어 "${music.query}")` : " (대체 곡)"}`);
   const sounds = buildMix(tl, voice, mix, music);
   // 장면마다 상품 · 사람이 있는 자리를 읽어 글자가 피하게 한다. 못 읽으면 기본 자리
-  const zones = subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
+  const zones = input.presetZones ?? subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
     const owner = allClips.find((c) => c.no === tl.cuts[i]?.clip);
     return owner?.shot?.startsWith("[코드 모션]") ? { ...z, cover: { ...z.cover, mid: 1 } } : z;
   }) ?? null;

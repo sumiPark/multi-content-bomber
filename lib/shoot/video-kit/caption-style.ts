@@ -150,6 +150,8 @@ export function normalizeLook(raw: Partial<Look> | null | undefined): Look {
 
 // 글자를 놓는 세 자리. 인스타 위 · 아래 화면 요소를 피한다.
 export type Zone = "top" | "mid" | "lower";
+// ZONE_BOX의 px 값이 놓이는 세로 화면 높이. 화면을 먼저 만드는 쪽(lemo 장면 계획)이 같은 자리를 비율로 바꿔 쓸 때 읽는다
+export const ZONE_FRAME_HEIGHT = 1920;
 export const ZONE_BOX: Record<Zone, { top: number; height: number }> = {
   top: { top: 170, height: 430 },
   mid: { top: 660, height: 400 },

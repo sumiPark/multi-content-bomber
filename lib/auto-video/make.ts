@@ -20,6 +20,7 @@ import { gifClip, isAnimatedGif, isGif, prepareGifAssets, shownGifSheet } from "
 import { stockClip } from "@/lib/auto-video/stock";
 import { makeWithLemo, type AutoVideoEngine, type LemoAttempt } from "@/lib/auto-video/lemo";
 import { kstDate } from "@/lib/automation/time";
+import { boardBrief } from "@/lib/lemo/board-brief";
 import type { ContentRule } from "@/lib/rules/check";
 import { finalBlocking } from "@/lib/shoot/final-check";
 import { captionSkillDir } from "@/lib/shoot/video-kit/caption-skill";
@@ -40,7 +41,12 @@ const MAX_DETAIL_FILES = 40;
 // 완성본을 볼 때 쓰는 자막 프레임 수. 긴 영상은 자막이 많아 전부 보내지 않는다
 const MAX_REVIEW_FRAMES = 30;
 const CALIBRATION_TEXT = "처음 듣는 사람도 알아듣게 천천히 설명해 볼게요. 이름이 낯설어도 뜻을 알면 고르기 쉬워져요.";
+// 한 각도로 장면표를 쓰는 최대 횟수. 각도를 바꾸면 새 각도가 이 횟수를 처음부터 다시 받는다
 const MAX_BOARD_TRIES = 4;
+// 각도를 바꿔 가며 쓰는 횟수를 모두 더한 한도. 각도가 계속 걸려도 유료 호출이 끝없이 늘지 않게 막는다
+const MAX_BOARD_TOTAL = 8;
+// 한 각도에서 재미 점수가 낮은 장면표가 이만큼 이어지면 다른 문제가 남아 있어도 다음 각도로 넘긴다
+const LOW_FUN_STREAK = 2;
 // 각도를 다시 내는 최대 회차(처음 포함). 거르고 남은 각도가 모두 MIN_INTEREST 미만일 때만 다시 낸다
 const MAX_ANGLE_ROUNDS = 3;
 const LONG_BEAT_SECONDS = 6.5;
@@ -468,11 +474,17 @@ export async function makeAutoVideo(input: {
   // 앞 회차들에서 받은 지적. 다시 쓸 때 함께 넘겨, 이번 지적을 고치다 앞서 고친 것이 다시 깨지지 않게 한다
   let history: string[] = [];
   const retryWith = (b: Storyboard, problems: string[]) => ({ board: b, problems, earlier: history.filter((h) => !problems.includes(h)).slice(-12) });
-  // 점검을 마친 장면표 가운데 남은 문제가 가장 적은 것(같으면 나중 것). 뒤 회차가 더 나빠지거나 AI 답이 깨져도 이걸 쓴다
-  let best: { board: Storyboard; left: string[]; soft: string[]; notes: string[] } | null = null;
+  // 점검을 마친 장면표 가운데 남은 문제가 가장 적은 것(같으면 나중 것). 뒤 회차가 더 나빠지거나 AI 답이 깨져도 이걸 쓴다.
+  // 주제가 걸린 장면표는 문장을 고쳐도 풀리지 않으므로, 주제가 걸리지 않은 장면표가 있으면 문제 수가 더 많아도 그쪽을 쓴다
+  let best: { board: Storyboard; left: string[]; soft: string[]; notes: string[]; topic: boolean } | null = null;
   let lastError = "";
   const fixedTexts = () => [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t);
-  for (let attempt = 0; !savedBoard && attempt < MAX_BOARD_TRIES; attempt++) {
+  // 지금 각도가 시작된 회차. 각도를 바꾸면 그 회차부터 MAX_BOARD_TRIES번을 다시 준다(전체는 MAX_BOARD_TOTAL번까지)
+  let angleStart = 0;
+  const tryLimit = () => Math.min(angleStart + MAX_BOARD_TRIES, MAX_BOARD_TOTAL);
+  // 지금 각도에서 재미 점수가 낮은 장면표가 이어진 횟수. LOW_FUN_STREAK번이면 다른 문제가 남아 있어도 다음 각도로 넘긴다
+  let lowFunStreak = 0;
+  for (let attempt = 0; !savedBoard && attempt < tryLimit(); attempt++) {
     let res: Awaited<ReturnType<typeof writeStoryboard>>;
     try {
       res = await writeStoryboard({
@@ -609,27 +621,37 @@ export async function makeAutoVideo(input: {
     // 재미 · 후킹 점수는 다시 쓰게 하는 이유로만 쓴다. 마지막까지 낮으면 멈추지 않고 사람이 볼 경고로 남긴다
     const soft: string[] = [];
     if (review.interest < MIN_INTEREST) soft.push(`재미 점수 ${review.interest}점이다. 끝까지 볼 이유가 약하다. ${review.boringParts.join(" / ")}`.trim());
-    if (!phrases.hooks.length) {
+    // 꾸민 이야기는 첫 문장이 사건이라 후킹 채점 공식(질문 · 오해 · 손해)에 맞지 않는다. 점수로 다시 쓰게 하면 사건 문장이 설명형으로 바뀌어 재지 않는다
+    if (!phrases.hooks.length && angles[angleOrder[anglePos]]?.form !== "tale") {
       const hookScore = scoreHooks([board.hook.spoken])[0];
       if (hookScore && hookScore.score < MIN_AUTO_HOOK_SCORE) soft.push(`첫 문장 "${board.hook.spoken}" 점수가 ${hookScore.score}점이다. 시청자의 오해 · 손해 · 놀라움과 이어지는 구체적인 문장으로 바꾼다`);
     }
     storyboardReviews.push({ attempt: attempt + 1, hook: board.hook, situation: board.situation, worry: board.worry, oneThing: board.one_thing, interest: review.interest, problems: left, soft, notes: review.notes, boring: review.boringParts });
     boardNotes = [...review.notes, ...review.boringParts.map((b) => `지루할 수 있는 구간: ${b}`)];
     softLeft = soft;
-    if (!best || left.length <= best.left.length) best = { board, left, soft, notes: boardNotes };
+    const topic = !!review.topicProblem;
+    if (!best || (best.topic && !topic) || (best.topic === topic && left.length <= best.left.length)) best = { board, left, soft, notes: boardNotes, topic };
     console.log(`  장면표 ${attempt + 1}번째: 코드 ${code.length} · 규칙/근거 ${blockingNow.length} · 시청자 ${review.problems.length} · 재미 ${review.interest}점 · ${board.situation} · ${board.one_thing}`);
     for (const p of left) console.log(`    - ${p.slice(0, 160)}`);
-    if (!left.length && (!soft.length || attempt === MAX_BOARD_TRIES - 1)) break;
+    if (!left.length && (!soft.length || attempt + 1 >= tryLimit())) break;
     rejectIncompatiblePhrases(phrases, [...review.unsuitable_phrases, ...code.filter((p) => p.includes("제형을 보라고")).map((reason) => ({ kind: "hook" as const, reason }))]);
     dropFailedPhrases(phrases, blockingIssues(check.issues));
     // 주제 자체가 걸리거나(불리한 정보 · 뻔한 사용법 · 이미 아는 내용) 재미가 낮으면 문장을 고치지 않고 다음 각도로 새로 쓴다.
-    // 주제 문제는 다른 문제가 남아 있어도 바꾼다. 같은 주제로 문장만 고쳐서는 풀리지 않는다
-    if ((review.topicProblem || (review.interest < MIN_INTEREST && !left.length)) && anglePos < angleOrder.length - 1) {
+    // 주제 문제는 다른 문제가 남아 있어도 바꾼다. 같은 주제로 문장만 고쳐서는 풀리지 않는다.
+    // 재미가 낮은 장면표가 LOW_FUN_STREAK번 이어져도 다른 문제가 남은 채로 바꾼다(2026-11-12 사용자 결정).
+    // 한 각도에 4번을 다 쓰고 나면 남은 각도를 써 볼 횟수가 없어진다
+    lowFunStreak = review.interest < MIN_INTEREST ? lowFunStreak + 1 : 0;
+    const lowFun = review.interest < MIN_INTEREST && (!left.length || lowFunStreak >= LOW_FUN_STREAK);
+    if ((review.topicProblem || lowFun) && anglePos < angleOrder.length - 1 && attempt + 1 < MAX_BOARD_TOTAL) {
+      const why = review.topicProblem ? "주제가 맞지 않아" : left.length ? `재미가 낮은 장면표가 ${lowFunStreak}번 이어져` : "재미가 낮아";
       anglePos++;
       retry = null;
       // 각도가 바뀌면 앞 각도의 지적은 맞지 않을 수 있어 비운다
       history = [];
-      console.log(`  ${review.topicProblem ? "주제가 맞지 않아" : "재미가 낮아"} 다음 각도로 바꾼다: ${angles[angleOrder[anglePos]].hook_line}`);
+      lowFunStreak = 0;
+      // 새 각도는 고쳐 쓸 횟수를 처음부터 받는다. 앞 각도가 쓴 횟수 때문에 한두 번만 쓰고 끝나지 않게 한다
+      angleStart = attempt + 1;
+      console.log(`  ${why} 다음 각도로 바꾼다(${tryLimit() - angleStart}번까지 다시 쓴다): ${angles[angleOrder[anglePos]].hook_line}`);
       continue;
     }
     retry = retryWith(board, [...left, ...soft]);
@@ -638,7 +660,7 @@ export async function makeAutoVideo(input: {
   if (!savedBoard) {
     if (!best) throw new Error(lastError ? `장면표를 만들지 못했어요: ${lastError}` : "장면표를 만들지 못했어요");
     // 마지막 회차가 더 나빠졌거나 깨졌으면, 남은 문제가 가장 적었던 장면표로 만든다
-    if (best.board !== board) console.log(`  남은 문제가 가장 적은 장면표(${best.left.length}개)로 만든다`);
+    if (best.board !== board) console.log(`  ${best.topic ? "" : "주제가 걸리지 않은 것 중 "}남은 문제가 가장 적은 장면표(${best.left.length}개)로 만든다`);
     board = best.board;
     left = best.left;
     softLeft = best.soft;
@@ -653,7 +675,7 @@ export async function makeAutoVideo(input: {
     for (const p of softLeft) console.log(`  (대본만) ! ${p}`);
     throw new BoardOnlyDone(left);
   }
-  if (left.length) throw new StopError(`장면표를 ${MAX_BOARD_TRIES}번 고친 뒤에도 해결되지 않았어요: ${left.join(" / ")}`);
+  if (left.length) throw new StopError(`장면표를 ${storyboardReviews.length}번 쓴 뒤에도 해결되지 않았어요: ${left.join(" / ")}`);
   // 장면표 단계에서 남은 사람 확인용 의견. 저장된 장면표로 만들면 그때 남긴 의견을 그대로 쓴다
   const boardWarnings = savedBoard && keep ? keep.warnings : [...softLeft, ...boardNotes.map((n) => `장면표 의견: ${n}`)].map((n) => n.slice(0, 300));
   // 새로 확정한 장면표는 영상을 만들기 전에 저장한다. 영상 단계에서 끊기면 다음 실행이 이 장면표로 이어 만든다
@@ -687,9 +709,13 @@ export async function makeAutoVideo(input: {
     return review;
   };
 
+  // AI가 고른 글꼴. lemo · 사진 컷 경로가 같은 값을 쓴다. 스킬 글꼴 목록을 못 읽었으면 null(자막 디자인 AI가 고른다)
+  const pickedFonts = fontChoices.length ? chosenFonts(fontChoices, { key_font: board.key_font, small_font: board.small_font }) : null;
   // 3-0. 기본은 lemo 코드 애니메이션(2026-11-11 사용자 결정). 제작 방식 선택이 기존 방식을 고르거나 lemo가 실패하면 아래 사진 · 스톡 컷으로 만든다
   let kit: KitResult | null = null;
   let lemo: LemoAttempt["record"] | null = null;
+  // lemo 화면에 그린 글자(장면표의 화면 글자). 완성본 글자 점검에 넣는다
+  let lemoTexts: LemoAttempt["screenTexts"] = [];
   if (input.engine === "lemo") {
     const tried = await makeWithLemo({
       service,
@@ -700,7 +726,8 @@ export async function makeAutoVideo(input: {
       concept,
       facts,
       rules,
-      board,
+      // 장면표의 말만이 아니라 화면 지시 · 화면 글자 · 자막 줄 · 강조어 · 글자 디자인 · 글꼴 · 끝 화면을 함께 넘긴다
+      brief: boardBrief(board, pickedFonts ? { key_font: pickedFonts.key.name, small_font: pickedFonts.small.name } : null),
       sources: { photos: Object.keys(assets.photos).length, gifs: Object.keys(assets.gifs).length, archive: Object.keys(assets.archive).length },
       workDir,
       reviewFinal,
@@ -709,13 +736,13 @@ export async function makeAutoVideo(input: {
     warnings.push(...tried.warnings);
     lemo = tried.record;
     kit = tried.kit;
+    lemoTexts = tried.screenTexts;
     if (kit) sources.push({ no: 1, kind: "lemo", style: tried.record.choice?.style ?? null, characters: [...tried.record.characters.reused, ...tried.record.characters.created] });
   }
   if (!kit) {
     // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
     // AI가 고른 글꼴을 자막 · 설명 화면이 함께 쓴다. 못 받으면 설명 화면만 대체 글꼴로 만든다
     const finalBoard = board;
-    const pickedFonts = fontChoices.length ? chosenFonts(fontChoices, { key_font: finalBoard.key_font, small_font: finalBoard.small_font }) : null;
     if (pickedFonts) console.log(`  글꼴: ${pickedFonts.key.name} + ${pickedFonts.small.name}`);
     let motionFonts: VideoFonts | undefined;
     const clips: KitClip[] = [];
@@ -889,7 +916,7 @@ export async function makeAutoVideo(input: {
     {
       ...script,
       // 근거 점검은 화면에 보이는 표기로 한다
-      beats: kit.plan.beats.map((b, i) => ({ spoken: board!.scenes[i]?.say ?? b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(!lemo?.used && board!.scenes[i]?.motion ? motionTexts(board!.scenes[i].motion!) : []), ...(i === lastBeat ? coverTexts : [])].join(" "), visual: "" })),
+      beats: kit.plan.beats.map((b, i) => ({ spoken: board!.scenes[i]?.say ?? b.tts, on_screen: [...(i === 0 ? [kit.plan.hook.on_screen] : []), ...b.graphics.flatMap(graphicTexts), ...(!lemo?.used && board!.scenes[i]?.motion ? motionTexts(board!.scenes[i].motion!) : []), ...lemoTexts.filter((t) => t.beat === i).map((t) => t.text), ...(i === lastBeat ? coverTexts : [])].join(" "), visual: "" })),
     },
     facts,
     rules,
@@ -909,7 +936,7 @@ export async function makeAutoVideo(input: {
     console.warn("  처음 보는 사람 시험 실패:", e instanceof Error ? e.message : e);
   }
   const blocking = finalBlocking(
-    { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...(lemo?.used ? [] : board.scenes.flatMap((s) => (s.motion ? motionTexts(s.motion) : []))), ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
+    { caption: board.caption.text, onScreen: [...kit.plan.beats.flatMap((b) => b.graphics.flatMap(graphicTexts)), kit.plan.hook.on_screen, ...(lemo?.used ? lemoTexts.map((t) => t.text) : board.scenes.flatMap((s) => (s.motion ? motionTexts(s.motion) : []))), ...coverTexts], subtitles: kit.plan.beats.flatMap((b) => b.captions) },
     { kind: facts.kind, rules, approvedClaims: facts.approvedClaims, stockStatus: facts.stockStatus, healthFunctional: facts.healthFunctional, certifiedFunctions: facts.certifiedFunctions },
   );
   if (!kit.quality?.passed) {

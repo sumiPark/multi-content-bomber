@@ -67,7 +67,7 @@
     "shapes": ["drop", "blob", "bottle", "fruit", "human", "animal"],
     "shape_features": {
       "fruit": { "kind": "apple | citrus | berry | pear", "leaf": "#hex 또는 false", "stem": "#hex", "seed_color": "#hex(berry)" },
-      "bottle": { "label": "라벨 글자", "label_color": "#hex", "cap_open": "true면 뚜껑 열림" },
+      "bottle": { "container": "bottle | tube | jar | box (용기 종류, 기본 bottle)", "label": "라벨 글자", "label_color": "#hex", "cap_open": "true면 뚜껑 열림(bottle만)" },
       "human": { "skin": "#hex", "hair": "#hex", "hair_style": "short | bob | long | bun | spiky | none", "pants": "#hex", "skirt": "true면 치마", "shoes": "#hex" },
       "animal": { "ears": "round | pointy | long | floppy | none", "tail": "curl | long | fluffy | none", "snout": "false면 주둥이 없음", "belly": "false면 배 무늬 없음" },
       "blob": { "sprout": "false면 머리 위 곱슬 없음" }

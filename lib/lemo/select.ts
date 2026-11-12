@@ -113,11 +113,45 @@ export function accountBlock(account: AccountContext): string {
 export function librarySummary(library: CharacterSpec[]): string {
   if (!library.length) return "계정 캐릭터 라이브러리: 비어 있음";
   return `계정 캐릭터 라이브러리:\n${library
-    .map((c) => `- ${c.id} "${c.name}" (${c.body.shape}, ${c.rig}${c.series ? `, 시리즈 ${c.series}` : ""}): ${c.description} / 표정: ${c.expressions.join(", ")} / 동작: ${c.actions.join(", ")} / 처음 만든 영상: ${c.made_for}`)
+    .map((c) => `- ${c.id} "${c.name}" (${c.body.shape}, ${c.rig}${c.series ? `, 시리즈 ${c.series}` : ""}${c.product_id ? ", 상품 캐릭터" : ""}): ${c.description} / 표정: ${c.expressions.join(", ")} / 동작: ${c.actions.join(", ")} / 처음 만든 영상: ${c.made_for}`)
     .join("\n")}`;
 }
 
+// ── 상품 배역 ────────────────────────────────────────────────────────────────
+
+type Role = ProductionChoice["characters"][number];
+
+/** 상품 캐릭터를 찾는 키(products.id). DB 없이 돌린 시험은 모두 "local"이라 시험끼리만 맞는다. */
+export function productKey(facts: ProductFacts | null): string | null {
+  return facts?.id || null;
+}
+
+/**
+ * 상품 자료가 있는 영상의 배역에 상품 배역(product=true)이 정확히 하나 있게 맞춘다(2026-11-11 사용자 결정).
+ * - AI가 넣지 않았으면 코드가 넣는다. 둘 이상이면 첫 배역만 남긴다.
+ * - 라이브러리에 같은 상품 키의 캐릭터가 있으면 그것을 재사용하고, 다른 상품의 캐릭터를 골랐으면 새로 만들게 한다.
+ * 상품 자료가 없으면 모든 배역의 표시를 끈다.
+ */
+export function withProductRole(roles: Role[], facts: ProductFacts | null, library: CharacterSpec[]): Role[] {
+  if (!facts) return roles.map((r) => ({ ...r, product: false }));
+  const key = productKey(facts);
+  const keyed = key ? library.find((c) => c.product_id === key) : undefined;
+  const out = roles.map((r) => ({ ...r }));
+  let at = out.findIndex((r) => r.product);
+  if (at < 0 && keyed) at = out.findIndex((r) => r.reuse === keyed.id);
+  if (at < 0) at = out.push({ role: "상품", reuse: null, why: `소개하는 상품(${facts.name})을 화면에 세울 캐릭터 — 배역 계획에 없어 코드가 넣음`, product: true }) - 1;
+  for (const [i, r] of out.entries()) r.product = i === at;
+  const role = out[at];
+  if (keyed) role.reuse = keyed.id;
+  else if (role.reuse && library.find((c) => c.id === role.reuse)?.product_id) role.reuse = null;
+  // 같은 캐릭터를 다른 배역이 또 쓰면 상품 배역만 남긴다
+  return out.filter((r, i) => i === at || !role.reuse || r.reuse !== role.reuse);
+}
+
 // ── 제작 방식 선택 ────────────────────────────────────────────────────────────
+
+// 상품 배역 규칙(2026-11-11 사용자 결정) — 엔진 소품에는 상품이 없어서, 상품을 보여 줄 수단은 상품 캐릭터뿐이다.
+const PRODUCT_ROLE_RULE = `- 상품 배역: 상품 자료가 있으면 lemo-code의 characters에 소개하는 상품 자체를 그린 배역을 정확히 하나 넣고 product=true로 표시한다(나머지 배역과 상품 자료가 없는 영상은 모두 false). 상품 배역은 실제 사진이 아니라 그 상품의 용기 · 생김새(튜브 · 병 · 단지 · 상자 · 과일 등)를 스타일에 맞게 그린 캐릭터다. 라이브러리에 이 상품을 그린 캐릭터가 있을 때만 reuse에 그 id를 쓰고, 없으면 null이다. 다른 상품 · 성분 · 사람 캐릭터를 상품 배역으로 쓰지 않는다.`;
 
 // lemo로만 만들 때(기본 — 2026-11-11 사용자 결정 "AI 자동 영상은 스톡이 아니라 lemo로"): 방식은 고르지 않고 스타일 · 배역만 고른다.
 const SYSTEM_LEMO_ONLY = `너는 인스타 릴스 제작 감독이다. 이 영상 한 편은 lemo 코드 애니메이션으로 만든다(정해진 방식이다). 어떤 스타일 · 배역으로 만들지 고른다.
@@ -136,6 +170,7 @@ lemo-code: 코드로 그리는 애니메이션. 계정 라이브러리 캐릭터
 - style은 selectable=true 후보 중 대본에 가장 맞는 것을 고른다. 점수가 낮아도 selectable=true면 고를 수 있다. selectable=false 후보가 더 맞다고 판단하면 rejected에 "엔진 작업 필요"와 이유를 적는다.
 - rejected에는 고르지 않은 후보 스타일 전부(slug 그대로)를 넣고 이유를 쓴다.
 - characters: 대본에 필요한 배역마다 하나(주인공 · 상대역 · 무리 등). 라이브러리 캐릭터가 그 배역과 대본 분위기에 맞으면 reuse에 id를 쓰고, 맞지 않거나 없으면 null(새로 만든다). 맞는 캐릭터가 있으면 재사용을 우선한다. 사람 중심 계정이면 사람 배역을 우선 검토한다.
+${PRODUCT_ROLE_RULE}
 - 이유는 짧은 문장으로, 대본 · 계정 설정 · 상품 자료에 있는 근거로 쓴다.
 
 ${CLAIM_RULES}`;
@@ -159,6 +194,7 @@ const SYSTEM = `너는 인스타 릴스 제작 감독이다. 이 영상 한 편�
 - selectable=false 후보는 고르지 않는다. 그 스타일이 가장 맞다고 판단하면 rejected에 "엔진 작업 필요"와 이유를 적고, 고를 수 있는 것 중에서 고른다. 고를 수 있는 스타일이 대본에 맞지 않으면 auto-video를 고른다.
 - rejected에는 고르지 않은 후보 스타일 전부(slug 그대로)와 고르지 않은 방식(lemo-code 또는 auto-video)을 하나씩 넣고 이유를 쓴다.
 - characters: lemo-code면 대본에 필요한 배역마다 하나(주인공 · 상대역 · 무리 등). 라이브러리 캐릭터가 그 배역과 대본 분위기에 맞으면 reuse에 id를 쓰고, 맞지 않거나 없으면 null(새로 만든다). 맞는 캐릭터가 있으면 같은 계정 영상끼리 이어지도록 재사용을 우선한다. 사람 중심 계정이면 사람 배역을 우선 검토한다. auto-video면 빈 배열.
+${PRODUCT_ROLE_RULE}
 - 이유는 짧은 문장으로, 대본 · 계정 설정 · 상품 자료에 있는 근거로 쓴다.
 
 ${CLAIM_RULES}`;
@@ -173,6 +209,7 @@ const aiChoiceSchema = z.object({
       role: z.string().describe("배역(예: 주인공 물방울, 설명하는 사람)"),
       reuse: z.string().nullable().describe("재사용할 라이브러리 캐릭터 id, 새로 만들면 null"),
       why: z.string(),
+      product: z.boolean().describe("소개하는 상품 자체를 그린 배역이면 true(영상에 하나만), 그 밖의 배역은 false"),
     }),
   ),
 });
@@ -191,7 +228,10 @@ ${styleNotes(c.slug)}`,
     .join("\n\n");
 }
 
-function choiceProblems(ai: AiChoice, cands: StyleCandidate[], library: CharacterSpec[], lemoOnly: boolean): string[] {
+// 상품 배역 문제는 이 말로 시작한다 — 두 번 다 어긋나도 throw하지 않고 withProductRole이 맞춘다
+const PRODUCT_ROLE_TAG = "상품 배역:";
+
+function choiceProblems(ai: AiChoice, cands: StyleCandidate[], library: CharacterSpec[], lemoOnly: boolean, facts: ProductFacts | null): string[] {
   const out: string[] = [];
   if (lemoOnly && ai.backend !== "lemo-code") out.push("이 영상은 lemo-code로 만들기로 정해져 있어요. backend는 lemo-code여야 해요");
   if (ai.backend === "lemo-code") {
@@ -202,6 +242,16 @@ function choiceProblems(ai: AiChoice, cands: StyleCandidate[], library: Characte
     if (!ai.characters.length) out.push("lemo-code인데 배역(characters)이 비어 있어요");
     const ids = new Set(library.map((x) => x.id));
     for (const ch of ai.characters) if (ch.reuse && !ids.has(ch.reuse)) out.push(`배역 ${ch.role}: 재사용 id ${ch.reuse}가 이 계정 라이브러리에 없어요`);
+    if (facts) {
+      const key = productKey(facts);
+      const product = ai.characters.filter((ch) => ch.product);
+      if (!product.length) out.push(`${PRODUCT_ROLE_TAG} 상품 자료가 있는데 product=true인 배역이 없어요. 소개하는 상품(${facts.name}) 자체를 그린 배역을 하나 넣어 주세요`);
+      if (product.length > 1) out.push(`${PRODUCT_ROLE_TAG} product=true는 하나여야 해요(지금 ${product.length}개)`);
+      for (const ch of product) {
+        const other = ch.reuse ? library.find((x) => x.id === ch.reuse)?.product_id : null;
+        if (other && other !== key) out.push(`${PRODUCT_ROLE_TAG} ${ch.reuse}는 다른 상품을 그린 캐릭터예요. reuse를 null로 두어 새로 만들어 주세요`);
+      }
+    }
   } else {
     if (ai.style) out.push("auto-video면 style은 null이어야 해요");
     if (ai.characters.length) out.push("auto-video면 characters는 빈 배열이어야 해요");
@@ -240,6 +290,8 @@ export async function chooseProduction(input: {
     .filter(([, v]) => v >= 0.3)
     .map(([k, v]) => `${STORY_KIND_LABEL[k]} ${v.toFixed(1)}`)
     .join(", ");
+  const key = productKey(input.facts);
+  const productOwn = key ? input.library.find((c) => c.product_id === key) : undefined;
 
   const user = `${accountBlock(input.account)}
 
@@ -252,7 +304,7 @@ ${input.script.map((l, i) => `${i}. ${l}`).join("\n")}
 
 규칙 분석 결과(참고): ${needLine || "뚜렷한 방식 없음"}${needs.notes.length ? ` / ${needs.notes.join(" / ")}` : ""}
 
-${librarySummary(input.library)}
+${librarySummary(input.library)}${input.facts ? `\n이 상품을 그린 라이브러리 캐릭터: ${productOwn ? `${productOwn.id} — 상품 배역은 이것을 재사용한다` : "상품 키로 등록된 것은 없음 — 위 목록의 설명이 이 상품을 그린 것일 때만 재사용하고, 아니면 새로 만든다"}` : ""}
 
 ## 스타일 후보(규칙으로 좁힌 ${candidates.length}개)
 ${candidateBlock(candidates)}`;
@@ -268,14 +320,15 @@ ${candidateBlock(candidates)}`;
     const r = await lemoParse({ stage: "lemo.select", schema: aiChoiceSchema, name: "production_choice", messages, maxTokens: 2500 });
     usages.push(r.usage);
     ai = r.parsed;
-    problems = choiceProblems(ai, candidates, input.library, lemoOnly);
+    problems = choiceProblems(ai, candidates, input.library, lemoOnly, input.facts);
     if (!problems.length) break;
     messages.push({ role: "assistant", content: r.content }, { role: "user", content: `이 답에 문제가 있어요. 고쳐서 다시 답해 주세요:\n${problems.map((p) => `- ${p}`).join("\n")}` });
   }
   if (!ai) throw new Error("chooseProduction: 응답 없음");
 
   // 고칠 수 없는 문제(후보 밖 스타일 · 없는 캐릭터)는 throw. rejected 누락만은 사실대로 채운다(지어낸 이유를 넣지 않는다).
-  const fatal = problems.filter((p) => !p.startsWith("rejected에"));
+  // 상품 배역 문제는 아래 withProductRole이 코드로 맞춘다.
+  const fatal = problems.filter((p) => !p.startsWith("rejected에") && !p.startsWith(PRODUCT_ROLE_TAG));
   if (fatal.length) throw new Error(`chooseProduction: 두 번 시도해도 선택이 규칙에 어긋나요 — ${fatal.join(" / ")}`);
   const rejected = [...ai.rejected];
   const have = new Set(rejected.map((r) => r.option));
@@ -283,7 +336,8 @@ ${candidateBlock(candidates)}`;
   for (const b of BACKENDS) if (b !== ai.backend && !have.has(b)) rejected.push({ option: b, why: lemoOnly ? "lemo로 만들기로 정해져 있어 고르지 않음" : "AI가 이유를 남기지 않음" });
 
   const profile = ai.style ? styleProfile(ai.style) : undefined;
-  const newChars = ai.characters.filter((c) => !c.reuse).length;
+  const roles = ai.backend === "lemo-code" ? withProductRole(ai.characters, input.facts, input.library) : [];
+  const newChars = roles.filter((c) => !c.reuse).length;
   let cost: ProductionChoice["cost_class"] = "mid";
   if (ai.backend === "lemo-code" && profile) {
     cost = profile.cost;
@@ -295,7 +349,7 @@ ${candidateBlock(candidates)}`;
     render_mode: ai.backend === "lemo-code" ? (profile?.render_mode ?? null) : null,
     reason: ai.reason,
     rejected,
-    characters: ai.backend === "lemo-code" ? ai.characters : [],
+    characters: roles,
     cost_class: cost,
   });
   return { choice, candidates, usage: sumUsage("lemo.select", usages) };

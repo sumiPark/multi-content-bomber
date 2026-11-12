@@ -3,15 +3,17 @@ import { join } from "node:path";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AccountConcept } from "@/lib/agents/concept";
 import type { ProductFacts } from "@/lib/agents/product-facts";
-import type { Storyboard } from "@/lib/agents/storyboard";
+import type { BoardBrief } from "@/lib/lemo/board-brief";
 import type { ProductionChoice } from "@/lib/lemo/contract";
+import { screenWords } from "@/lib/lemo/direct";
 import { runLemoJob, type LemoSources } from "@/lib/lemo/run";
 import { UsageLedger, type UsageSummary } from "@/lib/lemo/usage";
 import type { ContentRule } from "@/lib/rules/check";
 import type { KitInput, KitResult } from "@/lib/shoot/video-kit/pipeline";
 import type { createServiceClient } from "@/lib/supabase/service";
 
-// AI 자동 영상의 기본 제작 경로: 확정한 장면표의 말 · 후킹으로 lemo 코드 애니메이션을 만든다(lib/lemo/run.ts).
+// AI 자동 영상의 기본 제작 경로: 확정한 장면표에서 추린 값(lib/lemo/board-brief.ts — 말 · 후킹 · 화면 지시 · 화면 글자 · 자막 줄 · 강조어 · 글자 디자인 · 글꼴 · 끝 화면)으로
+// lemo 코드 애니메이션을 만든다(lib/lemo/run.ts).
 // 제작 방식 선택은 기존 방식(auto-video)을 고르지 않는다(lemo로 정해 둠). lemo가 실패하면 kit 없이 돌아오고, 호출자(make.ts)가 경고와 함께 사진 · 스톡 컷으로 만든다.
 // 러너 변수 AUTO_VIDEO_ENGINE=kit이면 이 경로를 아예 부르지 않는다(worker/make-auto-videos.ts).
 
@@ -35,6 +37,8 @@ export interface LemoAttempt {
   warnings: string[];
   /** make.ts 토큰 합계에 더할 값(편집 키트 합성까지 포함) */
   tokens: { input: number; output: number };
+  /** lemo 화면에 그린 글자(word 소품)와 그 장면이 시작하는 장면 번호. 완성본의 화면 글자 점검에 넣는다. lemo로 못 만들었으면 빈 배열 */
+  screenTexts: { beat: number; text: string }[];
 }
 
 export async function makeWithLemo(input: {
@@ -47,13 +51,14 @@ export async function makeWithLemo(input: {
   concept: AccountConcept;
   facts: ProductFacts;
   rules: ContentRule[];
-  board: Storyboard;
+  /** 장면표에서 lemo가 쓸 것만 추린 값. 글꼴 · 글자 디자인은 사진 경로와 같은 방식으로 고른 값이 들어 있다 */
+  brief: BoardBrief;
   /** 장면표를 쓸 때 정리한 소재 수 — 제작 방식 선택이 참고한다 */
   sources: LemoSources;
   workDir: string;
   reviewFinal: KitInput["reviewFinal"];
 }): Promise<LemoAttempt> {
-  const { service, board } = input;
+  const { service, brief } = input;
   const out = join(input.workDir, "lemo");
   mkdirSync(out, { recursive: true });
   // 0055 전이면 칸이 없어 오류가 난다. 선호 스타일은 기본값일 뿐이라 비워 두고 이어 간다
@@ -74,10 +79,12 @@ export async function makeWithLemo(input: {
         account: { accountKey, accountName: input.account, notes: input.concept.autoNotes || null, voiceId: input.concept.autoVoiceId, preferredStyles: preferred },
         facts: input.facts,
         rules: input.rules,
-        script: board.scenes.map((s) => s.say),
+        script: brief.scenes.map((s) => s.say),
         // 사진 컷 경로와 같게 읽는 원고(tts)로 음성을 만든다
-        speech: board.scenes.map((s) => s.tts || s.say),
-        hook: { spoken: board.hook.spoken, on_screen: board.hook.on_screen },
+        speech: brief.scenes.map((s) => s.speech),
+        hook: { spoken: brief.hook.spoken, on_screen: brief.hook.on_screen },
+        // 장면별 화면 지시 · 화면 글자 · 자막 줄 · 강조어 · 글자 디자인 · 글꼴 · 끝 화면
+        brief,
         sources: input.sources,
         tone: input.concept.autoNotes || null,
         service: input.dryRun ? null : service,
@@ -117,5 +124,6 @@ export async function makeWithLemo(input: {
     },
     warnings,
     tokens,
+    screenTexts: used && outcome?.production ? screenWords(outcome.production) : [],
   };
 }

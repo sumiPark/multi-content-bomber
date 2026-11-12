@@ -8,11 +8,14 @@ import { loadAccountConcept } from "@/lib/agents/concept";
 import { loadProductFacts, type ProductFacts } from "@/lib/agents/product-facts";
 import type { Storyboard } from "@/lib/agents/storyboard";
 import type { SavedStoryboard } from "@/lib/auto-video/make";
+import { boardBrief } from "@/lib/lemo/board-brief";
 import type { AccountContext } from "@/lib/lemo/contract";
 import { runLemoJob, type LemoJob, type LemoOutcome, type LemoSources } from "@/lib/lemo/run";
 import { UsageLedger } from "@/lib/lemo/usage";
 import { voiceFromExisting } from "@/lib/lemo/voice";
 import type { ContentRule } from "@/lib/rules/check";
+import { captionSkillDir } from "@/lib/shoot/video-kit/caption-skill";
+import { chosenFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import { createServiceClient } from "@/lib/supabase/service";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,6 +74,19 @@ function localFacts(raw: Partial<ProductFacts> | null | undefined, fallbackName:
   } as ProductFacts;
 }
 
+/** 장면표가 고른 글꼴을 스킬 글꼴 목록과 대조한다(AI 자동 영상과 같은 방식). 목록을 못 읽으면 null — 자막 디자인 AI가 고른다. */
+function boardFonts(board: Storyboard): { key_font: string; small_font: string } | null {
+  try {
+    const dir = captionSkillDir();
+    const list = dir ? loadSkillFonts(dir) : [];
+    if (!list.length) return null;
+    const picked = chosenFonts(list, { key_font: board.key_font, small_font: board.small_font });
+    return { key_font: picked.key.name, small_font: picked.small.name };
+  } catch (e) {
+    console.warn("[lemo] 스킬 글꼴 목록을 읽지 못했어요:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -167,6 +183,8 @@ async function main() {
       rules: (ruleRows.data ?? []).map((r) => ({ id: r.id, scope: r.scope as ContentRule["scope"], ruleType: r.rule_type as ContentRule["ruleType"], phrase: r.phrase, matchType: r.match_type as ContentRule["matchType"], reason: r.reason, suggestion: r.suggestion })),
       script: board.scenes.map((s) => s.say),
       hook: { spoken: board.hook.spoken, on_screen: board.hook.on_screen },
+      // AI 자동 영상과 같게 장면표의 화면 지시 · 화면 글자 · 자막 줄 · 강조어 · 글자 디자인 · 글꼴 · 끝 화면을 넘긴다
+      brief: boardBrief(board, boardFonts(board)),
       sources,
       tone: concept.autoNotes || null,
       // dry-run은 저장하지 않는다(편집 키트도 읽기만)
