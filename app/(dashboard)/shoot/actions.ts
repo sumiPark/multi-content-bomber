@@ -6,6 +6,7 @@ import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { getInstagramAuth } from "@/lib/episode-alerts/server";
 import { triggerShootEditRun, triggerShootPlanRun, triggerShotlistRun } from "@/lib/github-dispatch";
 import { listRecentMedia } from "@/lib/platforms/instagram-insights";
+import { searchScopedProducts, type SearchGroup, type SearchHit } from "@/lib/products/search";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
 import { duplicateWarning } from "@/lib/shoot/duplicates";
@@ -163,20 +164,14 @@ export async function addWantedProductAction(input: z.infer<typeof wantedSchema>
   return { ok: true };
 }
 
-export interface ProductHit {
-  id: string;
-  name: string;
-  price: number | null;
-  image: string | null;
-  oneLine: string | null;
-}
+export type ProductHit = SearchHit;
 
 const searchSchema = z.object({ accountId: z.string().uuid(), query: z.string().trim().min(1).max(50) });
 
-/** 원하는 상품 찾기 — 이 계정이 쓰는 몰 · 종류, 판매 중, 분석 완료만. */
+/** 원하는 상품 찾기 — 이 계정이 쓰는 몰 · 종류, 판매 중, 분석 완료만. 종류별로 묶어 검색어에 가까운 순서로. */
 export async function searchProductsAction(
   input: z.infer<typeof searchSchema>,
-): Promise<{ ok: true; hits: ProductHit[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; groups: SearchGroup[] } | { ok: false; error: string }> {
   const parsed = searchSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "검색어를 입력하세요." };
   const auth = await authorize("plan");
@@ -184,31 +179,11 @@ export async function searchProductsAction(
   const service = createServiceClient();
   const settings = await accountSettings(service, parsed.data.accountId, auth.orgId);
   if (!settings) return { ok: false, error: "촬영 설정에 없는 계정이에요." };
-
-  const pattern = `%${parsed.data.query.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-  const hits: ProductHit[] = [];
-  for (const scope of (settings.product_scopes ?? []) as { shop: string; kind: string }[]) {
-    const { data } = await service
-      .from("products")
-      .select("id, name, price, represent_image_url, product_analyses(summary)")
-      .eq("shop_code", scope.shop)
-      .eq("kind", scope.kind)
-      .eq("stock_status", "available")
-      .eq("excluded", false)
-      .eq("analysis_state", "ready")
-      .ilike("name", pattern)
-      .limit(12);
-    for (const p of data ?? []) {
-      hits.push({
-        id: p.id,
-        name: p.name,
-        price: p.price,
-        image: p.represent_image_url,
-        oneLine: (p.product_analyses?.summary as { oneLine?: string } | null)?.oneLine ?? null,
-      });
-    }
+  try {
+    return { ok: true, groups: await searchScopedProducts(service, (settings.product_scopes ?? []) as { shop: string; kind: string }[], parsed.data.query) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "상품을 찾지 못했어요." };
   }
-  return { ok: true, hits: hits.slice(0, 12) };
 }
 
 const accountSchema = z.object({ accountId: z.string().uuid() });

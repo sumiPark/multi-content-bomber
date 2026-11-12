@@ -14,8 +14,10 @@ import {
   type ProductHit,
   type ShootResult,
 } from "@/app/(dashboard)/shoot/actions";
+import type { SearchGroup } from "@/lib/products/search";
 import { ProductRow, type ProductBrief } from "@/components/auto/plan-card";
 import { won } from "@/components/products/labels";
+import { SearchGroupHead, SearchMoreHint } from "@/components/products/search-group";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -347,7 +349,7 @@ export function ShootAccountActions({ accountId, name, listCount }: { accountId:
 function WantedProduct({ accountId, onDone }: { accountId: string; onDone: () => void }) {
   const { isPending, error, run, warning, setWarning } = useRun();
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<ProductHit[] | null>(null);
+  const [groups, setGroups] = useState<SearchGroup[] | null>(null);
   const [selected, setSelected] = useState<ProductHit | null>(null);
   const [brief, setBrief] = useState("");
   const [searching, startSearch] = useTransition();
@@ -358,7 +360,7 @@ function WantedProduct({ accountId, onDone }: { accountId: string; onDone: () =>
     startSearch(async () => {
       setSearchError(null);
       const r = await searchProductsAction({ accountId, query });
-      if (r.ok) setHits(r.hits);
+      if (r.ok) setGroups(r.groups);
       else setSearchError(r.error);
     });
 
@@ -378,30 +380,40 @@ function WantedProduct({ accountId, onDone }: { accountId: string; onDone: () =>
       </form>
       <p className="text-xs text-muted-foreground">이 계정이 쓰는 몰 · 종류 중 판매 중이고 상세페이지 분석이 끝난 상품만 나와요.</p>
       {searchError && <p className="text-xs text-risk">{searchError}</p>}
-      {hits && hits.length === 0 && <p className="text-xs text-muted-foreground">찾는 상품이 없어요.</p>}
-      {hits && hits.length > 0 && !selected && (
-        <ul className="max-h-64 space-y-1 overflow-y-auto">
-          {hits.map((h) => (
-            <li key={h.id}>
-              <button type="button" onClick={() => setSelected(h)} className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-surface-2">
-                {h.image ? (
-                  // 몰 CDN 이미지
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={h.image} alt="" className="size-9 shrink-0 rounded object-cover" />
-                ) : (
-                  <div className="size-9 shrink-0 rounded bg-muted" />
-                )}
-                <span className="min-w-0">
-                  <span className="block truncate text-xs font-medium">{h.name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {won(h.price)}
-                    {h.oneLine && ` · ${h.oneLine}`}
-                  </span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+      {groups && groups.length === 0 && <p className="text-xs text-muted-foreground">찾는 상품이 없어요.</p>}
+      {groups && groups.length > 0 && !selected && (
+        <>
+          <SearchMoreHint groups={groups} />
+          <div className="max-h-80 space-y-3 overflow-y-auto">
+            {groups.map((g) => (
+              <section key={g.label}>
+                <SearchGroupHead group={g} />
+                <ul className="space-y-1">
+                  {g.hits.map((h) => (
+                    <li key={h.id}>
+                      <button type="button" onClick={() => setSelected(h)} className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-surface-2">
+                        {h.image ? (
+                          // 몰 CDN 이미지
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={h.image} alt="" className="size-9 shrink-0 rounded object-cover" />
+                        ) : (
+                          <div className="size-9 shrink-0 rounded bg-muted" />
+                        )}
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-medium">{h.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {won(h.price)}
+                            {h.oneLine && ` · ${h.oneLine}`}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </>
       )}
       {selected && (
         <div className="space-y-2">

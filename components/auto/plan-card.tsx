@@ -32,6 +32,7 @@ import {
   type ConfirmResult,
 } from "@/app/(dashboard)/auto/confirm/actions";
 import { won } from "@/components/products/labels";
+import { SearchGroupHead, SearchMoreHint } from "@/components/products/search-group";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -40,6 +41,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 import type { UsedEvidence } from "@/lib/agents/knowledge";
+import type { SearchGroup } from "@/lib/products/search";
 
 // AI 자동 칸 하나 — 위: 시각 · 상태 · 진행 단계 / 가운데: 영상(없으면 상품 사진) + 상품 · 이유 · 알림 · 대본 / 아래: 조작 버튼.
 // 사람이 할 일(확인 · 올리기)은 늘 카드 맨 아래 왼쪽 첫 버튼이다.
@@ -575,7 +577,7 @@ function Thumb({ src }: { src: string | null }) {
  */
 function ProductPicker({ planId, disabled, run, onClose }: { planId: string; disabled: boolean; run: ReturnType<typeof useRun>["run"]; onClose: () => void }) {
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<AutoProductHit[] | null>(null);
+  const [groups, setGroups] = useState<SearchGroup[] | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searching, startSearch] = useTransition();
   const [warn, setWarn] = useState<{ hit: AutoProductHit; message: string } | null>(null);
@@ -585,9 +587,9 @@ function ProductPicker({ planId, disabled, run, onClose }: { planId: string; dis
     startSearch(async () => {
       setSearchError(null);
       const r = await searchAutoProductsAction({ planId, query: query.trim() });
-      if (r.ok) setHits(r.hits);
+      if (r.ok) setGroups(r.groups);
       else {
-        setHits(null);
+        setGroups(null);
         setSearchError(r.error);
       }
     });
@@ -629,25 +631,35 @@ function ProductPicker({ planId, disabled, run, onClose }: { planId: string; dis
         </Button>
       </form>
       {searchError && <p className="text-xs text-risk">{searchError}</p>}
-      {hits && hits.length === 0 && <p className="text-sm text-muted-foreground">맞는 상품이 없어요.</p>}
-      {hits && hits.length > 0 && (
-        <ul className="divide-y rounded-md border">
-          {hits.map((h) => (
-            <li key={h.id} className="flex items-center gap-3 px-3 py-2">
-              <Thumb src={h.image} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{h.name}</p>
-                <p className="truncate text-xs text-muted-foreground tabular-nums">
-                  {won(h.price)}
-                  {h.oneLine && ` · ${h.oneLine}`}
-                </p>
-              </div>
-              <Button size="sm" variant="outline" className="shrink-0" disabled={disabled} onClick={() => pick(h, false)}>
-                이걸로 확인
-              </Button>
-            </li>
-          ))}
-        </ul>
+      {groups && groups.length === 0 && <p className="text-sm text-muted-foreground">맞는 상품이 없어요.</p>}
+      {groups && groups.length > 0 && (
+        <>
+          <SearchMoreHint groups={groups} />
+          <div className="max-h-[28rem] space-y-3 overflow-y-auto">
+            {groups.map((g) => (
+              <section key={g.label}>
+                <SearchGroupHead group={g} />
+                <ul className="divide-y rounded-md border">
+                  {g.hits.map((h) => (
+                    <li key={h.id} className="flex items-center gap-3 px-3 py-2">
+                      <Thumb src={h.image} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{h.name}</p>
+                        <p className="truncate text-xs text-muted-foreground tabular-nums">
+                          {won(h.price)}
+                          {h.oneLine && ` · ${h.oneLine}`}
+                        </p>
+                      </div>
+                      <Button size="sm" variant="outline" className="shrink-0" disabled={disabled} onClick={() => pick(h, false)}>
+                        이걸로 확인
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        </>
       )}
       <ConfirmDialog
         open={!!warn}

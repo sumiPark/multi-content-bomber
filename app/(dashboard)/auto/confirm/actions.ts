@@ -6,6 +6,7 @@ import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { isPastSlot } from "@/lib/automation/deadline";
 import { releaseOldPublish, scheduleAutoVideo } from "@/lib/auto-video/publish";
 import { triggerAutoVideoRun } from "@/lib/github-dispatch";
+import { searchScopedProducts, type SearchGroup, type SearchHit } from "@/lib/products/search";
 import { duplicateWarning } from "@/lib/shoot/duplicates";
 import type { Json } from "@/types/database";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -177,20 +178,14 @@ async function unapprovedHealth(service: Service, ids: string[]): Promise<Set<st
   return new Set(healthIds.filter((id) => !ok.has(id)));
 }
 
-export interface AutoProductHit {
-  id: string;
-  name: string;
-  price: number | null;
-  image: string | null;
-  oneLine: string | null;
-}
+export type AutoProductHit = SearchHit;
 
 const searchSchema = z.object({ planId: z.string().uuid(), query: z.string().trim().min(1).max(50) });
 
-/** 칸에 넣을 상품 찾기 — 이 계정이 쓰는 몰 · 종류, 판매 중, 분석 완료, (건강기능식품이면) 심의 문구 확정만 */
+/** 칸에 넣을 상품 찾기 — 이 계정이 쓰는 몰 · 종류, 판매 중, 분석 완료, (건강기능식품이면) 심의 문구 확정만. 종류별로 묶어 검색어에 가까운 순서로. */
 export async function searchAutoProductsAction(
   input: z.infer<typeof searchSchema>,
-): Promise<{ ok: true; hits: AutoProductHit[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; groups: SearchGroup[] } | { ok: false; error: string }> {
   const parsed = searchSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "검색어를 입력하세요." };
   const auth = await authorize();
@@ -201,33 +196,17 @@ export async function searchAutoProductsAction(
   const settings = await accountScopes(service, plan.social_account_id, auth.orgId);
   if (!settings?.scopes.length) return { ok: false, error: "자동 콘텐츠 설정에 쓸 상품 종류가 없는 계정이에요." };
 
-  const pattern = `%${parsed.data.query.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
-  const rows = [];
-  for (const scope of settings.scopes) {
-    const { data } = await service
-      .from("products")
-      .select("id, name, price, represent_image_url, product_analyses(summary)")
-      .eq("shop_code", scope.shop)
-      .eq("kind", scope.kind)
-      .eq("stock_status", "available")
-      .eq("excluded", false)
-      .eq("analysis_state", "ready")
-      .ilike("name", pattern)
-      .limit(20);
-    rows.push(...(data ?? []));
+  // 빼는 기준은 예전과 같다: 심의 문구가 확정되지 않은 건강기능식품 · 지금 칸에 든 상품
+  const exclude = async (ids: string[]) => {
+    const dropped = await unapprovedHealth(service, ids);
+    if (plan.product_id && ids.includes(plan.product_id)) dropped.add(plan.product_id);
+    return dropped;
+  };
+  try {
+    return { ok: true, groups: await searchScopedProducts(service, settings.scopes, parsed.data.query, exclude) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "상품을 찾지 못했어요." };
   }
-  const blocked = await unapprovedHealth(service, rows.map((r) => r.id));
-  const hits = rows
-    .filter((p) => !blocked.has(p.id) && p.id !== plan.product_id)
-    .slice(0, 12)
-    .map((p) => ({
-      id: p.id,
-      name: p.name,
-      price: p.price,
-      image: p.represent_image_url,
-      oneLine: (p.product_analyses?.summary as { oneLine?: string } | null)?.oneLine ?? null,
-    }));
-  return { ok: true, hits };
 }
 
 const pickSchema = z.object({ planId: z.string().uuid(), productId: z.string().uuid(), force: z.boolean().optional() });
