@@ -36,13 +36,25 @@ const FETCH = 80;
 const normalize = (s: string) =>
   s.replace(/^(\s*[[(（【][^\])）】]*[\])）】]\s*)+/, "").toLowerCase();
 
-/** 낮을수록 검색어에 가깝다: 같음 0 · 이름이 검색어로 시작 1 · 단어가 검색어로 시작 2 · 그 밖에 포함 3 */
+const noSpace = (s: string) => s.replace(/\s+/g, "");
+
+/**
+ * 띄어쓰기와 관계없이 찾는 이름 패턴(Postgres 정규식, 대소문자 무시) — 검색어의 공백을 지우고
+ * 글자 사이에 공백이 있어도 되게 한다. "상주 곶감" · "상주곶감" 모두 "상주곶감 반건시"에 걸린다.
+ */
+const spacelessPattern = (query: string) =>
+  Array.from(noSpace(query))
+    .map((c) => c.replace(/[\\^$.|?*+()[\]{}]/g, "\\$&"))
+    .join("\\s*");
+
+/** 낮을수록 검색어에 가깝다: 같음 0 · 이름이 검색어로 시작 1 · 단어가 검색어로 시작 2 · 그 밖에 포함 3 (모두 띄어쓰기 무시) */
 function matchRank(name: string, query: string): number {
   const n = normalize(name);
-  const q = query.toLowerCase();
-  if (n === q) return 0;
-  if (n.startsWith(q)) return 1;
-  if (n.split(/[\s/·,+&()[\]]+/).some((w) => w.startsWith(q))) return 2;
+  const q = noSpace(query.toLowerCase());
+  if (noSpace(n) === q) return 0;
+  if (noSpace(n).startsWith(q)) return 1;
+  const words = n.split(/[\s/·,+&()[\]]+/);
+  if (words.some((_, i) => words.slice(i).join("").startsWith(q))) return 2;
   return 3;
 }
 
@@ -53,7 +65,8 @@ export async function searchScopedProducts(
   /** 받은 후보 중 빼야 할 id(예: 심의 문구 없는 건강기능식품) */
   exclude: (ids: string[]) => Promise<Set<string>> = async () => new Set(),
 ): Promise<SearchGroup[]> {
-  const pattern = `%${query.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+  const pattern = spacelessPattern(query);
+  if (!pattern) return [];
   const groups = await Promise.all(
     scopes.map(async (scope) => {
       const { data, count, error } = await service
@@ -67,7 +80,7 @@ export async function searchScopedProducts(
         .eq("stock_status", "available")
         .eq("excluded", false)
         .eq("analysis_state", "ready")
-        .ilike("name", pattern)
+        .filter("name", "imatch", pattern)
         .limit(FETCH);
       if (error) throw new Error(`상품 찾기 실패: ${error.message}`);
       const rows = data ?? [];
