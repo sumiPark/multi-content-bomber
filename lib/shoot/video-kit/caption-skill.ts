@@ -15,15 +15,58 @@ import { mediaSeconds } from "@/lib/shoot/video-kit/tools";
 
 // 자막 모션 스킬 연결(2026-11-05 사용자 결정). 스킬은 구매한 사용자의 유료 자료라 저장소에 넣지 않는다.
 // 러너는 비공개 저장 공간에서 받고(worker/fetch-caption-skill.ts), 이 PC는 설치된 폴더를 쓴다. 효과 설명 · 글꼴 목록도 실행할 때 스킬 폴더에서 읽는다.
-// 영상마다 AI가 제품 화면과 계정 분위기를 보고 대표 모션을 고르고, 말의 내용에 더 맞는 줄만 다른 모션을 쓴다(2026-11-05 사용자 결정).
+// 영상마다 AI가 제품 화면과 계정 분위기를 보고 대표 모션을 고른다(2026-11-05 사용자 결정). 대표 모션은 줄에 모션을 따로 고르지 않았을 때의 기본이다.
+// 한 영상에 모션 하나만 쓰도록 묶지 않는다. 내용에 효과가 필요한 줄은 그 줄에 맞는 모션을 골라 여러 모션을 섞어 쓴다(2026-11-12 사용자 결정. 그 전에는 바꾸는 줄을 전체의 3분의 1 이내로 묶었다).
+// 직접 촬영 · AI 자동 영상(사진 · 스톡, lemo) 모두 renderKitEdit을 거쳐 이 파일의 모션 · 모양 규칙을 똑같이 쓴다. 한쪽에만 다른 자막 규칙을 두지 않는다(2026-11-12 사용자 결정).
 // 스킬의 디자인 자막처럼 큰 강조어 줄과 작은 줄을 쌓는다. 글꼴도 영상마다 AI가 스킬 글꼴 중에서 고른다(사용자 결정, skill-fonts.ts). AI는 모션 · 글꼴 · 줄 나누기만 고르고, 글자와 시각은 코드가 편집 결과와 대조해 그대로 넣는다.
 
-// 글자 자체가 움직이는 효과만 영상 자막에 쓸 수 있다(스킬 안내). 사물이 나오는 장면 번호는 쓰지 않는다
+// 번호 효과는 글자 자체가 움직이는 것만 영상 자막에 쓸 수 있다(스킬 안내). 사물이 나오는 장면 번호는 쓰지 않는다
 // 천천히 드러나는 효과(29 · 33 · 37)는 글자가 말보다 늦게 읽혀 쓰지 않는다
 const MOTION_FX = ["04", "06", "07", "08", "10", "13", "18", "19", "20", "22", "32", "36", "38", "39", "41"];
-const EMOTION_FX = ["sway", "shiver", "heartbeat", "tilt", "hop", "droop", "impact"];
-const ALLOWED_FX = new Set(["cut", ...MOTION_FX, ...EMOTION_FX]);
+const EMOTION_FX = ["sway", "shiver", "heartbeat", "tilt", "hop", "droop", "impact", "wave", "ticktock"];
+// 예능 모션(스킬 1.5). 스킬의 모션을 AI가 전부 고를 수 있게 넣는다(2026-11-12 사용자 결정). 설명은 실행할 때 스킬 문서에서 읽는다
+const VARIETY_FX = ["slam", "springY", "popIn", "shake", "riseUp", "creep", "shine", "kkk", "random", "tapeTurn", "pageTurn"];
+const ALLOWED_FX = new Set(["cut", ...MOTION_FX, ...EMOTION_FX, ...VARIETY_FX]);
 export const isMotionEffect = (value: string): boolean => value !== "cut" && ALLOWED_FX.has(value);
+// 예능 모션은 강조어 줄에만 쓰고 작은 윗줄은 cut으로 둔다(스킬 안내). 까딱까딱은 강조어 줄이 아니면 스킬이 글꼴을 따로 바꿔, 고른 글꼴 두 개만 쓰는 규칙과 어긋난다
+const KEY_ONLY_FX = new Set([...VARIETY_FX, "ticktock"]);
+// 테이프 모션은 테이프 바탕이 있어야 그려진다. 모션을 고르면 코드가 바탕을 같이 넘긴다
+const TAPE: Record<string, unknown> = { tapeTurn: { v: 2 }, pageTurn: true };
+// 테이프 바탕은 밝은 색이라 그 위 글자는 어두운 색으로 쓴다. 강조색 · 예능 모양을 입히면 읽히지 않는다(2026-11-12 시험 렌더: 흰 테이프에 노란 글자)
+// 그림자는 뺀다. 주면 테이프 둘레까지 번져 테이프가 빛나는 것처럼 보인다
+const ON_TAPE = { color: "#1B1F27", glow: false };
+// 테이프는 글자보다 위아래로 넓어 윗줄을 덮는다. 테이프 자막은 줄 사이를 더 띄운다
+const TAPE_GAP = 54;
+
+// 예능 자막 모양(스킬 1.5의 look). 글자 색 · 테두리 · 번짐이 한 묶음으로 바뀐다(2026-11-12 사용자 결정으로 추가).
+// 불꽃 · 날개 같은 장식은 모양 이름만으로는 붙지 않아 extra로 같이 넘긴다. fx는 줄에 모션을 따로 고르지 않았을 때 짝으로 쓰는 모션이다.
+// 자막바(13~16의 상자 · 타원)와 이름표(25)는 모양이 아니라 글자 상자 · 화자 이름이 있어야 해서 넣지 않는다. 테이프는 tapeTurn 모션으로 쓴다.
+// 효과음은 켜지 않는다(자막 파일에 sfx를 주지 않음). 편집 키트가 넣는 효과음과 겹친다.
+const LOOKS: Record<string, { hint: string; extra?: Record<string, unknown>; fx?: string; pinFont?: boolean }> = {
+  "흰 글로우": { hint: "흰 글자에 흰 번짐" },
+  "마젠타 글로우": { hint: "마젠타 번짐과 X자 별" },
+  "네온 주황": { hint: "주황 그라데이션에 굵은 주황 테두리" },
+  "블루 글로우": { hint: "파란 번짐과 X자 별" },
+  "크롬": { hint: "은색 금속 그라데이션" },
+  "노을 그라데이션": { hint: "노랑에서 주황으로" },
+  "캔디 그라데이션": { hint: "네 가지 색 그라데이션에 흰 테두리" },
+  "소다 그라데이션": { hint: "흰색에서 하늘색, 남색 테두리" },
+  "주황 스티커": { hint: "흰 글자에 굵은 주황 테두리" },
+  "노랑 스티커": { hint: "노랑 글자에 검정 · 흰색 두 겹 테두리" },
+  "이중 테두리": { hint: "검정 · 하늘색 테두리" },
+  "보라 스티커": { hint: "검정 · 보라 테두리" },
+  "매운맛": { hint: "빨강 그라데이션, 뒤에서 불꽃. 맵다 · 화끈하다 · 세다", extra: { fire: true } },
+  "하늘 천사": { hint: "흰색에서 하늘색, 날개와 작은 별. 착하다 · 순하다 · 고맙다", extra: { wings: true, twinkle: 14 } },
+  "예능 골드": { hint: "금빛 그라데이션. 주인공 · 가장 중요한 한마디", fx: "shine" },
+  "예능 흰": { hint: "흰 글자에 얇은 테두리와 입체 그림자. 예능 프로의 기본 자막" },
+  "한숨 실버": { hint: "흰색에서 회색, 김이 올라옴. 한숨 · 지침 · 아쉬움", extra: { steam: true } },
+  "인용 흰": { hint: "흰 글자에 큰 따옴표. 누가 한 말 · 후기 인용", extra: { qOpen: true, qClose: true } },
+  "하트 핑크": { hint: "흰 글자에 진분홍 번짐과 하트. 애정 · 설렘", extra: { hearts: true } },
+  "톡톡 ㅋ": { hint: "주황 글자에 두꺼운 흰 테두리. 웃음 · ㅋㅋㅋ", fx: "kkk" },
+  // 스킬은 이 모양에 붓글씨 글꼴을 따로 쓴다. 영상마다 고른 글꼴 두 개만 쓰도록 강조어 글꼴을 그대로 넘긴다
+  "괴담": { hint: "회색 질감에 획 끝 핏물. 무섭다 · 소름 · 충격", extra: { blood: true }, pinFont: true },
+};
+const lookOf = (name: string | null | undefined): string | null => (name && LOOKS[name] ? name : null);
 // 손글씨 작은 줄은 글자 몸통이 작아 키운다
 const SMALL_SIZE = 96;
 const PLAIN_SMALL_SIZE = 80;
@@ -43,9 +86,10 @@ export function captionSkillDir(): string | null {
 }
 
 const designSchema = z.object({
-  key_fx: z.enum([...MOTION_FX, ...EMOTION_FX]).describe("이 영상의 대표 모션. 큰 강조어 줄의 기본이다. 정지 자막 cut은 고르지 않는다"),
-  small_fx: z.string().describe("작은 줄 모션. 대표 모션을 돋보이게 하는 부드러운 효과나 cut"),
+  key_fx: z.enum([...MOTION_FX, ...EMOTION_FX, ...VARIETY_FX]).describe("이 영상의 대표 모션. 줄에 모션을 따로 고르지 않은 큰 강조어 줄에 쓴다. 정지 자막 cut은 고르지 않는다"),
+  small_fx: z.string().describe("작은 줄 모션. 대표 모션을 돋보이게 하는 부드러운 효과나 cut. 예능 모션과 ticktock은 작은 줄에 쓰지 않는다"),
   finish_fx: z.string().describe("마지막 자막에만 쓰는 모션. 대표 모션과 같아도 된다"),
+  key_look: z.string().describe("영상 전체 강조어 줄에 입힐 예능 모양 이름. 기본 자막으로 둘 영상은 빈 문자열"),
   key_font: z.string().describe("큰 강조어 줄 글꼴. 쓸 수 있는 글꼴 목록의 이름 그대로"),
   small_font: z.string().describe("작은 줄 글꼴. 쓸 수 있는 글꼴 목록의 이름 그대로"),
   reading: z.string().describe("제품과 분위기를 어떻게 보고 이 모션과 글꼴을 골랐는지 한 줄"),
@@ -56,19 +100,27 @@ const designSchema = z.object({
         rows: z
           .array(z.object({ text: z.string(), role: z.enum(["key", "small"]) }))
           .describe("자막을 위에서 아래로 나눈 1~2줄. 이어 붙이면 자막과 글자가 같아야 한다. 핵심 낱말이 key"),
-        fx: z.string().describe("이 자막의 내용에 대표 모션보다 뚜렷하게 맞는 모션이 있을 때만 번호나 이름. 없으면 빈 문자열"),
+        fx: z.string().describe("이 자막의 내용을 살리는 데 효과가 필요하면 그 내용에 맞는 모션의 번호나 이름. 자막마다 서로 다른 모션이어도 된다. 대표 모션으로 충분하면 빈 문자열"),
+        look: z.string().describe("이 자막의 내용과 뚜렷하게 맞는 예능 모양이 있을 때만 그 이름. 없으면 빈 문자열"),
         spark: z.boolean().describe("이 자막의 강조어에 반짝이 장식을 붙일지. 영상 전체에서 2~3번만"),
       }),
     )
     .describe("자막마다 하나"),
 });
-export type CaptionDesign = z.infer<typeof designSchema>;
+type ParsedDesign = z.infer<typeof designSchema>;
+// 예능 모양은 나중에 생긴 값이라, 그 전에 저장된 디자인(다시 편집할 때 쓰는 captionDesign)에는 없다
+export type CaptionDesign = Omit<ParsedDesign, "key_look" | "lines"> & {
+  key_look?: string;
+  lines: (Omit<ParsedDesign["lines"][number], "look"> & { look?: string })[];
+};
 
+// 번호 효과 표의 줄(| 04 | …)과 이름 효과 표의 줄(| `slam` | …)을 스킬 문서에서 그대로 읽는다. 감정 효과 일곱 가지의 뜻은 프롬프트에 따로 적는다
+const NAMED_NOTES = [...VARIETY_FX, "wave", "ticktock"];
 function effectNotes(dir: string): string {
   const text = readFileSync(join(dir, "references", "effects.md"), "utf8");
   return text
     .split("\n")
-    .filter((l) => MOTION_FX.some((n) => l.startsWith(`| ${n} |`)))
+    .filter((l) => MOTION_FX.some((n) => l.startsWith(`| ${n} |`)) || NAMED_NOTES.some((n) => l.startsWith(`| \`${n}\` |`)))
     .join("\n");
 }
 
@@ -92,14 +144,18 @@ export async function designCaptions(input: {
         content: `너는 인스타 릴스 자막 디자이너다. 이 영상의 자막마다 움직임을 고른다. 글자는 바꾸지 않는다.
 규칙:
 - 자막마다 한 컷짜리 포스터처럼 만든다. 곁들이는 말은 작은 줄, 핵심 낱말은 큰 줄로 나눈다. 글자를 바꾸거나 빼거나 더하지 않는다. 짧은 자막은 key 한 줄이어도 된다.
-- 먼저 그림의 제품과 장면, 상품 설명, 계정 설정을 보고 이 영상에 어울리는 대표 모션 하나를 고른다. 차분한 고급 제품에 튀는 모션을, 발랄한 먹거리에 무거운 모션을 쓰지 않는다.
+- 먼저 그림의 제품과 장면, 상품 설명, 계정 설정을 보고 이 영상에 어울리는 대표 모션을 고른다. 대표 모션은 줄에 모션을 따로 고르지 않았을 때 쓰는 기본이다. 차분한 고급 제품에 튀는 모션을, 발랄한 먹거리에 무거운 모션을 쓰지 않는다.
 - 글꼴도 이 영상의 제품 · 장면 · 말의 내용 · 계정 분위기에 맞게 고른다. 큰 강조어 줄 글꼴 하나와 작은 줄 글꼴 하나만 쓴다. 습관처럼 같은 글꼴을 고르지 않는다. 자막은 짧게 지나가므로 한 번에 읽혀야 한다.
 ${FONT_PAIRING_RULES.map((r) => `- ${r}`).join("\n")}
-- 자막의 기본은 대표 모션이다. 말의 내용과 뚜렷하게 맞는 줄만 fx로 바꾼다: 궁금증 · 숫자 · 성분 이름 · 주의 · 반전처럼 내용이 분명한 줄이다. 바꾸는 줄은 전체의 3분의 1 이내로 두고, 효과 설명의 "어울리는 문구"를 참고한다.
-- 감정 효과의 뜻: sway 여유 · 기분 좋음, shiver 긴장 · 주의, heartbeat 설렘, tilt 궁금함, hop 놀람, droop 아쉬움, impact 강한 한마디. 그 감정이 말에 있을 때만 쓴다.
+- 한 영상에 모션 하나만 쓸 필요는 없다. 내용에 효과가 필요한 줄은 그 내용에 맞는 모션을 fx로 골라, 한 영상에 여러 모션을 섞어 써도 된다: 궁금증 · 숫자 · 성분 이름 · 주의 · 반전 · 감정 · 웃음처럼 내용이 분명한 줄이다. 바꾸는 줄 수와 모션 가짓수에 제한은 없다. 내용과 상관없이 모션만 바꾸지는 않고, 맞는 모션이 따로 없는 줄은 fx를 비워 대표 모션을 쓴다. 줄에 고르는 모션도 이 영상의 분위기와 어긋나지 않게 하고, 효과 설명의 "어울리는 문구"를 참고한다.
+- 감정 효과의 뜻: sway 여유 · 기분 좋음, shiver 긴장 · 주의, heartbeat 설렘, tilt 궁금함, hop 놀람, droop 아쉬움, impact 강한 한마디, wave 안내 · 초대, ticktock 띄어 쓴 두 낱말 반복어. 그 감정이 말에 있을 때만 쓴다. wave와 ticktock은 큰 줄 글꼴이 부리(명조) · 세리프이면 쓰지 않는다.
+- 예능 모션(${VARIETY_FX.join(", ")})은 예능 프로 자막처럼 튀는 움직임이다. 큰 강조어 줄에만 쓰고 작은 줄은 cut으로 둔다. tapeTurn · pageTurn은 글자 뒤에 테이프 바탕이 함께 나온다.
+- 예능 모양은 글자의 색 · 테두리 · 번짐 · 장식이 한꺼번에 바뀌는 글자 모양이다. 제품 · 장면 · 계정 분위기가 예능 자막과 맞는 영상에만 key_look을 고르고, 차분한 제품이나 정보를 설명하는 영상은 빈 문자열로 둔다. 말의 내용과 뚜렷하게 맞는 줄에만 그 줄의 look을 쓰고(맵다 → 매운맛, 후기 인용 → 인용 흰), 줄 look은 한 영상에 2~3번 이내로 둔다. 모양 이름은 목록에 있는 그대로 쓴다.
 쓸 수 있는 효과:
 ${effectNotes(input.dir)}
 감정 효과: ${EMOTION_FX.join(", ")}
+쓸 수 있는 예능 모양(이름: 생김새 · 어울리는 말):
+${Object.entries(LOOKS).map(([name, l]) => `${name}: ${l.hint}`).join("\n")}
 쓸 수 있는 글꼴(이름 · 종류 · 인상 · 굵기):
 ${fontChoiceLines(loadSkillFonts(input.dir))}${conceptBlock("이 계정의 말투 · 분위기", input.tone, "효과 세기와 글꼴에 반영한다.")}${conceptBlock("이 계정의 영상 스타일", input.styleText, "자막 움직임과 글꼴에 맞으면 반영한다.")}`,
       },
@@ -129,8 +185,10 @@ function keySize(text: string): number {
   return Math.round(Math.min(KEY_MAX, Math.max(SMALL_SIZE, KEY_WIDTH / Math.max(units, 1))));
 }
 
-function fx(value: string): string {
-  return ALLOWED_FX.has(value) ? value : "cut";
+/** 스킬에 넘길 모션 이름과 그 모션에 꼭 필요한 값. 목록에 없는 이름은 스킬이 렌더를 멈추므로 cut으로 바꾼다. */
+function motion(value: string, key: boolean): { fx: string; tape?: unknown } {
+  const name = ALLOWED_FX.has(value) && (key || !KEY_ONLY_FX.has(value)) ? value : "cut";
+  return { fx: name, ...(TAPE[name] !== undefined ? { tape: TAPE[name] } : {}) };
 }
 
 /** 스킬에 넘기는 글꼴. 굵기가 null이면 지정하지 않는다(한 굵기뿐인 글꼴). */
@@ -151,15 +209,23 @@ function rowsOf(c: TimedCaption, line: CaptionDesign["lines"][number] | undefine
   const usable = line && line.rows.length > 0 && line.rows.length <= 2 && squash(line.rows.map((r) => r.text).join("")) === squash(c.text);
   const rows = usable ? line.rows : readableRows(c.text).map((text) => ({ text, role: "key" as const }));
   const delays = rowDelays(c, rows.map((r) => r.text));
+  // 예능 모양은 글자색을 덮어쓴다. 밝은 배경 자막은 어두운 글자로 읽히게 하는 쪽이 먼저라 모양을 입히지 않는다
+  const lineLook = bright ? null : lookOf(line?.look);
+  const look = lineLook ?? (bright ? null : lookOf(design.key_look));
+  const lookFields = look ? { look, ...LOOKS[look].extra, ...(LOOKS[look].pinFont ? { font: fonts.key } : {}) } : null;
+  // 줄에 모션을 따로 고르지 않았으면, 그 줄에만 입힌 모양의 짝 모션(예능 골드 → shine)을 쓴다
+  const keyFx = line?.fx && ALLOWED_FX.has(line.fx) ? line.fx : (lineLook && LOOKS[lineLook].fx) || (last ? design.finish_fx : design.key_fx);
+  const keyMotion = motion(keyFx, true);
+  const onTape = keyMotion.tape !== undefined;
   return rows.map((r, i) => ({
     text: r.text.trim(),
-    fx: r.role === "key" ? (line?.fx && ALLOWED_FX.has(line.fx) ? line.fx : fx(last ? design.finish_fx : design.key_fx)) : fx(design.small_fx),
+    ...(r.role === "key" ? keyMotion : motion(design.small_fx, false)),
     size: r.role === "key" ? keySize(r.text.trim()) : fonts.smallSize,
-    // 강조어 줄은 이 자막 배경에 맞춘 강조색으로. 재지 못한 자막은 전체 강조색(tone hi = style.accent)
-    ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts), ...(bright ? {} : accent ? { color: accent } : { tone: "hi" }) } : {}),
+    // 강조어 줄은 이 자막 배경에 맞춘 강조색으로. 재지 못한 자막은 전체 강조색(tone hi = style.accent). 예능 모양을 입힌 줄은 모양의 색을, 테이프 위 줄은 어두운 글자를 쓴다
+    ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts), ...(onTape ? ON_TAPE : lookFields ?? (bright ? {} : accent ? { color: accent } : { tone: "hi" })) } : {}),
     // 밝은 배경에서는 흰 글자와 노란 강조색이 안 읽혀 어두운 글자와 밝은 그림자로 바꾼다
     ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
-    ...(i > 0 ? { gapPx: ROW_GAP } : {}),
+    ...(i > 0 ? { gapPx: onTape ? TAPE_GAP : ROW_GAP } : {}),
     ...(delays[i] ? { delay: delays[i] } : {}),
   }));
 }
@@ -216,14 +282,17 @@ function blockLine(b: SkillBlock, bright: boolean, fonts: SubtitleFonts) {
     t1: Number(b.end.toFixed(3)),
     cy: box.top + Math.round(box.height / 2),
     rows: b.rows.map((r, i) => {
-      const marked = b.highlight && r.text.includes(b.highlight) && !r.text.includes("*") ? r.text.replace(b.highlight, `*${b.highlight}*`) : r.text;
+      const onTape = r.role === "key" && TAPE[b.fx] !== undefined;
+      // 테이프 위에서는 강조 낱말 색(노랑)도 읽히지 않아 표시하지 않는다
+      const marked = !onTape && b.highlight && r.text.includes(b.highlight) && !r.text.includes("*") ? r.text.replace(b.highlight, `*${b.highlight}*`) : r.text;
       return {
         text: marked,
-        fx: r.role === "key" ? fx(b.fx) : "cut",
+        ...motion(r.role === "key" ? b.fx : "cut", r.role === "key"),
         size: r.role === "key" ? keySize(r.text) : fonts.smallSize,
         ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts) } : {}),
+        ...(onTape ? ON_TAPE : {}),
         ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
-        ...(i > 0 ? { gapPx: ROW_GAP } : {}),
+        ...(i > 0 ? { gapPx: TAPE[b.fx] !== undefined ? TAPE_GAP : ROW_GAP } : {}),
       };
     }),
   };

@@ -107,3 +107,78 @@ test("밝은 펌프와 어두운 배경이 섞인 컷은 평균만 보고 검은
   assert.equal(readableBrightness(Uint8Array.from([180, 182, 178, 180])), 180);
   assert.equal(readableBrightness(new Uint8Array()), null);
 });
+
+test("예능 모션은 강조어 줄에만 쓰고 테이프 모션에는 테이프 바탕을 같이 넘긴다", () => {
+  assert.equal(isMotionEffect("slam"), true);
+  assert.equal(isMotionEffect("wave"), true);
+  const design: CaptionDesign = { ...trial, key_fx: "slam", small_fx: "shake", finish_fx: "tapeTurn" };
+  const file = buildSubtitleFile("video.mp4", trialCues, ["lower", "lower"], design, [], [], [], pickSubtitleFonts(FONTS, trial));
+  const first = file.lines[0].rows[0] as Record<string, unknown>;
+  assert.equal(first.fx, "slam");
+  assert.equal("tape" in first, false);
+  // 작은 윗줄에 예능 모션을 고르면 cut으로 둔다. 줄에 고른 모션(tilt)은 강조어 줄에 그대로 쓴다
+  const last = file.lines[1].rows as Record<string, unknown>[];
+  assert.deepEqual(last.map((r) => r.fx), ["cut", "tilt"]);
+  // 마지막 자막의 대표 모션이 테이프면 바탕이 같이 간다
+  const tape = buildSubtitleFile("video.mp4", [trialCues[0]], ["lower"], design).lines[0].rows[0] as Record<string, unknown>;
+  assert.equal(tape.fx, "tapeTurn");
+  assert.deepEqual(tape.tape, { v: 2 });
+  // 테이프 위 글자는 강조색이 아니라 어두운 색
+  assert.equal(tape.color, "#1B1F27");
+  assert.equal("tone" in tape, false);
+  // 스킬은 효과음을 자막 파일의 sfx로만 켠다. 편집 키트 효과음과 겹치지 않게 주지 않는다
+  assert.equal("sfx" in file, false);
+});
+test("한 영상의 자막마다 고른 서로 다른 모션을 줄 수 제한 없이 그대로 쓴다", () => {
+  // 2026-11-12 사용자 결정: 한 영상에 모션 하나만 고집하지 않고 여러 모션을 조합한다
+  const texts = ["이거 진짜예요?", "딱 3일이면", "깜짝 놀랐어요", "매일 아침에 써요", "지금 확인해 보세요"];
+  const cues = texts.map((text, i) => ({ id: `c${i}`, text, start: i * 2, end: i * 2 + 1.8, beat: i, emphasis: [] }));
+  const picked = ["tilt", "slam", "hop", "", "wave"];
+  const design: CaptionDesign = {
+    ...trial,
+    key_fx: "39",
+    finish_fx: "38",
+    lines: texts.map((text, no) => ({ no, rows: [{ text, role: "key" as const }], fx: picked[no], spark: false })),
+  };
+  const file = buildSubtitleFile("video.mp4", cues, cues.map(() => "lower" as const), design, [], [], [], pickSubtitleFonts(FONTS, trial));
+  const used = file.lines.map((l) => (l.rows[0] as { fx: string }).fx);
+  // 모션을 고르지 않은 줄만 대표 모션. 마지막 자막도 줄에 고른 모션이 먼저다
+  assert.deepEqual(used, ["tilt", "slam", "hop", "39", "wave"]);
+  assert.equal(new Set(used).size, 5);
+});
+test("예능 모양은 강조어 줄에 장식과 함께 넘기고 밝은 배경에서는 입히지 않는다", () => {
+  const design: CaptionDesign = {
+    ...trial,
+    key_look: "예능 흰",
+    lines: [
+      { ...trial.lines[0], look: "매운맛" },
+      { ...trial.lines[1], fx: "", look: "예능 골드" },
+    ],
+  };
+  const fonts = pickSubtitleFonts(FONTS, trial);
+  const file = buildSubtitleFile("video.mp4", [...trialCues, { id: "c2", text: "끝까지 촉촉해요", start: 14, end: 16, beat: 5, emphasis: [] }], ["lower", "lower", "lower"], design, [], [], [], fonts);
+  const rows = file.lines.map((l) => l.rows as Record<string, unknown>[]);
+  // 줄에 고른 모양이 먼저, 장식은 코드가 붙인다. 모양을 입힌 줄에는 강조색을 주지 않는다
+  assert.equal(rows[0][0].look, "매운맛");
+  assert.equal(rows[0][0].fire, true);
+  assert.equal("color" in rows[0][0] || "tone" in rows[0][0], false);
+  // 작은 줄은 그대로, 강조어 줄은 모양의 짝 모션
+  assert.equal("look" in rows[1][0], false);
+  assert.equal(rows[1][1].look, "예능 골드");
+  assert.equal(rows[1][1].fx, "shine");
+  // 줄에 고르지 않은 자막은 영상 전체 모양
+  assert.equal(rows[2][0].look, "예능 흰");
+  // 붓글씨 글꼴로 바뀌는 모양은 고른 강조어 글꼴을 그대로 넘긴다
+  const scary = buildSubtitleFile("video.mp4", [trialCues[0]], ["lower"], { ...trial, key_look: "괴담", lines: [] }, [], [], [], fonts).lines[0].rows[0] as Record<string, unknown>;
+  assert.equal(scary.font, fonts.key);
+  assert.equal(scary.blood, true);
+  // 밝은 배경 자막은 어두운 글자가 먼저다. 없는 모양 이름은 쓰지 않는다
+  const bright = buildSubtitleFile("video.mp4", [trialCues[0]], ["lower"], design, [200], [], [], fonts).lines[0].rows[0] as Record<string, unknown>;
+  assert.equal("look" in bright, false);
+  assert.equal(bright.color, "#1B1F27");
+  const unknown = buildSubtitleFile("video.mp4", [trialCues[0]], ["lower"], { ...trial, key_look: "없는 모양", lines: [] }, [], [], [], fonts).lines[0].rows[0] as Record<string, unknown>;
+  assert.equal("look" in unknown, false);
+  // 예전에 저장된 디자인(모양 값 없음)도 그대로 쓴다
+  const old = buildSubtitleFile("video.mp4", trialCues, ["lower", "lower"], trial, [], [], [], fonts);
+  assert.ok(old.lines.every((l) => (l.rows as Record<string, unknown>[]).every((r) => !("look" in r))));
+});
