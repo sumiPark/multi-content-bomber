@@ -5,6 +5,7 @@ import { ReviewCard, type ReviewCardData } from "@/components/shoot/review-card"
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { groupNameOf, shopTagForGroup, withShopTagText } from "@/lib/products/shop-tag";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
 import { certifiedFunctionsOf, finalBlocking } from "@/lib/shoot/final-check";
@@ -67,7 +68,7 @@ export default async function ShootReviewPage() {
   const { data: rows } = await supabase
     .from("content_plans")
     .select(
-      "id, status, product_id, script, proposal, warnings_ack, posted_at, posted_permalink, social_accounts(display_name), products(name, kind, stock_status, represent_image_url, product_analyses(health_functional, summary)), shoot_requests(id, status, rendered_path, edit, cuts, clips, error, updated_at)",
+      "id, status, product_id, script, proposal, warnings_ack, posted_at, posted_permalink, social_accounts(display_name, account_groups(name)), products(name, kind, stock_status, represent_image_url, product_analyses(health_functional, summary)), shoot_requests(id, status, rendered_path, edit, cuts, clips, error, updated_at)",
     )
     .eq("track", "A")
     .in("status", ["SHOT", "RENDERED", "PUBLISHED"])
@@ -139,7 +140,8 @@ export default async function ShootReviewPage() {
       posterUrl: edit.thumbnail ? (urlOf.get(edit.thumbnail) ?? null) : null,
       hasFinal: !!r?.rendered_path,
       seconds: edit.seconds ?? null,
-      caption,
+      // 계정 그룹의 상점 태그(#오늘과일 등)를 해시태그 줄 끝에 — 이미 있으면 그대로
+      caption: withShopTagText(caption, shopTagForGroup(groupNameOf(p.social_accounts?.account_groups))),
       hookText: edit.kit?.hook?.text ?? null,
       hookByHuman: edit.kit?.hook?.source === "human",
       thumbnailText: edit.kit?.thumbnail?.title ?? null,

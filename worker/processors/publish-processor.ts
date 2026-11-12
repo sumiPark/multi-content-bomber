@@ -2,6 +2,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import { recordPublishedEpisode } from "@/lib/episode-alerts/server";
 import { prepublishCheck } from "@/lib/products/prepublish-check";
+import { groupNameOf, shopTagForGroup, withShopTag } from "@/lib/products/shop-tag";
 import {
   getAdapter,
   MediaError,
@@ -52,6 +53,8 @@ interface AccountRow {
   access_token_encrypted: string | null;
   refresh_token_encrypted: string | null;
   token_expires_at: string | null;
+  /** 계정 그룹(0009) — 상점 태그(lib/products/shop-tag.ts)를 고르는 데만 쓴다. */
+  account_groups?: unknown;
 }
 
 interface ContentRow {
@@ -399,7 +402,7 @@ async function runPublish(
   const { data: account, error: accountError } = await supabase
     .from("social_accounts")
     .select(
-      "id, platform, platform_account_id, is_active, access_token_encrypted, refresh_token_encrypted, token_expires_at",
+      "id, platform, platform_account_id, is_active, access_token_encrypted, refresh_token_encrypted, token_expires_at, account_groups(name)",
     )
     .eq("id", row.social_account_id)
     .maybeSingle<AccountRow>();
@@ -459,8 +462,18 @@ async function runPublish(
   const instagramCoverUrl = account.platform === "INSTAGRAM" && typeof igCoverPath === "string" && igCoverPath ? await signCover(supabase, igCoverPath) : null;
 
   // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID/커버/이어받기 상태 주입
+  //   계정 그룹이 오늘과일 · 쿠마마켓 · 리유코스메틱이면 그 상점 태그를 덧붙인다(이미 있으면 그대로).
+  //   틱톡은 해시태그가 본문 안에 있어 본문 끝에, 나머지는 해시태그 배열 끝에 둔다 — 스레드 주제 태그(첫 태그)는 그대로.
+  const baseCtx = buildPublishContext(content, account.platform);
+  const shopTag = shopTagForGroup(groupNameOf(account.account_groups));
+  if (shopTag && account.platform === "TIKTOK") {
+    const withTag = withShopTag([], baseCtx.caption, shopTag);
+    if (withTag.length > 0) baseCtx.caption = [baseCtx.caption?.trim(), shopTag].filter(Boolean).join(" ");
+  } else if (shopTag) {
+    baseCtx.hashtags = withShopTag(baseCtx.hashtags, baseCtx.caption, shopTag);
+  }
   const publishCtx: PublishContext = {
-    ...buildPublishContext(content, account.platform),
+    ...baseCtx,
     platformAccountId: account.platform_account_id,
     mediaSignedUrls,
     mediaItemKinds: mediaItemKinds(content.media_urls),

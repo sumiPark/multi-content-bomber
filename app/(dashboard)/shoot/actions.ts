@@ -6,6 +6,7 @@ import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { getInstagramAuth } from "@/lib/episode-alerts/server";
 import { triggerShootEditRun, triggerShootPlanRun, triggerShotlistRun } from "@/lib/github-dispatch";
 import { listRecentMedia } from "@/lib/platforms/instagram-insights";
+import { groupNameOf, shopTagForGroup, withShopTagText } from "@/lib/products/shop-tag";
 import { searchScopedProducts, type SearchGroup, type SearchHit } from "@/lib/products/search";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
@@ -705,7 +706,7 @@ async function loadPlanForFiles(service: Service, planId: string, orgId: string)
   const { data } = await service
     .from("content_plans")
     .select(
-      "id, status, product_id, social_account_id, script, warnings_ack, social_accounts(display_name), shoot_requests(id, status, rendered_path, edit, cuts, clips)",
+      "id, status, product_id, social_account_id, script, warnings_ack, social_accounts(display_name, account_groups(name)), shoot_requests(id, status, rendered_path, edit, cuts, clips)",
     )
     .eq("id", planId)
     .eq("organization_id", orgId)
@@ -831,7 +832,7 @@ export async function getShootFilesAction(input: z.infer<typeof filesSchema>): P
     const texts = buildPackageTexts({
       account,
       productName,
-      caption: script?.caption?.text ?? "",
+      caption: withShopTagText(script?.caption?.text ?? "", shopTagForGroup(groupNameOf(plan.social_accounts?.account_groups))),
       script,
       cuts: (req.cuts ?? []) as unknown as PackageCut[],
       segments: edit.segments ?? [],
