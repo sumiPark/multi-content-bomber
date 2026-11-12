@@ -26,6 +26,8 @@ import type { Json } from "@/types/database";
 
 const MAX_REWRITES = 1;
 
+const squash = (s: string) => s.replace(/\s+/g, "");
+
 function arg(argv: string[], flag: string): string | undefined {
   const i = argv.indexOf(flag);
   const v = i >= 0 ? argv[i + 1] : undefined;
@@ -128,36 +130,53 @@ async function main() {
       });
       let shotlist: ShotlistOutput | null = null;
       let check: CheckResult | null = null;
+      // 저장할 초안을 쓸 때의 고정 문구 기록 — 다시 쓰다 실패하면 그 뒤에 바뀐 문구가 아니라 이 기록을 남긴다
+      let fixed: ReturnType<typeof fixedRecord> | null = null;
       let fixRequests: string[] | undefined;
       let tokens = phrases.tokens.input + phrases.tokens.output;
       let maxAttempts = MAX_REWRITES;
       for (let attempt = 0; attempt <= maxAttempts; attempt++) {
-        const res = await writeShotlist(
-          {
-            service,
-            planId: plan.id,
-            accountName: acc?.display_name ?? "",
-            roleFocus: concept.shootRole,
-            liveVoice: concept.shootLiveVoice,
-            roleNote: acc?.role_note ?? null,
-            facts,
-            rules,
-            idea,
-            brief: plan.human_brief,
-            concept: concept.shootConcept,
-            tone: concept.shootTone,
-            editStyle: concept.shootEditStyle,
-            phraseBlock: fixedPhraseBlock(phrases),
-            fixRequests,
-          },
-          { log: !dryRun },
-        );
-        shotlist = applyToShotlist(res.output, phrases, concept.shootLiveVoice);
-        tokens += res.tokens.input + res.tokens.output;
-        const seconds = shotlist.cuts.reduce((sum, c) => sum + c.seconds, 0);
-        check = await checkScript(shotlistAsScript(shotlist), facts, rules, acc?.display_name ?? "", { track: "A", seconds, fixedHook: phrases.hooks.length > 0, fixedTexts: [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t) });
-        tokens += check.tokens.input + check.tokens.output;
-        console.log(`[a-shotlist] ${label} ${facts.name} — ${attempt + 1}번째: ${check.passed ? "통과" : `걸림 ${check.issues.length}건`} (스킬 ${res.skillCalls.length}번)`);
+        // 사람이 읽고 고른 초안의 첫 문장 — 저장한 고정 문구가 있으면 그쪽이 먼저다
+        const keepHook = idea && phrases.hooks.length === 0 ? chosen?.draft?.hook?.trim() || null : null;
+        try {
+          const res = await writeShotlist(
+            {
+              service,
+              planId: plan.id,
+              accountName: acc?.display_name ?? "",
+              roleFocus: concept.shootRole,
+              liveVoice: concept.shootLiveVoice,
+              roleNote: acc?.role_note ?? null,
+              facts,
+              rules,
+              idea,
+              brief: plan.human_brief,
+              concept: concept.shootConcept,
+              tone: concept.shootTone,
+              editStyle: concept.shootEditStyle,
+              phraseBlock: fixedPhraseBlock(phrases),
+              keepHook,
+              fixRequests,
+            },
+            { log: !dryRun },
+          );
+          const draft = applyToShotlist(res.output, phrases, concept.shootLiveVoice);
+          const seconds = draft.cuts.reduce((sum, c) => sum + c.seconds, 0);
+          // 고른 첫 문장을 그대로 썼으면 점수로 막지 않는다 — 다시 써도 그 문장이라 칸이 멈추기만 한다
+          const keptHook = !!keepHook && squash(draft.hooks[draft.chosen_hook]?.spoken ?? "").includes(squash(keepHook));
+          const draftCheck = await checkScript(shotlistAsScript(draft), facts, rules, acc?.display_name ?? "", { track: "A", seconds, fixedHook: phrases.hooks.length > 0 || keptHook, fixedTexts: [phrases.hooks[0]?.text, phrases.endings[0]?.text].filter((t): t is string => !!t) });
+          shotlist = draft;
+          check = draftCheck;
+          fixed = fixedRecord(phrases);
+          tokens += res.tokens.input + res.tokens.output + check.tokens.input + check.tokens.output;
+          console.log(`[a-shotlist] ${label} ${facts.name} — ${attempt + 1}번째: ${check.passed ? "통과" : `걸림 ${check.issues.length}건`} (스킬 ${res.skillCalls.length}번)`);
+        } catch (err) {
+          // 다시 쓰다 실패하면 앞에서 쓴 초안을 버리지 않는다 — 걸린 항목과 함께 저장해 촬영 화면에 "고칠 것"으로 보여 준다
+          // (2026-11-12: 다시 쓰기가 스킬 호출 한도를 넘어 첫 초안까지 사라졌다). 첫 시도가 실패하면 남길 초안이 없어 예전처럼 실패로 둔다
+          if (!shotlist || !check) throw err;
+          console.warn(`[a-shotlist] ${label} ${facts.name} — ${attempt + 1}번째 다시 쓰기 실패, 앞의 초안을 저장: ${err instanceof Error ? err.message : String(err)}`);
+          break;
+        }
         if (check.passed) break;
         // 고정 문구가 걸렸으면 글자를 고칠 수 없으니 다음 문구로 한 번 더 쓴다(최대 3번 더)
         if (dropFailedPhrases(phrases, check.issues) && maxAttempts < MAX_REWRITES + 3) maxAttempts++;
@@ -171,7 +190,7 @@ async function main() {
       const saved = {
         ...shotlist,
         hooks: shotlist.hooks.map((h, i) => ({ ...h, score: hookScores[i]?.score ?? null })),
-        ...(hasPhrases ? { fixed: fixedRecord(phrases) } : {}),
+        ...(hasPhrases ? { fixed: fixed ?? fixedRecord(phrases) } : {}),
         ...(prevHuman ? { human: prevHuman } : {}),
         // 이 컷 목록을 쓸 때의 하고 싶은 말 — 그 뒤에 바뀌면 촬영 화면에 "편집에 반영됨"을 보여 준다
         brief: plan.human_brief ?? null,

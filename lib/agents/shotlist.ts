@@ -71,8 +71,15 @@ export interface ShotlistContext {
   editStyle?: string | null;
   // 사람이 고정한 첫 · 마지막 문구 안내 (fixed-phrases.ts)
   phraseBlock?: string;
+  // 사람이 읽고 고른 대본 초안의 첫 문장. 있으면 훅을 새로 쓰고 다시 채점하는 순서를 건너뛴다
+  // (2026-11-10 추황배: 바꿀 수 없는 첫 문장을 9번 다시 채점하다 스킬 호출 한도를 넘었다)
+  keepHook?: string | null;
   fixRequests?: string[];
 }
+
+// 길이 재기 안내 — 구체성 경고를 없애려고 숫자 · 개수를 지어내지 않게 한다
+// (2026-11-12 해물모둠: 만드는 순서 대본에 "두 가지", "1팩"을 지어 넣고 7번 다시 쟀다).
+const TIMING_RULE = `time_script로 잰다. 반드시 고칠 경고는 길이뿐이다(컷 길이 안에 못 읽는 줄, 목표 길이를 넘는 것). "구체적인 게 하나도 없다" · "숫자도 이름도 없다" 경고는 get_product_facts에 있는 숫자 · 이름으로 자연스럽게 채울 수 있을 때만 고치고, 없으면 그대로 둔다. 경고를 없애려고 개수 · 수량 · 이름을 지어내지 않는다("두 가지", "1팩" 같은 말). 만드는 순서를 보여 주는 대본은 이 경고가 남아도 된다. 길이를 고친 뒤 한 번 더 재는 것까지만 하고, 남은 구체성 경고 때문에 다시 재지 않는다.`;
 
 function systemPrompt(ctx: ShotlistContext): string {
   const f = ctx.facts;
@@ -84,6 +91,9 @@ function systemPrompt(ctx: ShotlistContext): string {
     ? `고른 기획: "${ctx.idea.title}" (${ctx.idea.format}) — ${ctx.idea.concept}${briefLine}`
     : `사람이 상품을 직접 골랐다.${briefLine || " 상품 사실에서 가장 찍을 만한 특징으로 기획한다."}`;
   const kit = editKit();
+  const hookStep = ctx.keepHook
+    ? `2. 첫 문장은 사람이 읽고 고른 "${ctx.keepHook}"다. 새로 쓰지 않는다. hooks 첫 항목에 이 문장을 그대로 넣고 chosen_hook은 0, 나머지 두 개는 서로 다른 공식의 대안으로 채운다. score_hooks는 참고로 한 번만 부르고, 점수가 낮아도 첫 문장을 바꾸거나 말을 덧붙여 다시 채점하지 않는다. 광고 문구 규칙에 어긋나거나 상품 사실에 없는 내용일 때만 그 부분을 고친다. 첫 컷은 이 문장이다.`
+    : `2. 서로 다른 공식으로 훅 3개를 쓰고 score_hooks로 채점한다. 1등이 50점 미만이면 다시 쓴다. 첫 컷은 그 훅이다.`;
   return `너는 인스타그램 @${ctx.accountName}의 릴스 촬영 감독 겸 대본 작가다. 사람이 휴대폰으로 컷 리스트대로 찍어 올리면 AI 편집자가 원본을 보고 컷 · 음성 · 자막 · 그래픽 · 효과음을 넣어 완성한다.
 계정 역할: ${focus}${ctx.roleNote ? ` — ${ctx.roleNote}` : ""}
 상품: ${f.shop} ${f.kindLabel} "${f.name}"
@@ -91,7 +101,7 @@ ${what}
 
 순서 (스킬을 실제로 써라):
 1. get_product_facts, list_hook_formulas를 읽는다.
-2. 서로 다른 공식으로 훅 3개를 쓰고 score_hooks로 채점한다. 1등이 50점 미만이면 다시 쓴다. 첫 컷은 그 훅이다.
+${hookStep}
    후킹 규칙:
 ${kit.hook_rules.map((r) => `   - ${r}`).join("\n")}
    표지 규칙(thumbnail):
@@ -99,7 +109,8 @@ ${kit.thumbnail_rules.map((r) => `   - ${r}`).join("\n")}
 3. 컷 리스트: 보여 주는 기획은 컷 8~12개, 합계 ${SHOW_SECONDS.min}~${SHOW_SECONDS.max}초. 사람이 설명하는 기획은 컷 10~24개, 합계 30~85초로 내용에 맞춘다. 컷마다 1.5~5초. 첫 컷은 후킹 글자와 함께 궁금증을 만드는 장면이다(결과 · 단면 · 움직임 · 의외의 행동). 편집에서 잘라 쓰게 컷마다 동작을 2~3초 더 길게 찍으라고 how에 적는다.
    컷마다 장면이 바뀌어야 한다(같은 각도 연속 금지). 마지막 컷은 훅의 낱말을 되받아 다시 보게.
    how는 찍는 사람이 그대로 따라 할 수 있게 구체적으로: 위에서 · 옆에서 · 손 클로즈업 · 흰 배경 · 창가 빛 등.
-4. ${ctx.liveVoice ? "voice: 사람이 카메라 보고 말할 짧은 대사. 컷 길이 안에 말할 수 있게(1초에 6음절 안팎). time_script로 재고 경고를 없앤다." : "voice는 모두 빈 문자열이다. 찍는 사람은 말하지 않고, narration을 AI 음성이 읽는다. 말투는 친근한 수다체, 컷 길이 안에 읽을 수 있게(1초에 6음절 안팎). 말은 그 컷에서 보이는 것에 맞춘다. time_script로 재고 경고를 없앤다."}
+4. ${ctx.liveVoice ? "voice: 사람이 카메라 보고 말할 짧은 대사. 컷 길이 안에 말할 수 있게(1초에 6음절 안팎)." : "voice는 모두 빈 문자열이다. 찍는 사람은 말하지 않고, narration을 AI 음성이 읽는다. 말투는 친근한 수다체, 컷 길이 안에 읽을 수 있게(1초에 6음절 안팎). 말은 그 컷에서 보이는 것에 맞춘다."}
+   ${TIMING_RULE}
 5. 캡션을 쓰고 check_caption으로 점검한다. 첫 줄 40자 이내, 요청은 하나, 해시태그 정확히 3개.
    ${CAPTION_LINE_RULE}
 6. 화면 문구 · 대사 · 캡션 전체를 check_ai_tone, check_rules로 점검하고 걸린 것을 고친다.
@@ -128,7 +139,7 @@ export async function writeShotlist(ctx: ShotlistContext, opts: { log: boolean }
     service: opts.log ? ctx.service : null,
     readService: ctx.service,
     planId: ctx.planId,
-    input: { track: "A", product: ctx.facts.name, idea: ctx.idea, brief: ctx.brief, fixRequests: ctx.fixRequests ?? [], concept: ctx.concept ?? null, tone: ctx.tone ?? null, editStyle: ctx.editStyle ?? null },
+    input: { track: "A", product: ctx.facts.name, idea: ctx.idea, brief: ctx.brief, fixRequests: ctx.fixRequests ?? [], keepHook: ctx.keepHook ?? null, concept: ctx.concept ?? null, tone: ctx.tone ?? null, editStyle: ctx.editStyle ?? null },
   });
   result.output.caption.text = breakCaptionLines(result.output.caption.text);
   return result;
