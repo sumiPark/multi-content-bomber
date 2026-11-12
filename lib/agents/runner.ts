@@ -132,7 +132,8 @@ export async function runAgent<T>(opts: {
         // 스킬을 쓰는 에이전트는 'none'으로 둔다. 판단 근거는 스킬 결과로 충분히 준다.
         ...(isReasoningModel(model) ? { reasoning_effort: "none" as const } : {}),
         messages,
-        tools,
+        // 스킬 없이 한 번에 답하는 에이전트(완성본 고치기)는 tools를 보내지 않는다 — 빈 배열은 API가 거절한다
+        ...(tools.length ? { tools } : {}),
         response_format: zodResponseFormat(opts.outputSchema as z.ZodType, opts.outputName),
       });
       tokens.input += completion.usage?.prompt_tokens ?? 0;

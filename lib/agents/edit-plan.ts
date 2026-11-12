@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { conceptBlock } from "@/lib/agents/concept";
+import { graphicSchema, sfxNames } from "@/lib/agents/edit-plan-parts";
 import { editKit, ttsReading } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import type { ProductKind } from "@/lib/products/shops";
@@ -15,32 +16,8 @@ import type { createServiceClient } from "@/lib/supabase/service";
 
 type Service = ReturnType<typeof createServiceClient>;
 
-const graphicTypes = ["badge", "title", "chip", "notice", "stat", "split", "steps", "ring", "arrow", "end_card"] as const;
-export const sfxNames = ["pop", "click", "rustle", "whoosh", "plug", "tick", "ding"] as const;
-
-export const graphicSchema = z.object({
-  type: z.enum(graphicTypes),
-  at_word: z.string().describe("이 낱말을 말할 때 나온다. 없으면 빈 문자열"),
-  at: z.number().describe("at_word가 없을 때 비트 안의 위치 0~1"),
-  text: z.string(),
-  small: z.string(),
-  sub: z.string(),
-  note: z.string(),
-  chip: z.string(),
-  tone: z.string(),
-  side: z.string(),
-  number: z.string(),
-  unit: z.string(),
-  left: z.string(),
-  right: z.string(),
-  left_value: z.number(),
-  right_value: z.number(),
-  items: z.array(z.string()),
-  x: z.number(),
-  y: z.number(),
-  r: z.number(),
-  from: z.string(),
-});
+// 그래픽 틀 · 효과음 이름은 완성본 고치기(앱)도 쓰도록 edit-plan-parts로 옮겼다. 불러 쓰던 곳은 그대로 여기서 받는다
+export { graphicSchema, sfxNames };
 
 // AI 이미지는 원료를 그림으로 설명할 수 있는 상품에만 쓴다. 과일 · 의류는 그림이 실물처럼 보여 쓰지 않는다
 export const VISUAL_KINDS: ProductKind[] = ["COSMETIC", "HEALTH_FOOD"];
@@ -209,6 +186,34 @@ export interface EditPlanContext {
   visualLibrary?: { key: string; subject: string }[];
   // 먼저 낸 계획과 코드 점검에서 걸린 것 — 고쳐서 다시 낸다
   retry?: { plan: EditPlan; problems: string[] } | null;
+  // 완성본 고치기: 촬영본을 다시 봐야 하는 요청이 있을 때만 넘긴다(lib/agents/edit-revise.ts). 지난 계획에서 요청한 것만 바꾼다.
+  // 없으면 지시문 · 동작은 예전 그대로다
+  revise?: { plan: EditPlan; request: string; items: string[] } | null;
+}
+
+/** 완성본 고치기 지시 — 지난 계획과 고칠 내용. 사용자 메시지 끝에 붙는다. */
+function reviseBlock(revise: NonNullable<EditPlanContext["revise"]>): string {
+  // 고른 음악 · 자막 디자인은 코드가 따로 이어 쓰고, 지난 경고는 새 계획과 상관없어 계획 글에서 뺀다
+  const past = Object.fromEntries(Object.entries(revise.plan).filter(([k]) => !["warnings", "pickedMusic", "captionDesign", "redoCaptionLines"].includes(k)));
+  return `
+
+이미 만든 완성본을 고치는 작업이다. 지난 계획과 관리자가 적은 고칠 내용이 아래에 있다.
+- 글 · 순서 · 그래픽 · 효과음처럼 바로 고칠 수 있는 요청은 지난 계획에 이미 반영돼 있다. 아래 "촬영본을 다시 보고 고를 것"만 새로 처리한다.
+- 촬영본 프레임을 다시 보고 요청에 맞는 구간을 고른다. 시각이 애매하면 look_closer로 확인한다.
+- 요청한 것만 바꾸고 나머지 글(후킹 · 표지 · 읽는 말 · 자막) · 순서 · 컷 · 그래픽 · 효과음 · look · caption_style은 지난 계획 그대로 둔다. 후킹과 표지는 요청이 없으면 새로 만들지 않고, 후킹 공식 · 채점 스킬도 쓰지 않는다.
+- 고칠 내용에서 따옴표로 적은 글자는 다듬지 않고 글자 그대로 쓴다.
+- 새로 쓰거나 고친 말만 check_ai_tone, check_rules, read_tts로 점검한다.
+
+촬영본을 다시 보고 고를 것:
+${bullets(revise.items)}
+
+고칠 내용 전체:
+"""
+${revise.request}
+"""
+
+지난 계획:
+${JSON.stringify(past)}`;
 }
 
 function bullets(lines: string[]): string {
@@ -265,7 +270,8 @@ function systemPrompt(ctx: EditPlanContext): string {
     ? `사람이 정한 표지 글자가 있다: "${ctx.humanThumbnail.trim()}". 글자를 바꾸지 말고 thumbnail.title에 쓰고, 어울리는 프레임만 고른다.`
     : `표지도 네가 만든다.${ctx.shotlistThumbnail?.title ? ` 컷 리스트의 표지 문구 "${ctx.shotlistThumbnail.title}"를 참고한다.` : ""}`;
   const auto = ctx.source === "auto";
-  const priceLines = humanPriceLines(ctx);
+  // 완성본 고치기: 관리자가 고칠 내용에 적은 가격 · 할인 표현도 관리자가 넣은 문구다
+  const priceLines = [...humanPriceLines(ctx), ...(ctx.revise && PRICE_WORDS.test(ctx.revise.request) ? [ctx.revise.request.trim()] : [])];
   const priceRule = priceLines.length
     ? `재고 · 품절 · 배송은 말하지 않는다. 특가 · 할인 · 금액은 관리자가 넣은 아래 문구에 있는 표현과 숫자 그대로만 쓸 수 있다(끝맺음의 이유로 쓰기 좋다). 문구에 없는 할인율 · 금액 · 기간 · "오늘만" 같은 조건은 만들지 않는다.\n${priceLines.map((l) => `  · "${l}"`).join("\n")}`
     : "재고 · 품절 · 할인 · 특가 · 배송 · 가격은 말하지 않는다.";
@@ -370,7 +376,7 @@ export async function writeEditPlan(ctx: EditPlanContext, opts: { maxSteps?: num
   return runAgent({
     agent: "edit",
     system: systemPrompt(ctx),
-    user: `${facts.name} 촬영본 ${ctx.clips.length}개의 편집 계획을 세워 줘. 프레임 묶음은 촬영본 순서대로이고, 왼쪽 위 글자가 그 촬영본의 시각이다.\n\n${clipLines.join("\n")}${ctx.retry ? `\n\n먼저 낸 계획이 점검에서 걸렸다. 이것을 고쳐서 계획 전체를 다시 내라:\n${ctx.retry.problems.map((p) => `- ${p}`).join("\n")}\n\n먼저 낸 계획:\n${JSON.stringify(ctx.retry.plan.beats.map((b) => ({ tts: b.tts, cuts: b.cuts })))}` : ""}`,
+    user: `${facts.name} 촬영본 ${ctx.clips.length}개의 편집 계획을 세워 줘. 프레임 묶음은 촬영본 순서대로이고, 왼쪽 위 글자가 그 촬영본의 시각이다.\n\n${clipLines.join("\n")}${ctx.revise ? reviseBlock(ctx.revise) : ""}${ctx.retry ?`\n\n먼저 낸 계획이 점검에서 걸렸다. 이것을 고쳐서 계획 전체를 다시 내라:\n${ctx.retry.problems.map((p) => `- ${p}`).join("\n")}\n\n먼저 낸 계획:\n${JSON.stringify(ctx.retry.plan.beats.map((b) => ({ tts: b.tts, cuts: b.cuts })))}` : ""}`,
     userImages: ctx.sheets,
     skills,
     outputSchema: editPlanSchema,
@@ -379,6 +385,6 @@ export async function writeEditPlan(ctx: EditPlanContext, opts: { maxSteps?: num
     service: ctx.service,
     readService: ctx.readService,
     planId: ctx.planId ?? null,
-    input: { product: facts.name, clips: ctx.clips.length, humanHook: ctx.humanHook ?? null, humanThumbnail: ctx.humanThumbnail ?? null, brief: ctx.brief ?? null },
+    input: { product: facts.name, clips: ctx.clips.length, humanHook: ctx.humanHook ?? null, humanThumbnail: ctx.humanThumbnail ?? null, brief: ctx.brief ?? null, ...(ctx.revise ? { revise: ctx.revise.request } : {}) },
   });
 }

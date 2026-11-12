@@ -2,18 +2,21 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
-import { CheckCircle2, ClipboardCopy, Download, ExternalLink, FolderDown, Link2Off, Pencil, RotateCcw, Save, SkipForward, Upload } from "lucide-react";
+import { CheckCircle2, ClipboardCopy, Download, ExternalLink, FolderDown, Link2Off, ListChecks, Pencil, RotateCcw, Save, SkipForward, Upload } from "lucide-react";
 import {
   ackWarningsAction,
+  confirmRevisionAction,
   getShootFilesAction,
   listRecentReelsAction,
   markPostedAction,
+  proposeRevisionAction,
   reEditAction,
   reopenShootAction,
   saveCaptionAction,
   skipShootAction,
   unlinkPostedAction,
   type RecentReel,
+  type RevisionProposal,
   type ShootFile,
   type ShootFilesResult,
   type ShootResult,
@@ -21,7 +24,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Input } from "@/components/ui/input";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
@@ -29,7 +31,10 @@ import { saveZip } from "@/lib/shoot/zip-download";
 import { cn } from "@/lib/utils";
 
 // 완성본 하나 — 미리보기 · 경고 확인 · 받기(완성본 · 다시 편집용 파일) · 캡션 복사 · 올렸어요 + 릴스 연결.
-// 받기 · 올렸어요는 조직 누구나, 캡션 · 문구 고치기와 빼기는 관리자 · 매니저.
+// 받기 · 올렸어요는 조직 누구나, 캡션 고치기 · 완성본 고치기 · 빼기는 관리자 · 매니저.
+// 완성본 고치기: 고칠 내용을 말로 적으면 AI가 바뀔 내용(전 → 후)을 먼저 보여 주고, 확인하면 다시 편집한다.
+
+const REQUEST_MAX = 500;
 
 export interface ReviewCardData {
   planId: string;
@@ -45,14 +50,8 @@ export interface ReviewCardData {
   hasFinal: boolean;
   seconds: number | null;
   caption: string;
-  // 이번 편집에 들어간 후킹 · 표지 글자 (기본 편집이면 null)
-  hookText: string | null;
-  hookByHuman: boolean;
-  thumbnailText: string | null;
-  // 사람이 넣어 둔 글자. 비면 AI가 정한다
-  humanHook: string;
-  humanThumbnail: string;
-  cuts: { no: number; onScreen: string; subtitle: string | null }[];
+  // 저장된 편집 계획이 있는지 — 있어야 고칠 내용을 적어 고칠 수 있다(기본 편집으로 만든 완성본 · 실패한 편집은 없다)
+  hasPlan: boolean;
   // 찍지 못해 뺀 컷 번호
   skippedCuts: number[];
   // 받기 전에 확인할 것(광고 문구 규칙 · 판매 상태) / 사람이 판단할 것(AI 점검)
@@ -97,10 +96,10 @@ function textHref(content: string): string {
 export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManage: boolean }) {
   const { isPending, error, setError, run } = useRun();
   const [caption, setCaption] = useState(card.caption);
-  const [editingTexts, setEditingTexts] = useState(false);
-  const [texts, setTexts] = useState(card.cuts);
-  const [hook, setHook] = useState(card.humanHook);
-  const [thumbnail, setThumbnail] = useState(card.humanThumbnail);
+  const [revising, setRevising] = useState(false);
+  const [request, setRequest] = useState("");
+  const [proposal, setProposal] = useState<Extract<RevisionProposal, { ok: true }> | null>(null);
+  const [proposing, startProposing] = useTransition();
   const [ask, setAsk] = useState<"skip" | "reopen" | "unlink" | null>(null);
   const [files, setFiles] = useState<Extract<ShootFilesResult, { ok: true }> | null>(null);
   const [showFiles, setShowFiles] = useState(false);
@@ -118,13 +117,9 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
   const needsAck = !posted && card.blocking.length > 0 && !card.acked;
   const canDownload = (ready || posted) && !needsAck && !card.filesGone;
   const captionChanged = caption.trim() !== card.caption.trim();
-  // 고친 컷만, 고친 칸만 보낸다 — 화면 문구만 고쳤는데 자막까지 다시 보내면 말한 시각에 맞춘 자막이 풀렸다(2026-11-04)
-  const changedCuts = texts.flatMap((t, i) => {
-    const subtitleChanged = (t.subtitle ?? "") !== (card.cuts[i].subtitle ?? "");
-    if (t.onScreen === card.cuts[i].onScreen && !subtitleChanged) return [];
-    return [{ no: t.no, onScreen: t.onScreen, ...(subtitleChanged ? { subtitle: t.subtitle ?? "" } : {}) }];
-  });
-  const hookChanged = hook.trim() !== card.humanHook.trim() || thumbnail.trim() !== card.humanThumbnail.trim();
+  // 편집 계획이 있는 완성본만 고칠 내용을 적어 고친다. 없으면(기본 편집 · 실패) 같은 촬영본으로 다시 편집만 할 수 있다
+  const canRevise = reviewable && card.hasPlan && !!card.requestId;
+  const canReEdit = (failed || (reviewable && !card.hasPlan)) && !!card.requestId;
   // 페이지를 오래 열어 두면 미리보기 링크가 만료된다 — 한 번만 새 링크를 받아 온다
   const router = useRouter();
   const refreshedOnce = useRef(false);
@@ -170,6 +165,21 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
     } catch {
       setError("복사하지 못했어요. 캡션 칸에서 직접 복사해 주세요.");
     }
+  };
+
+  // 바뀔 내용 확인 — AI가 저장된 편집 계획에서 바꿀 곳을 정리한다(10~40초). 완성본은 아직 바뀌지 않는다
+  const propose = () =>
+    startProposing(async () => {
+      setError(null);
+      const r = await proposeRevisionAction({ requestId: card.requestId!, request });
+      if (r.ok) setProposal(r);
+      else setError(r.error);
+    });
+
+  const closeRevise = () => {
+    setRevising(false);
+    setProposal(null);
+    setError(null);
   };
 
   const openPicker = () => {
@@ -381,45 +391,138 @@ export function ReviewCard({ card, canManage }: { card: ReviewCardData; canManag
           </details>
         )}
 
-        {reviewable && editingTexts && card.requestId && (
+        {canManage && canRevise && revising && (
           <div className="space-y-2 rounded-md border border-dashed p-2.5">
-            <div className="grid gap-1.5 sm:grid-cols-2">
-              <label className="space-y-1 text-xs font-semibold">
-                첫 화면 후킹
-                <Input value={hook} maxLength={40} placeholder={card.hookText ? `비우면 AI가 정해요 · 지금: ${card.hookText}` : "비우면 AI가 정해요"} onChange={(e) => setHook(e.target.value)} />
-              </label>
-              <label className="space-y-1 text-xs font-semibold">
-                표지 글자
-                <Input value={thumbnail} maxLength={24} placeholder={card.thumbnailText ? `비우면 AI가 정해요 · 지금: ${card.thumbnailText.replace(/\n+/g, " ")}` : "비우면 AI가 정해요"} onChange={(e) => setThumbnail(e.target.value)} />
-              </label>
-            </div>
-            <p className="text-xs text-muted-foreground">컷마다 화면 문구 · 자막을 고치고 다시 편집하면 몇 분 뒤 새 완성본이 나와요. 자막을 비우면 그 컷 자막은 빠져요. 화면 문구는 22자까지 큰 글자로 들어가고, 더 길면 글자가 작아져요.</p>
-            {texts.map((t, i) => (
-              <div key={t.no} className="grid gap-1 sm:grid-cols-[2rem_1fr_1.4fr] sm:items-center">
-                <span className="text-xs font-semibold">{t.no}.</span>
-                <Input value={t.onScreen} maxLength={40} placeholder="화면 문구" onChange={(e) => setTexts((prev) => prev.map((x, j) => (j === i ? { ...x, onScreen: e.target.value } : x)))} />
-                <Input value={t.subtitle ?? ""} maxLength={120} placeholder="자막 (말한 내용)" onChange={(e) => setTexts((prev) => prev.map((x, j) => (j === i ? { ...x, subtitle: e.target.value } : x)))} />
+            <label className="block space-y-1 text-xs font-semibold">
+              고칠 내용
+              <Textarea
+                value={request}
+                rows={3}
+                maxLength={REQUEST_MAX}
+                disabled={proposing || isPending}
+                placeholder={'예시: 후킹을 "이거 모르고 사면 손해"로 바꿔 줘. 3번 장면은 빼고, 음악은 더 잔잔하게.'}
+                className="font-normal placeholder:text-faint"
+                onChange={(e) => {
+                  setRequest(e.target.value);
+                  setProposal(null);
+                }}
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">
+              후킹 · 표지 · 읽는 말 · 자막 · 화면 문구 · 효과음 · 장면 순서 · 음악처럼 고치고 싶은 것을 적어 주세요. 따옴표 안에 적은 글자는 그대로 넣어요. 다시 편집하기 전에 바뀔 내용을 먼저 보여 드려요.{" "}
+              <span className="tabular-nums">
+                {request.length}/{REQUEST_MAX}
+              </span>
+            </p>
+
+            {!proposal && (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" disabled={proposing || isPending || !request.trim()} onClick={propose}>
+                  <ListChecks className="size-4" /> 바뀔 내용 확인
+                </Button>
+                <Button size="sm" variant="ghost" disabled={proposing} onClick={closeRevise}>
+                  취소
+                </Button>
+                {proposing && <span className="text-xs text-muted-foreground">AI가 바뀔 내용을 정리하고 있어요. 10~40초쯤 걸려요.</span>}
               </div>
-            ))}
-            <Button
-              size="sm"
-              disabled={isPending || (changedCuts.length === 0 && !hookChanged)}
-              onClick={() => run(() => reEditAction({ requestId: card.requestId!, cuts: changedCuts, ...(hookChanged ? { hook: hook.trim(), thumbnail: thumbnail.trim() } : {}) }), "다시 편집을 시작했어요. 몇 분 뒤 새 완성본이 나와요.", () => setEditingTexts(false))}
-            >
-              <RotateCcw className="size-4" /> 고친 문구로 다시 편집
-            </Button>
+            )}
+
+            {proposal && (
+              <div className="space-y-2">
+                {proposal.changes.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold">
+                      바뀌는 내용 <span className="tabular-nums">{proposal.changes.length}</span>개
+                    </p>
+                    <ul className="divide-y rounded-md border bg-card text-sm">
+                      {proposal.changes.map((c, i) => (
+                        <li key={`${i}-${c.label}`} className="grid gap-x-3 gap-y-0.5 px-3 py-2 sm:grid-cols-[9.5rem_1fr]">
+                          <span className="text-xs font-semibold text-muted-foreground">{c.label}</span>
+                          <div className="min-w-0 space-y-0.5">
+                            <p className="break-words text-muted-foreground">
+                              <span className="mr-1.5 text-xs font-semibold">전</span>
+                              {c.before}
+                            </p>
+                            <p className="break-words font-medium">
+                              <span className="mr-1.5 text-xs font-semibold text-primary">후</span>
+                              {c.after}
+                            </p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {proposal.footage.length > 0 && (
+                  <div className="space-y-1 rounded-md bg-brand-soft px-3 py-2">
+                    <p className="text-xs font-semibold">촬영본을 다시 보고 골라요</p>
+                    <ul className="space-y-0.5 text-sm">
+                      {proposal.footage.map((f) => (
+                        <li key={f}>· {f}</li>
+                      ))}
+                    </ul>
+                    <p className="text-xs text-muted-foreground">이 요청은 바뀔 내용을 미리 보여 드릴 수 없어요. 다시 편집할 때 AI가 촬영본을 다시 분석해서 정해요.</p>
+                  </div>
+                )}
+                {proposal.cannot.length > 0 && (
+                  <div className="space-y-1 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-xs text-warn">
+                    <p className="font-semibold">반영하지 못한 요청</p>
+                    <ul className="space-y-0.5">
+                      {proposal.cannot.map((c, i) => (
+                        <li key={`${i}-${c.request}`}>
+                          · {c.request}
+                          {c.request && c.reason ? " — " : ""}
+                          {c.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {proposal.notes.length > 0 && (
+                  <div className="space-y-1 text-xs text-muted-foreground">
+                    <p className="font-semibold">참고</p>
+                    <ul className="space-y-0.5">
+                      {proposal.notes.map((n) => (
+                        <li key={n}>· {n}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {!proposal.revisionId && <p className="text-sm">바뀌는 내용이 없어요. 고칠 내용을 더 자세히 적어 주세요.</p>}
+                <div className="flex flex-wrap items-center gap-2">
+                  {proposal.revisionId && (
+                    <Button
+                      size="sm"
+                      disabled={isPending}
+                      onClick={() =>
+                        run(() => confirmRevisionAction({ requestId: card.requestId!, revisionId: proposal.revisionId! }), "다시 편집을 시작했어요. 몇 분 뒤 새 완성본이 나와요.", () => {
+                          closeRevise();
+                          setRequest("");
+                        })
+                      }
+                    >
+                      <RotateCcw className="size-4" /> 이대로 다시 편집
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" disabled={isPending} onClick={closeRevise}>
+                    취소
+                  </Button>
+                  {proposal.revisionId && <span className="text-xs text-muted-foreground">취소하면 아무것도 바뀌지 않아요.</span>}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {canManage && !posted && (
           <div className="flex flex-wrap gap-2">
-            {reviewable && card.requestId && (
-              <Button size="sm" variant="ghost" disabled={isPending} onClick={() => setEditingTexts((v) => !v)}>
-                <Pencil className="size-4" /> 후킹 · 문구 · 자막 고치기
+            {canRevise && (
+              <Button size="sm" variant="ghost" disabled={isPending || proposing} onClick={() => (revising ? closeRevise() : setRevising(true))}>
+                <Pencil className="size-4" /> 완성본 고치기
               </Button>
             )}
-            {failed && card.requestId && (
-              <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => reEditAction({ requestId: card.requestId!, cuts: [] }), "다시 편집을 시작했어요.")}>
+            {canReEdit && (
+              <Button size="sm" variant="ghost" disabled={isPending} onClick={() => run(() => reEditAction({ requestId: card.requestId! }), "다시 편집을 시작했어요.")}>
                 <RotateCcw className="size-4" /> 다시 편집
               </Button>
             )}

@@ -46,7 +46,7 @@ type Cut = {
   on_screen: string;
   voice: string;
   narration?: string;
-  // 완성본 받기에서 사람이 고친 문구 (있으면 이걸 쓴다)
+  // 예전 방식(완성본 받기의 칸별 입력)으로 사람이 고친 문구 (남아 있으면 이걸 쓴다)
   on_screen_override?: string | null;
   subtitle_override?: string | null;
   // 못 찍어서 뺀 컷 — 편집에서 건너뛴다
@@ -304,7 +304,11 @@ async function main() {
       // 촬영본 · 순서 · 하고 싶은 말이 같을 때만 지난 계획을 다시 쓴다
       const brief = plan.human_brief?.trim() || null;
       const clipsSig = [...units.map((u) => u.clip.path), `brief:${brief ?? ""}`].join("|");
-      const prevKit = (req.edit as { kit?: { plan?: EditPlan; clipsSig?: string } } | null)?.kit;
+      const prevKit = (req.edit as { kit?: { plan?: EditPlan; clipsSig?: string; replan?: { request?: string; items?: string[] } } } | null)?.kit;
+      const prevPlan = prevKit?.clipsSig === clipsSig ? (prevKit.plan ?? null) : null;
+      // 완성본 고치기에서 촬영본을 다시 봐야 하는 요청이 있으면(replan) 지난 계획을 그대로 쓰지 않고, 프레임을 다시 보고 요청한 것만 바꾼다
+      const replanItems = (prevKit?.replan?.items ?? []).filter((t) => typeof t === "string" && t.trim());
+      const revise = prevPlan && replanItems.length ? { plan: prevPlan, request: prevKit?.replan?.request ?? "", items: replanItems } : null;
       let kit: KitResult | null = null;
       let kitError: string | null = null;
       if (process.env.SHOOT_BASIC_EDIT !== "1") {
@@ -347,7 +351,9 @@ async function main() {
             editStyleText: concept.shootEditStyle,
             voiceId: concept.shootVoiceId,
             style,
-            reusePlan: prevKit?.clipsSig === clipsSig ? prevKit.plan : null,
+            reusePlan: revise ? null : prevPlan,
+            revise,
+            // 예전 방식(칸별 입력)으로 남아 있는 컷별 문구. 완성본 고치기는 다시 편집할 때 이 값을 지운다
             overrides: cuts
               .filter((c) => c.on_screen_override != null || c.subtitle_override != null)
               .map((c) => ({ no: c.no, onScreen: c.on_screen_override, subtitle: c.subtitle_override })),

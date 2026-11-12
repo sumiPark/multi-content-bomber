@@ -18,38 +18,20 @@ import { AutoRefresh } from "@/components/ui/auto-refresh";
 
 export const metadata = { title: "완성본 받기 | MCB" };
 
-type Cut = { no: number; on_screen: string; on_screen_override?: string | null; subtitle_override?: string | null; skipped?: boolean };
+// 완성본 고치기의 "바뀔 내용 확인"이 이 화면의 서버 액션에서 AI를 부른다(10~40초). 서버 액션의 시간 제한은 화면 단위로 정한다
+export const maxDuration = 60;
+
+type Cut = { no: number; skipped?: boolean };
 type Edit = {
   seconds?: number;
   thumbnail?: string | null;
   editedAt?: string | null;
   segments?: { cut: number; onScreen: string; subtitles: { text: string }[] }[];
-  kit?: { hook?: { text?: string; source?: string }; thumbnail?: { title?: string } } | null;
+  // 편집 키트로 만든 완성본에만 편집 계획이 있다(기본 편집이면 null)
+  kit?: { plan?: { beats?: unknown[] } } | null;
   check?: { issues?: { kind: string; detail: string }[] };
 };
 type Proposal = { ideas?: { title: string }[]; chosen?: number | null };
-type Clip = { cut: number; free?: boolean; on_screen_override?: string | null; subtitle_override?: string | null };
-type Segment = NonNullable<Edit["segments"]>[number];
-
-/**
- * 고치는 칸 — 촬영본마다 하나(no = 촬영본 번호 = 편집 결과 segments의 cut). 예전 촬영본은 같은 번호 컷의 문구로 채운다.
- * 촬영본 파일이 보관 기간이 지나 지워졌으면 예전처럼 컷 목록으로 보여 준다.
- */
-function reviewRows(cuts: Cut[], clips: Clip[], segments: Segment[]) {
-  const rows = clips.length
-    ? clips
-        .slice()
-        .sort((a, b) => a.cut - b.cut)
-        .map((k) => {
-          const legacy = k.free ? undefined : cuts.find((c) => c.no === k.cut && !c.skipped);
-          return { no: k.cut, onScreen: k.on_screen_override ?? legacy?.on_screen_override ?? legacy?.on_screen ?? "", subtitle: k.subtitle_override ?? legacy?.subtitle_override ?? null };
-        })
-    : cuts.filter((c) => !c.skipped).map((c) => ({ no: c.no, onScreen: c.on_screen_override ?? c.on_screen, subtitle: c.subtitle_override ?? null }));
-  return rows.map((row) => {
-    const seg = segments.find((s) => s.cut === row.no);
-    return { no: row.no, onScreen: seg?.onScreen ?? row.onScreen, subtitle: row.subtitle ?? (seg?.subtitles.map((t) => t.text).join(" ") || null) };
-  });
-}
 
 // 렌더 함수 밖에서 현재 시각을 읽는다(react-hooks/purity)
 function nowMs(): number {
@@ -102,7 +84,7 @@ export default async function ShootReviewPage() {
   const cards: ReviewCardData[] = plans.map((p) => {
     const r = p.shoot_requests;
     const edit = (r?.edit ?? {}) as Edit;
-    const script = (p.script ?? {}) as { caption?: { text: string }; human?: { hook?: string | null; thumbnail?: string | null } };
+    const script = (p.script ?? {}) as { caption?: { text: string } };
     const caption = script.caption?.text ?? "";
     const segments = edit.segments ?? [];
     const cuts = (r?.cuts ?? []) as Cut[];
@@ -142,13 +124,8 @@ export default async function ShootReviewPage() {
       seconds: edit.seconds ?? null,
       // 계정 그룹의 상점 태그(#오늘과일 등)를 해시태그 줄 끝에 — 이미 있으면 그대로
       caption: withShopTagText(caption, shopTagForGroup(groupNameOf(p.social_accounts?.account_groups))),
-      hookText: edit.kit?.hook?.text ?? null,
-      hookByHuman: edit.kit?.hook?.source === "human",
-      thumbnailText: edit.kit?.thumbnail?.title ?? null,
-      humanHook: script.human?.hook ?? "",
-      humanThumbnail: script.human?.thumbnail ?? "",
+      hasPlan: Array.isArray(edit.kit?.plan?.beats) && edit.kit.plan.beats.length > 0,
       skippedCuts: cuts.filter((c) => c.skipped).map((c) => c.no),
-      cuts: reviewRows(cuts, (r?.clips ?? []) as Clip[], segments),
       blocking,
       warnings: (edit.check?.issues ?? []).filter((i) => i.kind !== "rules" && i.kind !== "stock").map((i) => i.detail),
       acked: blocking.every((b) => acked.has(b)),

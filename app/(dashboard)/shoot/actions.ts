@@ -2,6 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { loadAccountConcept } from "@/lib/agents/concept";
+import { applyRevision, quotedTexts, revisionChanges, ruleNotes, writeEditRevision, type EditRevision, type RevisionChange, type SavedEditPlan } from "@/lib/agents/edit-revise";
+import { loadProductFacts, type ProductFacts } from "@/lib/agents/product-facts";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { getInstagramAuth } from "@/lib/episode-alerts/server";
 import { triggerShootEditRun, triggerShootPlanRun, triggerShotlistRun } from "@/lib/github-dispatch";
@@ -267,7 +270,8 @@ export async function skipShootAction(input: z.infer<typeof idSchema>): Promise<
 /**
  * 촬영본(shoot_requests.clips). cut = 촬영본 순서 번호(1부터). 예전엔 컷마다 하나씩 올려 컷 번호와 같았다.
  * free = 컷과 상관없이 올린 촬영본(2026-11-10~). 없으면 예전 방식이라 같은 번호 컷의 설명을 편집 힌트로 쓴다.
- * on_screen_override · subtitle_override = 완성본 받기에서 사람이 고친 화면 문구 · 자막.
+ * on_screen_override · subtitle_override = 예전 방식(완성본 받기의 칸별 입력)으로 사람이 고친 화면 문구 · 자막.
+ * 지금은 새로 저장하지 않고, 완성본 고치기로 다시 편집할 때 지운다(confirmRevisionAction).
  */
 type Clip = {
   cut: number;
@@ -566,16 +570,7 @@ export async function saveCaptionAction(input: z.infer<typeof captionSchema>): P
   return { ok: true };
 }
 
-const reEditSchema = z.object({
-  requestId: z.string().uuid(),
-  cuts: z
-    // subtitle을 안 보내면 그 컷 자막은 그대로(말한 시각에 맞춘 자막 유지), 보내면 그 글로 바꾼다
-    .array(z.object({ no: z.number().int().min(1).max(20), onScreen: z.string().max(40), subtitle: z.string().max(120).optional() }))
-    .max(20),
-  // 사람이 직접 넣는 후킹 · 표지 문구. 안 보내면 그대로, 빈 문자열이면 AI가 정한다
-  hook: z.string().trim().max(40).optional(),
-  thumbnail: z.string().trim().max(24).optional(),
-});
+const reEditSchema = z.object({ requestId: z.string().uuid() });
 
 const humanTextSchema = z.object({
   planId: z.string().uuid(),
@@ -613,7 +608,40 @@ export async function saveHumanTextAction(input: z.infer<typeof humanTextSchema>
   return { ok: true };
 }
 
-/** 고친 화면 문구 · 자막으로 다시 편집 (실패한 편집 다시 시도도 이걸로 — cuts 빈 배열). */
+/**
+ * 다시 편집 시작 — 촬영 요청을 편집 대기(UPLOADED), 기획을 SHOT으로 돌리고 편집 워커를 깨운다.
+ * patch = 상태와 함께 저장할 값(고친 편집 계획 등). 그사이 상태가 바뀌었으면 아무것도 저장하지 않는다.
+ */
+async function startReEdit(
+  service: Service,
+  req: { id: string; plan_id: string },
+  from: ("EDITED" | "FAILED")[],
+  patch: { clips?: Json; cuts?: Json; edit?: Json },
+  reason: string,
+): Promise<ShootResult> {
+  const { data: moved, error } = await service
+    .from("shoot_requests")
+    .update({ ...patch, status: "UPLOADED", error: null })
+    .eq("id", req.id)
+    .in("status", from)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
+  const { error: planError } = await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id).in("status", ["RENDERED", "SHOT"]);
+  if (planError) {
+    console.error("[shoot] 기획 상태(SHOT) 저장 실패:", planError.message);
+    return { ok: false, error: "기획 상태를 바꾸지 못했어요. 새로 고쳐 주세요." };
+  }
+  await triggerShootEditRun(reason).catch((e) => console.error("[shoot] 편집 트리거 실패:", e));
+  revalidatePath("/shoot/review");
+  revalidatePath("/shoot/uploads");
+  return { ok: true };
+}
+
+/**
+ * 같은 촬영본으로 다시 편집 — 실패한 편집을 다시 시도하거나, 편집 계획 없이(기본 편집) 만든 완성본을 다시 만들 때.
+ * 완성본의 글 · 장면 · 음악을 고치는 것은 proposeRevisionAction → confirmRevisionAction이 한다.
+ */
 export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise<ShootResult> {
   const parsed = reEditSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "잘못된 입력" };
@@ -626,37 +654,226 @@ export async function reEditAction(input: z.infer<typeof reEditSchema>): Promise
   if (req.status !== "EDITED" && req.status !== "FAILED") return { ok: false, error: "편집이 끝난 뒤에 다시 편집할 수 있어요." };
   const { data: planRow } = await service.from("content_plans").select("status").eq("id", req.plan_id).maybeSingle();
   if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 올렸거나 끝난 기획이라 다시 편집할 수 없어요." };
-  if (parsed.data.hook !== undefined || parsed.data.thumbnail !== undefined) {
+  return startReEdit(service, req, ["EDITED", "FAILED"], {}, `re-edit ${req.id}`);
+}
+
+// ─── 완성본 고치기 ────────────────────────────────────────────────────────────
+// 고칠 내용을 적으면 → AI가 저장된 편집 계획에서 바꿀 곳만 답하고(앱에서 바로) → 전 → 후 목록을 확인한 뒤 → 다시 편집한다.
+// 확인 전까지는 완성본 · 편집 계획이 바뀌지 않는다. 고친 계획은 shoot_requests.edit.revision에 잠깐 둔다.
+
+/** 워커가 저장한 편집 키트 결과(shoot_requests.edit.kit). replan = 촬영본을 다시 보고 계획을 다시 세울 요청(워커가 읽는다). */
+type SavedKit = { plan?: SavedEditPlan; replan?: { request: string; items: string[] } } & Record<string, unknown>;
+/** 확인을 기다리는 고친 계획(shoot_requests.edit.revision). */
+type SavedRevision = {
+  id: string;
+  request: string;
+  plan: SavedEditPlan;
+  // 촬영본을 다시 봐야 하는 요청 — 확인하면 워커가 프레임을 다시 보고 계획을 다시 세운다
+  footage: string[];
+  repickMusic: boolean;
+  repickDesign: boolean;
+  // 다시 편집할 때 사람이 정한 글(script.human)로 저장할 후킹 · 표지. null이면 저장하지 않는다
+  humanHook: string | null;
+  humanThumbnail: string | null;
+  createdAt: string;
+};
+type SavedEdit = { kit?: SavedKit | null; revision?: SavedRevision | null } & Record<string, unknown>;
+type FixedScript = { fixed?: { hook?: { text?: string } | null; ending?: { text?: string } | null }; human?: { hook?: string | null; thumbnail?: string | null } };
+
+async function loadRequestWithEdit(service: Service, requestId: string, orgId: string) {
+  const { data } = await service
+    .from("shoot_requests")
+    .select("id, plan_id, status, cuts, clips, edit, updated_at")
+    .eq("id", requestId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+  return data;
+}
+
+async function loadActiveRules(service: Service): Promise<ContentRule[]> {
+  const { data } = await service.from("content_rules").select("id, scope, rule_type, phrase, match_type, reason, suggestion").eq("active", true);
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    scope: r.scope as ContentRule["scope"],
+    ruleType: r.rule_type as ContentRule["ruleType"],
+    phrase: r.phrase,
+    matchType: r.match_type as ContentRule["matchType"],
+    reason: r.reason,
+    suggestion: r.suggestion,
+  }));
+}
+
+// Vercel 함수 제한(60초, review/page.tsx의 maxDuration)보다 먼저 멈추고 안내한다
+const REVISE_TIMEOUT_MS = 50_000;
+const REVISE_TIMEOUT = "revise-timeout";
+
+function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(REVISE_TIMEOUT)), ms);
+  });
+  return Promise.race([work, limit]).finally(() => clearTimeout(timer));
+}
+
+const proposeSchema = z.object({ requestId: z.string().uuid(), request: z.string().trim().min(1).max(500) });
+
+export type RevisionProposal =
+  | {
+      ok: true;
+      // 확인을 누를 때 보내는 번호. 바뀌는 내용이 없으면 null(저장하지 않음)
+      revisionId: string | null;
+      changes: RevisionChange[];
+      // 촬영본을 다시 보고 고를 요청
+      footage: string[];
+      // 반영하지 못한 요청과 이유
+      cannot: { request: string; reason: string }[];
+      // 요청한 말을 고쳐 쓴 이유 · 광고 문구 규칙 경고
+      notes: string[];
+    }
+  | { ok: false; error: string };
+
+/**
+ * 고칠 내용 → 바뀔 내용 확인. AI가 저장된 편집 계획에서 바꿀 곳만 답하고, 코드가 계획 사본에 적용해 전 → 후 목록을 만든다.
+ * 고친 계획은 edit.revision에 두고, 완성본 · 편집 계획 · 상태는 confirmRevisionAction 전까지 그대로다.
+ */
+export async function proposeRevisionAction(input: z.infer<typeof proposeSchema>): Promise<RevisionProposal> {
+  const parsed = proposeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "고칠 내용을 500자 안으로 적어 주세요." };
+  const auth = await authorize("plan");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const req = await loadRequestWithEdit(service, parsed.data.requestId, auth.orgId);
+  if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
+  if (req.status !== "EDITED") return { ok: false, error: "편집이 끝난 완성본만 고칠 수 있어요." };
+  const edit = (req.edit ?? {}) as SavedEdit;
+  const plan = edit.kit?.plan;
+  if (!plan?.beats?.length) return { ok: false, error: "편집 계획이 없어요. 기본 편집으로 만든 완성본은 ‘다시 편집’으로 새로 만들어 주세요." };
+  const { data: planRow } = await service
+    .from("content_plans")
+    .select("status, product_id, social_account_id, script, social_accounts(display_name)")
+    .eq("id", req.plan_id)
+    .maybeSingle();
+  if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 올렸거나 끝난 기획이라 다시 편집할 수 없어요." };
+  if (!planRow.product_id) return { ok: false, error: "상품이 없는 기획이에요." };
+  const script = (planRow.script ?? {}) as FixedScript;
+  const pins = { humanHook: script.human?.hook, humanThumbnail: script.human?.thumbnail, fixedHook: script.fixed?.hook?.text, fixedEnding: script.fixed?.ending?.text };
+
+  let revision: EditRevision;
+  let facts: ProductFacts;
+  let rules: ContentRule[];
+  try {
+    const [loadedFacts, loadedRules, concept] = await Promise.all([loadProductFacts(service, planRow.product_id), loadActiveRules(service), loadAccountConcept(service, planRow.social_account_id)]);
+    facts = loadedFacts;
+    rules = loadedRules;
+    const res = await withTimeout(
+      writeEditRevision({
+        service,
+        planId: req.plan_id,
+        accountName: planRow.social_accounts?.display_name ?? "",
+        facts,
+        rules,
+        plan,
+        request: parsed.data.request,
+        pins,
+        tone: concept.shootTone,
+      }),
+      REVISE_TIMEOUT_MS,
+    );
+    revision = res.output;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[shoot] 바뀔 내용 확인 실패:", message);
+    if (message === REVISE_TIMEOUT) return { ok: false, error: "AI 응답이 늦어서 멈췄어요. 고칠 내용을 나눠 적거나 잠시 뒤 다시 해 주세요." };
+    return { ok: false, error: `바뀔 내용을 정리하지 못했어요. 다시 해 주세요. (${message.slice(0, 160)})` };
+  }
+
+  const quoted = quotedTexts(parsed.data.request);
+  const applied = applyRevision(plan, revision, { pins, quoted });
+  const changes = revisionChanges(plan, applied);
+  const clean = (list: string[]) => [...new Set(list.map((t) => t.trim()).filter(Boolean))];
+  const footage = clean(revision.footage).slice(0, 8);
+  const cannot = [...revision.cannot.map((c) => ({ request: c.request.trim(), reason: c.reason.trim() })).filter((c) => c.request || c.reason), ...applied.rejected];
+  const notes = clean([...revision.notes, ...ruleNotes(plan, applied.plan, { facts, rules, quoted })]);
+  // 바뀌는 것이 없으면 저장하지 않고, 반영하지 못한 이유만 알려 준다
+  if (!changes.length && !footage.length) return { ok: true, revisionId: null, changes: [], footage: [], cannot, notes };
+
+  const saved: SavedRevision = {
+    id: crypto.randomUUID(),
+    request: parsed.data.request,
+    plan: applied.plan,
+    footage,
+    repickMusic: applied.repickMusic,
+    repickDesign: applied.repickDesign,
+    humanHook: applied.humanHook,
+    humanThumbnail: applied.humanThumbnail,
+    createdAt: new Date().toISOString(),
+  };
+  // AI를 기다리는 사이 다시 편집 · 다시 올리기가 시작됐으면 저장하지 않는다
+  const { data: stored, error } = await service
+    .from("shoot_requests")
+    .update({ edit: { ...edit, revision: saved } as unknown as Json })
+    .eq("id", req.id)
+    .eq("status", "EDITED")
+    .eq("updated_at", req.updated_at)
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!stored?.length) return { ok: false, error: "그사이 상태가 바뀌었어요. 새로 고쳐 주세요." };
+  return { ok: true, revisionId: saved.id, changes, footage, cannot, notes };
+}
+
+const confirmSchema = z.object({ requestId: z.string().uuid(), revisionId: z.string().uuid() });
+
+/**
+ * 이대로 다시 편집 — 확인한 고친 계획을 저장하고 편집 워커를 깨운다.
+ * 촬영본을 다시 봐야 하는 요청이 있으면 edit.kit.replan에 남겨, 워커가 프레임을 다시 보고 계획을 다시 세운다.
+ */
+export async function confirmRevisionAction(input: z.infer<typeof confirmSchema>): Promise<ShootResult> {
+  const parsed = confirmSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize("plan");
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const req = await loadRequestWithEdit(service, parsed.data.requestId, auth.orgId);
+  if (!req) return { ok: false, error: "촬영 요청을 찾을 수 없습니다." };
+  if (req.status !== "EDITED") return { ok: false, error: "편집이 끝난 완성본만 고칠 수 있어요." };
+  const { revision, kit, ...restEdit } = (req.edit ?? {}) as SavedEdit;
+  if (!revision || revision.id !== parsed.data.revisionId || !kit?.plan) return { ok: false, error: "확인한 내용이 바뀌었어요. ‘바뀔 내용 확인’을 다시 눌러 주세요." };
+  const { data: planRow } = await service.from("content_plans").select("status").eq("id", req.plan_id).maybeSingle();
+  if (!planRow || !["SHOT", "RENDERED"].includes(planRow.status)) return { ok: false, error: "이미 올렸거나 끝난 기획이라 다시 편집할 수 없어요." };
+
+  // 바뀐 후킹 · 표지 글자가 사람이 정한 글이면 그 글로 저장한다 — 안 그러면 워커가 예전에 정한 글로 되돌린다(applyHumanText)
+  if (revision.humanHook != null || revision.humanThumbnail != null) {
     const failed = await saveHumanText(service, req.plan_id, {
-      ...(parsed.data.hook !== undefined ? { hook: parsed.data.hook } : {}),
-      ...(parsed.data.thumbnail !== undefined ? { thumbnail: parsed.data.thumbnail } : {}),
+      ...(revision.humanHook != null ? { hook: revision.humanHook } : {}),
+      ...(revision.humanThumbnail != null ? { thumbnail: revision.humanThumbnail } : {}),
     });
     if (failed) return { ok: false, error: failed };
   }
-  // 고친 문구는 촬영본에 남긴다 — no = 촬영본 번호(편집 결과 segments의 cut). 촬영본이 컷 수보다 많아도 빠지지 않는다
-  const fix = new Map(parsed.data.cuts.map((c) => [c.no, c]));
-  const clips = ((req.clips ?? []) as Clip[]).map((c) => {
-    const f = fix.get(c.cut);
-    if (!f) return c;
-    return { ...c, on_screen_override: f.onScreen.trim(), ...(f.subtitle === undefined ? {} : { subtitle_override: f.subtitle.trim() }) };
-  });
-  const { data: moved, error } = await service
-    .from("shoot_requests")
-    .update({ clips: clips as unknown as Json, status: "UPLOADED", error: null })
-    .eq("id", req.id)
-    .in("status", ["EDITED", "FAILED"])
-    .select("id");
-  if (error) return { ok: false, error: error.message };
-  if (!moved?.length) return { ok: false, error: "상태가 바뀌었어요. 새로 고쳐 주세요." };
-  const { error: planError } = await service.from("content_plans").update({ status: "SHOT" }).eq("id", req.plan_id).in("status", ["RENDERED", "SHOT"]);
-  if (planError) {
-    console.error("[shoot] 기획 상태(SHOT) 저장 실패:", planError.message);
-    return { ok: false, error: "기획 상태를 바꾸지 못했어요. 새로 고쳐 주세요." };
-  }
-  await triggerShootEditRun(`re-edit ${req.id}`).catch((e) => console.error("[shoot] 편집 트리거 실패:", e));
-  revalidatePath("/shoot/review");
-  revalidatePath("/shoot/uploads");
-  return { ok: true };
+  // 예전 방식(칸별 입력)으로 저장된 컷별 문구는 지운다 — 저장된 계획에 이미 반영돼 있고, 남기면 워커가 방금 고친 글을 다시 덮어쓴다
+  const dropOverrides = <T extends { on_screen_override?: string | null; subtitle_override?: string | null }>(rows: T[]) =>
+    rows.map(({ on_screen_override: _onScreen, subtitle_override: _subtitle, ...row }) => {
+      void _onScreen;
+      void _subtitle;
+      return row;
+    });
+  const { replan: _replan, ...restKit } = kit;
+  void _replan;
+  const nextEdit = {
+    ...restEdit,
+    kit: { ...restKit, plan: revision.plan, ...(revision.footage.length ? { replan: { request: revision.request, items: revision.footage } } : {}) },
+  };
+  return startReEdit(
+    service,
+    req,
+    ["EDITED"],
+    {
+      edit: nextEdit as unknown as Json,
+      ...(Array.isArray(req.clips) ? { clips: dropOverrides(req.clips as Clip[]) as unknown as Json } : {}),
+      // 예전 촬영본은 컷 목록에 문구가 남아 있을 수 있다
+      ...(Array.isArray(req.cuts) ? { cuts: dropOverrides(req.cuts as { on_screen_override?: string | null; subtitle_override?: string | null }[]) as unknown as Json } : {}),
+    },
+    `revise ${req.id}`,
+  );
 }
 
 const reopenSchema = z.object({ requestId: z.string().uuid() });

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { SHOW_SECONDS, SHOW_SYLLABLES_PER_SECOND, writeEditPlan, type EditClipInfo, type EditPlan, type EditPlanContext, type VisualPolicy } from "@/lib/agents/edit-plan";
+import { quotedTexts, restoreQuotedInPlan, type SavedEditPlan } from "@/lib/agents/edit-revise";
 import { editKit, editKitAsset, ttsReading } from "@/lib/agents/ko-skills";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { agentModel } from "@/lib/agents/runner";
@@ -16,7 +17,8 @@ import { CAPTION_FALLBACK_WARNING, selectCaptionRenderer } from "@/lib/shoot/vid
 import { inspectAndRepairVideo, type VideoQuality, type VideoReview } from "@/lib/shoot/video-kit/quality";
 import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
 import { blockRows, captionSkillDir, designCaptions, isMotionEffect, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
-import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse, type PickedMusic } from "@/lib/shoot/video-kit/music";
+import { applyHumanText } from "@/lib/shoot/video-kit/human-text";
+import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
 import { captionZones, writeCoverProject, writeProject, type BehindWord, type VideoFonts } from "@/lib/shoot/video-kit/compose";
@@ -68,8 +70,12 @@ export interface KitInput {
   tone?: string | null;
   editStyleText?: string | null;
   style?: EditStyle;
-  // 다시 편집: 같은 촬영본이면 이 계획을 다시 쓴다(사람이 고친 글만 반영)
+  // 다시 편집: 같은 촬영본이면 이 계획을 다시 쓴다(완성본 고치기에서 고친 계획도 이 값으로 온다)
   reusePlan?: EditPlan | null;
+  // 완성본 고치기에서 촬영본을 다시 봐야 하는 요청이 있을 때: 지난 계획을 그대로 쓰지 않고, 편집 에이전트가 프레임을 다시 보고
+  // 요청한 것만 바꾼 계획을 세운다. 고른 음악 · 자막 디자인은 지난 계획의 값을 이어 쓴다. reusePlan과 함께 넘기지 않는다
+  revise?: { plan: EditPlan; request: string; items: string[] } | null;
+  // 예전 방식(칸별 입력)으로 저장된 컷별 문구. 새로 저장하지 않지만 남아 있는 값은 반영한다
   overrides?: { no: number; onScreen?: string | null; subtitle?: string | null }[];
   // 이미 만든 음성(lemo 경로). 있으면 음성을 새로 만들지 않고 비트마다 이 음성을 쓴다.
   // layout이 있으면 줄 시각 · 영상 길이도 이 값으로 고정한다(화면이 먼저 만들어진 경우). 직접 촬영 · AI 자동은 넘기지 않는다
@@ -135,47 +141,8 @@ async function voiceMatch(file: string, text: string, workDir: string): Promise<
   }
 }
 
-/** 사람이 넣은 문구는 AI 답과 상관없이 글자 그대로 쓴다. */
-export function applyHumanText(plan: EditPlan, input: Pick<KitInput, "humanHook" | "humanThumbnail" | "fixedHook" | "fixedEnding" | "overrides">): EditPlan {
-  const out: EditPlan = JSON.parse(JSON.stringify(plan));
-  const hook = input.humanHook?.trim() || input.fixedHook?.trim();
-  if (hook) {
-    out.hook.on_screen = hook;
-    out.hook.spoken = hook;
-    out.hook.highlight = hook.includes(out.hook.highlight) ? out.hook.highlight : "";
-    const first = out.beats[0];
-    if (first) {
-      first.mode = "tts";
-      first.tts = hook;
-      first.captions = [];
-    }
-  }
-  const thumb = input.humanThumbnail?.trim();
-  if (thumb) {
-    out.thumbnail.title = thumb;
-    out.thumbnail.highlight = thumb.includes(out.thumbnail.highlight) ? out.thumbnail.highlight : "";
-  }
-  const ending = input.fixedEnding?.trim();
-  const last = out.beats[out.beats.length - 1];
-  if (ending && last && out.beats.length > 1 && last.mode === "tts") {
-    last.tts = ending;
-    last.captions = [ending];
-  }
-  for (const o of input.overrides ?? []) {
-    const beatIndex = out.beats.findIndex((b) => b.cuts.some((c) => c.clip === o.no));
-    if (beatIndex < 0) continue;
-    const beat = out.beats[beatIndex];
-    if (o.subtitle != null) beat.captions = o.subtitle.trim() ? [o.subtitle.trim()] : [];
-    if (o.onScreen != null) {
-      if (beatIndex === 0 && !hook) out.hook.on_screen = o.onScreen.trim();
-      else {
-        const g = beat.graphics.find((x) => ["badge", "title", "chip", "notice", "stat", "end_card"].includes(x.type));
-        if (g) g.text = o.onScreen.trim();
-      }
-    }
-  }
-  return out;
-}
+// 사람이 넣은 문구 덮어쓰기는 완성본 고치기의 미리 보기(앱)도 같은 함수를 쓰도록 human-text로 옮겼다
+export { applyHumanText };
 
 /**
  * 계획을 촬영본에 맞게 다듬는다 — 없는 촬영본 · 잘못된 구간은 버리고, 빠진 끝 카드는 그대로 둔다.
@@ -530,6 +497,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     const visualLibrary = await loadVisualLibrary(input.service ?? input.readService);
     const ask = (retry: { plan: EditPlan; problems: string[] } | null) => writeEditPlan({
       retry,
+      revise: input.revise,
       service: input.service,
       readService: input.readService,
       planId: input.planId,
@@ -573,6 +541,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       plan = again.output;
       for (const p of planProblems(applyHumanText(plan, input), show)) warnings.push(`편집 계획: ${p}`);
     }
+    // 완성본 고치기: 따옴표로 적은 글자는 AI가 다듬었어도 글자 그대로 되돌린다
+    if (input.revise) plan = restoreQuotedInPlan(plan, quotedTexts(input.revise.request), input.revise.plan);
   }
   plan = sanitizePlan(applyHumanText(plan, input), clips, input.liveVoice);
   // 첫 비트는 후킹 글자만 — 다른 그래픽이 겹치면 후킹이 묻힌다
@@ -659,7 +629,10 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   copyFileSync(baseVideo, join(project, "assets", "base.mp4"));
   const mix = join(project, "assets", "mix.wav");
   // 음악: 다시 편집이면 처음 고른 곡, 아니면 영상마다 검색한다. 안 되면 대체 곡
-  const priorMusic = (input.reusePlan as (EditPlan & { pickedMusic?: PickedMusic }) | null | undefined)?.pickedMusic;
+  // 완성본 고치기로 계획을 다시 세웠어도(revise) 요청하지 않은 음악 · 자막 디자인은 지난 계획의 값을 이어 쓴다.
+  // 다시 고르라는 요청이면 앱이 저장된 계획에서 그 값을 지워 두므로 여기서 새로 고른다
+  const prior = (input.reusePlan ?? input.revise?.plan) as SavedEditPlan | null | undefined;
+  const priorMusic = prior?.pickedMusic;
   const music =
     (priorMusic ? (priorMusic.source ? await reloadMusic(priorMusic, workDir) : libraryMusic(priorMusic.name)) : null) ??
     (await findMusic({ service: input.service, readService: input.readService, query: look.music_query, intent: look.music_intent, workDir })) ??
@@ -699,12 +672,15 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
 
   // 6. 렌더 · 표지
   // 자막 모션 스킬을 쓸 수 있으면 자막 없이 렌더한 뒤 얹는다. 안 되면 지금까지의 자막으로 렌더한다
-  const priorDesign = (input.reusePlan as (EditPlan & { captionDesign?: CaptionDesign }) | null | undefined)?.captionDesign;
+  const priorDesign = prior?.captionDesign;
+  // 완성본 고치기로 장면을 빼거나 순서를 바꾸거나 계획을 다시 세우면 자막 번호가 달라져, 지난 디자인의 줄별 값(줄 나눔 · 줄 모션 · 장식)이
+  // 다른 자막에 붙는다. 그때는 줄별 값만 다시 정하고 모션 · 모양 · 글꼴은 지난 값을 그대로 쓴다
+  const redoLines = !!priorDesign && (!!input.revise || !!prior?.redoCaptionLines);
   let design: CaptionDesign | null = null;
   let videoFonts: VideoFonts | undefined;
   if (renderer === "motion" && skillDir && tl.captions.length) {
     try {
-      if (priorDesign && isMotionEffect(priorDesign.key_fx)) design = priorDesign;
+      if (priorDesign && isMotionEffect(priorDesign.key_fx) && !redoLines) design = priorDesign;
       else {
         // 제품과 장면을 보고 고르게 영상 전체에서 여섯 장면을 모아 보여 준다
         const framesFile = join(workDir, "caption-frames.jpg");
@@ -722,6 +698,10 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
         design = made.design;
         tokens.input += made.tokens.input;
         tokens.output += made.tokens.output;
+        // 줄별 값만 다시 정한 경우: 요청하지 않은 모션 · 모양 · 글꼴은 지난 디자인 그대로 둔다
+        if (redoLines && priorDesign && isMotionEffect(priorDesign.key_fx)) {
+          design = { ...design, key_fx: priorDesign.key_fx, small_fx: priorDesign.small_fx, finish_fx: priorDesign.finish_fx, key_look: priorDesign.key_look ?? "", key_font: priorDesign.key_font, small_font: priorDesign.small_font };
+        }
       }
       // 글꼴을 미리 고른 흐름(AI 자동)은 그 값을 쓴다. 설명 화면과 글꼴이 달라지지 않게 한다
       if (input.fonts) design = { ...design, ...input.fonts };
@@ -825,6 +805,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
 
   const hookText = plan.hook.on_screen.replace(/\n+/g, " ");
   plan.look = finalLook;
+  // 이번 편집에서 쓰고 끝나는 표시라 저장하는 계획에는 남기지 않는다
+  delete (plan as SavedEditPlan).redoCaptionLines;
   return {
     final,
     cover,

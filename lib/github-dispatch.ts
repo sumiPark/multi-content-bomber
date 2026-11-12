@@ -84,7 +84,6 @@ export async function triggerShotlistRun(reason: string): Promise<void> {
   await dispatch(SHOTLIST_DISPATCH_EVENT, reason);
 }
 
-/** 직접 촬영 편집 — "다 올렸어요" · "고친 문구로 다시 편집" 직후. 편집은 FFmpeg라 Actions에서만. */
 /** AI 자동 상품 제안 — 칸 · 계정을 새로 넣은 직후. 내일 칸 중 비어 있는 칸만 채운다(같은 워크플로). */
 export async function triggerAutoPlanRun(reason: string): Promise<void> {
   await dispatch(AUTO_PLAN_DISPATCH_EVENT, reason);
@@ -100,6 +99,7 @@ export async function triggerKnowledgeDraftRun(reason: string, product?: string)
   await dispatch("draft-knowledge", reason, product ? { product } : {});
 }
 
+/** 직접 촬영 편집 — "다 올렸어요" · 완성본 고치기의 "이대로 다시 편집" · 실패한 편집 "다시 편집" 직후. 편집은 FFmpeg라 Actions에서만. */
 export async function triggerShootEditRun(reason: string): Promise<void> {
   await dispatch(SHOOT_EDIT_DISPATCH_EVENT, reason);
 }
