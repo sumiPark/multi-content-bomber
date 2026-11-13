@@ -746,7 +746,8 @@ export function UploadWizard({
     if (draft && draft.contentId !== contentId) {
       await clearDraftAction({ contentId: draft.contentId }).catch(() => null);
     }
-    router.push(`/?content=${contentId}`);
+    // 발행 진행 상태를 바로 볼 수 있게 배포 관리로 보낸다(최신 등록 순이라 방금 건이 맨 위).
+    router.push("/postings");
     router.refresh();
   }
 
