@@ -132,6 +132,11 @@ export const tiktok: PlatformAdapter = {
       disable_comment: false,
       disable_duet: false,
       disable_stitch: false,
+      // 상업 콘텐츠 공개 값 — 틱톡이 빠지면 40002로 거절한다(2026-11-13 실측).
+      // 우리 몰 상품을 소개하는 영상이라 '내 브랜드 홍보'로 표시하고(사용자 결정, 2026-11-13),
+      // 다른 브랜드의 유료 협찬은 아니다.
+      is_brand_organic: true,
+      is_branded_content: false,
       // 커버 프레임: 사용자가 마법사에서 고른 시점(ms). 미지정이면 1초 프레임.
       thumbnail_offset: ctx.coverTimestampMs ?? 1000,
     });
