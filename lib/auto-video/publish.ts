@@ -28,6 +28,8 @@ export interface AutoVideo {
   engine?: "lemo" | "kit";
   lemo?: unknown;
   madeAt?: string;
+  // lemo로 끝내 못 만들어 영상 없이 멈춘 칸(BLOCKED). 확인 화면이 "다시 만들기 필요"와 이 이유를 보여 준다(2026-11-13)
+  needsRemake?: { reason: string; at: string };
 }
 
 /** 사람의 승인 또는 자동 발행 설정으로만 부른다. 이미 넘어간 칸은 건드리지 않는다. */

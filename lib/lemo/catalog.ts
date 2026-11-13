@@ -26,6 +26,8 @@ export interface StyleProfile {
   cast: CastKind[];
   // 캐릭터 연기 적합도 0~3
   acting: number;
+  // 얼굴 달린 캐릭터가 연기해야 성립하는지. false면 캐릭터 없이 그림 · 도형 · 글자로 설명하는 방식이다(select.ts가 방식을 고를 때 쓴다)
+  needs_characters: boolean;
   // 실제 영상 · 데이터 · 설계 파일이 있어야 성립 — lemo-code 경로는 이런 자료를 넣지 않는다
   needs_material: boolean;
   // 판매 영상에 맞지 않는 분위기(공포 등)
@@ -41,6 +43,8 @@ export interface StyleCandidate {
   webgl: boolean;
   runner_speed: StyleProfile["runner_speed"];
   cost: CostClass;
+  // 캐릭터 연기 방식(true)인지, 캐릭터 없이 설명하는 방식(false)인지 — styles.json needs_characters
+  needs_characters: boolean;
   // 규칙 점수(가격은 넣지 않는다 — 같은 점수대에서 순서만 가른다)
   score: number;
   implemented: boolean;
@@ -69,6 +73,11 @@ export function styleProfile(slug: string): StyleProfile | undefined {
   return BY_SLUG.get(slug);
 }
 
+/** 그 스타일이 캐릭터 연기로 성립하는지. 목록에 없는 스타일은 지금 엔진 방식(캐릭터 연기)으로 본다. */
+export function styleNeedsCharacters(slug: string): boolean {
+  return BY_SLUG.get(slug)?.needs_characters ?? true;
+}
+
 /** lemo-opuscar 라이브러리 폴더(STYLE.md를 읽는 곳). README의 실행 환경과 같다. */
 export function lemoOpuscarHome(): string {
   return process.env.LEMO_OPUSCAR_HOME || "D:/ai/lemo-firstgel-test/_vendor/lemo-opuscar";
@@ -91,10 +100,15 @@ const manifestSchema = z.object({
         transitions: z.array(z.string()),
         fx: z.array(z.string()),
         backgrounds: z.array(z.object({ kind: z.string(), params: z.record(z.string(), z.unknown()).default({}) }).loose()),
+        // 캐릭터 없이 설명하는 스타일만: characters=false와 그 스타일 전용 소품(상품 · 아이콘 · 화살표 · 목록 점 · 화면 글자). 캐릭터 스타일에는 없다
+        characters: z.boolean().optional(),
+        props: z.array(z.unknown()).optional(),
       })
       .loose(),
   ),
   props: z.array(z.unknown()).default([]),
+  // 캐릭터 없는 스타일의 icon 소품 이름 → 뜻(engine/explain.js ICONS와 같은 목록). "_about"은 설명
+  icons: z.record(z.string(), z.string()).default({}),
   parametric: z
     .object({
       shapes: z.array(z.string()),
@@ -335,6 +349,7 @@ function shortlistByScore(ctx: StyleContext, all = false): StyleCandidate[] {
       webgl: p.webgl,
       runner_speed: p.runner_speed,
       cost: p.cost,
+      needs_characters: p.needs_characters,
       score: s.score,
       implemented,
       selectable: implemented,

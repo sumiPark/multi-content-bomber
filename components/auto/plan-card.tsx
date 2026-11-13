@@ -80,6 +80,8 @@ export interface PlanCardData {
   jobStatus: string | null;
   // 저장된 장면표가 있는지 (0054). 없으면 화면만 다시 만들 수 없다
   hasStoryboard: boolean;
+  // lemo로 끝내 못 만들어 영상 없이 멈춘 칸(BLOCKED)의 이유. 있으면 "다시 만들기 필요"로 보여 준다
+  needsRemake: string | null;
   // 이 영상이 쓴 근거 (저장된 장면표 기준). 장면표가 없으면 null
   evidence: UsedEvidence | null;
   // 완성본 (서명 주소)
@@ -100,6 +102,9 @@ const STATUS: Record<string, StatusView> = {
   SKIPPED: { label: "건너뜀", variant: "outline", icon: SkipForward },
   FAILED: { label: "실패", variant: "destructive", icon: XCircle },
 };
+
+// 영상 제작에서 멈춘 칸(BLOCKED + needsRemake) — 점검이 아니라 영상을 만들지 못해 멈췄다
+const NEEDS_REMAKE: StatusView = { label: "다시 만들기 필요", variant: "destructive", icon: AlertTriangle };
 
 // 칸 상태는 예약에서 멈춰 있어 실제 결과는 발행 작업에서 읽는다
 const JOB_STATUS: Record<string, StatusView> = {
@@ -125,8 +130,8 @@ function stepOf(plan: PlanCardData): { index: number; tone: "now" | "stop" } | n
     case "SCRIPTED":
       return { index: 2, tone: "now" };
     case "BLOCKED":
-      // 완성본이 있으면 영상 점검, 없으면 대본 점검에서 멈췄다
-      return { index: plan.video ? 3 : 1, tone: "stop" };
+      // 완성본이 있으면 영상 점검, 영상 제작에서 멈췄으면(다시 만들기 필요) 영상 제작, 그 밖에는 대본 점검에서 멈췄다
+      return { index: plan.video ? 3 : plan.needsRemake ? 2 : 1, tone: "stop" };
     case "RENDERED":
       return { index: 3, tone: "now" };
     case "SCHEDULED":
@@ -165,7 +170,7 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
   const [redo, setRedo] = useState<"visual" | "script" | null>(null);
   const [memo, setMemo] = useState("");
   const [picking, setPicking] = useState(false);
-  const s = (plan.jobStatus && JOB_STATUS[plan.jobStatus]) || STATUS[plan.status] || { label: plan.status, variant: "outline" as const, icon: Clapperboard };
+  const s = (plan.jobStatus && JOB_STATUS[plan.jobStatus]) || (blocked && plan.needsRemake ? NEEDS_REMAKE : null) || STATUS[plan.status] || { label: plan.status, variant: "outline" as const, icon: Clapperboard };
   const canRemake = canManage && (plan.status === "RENDERED" || plan.status === "BLOCKED") && (!!plan.video || !!plan.script);
   const canSkip = editable || (canRemake && (plan.status === "RENDERED" || plan.pastSlot));
   const canApprove = canRemake && plan.status === "RENDERED" && !!plan.video;
@@ -221,7 +226,8 @@ export function PlanCard({ plan, canManage }: { plan: PlanCardData; canManage: b
           ) : (
             plan.humanPicked && <p className="text-sm text-muted-foreground">사람이 직접 고른 상품이에요.</p>
           )}
-          {plan.note && <p className="text-xs text-muted-foreground">{plan.note}</p>}
+          {/* 다시 만들기 필요 칸은 같은 이유를 아래 알림에 보여 준다 */}
+          {plan.note && !plan.needsRemake && <p className="text-xs text-muted-foreground">{plan.note}</p>}
 
           <Notices plan={plan} editable={editable} soldOut={soldOut} canManage={canManage} />
 
@@ -399,6 +405,13 @@ function Notices({ plan, editable, soldOut, canManage }: { plan: PlanCardData; e
   const blocked = plan.status === "BLOCKED";
   const late = canManage && plan.pastSlot && (plan.status === "PROPOSED" || plan.status === "CONFIRMED");
   const items: ReactNode[] = [];
+  if (blocked && plan.needsRemake)
+    items.push(
+      <Notice key="remake" tone="risk" title="다시 만들기 필요">
+        코드 애니메이션으로 영상을 만들지 못해 이 칸은 영상 없이 멈췄어요. 사진 · 스톡 영상으로는 만들지 않아요. &lsquo;화면만 다시&rsquo; 또는 &lsquo;대본부터 다시&rsquo;로 다시 만들어 주세요.
+        <span className="mt-1 block break-all opacity-80">이유: {plan.needsRemake}</span>
+      </Notice>,
+    );
   if (plan.error)
     items.push(
       <Notice key="error" tone="risk" title="만드는 중에 오류가 났어요">

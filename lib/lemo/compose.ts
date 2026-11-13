@@ -48,6 +48,8 @@ export interface ComposeInput {
   hook: { spoken: string; on_screen: string } | null;
   // 장면표에서 추린 값(board-brief.ts). 있으면 자막 줄 · 강조어 · 글자 디자인 · 글꼴을 여기서 가져온다
   brief?: BoardBrief | null;
+  // 화면 글자에 이미 쓴 스킬 글꼴(run.ts, 픽토그램 스타일). 있으면 자막도 이 글꼴로 맞춘다. 없으면 장면표 값 → 자막 디자인 AI
+  fonts?: { key_font: string; small_font: string } | null;
   facts: ProductFacts;
   rules: ContentRule[];
   accountName: string;
@@ -185,7 +187,7 @@ export async function composeLemoVideo(input: ComposeInput): Promise<KitResult> 
     tone: input.tone ?? null,
     reusePlan: plan,
     // 장면표에서 고른 글꼴(사진 경로와 같은 값). 없으면 자막 디자인 AI가 고른다
-    fonts: input.brief?.fonts ?? undefined,
+    fonts: input.fonts ?? input.brief?.fonts ?? undefined,
     presetVoices: { clips: preset.clips, layout: preset.layout, duration: input.production.duration },
     // 후킹 글자 · 자막을 장면 데이터가 정한 자리(caption_place)에 놓는다
     presetZones: lemoCaptionZones(input.voice, input.production),

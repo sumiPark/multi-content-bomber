@@ -142,8 +142,29 @@ export const productionChoiceSchema = z.object({
     }),
   ),
   cost_class: z.enum(["low", "mid", "high"]).describe("렌더 시간 · AI 사용량 어림"),
+  // 캐릭터가 연기하는 방식(characters)인지 캐릭터 없이 그림 · 도형 · 글자로 설명하는 방식(no-characters)인지 — 고른 스타일의 needs_characters에서 온다. 예전 기록에는 없다
+  approach: z.enum(["characters", "no-characters"]).optional(),
+  // 캐릭터 그림이 검수에 떨어져 배역을 다시 정한 기록(characters.ts prepareCharacters가 정하고 run.ts가 선택 결과에 붙인다). 예전 기록에는 없다
+  recast: z.array(recastSchema()).optional(),
 });
 export type ProductionChoice = z.infer<typeof productionChoiceSchema>;
+
+/**
+ * 배역 다시 정하기 한 건.
+ * - reuse: 계정에 저장된(이미 합격한) 캐릭터 to로 바꿨다
+ * - object: 몸 모양 6가지로 못 그리는 물건이라 얼굴 달린 캐릭터 대신 화면 속 물건으로 둔다(엔진 소품 · 장면표 화면 글자로 보여 주거나, 그럴 수 없으면 뺀다)
+ * - drop: 바꿀 캐릭터가 없어 그 배역을 빼고 장면을 짠다
+ */
+function recastSchema() {
+  return z.object({
+    role: z.string(),
+    kind: z.enum(["reuse", "object", "drop"]),
+    to: z.string().nullable().describe("kind=reuse면 바꾼 라이브러리 캐릭터 id, 아니면 null"),
+    why: z.string(),
+    fails: z.array(z.string()).describe("그 배역 시트의 불합격 사유(차례대로)"),
+  });
+}
+export type Recast = z.infer<ReturnType<typeof recastSchema>>;
 
 /** 이 영상의 상품 캐릭터 — 배역 계획이 상품 배역으로 재사용한 것, 없으면 그 상품 키(product_id)로 만든 것. 없으면 null. */
 export function productCharacter(choice: ProductionChoice, characters: CharacterSpec[], productId: string | null): CharacterSpec | null {

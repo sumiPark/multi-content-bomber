@@ -12,7 +12,7 @@ export const ENGINE_DIR = path.join(LEMO_DIR, "engine");
 export const LIBRARY_DIR = path.join(LEMO_DIR, "library");
 
 // 엔진 공통 파일(스타일 폴더 · 계정 캐릭터는 따로 복사)
-const ENGINE_FILES = ["index.html", "main.js", "timeline.js", "parametric.js", "props.js", "fx.js", "transitions.js", "geom.js", "sheet.js", "manifest.json", "LICENSE-lemo-opuscar"];
+const ENGINE_FILES = ["index.html", "main.js", "timeline.js", "parametric.js", "props.js", "fx.js", "transitions.js", "geom.js", "sheet.js", "explain.js", "manifest.json", "LICENSE-lemo-opuscar"];
 
 export function styleSlugs(): string[] {
   const dir = path.join(ENGINE_DIR, "styles");

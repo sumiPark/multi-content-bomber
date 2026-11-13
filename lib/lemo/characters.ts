@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { extname, join } from "node:path";
 import { z } from "zod";
 import { imageDataUrl } from "@/lib/shoot/video-kit/tools";
-import { lemoRoot, loadEngineManifest, manifestPropNames, styleNotes, type EngineManifest } from "./catalog";
-import { characterSpecSchema, type AccountContext, type AiUsage, type CharacterSpec, type Production, type ProductionChoice } from "./contract";
+import { lemoRoot, loadEngineManifest, manifestPropNames, styleNeedsCharacters, styleNotes, type EngineManifest } from "./catalog";
+import { characterSpecSchema, type AccountContext, type AiUsage, type CharacterSpec, type Production, type ProductionChoice, type Recast } from "./contract";
 import { buildSheetProject } from "./project";
 import { renderStills } from "./render";
 import { accountBlock, assertAccountLibrary, CLAIM_RULES, factsBlock, lemoParse, librarySummary, productKey, withProductRole } from "./select";
@@ -12,9 +12,11 @@ import type OpenAI from "openai";
 
 // 캐릭터 준비 — 계정 라이브러리(lib/lemo/library/accounts/<account_key>/)만 읽고, 맞는 캐릭터가 없으면
 // 그 계정 이름공간으로 parametric 리그용 명세를 새로 만든다. 새 캐릭터는 작업 폴더에만 쓰고(라이브러리 저장은 사람이 확인한 뒤 따로),
-// 시트를 실제 엔진으로 렌더해 비전 검수를 거친다. 불합격은 이유를 되먹여 다시 만들고(모두 SHEET_ATTEMPTS번),
-// 그래도 합격한 시트가 없으면 failed로 돌려준다 — 호출자(run.ts)가 사용량을 장부에 넣은 뒤 lemo 제작을 멈춘다(2026-11-11 사용자 결정).
-// 상품 자료가 있는 영상은 상품 배역을 하나 꼭 준비한다(select.ts withProductRole).
+// 시트를 실제 엔진으로 렌더해 비전 검수를 거친다. 불합격은 이유를 되먹여 다시 만든다(모두 SHEET_ATTEMPTS번).
+// 그래도 합격한 시트가 없으면 멈추지 않고 그 배역을 다시 정한다(2026-11-13 사용자 결정 — 11-11의 "하나라도 불합격이면 멈춘다"를 바꿈):
+//   조연은 계정에 저장된(이미 합격한) 캐릭터로 바꾸거나, 몸 모양 6가지로 못 그리는 물건이면 화면 속 물건으로 두거나, 빼고 장면을 짠다(recast).
+//   상품 배역은 뺄 수 없어 failed로 돌려준다 — 호출자(run.ts)가 사용량을 장부에 넣은 뒤 멈추고, AI 자동 영상은 그 칸을 "다시 만들기 필요"로 둔다.
+// 상품 자료가 있는 영상은 상품 배역을 하나 꼭 준비한다(select.ts withProductRole). 캐릭터 없이 설명하는 스타일은 배역을 준비하지 않는다.
 // 라이브러리 폴더 · account.json · rig.js는 사람이 확인한 뒤 따로 저장한다. 여기서는 읽기만 한다.
 
 type Message = OpenAI.Chat.Completions.ChatCompletionMessageParam;
@@ -240,7 +242,7 @@ function toSpec(d: Design, id: string, accountKey: string, series: string | null
 const LOOK_KEYS = ["productType", "texture", "productForm", "packaging", "variety", "weightOrCount", "sizeGrade", "colors", "material"];
 const LOOK_WORDS = /튜브|펌프|병|단지|용기|뚜껑|캡|스틱|파우치|상자|박스|봉지|포장|캔|앰플|스포이드|색상|컬러|빛깔/;
 
-function productLookBlock(facts: ProductFacts): string {
+export function productLookBlock(facts: ProductFacts): string {
   const details = LOOK_KEYS.flatMap((k) => {
     const v = facts.details[k];
     const text = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").join(", ") : typeof v === "string" ? v : "";
@@ -293,20 +295,48 @@ ${CLAIM_RULES}`;
 
 const reviewSchema = z.object({
   description_match: z.boolean().describe("그림의 형태 · 색 · 특징이 설명과 맞는지"),
-  proportions_ok: z.boolean().describe("머리 : 키 비율이 명세와 비슷하고, 잘리거나 겹친 부분 없이 형태가 읽히는지"),
-  expressions_distinct: z.boolean().describe("표정들이 휴대폰 화면 크기에서도 서로 구분되는지(걱정 · 화남 눈썹 방향 등)"),
+  proportions_ok: z.boolean().describe("잘리거나 겹친 부분 없이 형태가 읽히는지. 사람 · 동물 모양은 머리 : 키 비율이 명세와 비슷한지도 본다. 시트 속 캐릭터의 크기(px)는 보지 않는다"),
+  expressions_distinct: z.boolean().describe("표정들이 휴대폰 화면 크기에서도 서로 구분되는지(걱정 · 화남 눈썹 방향 등). 표정 확대 그림이 있으면 그 그림으로 본다"),
   issues: z.array(z.string()).describe("고칠 점. 명세의 어느 값을 어떻게 바꿀지 구체적으로. 없으면 빈 배열"),
 });
 type Review = z.infer<typeof reviewSchema>;
+
+/** 시트로 찍는 시각 — engine/sheet.js는 시각으로 쪽을 고른다(0.5 = 전체 시트, 1.5 = 표정 확대). 첫 장이 명세에 남는 시트 그림이다. */
+const SHEET_TIMES = [0.5, 1.5];
+// head_ratio가 그림에 쓰이는 몸 모양(engine/parametric.js anatomy). 그 밖의 모양은 몸 전체가 얼굴이라 이 값을 읽지 않는다
+const HEAD_RATIO_SHAPES = ["human", "animal"];
+
+/**
+ * 검수자에게 주는 시트 읽는 법. 리그가 정해 둔 것(명세 값으로 바꿀 수 없는 것)을 불합격 사유로 삼으면 몇 번을 다시 만들어도 같은 지적이 나온다
+ * (2026-11-12 색연필 · 쟁반 · 파우치 세 건: 칸에 맞춰 197~300px로 그린 시트를 명세 키 380~680px와 견줌, 몸 윤곽이 같은 q를 정면과 같다고 지적).
+ * 몸 형태가 설명과 다른 것은 여기서 빼지 않는다 — 그건 description_match가 그대로 판정한다.
+ * 내용은 engine/sheet.js(쪽 · 칸 크기) · engine/parametric.js(anatomy · drawFace) · engine/timeline.js(영상의 view는 front · q뿐)와 맞춰 둔다.
+ */
+function sheetGuide(spec: CharacterSpec, pages: number): string {
+  const headRatio = HEAD_RATIO_SHAPES.includes(spec.body.shape);
+  return [
+    "그림 읽는 법:",
+    pages > 1
+      ? "- 첫째 그림은 전체 시트(방향 · 표정 · 동작)이고, 둘째 그림은 표정만 크게 그린 확대본이다. 표정 구분은 둘째 그림으로 판정한다."
+      : "- 그림은 전체 시트(방향 · 표정 · 동작) 한 장이다.",
+    "- 시트는 여러 칸에 맞춰 줄여 그린 검수용 배치다. 그림 속 캐릭터의 크기(px)는 영상 속 크기가 아니다. 영상 속 키는 명세 값을 코드가 그대로 적용하므로 그림과 대조하지 않고, 크기를 키우거나 줄이라는 지적도 하지 않는다.",
+    "- 방향 칸(q · side): 이 리그는 평면 그림 방식이다. 몸 윤곽은 정면과 같고, 얼굴(눈 · 입 · 볼)이 보는 쪽으로 옮겨 가며 먼 쪽 눈이 좁아지고 먼 쪽 팔이 몸 뒤로 간다(사람 · 동물은 머리 · 코 · 주둥이도 옮겨 간다). 몸의 옆면이나 두께가 보이지 않는 것은 문제가 아니다. side는 영상에서 쓰지 않는 참고 칸이다. 방향 칸에서는 얼굴이 보는 쪽으로 옮겨졌는지, 잘리거나 어긋난 부분이 없는지만 본다.",
+    headRatio
+      ? `- 머리 : 키 비율은 명세 값(${spec.body.head_ratio})과 그림을 대조한다.`
+      : `- 이 몸 모양(${spec.body.shape})은 몸 전체가 얼굴이라 머리 : 키 값이 그림에 쓰이지 않는다. 머리 : 키 비율은 판정하지 않고, 그 값을 바꾸라는 지적도 하지 않는다.`,
+    "- talk 칸은 말하는 중 입이 열린 순간을 그린 것이다.",
+    `- 위에 적은 리그 방식(시트 속 크기, 방향 칸의 몸 윤곽${headRatio ? "" : ", 머리 : 키 값"})이 아쉬우면 issues에 "리그 한계:"로 시작해 적되 세 판정에는 반영하지 않는다. 몸 형태 · 색 · 특징이 설명과 다른 것은 리그 한계로 돌리지 않고 description_match로 판정한다.`,
+  ].join("\n");
+}
 
 function mimeOf(file: string): string {
   const ext = extname(file).toLowerCase();
   return ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
 }
 
-async function reviewSheet(spec: CharacterSpec, files: string[]): Promise<{ review: Review; usage: AiUsage }> {
+async function reviewSheet(spec: CharacterSpec, files: string[], parse: Parse): Promise<{ review: Review; usage: AiUsage }> {
   const images = files.slice(0, 4).map((f) => ({ type: "image_url" as const, image_url: { url: imageDataUrl(f, mimeOf(f)), detail: "high" as const } }));
-  const r = await lemoParse({
+  const r = await parse({
     stage: "lemo.character.review",
     schema: reviewSchema,
     name: "character_sheet_review",
@@ -314,14 +344,15 @@ async function reviewSheet(spec: CharacterSpec, files: string[]): Promise<{ revi
     messages: [
       {
         role: "system",
-        content: "너는 애니메이션 캐릭터 시트 검수자다. 실제 엔진으로 렌더한 캐릭터 시트 그림을 명세와 대조한다. 그림에 보이는 것만 근거로 판정하고, 사소한 붓질 차이는 문제로 삼지 않는다. 표정 칸이 있으면 이름과 생김새가 맞는지도 본다.",
+        content: `너는 애니메이션 캐릭터 시트 검수자다. 실제 엔진으로 렌더한 캐릭터 시트 그림을 명세와 대조한다. 그림에 보이는 것만 근거로 판정하고, 사소한 붓질 차이는 문제로 삼지 않는다. 표정 칸이 있으면 이름과 생김새가 맞는지도 본다.\n\n${sheetGuide(spec, images.length)}`,
       },
       {
         role: "user",
         content: [
           {
             type: "text",
-            text: `명세:\n이름: ${spec.name}\n설명: ${spec.description}\n몸 모양: ${spec.body.shape}, 키 ${spec.body.height}px(1080 폭 기준), 머리 : 키 ${spec.body.head_ratio}\n색: ${JSON.stringify(spec.body.colors)}\n특징: ${JSON.stringify(spec.body.features)}\n표정: ${spec.expressions.join(", ")}\n방향: ${spec.views.join(", ")}`,
+            // 영상 속 키(px)는 넣지 않는다 — 시트는 칸에 맞춰 줄여 그리므로 검수자가 그림 크기와 견주면 늘 "작다"가 된다(sheetGuide)
+            text: `명세:\n이름: ${spec.name}\n설명: ${spec.description}\n몸 모양: ${spec.body.shape}${HEAD_RATIO_SHAPES.includes(spec.body.shape) ? `, 머리 : 키 ${spec.body.head_ratio}` : ""}\n색: ${JSON.stringify(spec.body.colors)}\n특징: ${JSON.stringify(spec.body.features)}\n표정: ${spec.expressions.join(", ")}\n방향: ${spec.views.join(", ")}`,
           },
           ...images,
         ],
@@ -338,6 +369,64 @@ function reviewText(r: Review): string {
   return [...flags, ...r.issues].join(" / ");
 }
 
+// ── 배역 다시 정하기 ──────────────────────────────────────────────────────────
+
+/** 구조화 출력 호출. 시험에서는 가짜 응답을 넣는다(prepareCharacters deps.parse). */
+type Parse = typeof lemoParse;
+type Role = ProductionChoice["characters"][number];
+
+const recastDecisionSchema = z.object({
+  kind: z.enum(["reuse", "object", "drop"]).describe("reuse = 저장된 캐릭터로 바꾼다, object = 화면 속 물건으로 둔다, drop = 배역을 뺀다"),
+  reuse: z.string().nullable().describe("kind=reuse면 바꿀 캐릭터 id(목록 중), 아니면 null"),
+  why: z.string().describe("그렇게 정한 이유 한 문장"),
+});
+
+const RECAST_SYSTEM = `너는 릴스 애니메이션 배역 담당이다. 새로 그린 캐릭터가 시트 검수에 여러 번 맞지 않아 이 배역을 다시 정한다. 캐릭터 그림은 몸 모양 6가지(물방울 · 덩어리 · 병 · 과일 · 사람 · 동물)로만 그릴 수 있다.
+
+고르는 법:
+- reuse: "바꿀 수 있는 저장된 캐릭터" 중 이 배역을 맡아도 대본이 말이 되는 캐릭터가 있으면 그 id를 쓴다. 생김새 · 성격이 배역과 너무 다르면 고르지 않는다.
+- object: 이 배역이 원래 물건(색연필 · 쟁반 · 봉지 · 파우치 등)이라 몸 모양 6가지로 그리기 어려우면, 얼굴 달린 캐릭터 대신 화면 속 물건으로 둔다. 검수 사유가 "그 물건처럼 보이지 않는다"는 내용이면 object를 먼저 검토한다.
+- drop: 둘 다 아니면 이 배역을 빼고 다른 배역만으로 장면을 짠다.
+- 이유는 대본 · 배역 설명 · 검수 사유에 있는 근거로 짧게 쓴다.`;
+
+/** 시트가 끝내 불합격한 조연 하나를 어떻게 할지 정한다. 목록 밖 캐릭터 id를 고르면 빼는 쪽으로 둔다. */
+async function decideRecast(
+  parse: Parse,
+  input: { role: NewRole; fails: string[]; candidates: CharacterSpec[]; script: string[] },
+): Promise<{ recast: Pick<Recast, "kind" | "to" | "why">; usage: AiUsage }> {
+  const { role, fails, candidates } = input;
+  const list = candidates.length
+    ? candidates.map((c) => `- ${c.id} "${c.name}" (${c.body.shape}): ${c.description} / 표정: ${c.expressions.join(", ")} / 동작: ${c.actions.join(", ")}`).join("\n")
+    : "없음 — reuse를 고르지 않는다";
+  const r = await parse({
+    stage: "lemo.character.recast",
+    schema: recastDecisionSchema,
+    name: "character_recast",
+    maxTokens: 600,
+    messages: [
+      { role: "system", content: RECAST_SYSTEM },
+      {
+        role: "user",
+        content: `대본:\n${input.script.map((l, i) => `${i}. ${l}`).join("\n")}\n\n다시 정할 배역: ${role.role} — ${role.why}\n시트 검수 불합격 사유(차례대로):\n${fails.map((f, i) => `${i + 1}차 ${f}`).join("\n")}\n\n바꿀 수 있는 저장된 캐릭터:\n${list}`,
+      },
+    ],
+  });
+  const d = r.parsed;
+  if (d.kind === "reuse") {
+    const hit = d.reuse ? candidates.find((c) => c.id === d.reuse) : undefined;
+    if (hit) return { recast: { kind: "reuse", to: hit.id, why: d.why }, usage: r.usage };
+    return { recast: { kind: "drop", to: null, why: `바꿀 캐릭터로 목록 밖 값(${d.reuse ?? "없음"})을 골라 배역을 제외했어요` }, usage: r.usage };
+  }
+  return { recast: { kind: d.kind, to: null, why: d.why }, usage: r.usage };
+}
+
+const RECAST_LABEL: Record<Recast["kind"], string> = { reuse: "저장된 캐릭터로 바꿨어요", object: "캐릭터 대신 화면 속 물건으로 뒀어요", drop: "배역에서 제외하고 장면을 짰어요" };
+
+/** 배역 다시 정하기 한 건을 사람이 볼 문장으로. */
+export function recastText(r: Recast): string {
+  return `${r.role} 배역은 캐릭터 그림이 검수 기준에 ${r.fails.length}번 어긋나 ${RECAST_LABEL[r.kind]}${r.to ? `(${r.to})` : ""} — ${r.why}`;
+}
+
 // ── 준비 ─────────────────────────────────────────────────────────────────────
 
 type NewRole = { role: string; why: string; product: boolean };
@@ -348,8 +437,11 @@ type NewRole = { role: string; why: string; product: boolean };
  * - 새 배역은 OpenAI로 parametric 명세를 만들어 workDir/new-characters/<id>/spec.json에 쓰고, 시트를 렌더 · 비전 검수한다.
  * - 상품 자료가 있으면 상품 배역을 하나 꼭 둔다. 같은 상품 키의 라이브러리 캐릭터가 있으면 재사용, 없으면 새로 만든다.
  * - library는 그 계정 것만(다른 계정 캐릭터가 있으면 throw).
- * failed가 비어 있지 않으면 합격한 시트를 얻지 못한 캐릭터가 있다는 뜻이다 — 호출자는 이 결과로 영상을 만들면 안 된다(사용량을 남기고 멈춘다).
+ * - 새 조연의 시트가 끝내 불합격하면 배역을 다시 정한다(decideRecast: 저장된 캐릭터로 바꾸기 · 화면 속 물건으로 두기 · 빼기). 기록은 recast, 바뀐 배역 계획은 roles.
+ * - 상품 배역을 먼저 만든다. 상품 배역이 불합격하면 뺄 수 없으니 뒤 배역은 만들지 않고 돌아온다.
+ * failed가 비어 있지 않으면(상품 배역 불합격 · 남은 캐릭터 없음) 호출자는 이 결과로 영상을 만들면 안 된다(사용량을 남기고 멈춘다).
  * created에는 검수에 합격한 캐릭터만 들어간다.
+ * deps는 시험용이다: parse(구조화 출력 호출) · tools(시트 렌더)를 바꿔 끼운다.
  */
 export async function prepareCharacters(input: {
   choice: ProductionChoice;
@@ -360,8 +452,20 @@ export async function prepareCharacters(input: {
   facts: ProductFacts | null;
   workDir: string;
   style: string;
-}): Promise<{ characters: CharacterSpec[]; reused: string[]; created: { spec: CharacterSpec; dir: string; sheet: string }[]; usage: AiUsage[]; problems: string[]; failed: string[] }> {
+  deps?: { parse?: Parse; tools?: SheetTools };
+}): Promise<{
+  characters: CharacterSpec[];
+  reused: string[];
+  created: { spec: CharacterSpec; dir: string; sheet: string }[];
+  usage: AiUsage[];
+  problems: string[];
+  failed: string[];
+  // 다시 정한 뒤의 배역 계획(상품 배역 포함). 장면 계획은 이 배역으로 짠다
+  roles: Role[];
+  recast: Recast[];
+}> {
   const { account, profile, library } = input;
+  const parse = input.deps?.parse ?? lemoParse;
   assertAccountLibrary(account.accountKey, library, "prepareCharacters");
   if (profile.accountKey !== account.accountKey) throw new Error(`prepareCharacters: 프로필(${profile.accountKey})과 계정(${account.accountKey})이 달라요`);
   const out = {
@@ -371,14 +475,19 @@ export async function prepareCharacters(input: {
     usage: [] as AiUsage[],
     problems: [] as string[],
     failed: [] as string[],
+    roles: [] as Role[],
+    recast: [] as Recast[],
   };
   if (input.choice.backend !== "lemo-code") return out;
+  // 캐릭터 없이 설명하는 스타일은 배역을 두지 않는다(상품 배역도 넣지 않는다)
+  if (!styleNeedsCharacters(input.style) && !input.choice.characters.length) return out;
 
   const manifest = loadEngineManifest();
   const byId = new Map(library.map((c) => [c.id, c]));
   const toCreate: NewRole[] = [];
   // 선택 단계가 이미 맞췄지만, 다른 경로로 온 배역 계획에도 상품 배역이 빠지지 않게 한 번 더 맞춘다
-  for (const role of withProductRole(input.choice.characters, input.facts, library)) {
+  out.roles = withProductRole(input.choice.characters, input.facts, library);
+  for (const role of out.roles) {
     const spec = role.reuse ? byId.get(role.reuse) : undefined;
     if (role.reuse && !spec) out.problems.push(`배역 ${role.role}: 재사용으로 고른 ${role.reuse}가 라이브러리에 없어 새로 만들어요`);
     if (spec) {
@@ -396,9 +505,11 @@ export async function prepareCharacters(input: {
     toCreate.push({ role: role.role, why: role.why, product: !!role.product });
   }
   if (!toCreate.length) return out;
+  // 상품 배역을 먼저 만든다 — 상품 배역이 불합격하면 멈추므로 조연 시트에 먼저 비용을 쓰지 않는다
+  toCreate.sort((a, b) => Number(b.product) - Number(a.product));
   const productId = productKey(input.facts);
 
-  const tools = await sheetTools();
+  const tools = input.deps?.tools ?? (await sheetTools());
   const schema = designSchema(manifest);
   const madeFor = `${input.facts?.name ?? "상품 없음"} · ${input.script[0] ?? ""}`.slice(0, 120);
   const taken = new Set([...library.map((c) => c.id)]);
@@ -433,7 +544,7 @@ ${roles.map((r) => `- ${r.role}${r.product ? " [상품 배역]" : ""}: ${r.why}`
     ];
     let last: Design[] = [];
     for (let attempt = 0; attempt < 2; attempt++) {
-      const r = await lemoParse({ stage: "lemo.character.create", schema, name: "character_specs", messages, maxTokens: 3000 });
+      const r = await parse({ stage: "lemo.character.create", schema, name: "character_specs", messages, maxTokens: 3000 });
       out.usage.push(r.usage);
       last = r.parsed.characters;
       const problems = [
@@ -457,24 +568,45 @@ ${roles.map((r) => `- ${r.role}${r.product ? " [상품 배역]" : ""}: ${r.why}`
     let files: string[];
     try {
       const film = tools.buildSheetProject({ workDir: join(input.workDir, "sheet-projects", spec.id), accountKey: account.accountKey, character: spec, characterDir: dir, style: input.style, brand: profile.brand });
-      files = (await tools.renderStills(film, [0.5], join(dir, "sheet"), { sheet: spec.id })).files;
+      files = (await tools.renderStills(film, SHEET_TIMES, join(dir, "sheet"), { sheet: spec.id })).files;
     } catch (e) {
       return { error: `시트 렌더 실패 — ${e instanceof Error ? e.message : String(e)}` };
     }
     if (!files.length) return { error: "시트 렌더 결과 그림이 없어요" };
     const sheet = files[0];
     writeFileSync(join(dir, "spec.json"), JSON.stringify({ ...spec, sheet }, null, 2));
-    const { review, usage } = await reviewSheet(spec, files);
+    const { review, usage } = await reviewSheet(spec, files, parse);
     out.usage.push(usage);
     return { sheet, review };
   };
 
-  // 합격한 시트를 얻지 못한 캐릭터: 작업 폴더에 불합격 표시를 남기고(라이브러리로 옮기지 않게) failed로 돌려준다
-  const reject = (id: string, role: NewRole, dir: string | null, fails: string[]) => {
-    if (dir) writeFileSync(join(dir, "rejected.json"), JSON.stringify({ id, role: role.role, attempts: fails }, null, 2));
-    out.problems.push(`${id}: 합격한 시트가 없어 lemo 제작을 멈춰요 — ${fails.map((f, i) => `${i + 1}차 ${f}`).join(" | ")}`);
+  // 합격한 시트를 얻지 못한 상품 배역: 작업 폴더에 불합격 표시를 남기고(라이브러리로 옮기지 않게) failed로 돌려준다
+  const reject = (id: string, dir: string | null, fails: string[]) => {
+    if (dir) writeFileSync(join(dir, "rejected.json"), JSON.stringify({ id, role: "상품 배역", attempts: fails }, null, 2));
+    out.problems.push(`${id}: 상품 배역의 합격한 시트가 없어 lemo 제작을 멈춰요 — ${fails.map((f, i) => `${i + 1}차 ${f}`).join(" | ")}`);
     // 호출자 경고는 300자에서 잘린다 — 캐릭터 id와 마지막 사유를 앞에 짧게 둔다
-    out.failed.push(`${id}(${role.product ? "상품 배역" : role.role}) 시트 ${fails.length}번 불합격: ${fails[fails.length - 1].slice(0, 150)}`);
+    out.failed.push(`${id}(상품 배역) 시트 ${fails.length}번 불합격: ${fails[fails.length - 1].slice(0, 150)}`);
+  };
+
+  // 합격한 시트를 얻지 못한 조연: 멈추지 않고 배역을 다시 정한다.
+  // 바꿀 후보는 이 계정에 저장된(사람이 확인해 저장한) 캐릭터 중 상품 캐릭터와 이미 이 영상에 나오는 캐릭터를 뺀 것
+  const recastRole = async (id: string | null, role: NewRole, dir: string | null, fails: string[]) => {
+    if (id && dir) writeFileSync(join(dir, "rejected.json"), JSON.stringify({ id, role: role.role, attempts: fails }, null, 2));
+    const inUse = new Set(out.characters.map((c) => c.id));
+    const candidates = library.filter((c) => !c.product_id && !inUse.has(c.id));
+    const { recast, usage } = await decideRecast(parse, { role, fails, candidates, script: input.script });
+    out.usage.push(usage);
+    const record: Recast = { role: role.role, ...recast, fails };
+    out.recast.push(record);
+    out.problems.push(recastText(record));
+    // 새로 만들던 배역(재사용 id가 없거나 라이브러리에 없던 것)
+    const at = out.roles.findIndex((r) => r.role === role.role && !(r.reuse && byId.has(r.reuse)));
+    const spec = recast.kind === "reuse" && recast.to ? byId.get(recast.to) : undefined;
+    if (spec) {
+      out.reused.push(spec.id);
+      out.characters.push(spec);
+      if (at >= 0) out.roles[at] = { ...out.roles[at], reuse: spec.id, why: `${out.roles[at].why} (다시 정함: ${recast.why})` };
+    } else if (at >= 0) out.roles.splice(at, 1);
   };
 
   const designs = await design(toCreate, null);
@@ -483,9 +615,13 @@ ${roles.map((r) => `- ${r.role}${r.product ? " [상품 배역]" : ""}: ${r.why}`
     // 상품 배역은 빠지면 안 된다 — 명세가 없으면 그 배역만 한 번 더 요청하고, 그래도 없으면 멈춘다
     if (!first && role.product) first = (await design([role], null)).find((x) => x.role === role.role);
     if (!first) {
-      if (!role.product) continue;
-      out.failed.push(`상품 배역(${role.role}) 명세를 만들지 못했어요`);
-      return out;
+      if (role.product) {
+        out.failed.push(`상품 배역(${role.role}) 명세를 만들지 못했어요`);
+        return out;
+      }
+      // 조연 명세가 없으면 그 배역도 다시 정한다(예전에는 조용히 건너뛰어 배역 계획에만 남았다)
+      await recastRole(null, role, null, ["캐릭터 명세를 만들지 못했어요"]);
+      continue;
     }
     let d: Design = first;
     const id = idFor(d.slug);
@@ -507,7 +643,7 @@ ${roles.map((r) => `- ${r.role}${r.product ? " [상품 배역]" : ""}: ${r.why}`
       fails.push(reviewText(res.review));
       if (attempt === SHEET_ATTEMPTS) break;
       // 불합격 이유를 모두 되먹여 다시 만든다
-      const feedback: string = `가장 최근 명세:${JSON.stringify({ ...d, why: undefined })}\n${fails.map((f, i) => `${i + 1}차 검수 결과: ${f}`).join("\n")}\n지적된 값을 실제로 바꿔 다시 만든다(같은 명세를 되풀이하지 않는다).`;
+      const feedback: string = `가장 최근 명세:${JSON.stringify({ ...d, why: undefined })}\n${fails.map((f, i) => `${i + 1}차 검수 결과: ${f}`).join("\n")}\n지적된 값을 실제로 바꿔 다시 만든다(같은 명세를 되풀이하지 않는다). "리그 한계:"로 시작하는 지적은 명세 값으로 바꿀 수 없으니 그대로 둔다.`;
       const next: Design | undefined = (await design([role], feedback)).find((x) => x.role === role.role);
       if (!next) {
         fails.push("다시 만든 명세가 없어요");
@@ -516,8 +652,12 @@ ${roles.map((r) => `- ${r.role}${r.product ? " [상품 배역]" : ""}: ${r.why}`
       d = next;
     }
     if (!made) {
-      reject(id, role, dir, fails);
-      return out;
+      if (role.product) {
+        reject(id, dir, fails);
+        return out;
+      }
+      await recastRole(id, role, dir, fails);
+      continue;
     }
     // 합격이어도 지적은 남긴다(조용히 넘기지 않음). 다시 만들어 합격한 경우도 같다
     if (made.review.issues.length) out.problems.push(`${id}: 시트 검수 합격${fails.length ? `(${fails.length + 1}번째 시도)` : ""}, 참고 지적 — ${made.review.issues.join(" / ")}`);
@@ -526,5 +666,7 @@ ${roles.map((r) => `- ${r.role}${r.product ? " [상품 배역]" : ""}: ${r.why}`
     out.characters.push(made.spec);
     out.created.push({ spec: made.spec, dir, sheet: made.sheet });
   }
+  // 다시 정한 뒤 캐릭터가 하나도 남지 않으면(상품 자료 없는 영상의 배역이 모두 빠짐) 캐릭터 연기로 만들 수 없다
+  if (!out.characters.length) out.failed.push("배역을 다시 정한 뒤 남은 캐릭터가 없어요");
   return out;
 }

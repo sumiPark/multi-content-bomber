@@ -22,7 +22,7 @@ const CONTRACT_TRANSITIONS = ["cut", "fade", "wipe", "page-turn", "match"] as co
 
 // 장면 경계: 다음 줄 음성보다 조금 먼저 그림을 바꾸고, 마지막 줄 뒤에는 여유를 둔다
 const LEAD = 0.15;
-const TAIL = 0.6;
+export const TAIL = 0.6;
 // 모션 자막 자리(화면 높이 비율) — 이 안에 얼굴 · 몸 · 소품을 두지 않는다.
 // 수치는 실제 자막이 놓이는 편집 키트의 자리(caption-style.ts ZONE_BOX)에서 가져온다. 여기서 따로 정하지 않는다
 const zoneSpan = (place: "top" | "lower"): [number, number] => [ZONE_BOX[place].top / ZONE_FRAME_HEIGHT, (ZONE_BOX[place].top + ZONE_BOX[place].height) / ZONE_FRAME_HEIGHT];
@@ -30,7 +30,7 @@ export const CAPTION_ZONE: Record<"top" | "lower", [number, number]> = { top: zo
 // 자막 자리 높이 가운데 이 비율 넘게 몸 · 소품이 들어오면 겹친 것으로 본다. 글자는 자리 가운데에 놓여 가장자리는 조금 닿아도 된다
 const ZONE_OVERLAP = 0.2;
 // 화면 글자 소품(엔진 props.js word). 장면표가 정한 글자만 쓴다
-const WORD_PROP = "word";
+export const WORD_PROP = "word";
 // 소품의 세로 반 크기 어림(1080 폭 기준 px, scale 1). 엔진 manifest에 크기가 없어 공용 소품(양동이 · 구름)과 글자 높이로 잡는다
 const PROP_HALF = 75;
 const WORD_HALF = 35;
@@ -41,7 +41,7 @@ function zoneShare(a: number, b: number, zone: [number, number]): number {
 }
 
 /** 소품 state '글자' 또는 '글자@초'에서 글자와 시각을 나눈다(엔진 geom.js parseState와 같은 규칙). */
-function wordState(state: string | null): { text: string; at: number | null } {
+export function wordState(state: string | null): { text: string; at: number | null } {
   const raw = (state ?? "").trim();
   const i = raw.lastIndexOf("@");
   const at = i >= 0 ? Number.parseFloat(raw.slice(i + 1)) : Number.NaN;
@@ -49,7 +49,7 @@ function wordState(state: string | null): { text: string; at: number | null } {
 }
 
 /** 엔진 manifest의 소품 층(bg · obj · fx). 계정 소품처럼 적혀 있지 않은 것은 없다. */
-function propLayers(manifest: EngineManifest): Map<string, string> {
+export function propLayers(manifest: EngineManifest): Map<string, string> {
   const out = new Map<string, string>();
   for (const p of manifest.props) {
     if (!p || typeof p !== "object") continue;
@@ -116,7 +116,8 @@ function aiSchema(characters: CharacterSpec[], styleEntry: EngineManifest["style
     ),
   });
 }
-type AiProduction = z.infer<ReturnType<typeof aiSchema>>;
+// 캐릭터 없는 장면 계획(explain.ts)도 같은 모양(cast · actors 빈 배열)으로 바꿔 아래 검사 · 변환을 그대로 쓴다
+export type AiProduction = z.infer<ReturnType<typeof aiSchema>>;
 
 /** 음성 줄 묶음 → 장면 시작 · 끝. 첫 장면 0초, 장면 사이 빈틈 없음, 마지막 = 마지막 줄 끝 + 여유. */
 function sceneTimes(voice: VoiceLine[], groups: { from: number; to: number }[]): { start: number; end: number }[] {
@@ -133,7 +134,7 @@ function sceneTimes(voice: VoiceLine[], groups: { from: number; to: number }[]):
   return groups.map((_, k) => ({ start: bounds[k], end: k + 1 < bounds.length ? bounds[k + 1] : end }));
 }
 
-function coverageProblems(voice: VoiceLine[], scenes: AiProduction["scenes"]): string[] {
+export function coverageProblems(voice: VoiceLine[], scenes: AiProduction["scenes"]): string[] {
   const out: string[] = [];
   const beats = voice.map((v) => v.beat);
   const pos = new Map(beats.map((b, i) => [b, i]));
@@ -155,7 +156,7 @@ function coverageProblems(voice: VoiceLine[], scenes: AiProduction["scenes"]): s
 
 const inRange = (n: number, lo: number, hi: number) => n >= lo && n <= hi;
 
-function extraProblems(
+export function extraProblems(
   ai: AiProduction,
   p: Production,
   characters: CharacterSpec[],
@@ -264,7 +265,7 @@ function extraProblems(
   return out;
 }
 
-function buildProduction(
+export function buildProduction(
   ai: AiProduction,
   ctx: { voice: VoiceLine[]; choice: ProductionChoice; account: AccountContext; profile: AccountProfile; size: { w: number; h: number }; fps: number; style: string },
 ): Production {
@@ -382,7 +383,7 @@ export function screenWords(p: Production): { beat: number; text: string }[] {
 }
 
 /** 장면표가 그 장면에 정한 글자가 아닌 화면 글자를 뺀다. */
-function dropForeignWords(p: Production, brief: BoardBrief): { production: Production; dropped: string[] } {
+export function dropForeignWords(p: Production, brief: BoardBrief): { production: Production; dropped: string[] } {
   const dropped: string[] = [];
   const scenes = p.scenes.map((s, k) => {
     const to = k + 1 < p.scenes.length ? p.scenes[k + 1].beat - 1 : brief.scenes.length - 1;
@@ -443,13 +444,21 @@ export async function directProduction(input: {
   // 상품 배역(select.ts withProductRole)이 어느 캐릭터인지 알려 준다 — 상품을 보여 줄 수단은 이 캐릭터뿐이다
   const product = productCharacter(choice, characters, input.facts?.id ?? null);
   const roleLines = choice.characters.map((c) => `- ${c.role}${c.product && product ? ` [상품 배역 = ${product.id}]` : ""}: ${c.reuse ?? "새로 만든 캐릭터"} — ${c.why}`).join("\n");
+  // 캐릭터 그림이 검수 기준에 어긋나 배역에서 뺀 것(characters.ts recast). 얼굴 달린 캐릭터로 세우지 않는다.
+  // 엔진에는 물건을 그리는 범용 소품이 없어(manifest props: 해 · 구름 · 양동이 · 별 · 화면 글자) 맞는 소품 · 장면표 화면 글자가 있을 때만 그것으로 보여 준다
+  const without = (choice.recast ?? []).filter((r) => r.kind !== "reuse");
+  const withoutLines = without.length
+    ? `\n캐릭터로 세우지 않는 것(캐릭터 그림이 검수 기준에 어긋나 배역에서 뺐다):\n${without
+        .map((r) => `- ${r.role}${r.kind === "object" ? " [화면 속 물건]" : ""}: cast에 넣지 않는다. ${r.kind === "object" ? "엔진 소품 중 맞는 것이 있거나 장면표가 그 장면에 정한 화면 글자가 있으면 그것으로 보여 주고, 없으면 " : ""}다른 배역의 행동 · 시선 · 카메라로 그 줄의 내용을 보여 준다.`)
+        .join("\n")}`
+    : "";
   const user = `${accountBlock(account)}
 
 ${factsBlock(input.facts)}
 
 제작 방식 선택 이유: ${choice.reason}
 배역 계획:
-${roleLines}
+${roleLines}${withoutLines}
 
 확정된 음성(줄 번호 · 말하는 구간 · 문장):
 ${voice.map((v) => `${v.beat}. [${v.start.toFixed(2)}–${v.end.toFixed(2)}초, ${(v.end - v.start).toFixed(1)}초] ${v.text}`).join("\n")}

@@ -3,12 +3,14 @@ import { z } from "zod";
 import { agentModel } from "@/lib/agents/runner";
 import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
-import { analyzeNeeds, shortlistStyles, STORY_KIND_LABEL, styleNotes, styleProfile, type StyleCandidate } from "./catalog";
+import { analyzeNeeds, shortlistStyles, STORY_KIND_LABEL, styleNeedsCharacters, styleNotes, styleProfile, type StyleCandidate } from "./catalog";
 import { BACKENDS, productionChoiceSchema, type AccountContext, type AiUsage, type CharacterSpec, type ProductionChoice } from "./contract";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import type OpenAI from "openai";
 
 // 제작 방식 선택 — 기본은 lemo-code로 정해 두고 스타일 후보(catalog.ts, 구현된 스타일 전부 포함) 중에서 AI가 스타일 · 배역을 고르고 이유를 남긴다.
+// 스타일마다 캐릭터가 연기하는 방식인지, 캐릭터 없이 그림 · 도형 · 글자로 설명하는 방식인지가 정해져 있다(styles.json needs_characters).
+// 두 방식의 스타일이 모두 고를 수 있는 후보에 있으면 대본에 맞는 방식을 함께 고르고, 캐릭터 없는 스타일이 구현되지 않았으면 지금처럼 캐릭터 방식으로 간다(2026-11-13 사용자 결정).
 // 기존 AI 자동 영상(auto-video)은 allowAutoVideo일 때만 후보가 된다(2026-11-11 사용자 결정: AI 자동 영상은 lemo로).
 // 외부 영상 생성 모델은 이 프로젝트에 연결된 경로가 없어 후보로 만들지 않는다(contract.ts BACKENDS).
 // 캐릭터 라이브러리는 호출자가 그 계정 것만 넘긴다는 전제다. 다른 계정 캐릭터가 섞여 들어오면 바로 throw한다.
@@ -154,10 +156,11 @@ export function withProductRole(roles: Role[], facts: ProductFacts | null, libra
 const PRODUCT_ROLE_RULE = `- 상품 배역: 상품 자료가 있으면 lemo-code의 characters에 소개하는 상품 자체를 그린 배역을 정확히 하나 넣고 product=true로 표시한다(나머지 배역과 상품 자료가 없는 영상은 모두 false). 상품 배역은 실제 사진이 아니라 그 상품의 용기 · 생김새(튜브 · 병 · 단지 · 상자 · 과일 등)를 스타일에 맞게 그린 캐릭터다. 라이브러리에 이 상품을 그린 캐릭터가 있을 때만 reuse에 그 id를 쓰고, 없으면 null이다. 다른 상품 · 성분 · 사람 캐릭터를 상품 배역으로 쓰지 않는다.`;
 
 // lemo로만 만들 때(기본 — 2026-11-11 사용자 결정 "AI 자동 영상은 스톡이 아니라 lemo로"): 방식은 고르지 않고 스타일 · 배역만 고른다.
-const SYSTEM_LEMO_ONLY = `너는 인스타 릴스 제작 감독이다. 이 영상 한 편은 lemo 코드 애니메이션으로 만든다(정해진 방식이다). 어떤 스타일 · 배역으로 만들지 고른다.
+// {{APPROACH}} 자리에는 캐릭터 없는 스타일도 고를 수 있을 때만 방식 고르기 절이 들어간다(approachBlock).
+const SYSTEM_LEMO_ONLY_TEMPLATE = `너는 인스타 릴스 제작 감독이다. 이 영상 한 편은 lemo 코드 애니메이션으로 만든다(정해진 방식이다). 어떤 스타일 · 배역으로 만들지 고른다.
 
 lemo-code: 코드로 그리는 애니메이션. 계정 라이브러리 캐릭터나 새로 만드는 캐릭터가 표정 · 동작으로 연기한다. 설명형 대본이라도 캐릭터가 설명하고 반응하는 장면으로 풀어 만든다.
-
+{{APPROACH}}
 따질 기준(이 순서로):
 1. 계정 분위기와 시청자 — 계정 설정에 적힌 방향을 참고한다.
 2. 대본 핵심과 흐름 — 캐릭터 이야기인지, 상식 · 원리 설명인지, 순서 안내인지. 처음 3초와 꺾이는 지점이 화면으로 무엇이 되어야 하는지.
@@ -174,6 +177,21 @@ ${PRODUCT_ROLE_RULE}
 - 이유는 짧은 문장으로, 대본 · 계정 설정 · 상품 자료에 있는 근거로 쓴다.
 
 ${CLAIM_RULES}`;
+
+/**
+ * 캐릭터가 연기하는 방식과 캐릭터 없이 설명하는 방식 중에서 고르게 하는 절.
+ * 고를 수 있는 후보에 두 방식이 모두 있을 때만 넣는다. 캐릭터 없는 스타일이 구현되지 않았으면 빈 글자라 프롬프트가 예전과 같다.
+ */
+export function approachBlock(cands: StyleCandidate[]): string {
+  const open = cands.filter((c) => c.selectable);
+  if (!open.some((c) => !c.needs_characters) || !open.some((c) => c.needs_characters)) return "";
+  return `
+이 영상의 방식을 먼저 정한다. 후보마다 [캐릭터 연기] 또는 [캐릭터 없이 설명]이 적혀 있다.
+- 캐릭터 연기: 캐릭터가 표정 · 동작으로 이야기를 끌고 간다. 등장인물의 감정 변화 · 반응이 대본의 중심일 때 맞다.
+- 캐릭터 없이 설명: 얼굴 달린 캐릭터 없이 그림 · 도형 · 글자로 설명한다. 순서 · 비교 · 숫자 · 원리처럼 생각을 차례로 보여 주는 대본, 또는 대본에 나오는 것이 사람 · 동물 · 과일 · 병 같은 모양으로 그리기 어려운 물건(색연필 · 쟁반 · 봉지 등)일 때 맞다.
+- 캐릭터 없이 설명 스타일을 고르면 characters는 빈 배열이다(상품 배역도 두지 않는다. 상품은 그 스타일의 그림으로 보여 준다).
+`;
+}
 
 const SYSTEM = `너는 인스타 릴스 제작 감독이다. 이 영상 한 편을 어떤 방식으로 만들지 고른다.
 
@@ -219,7 +237,7 @@ function candidateBlock(cands: StyleCandidate[]): string {
   return cands
     .map(
       (c) =>
-        `### ${c.slug} — ${c.name} [selectable=${c.selectable}]
+        `### ${c.slug} — ${c.name} [selectable=${c.selectable}] [${c.needs_characters ? "캐릭터 연기" : "캐릭터 없이 설명"}]
 규칙 점수 ${c.score} · ${c.render_mode}${c.webgl ? " · WebGL" : ""} · 러너 속도 ${c.runner_speed} · 비용 ${c.cost}
 맞는 점: ${c.reasons.join(" / ") || "없음"}
 막는 점: ${c.blockers.join(" / ") || "없음"}
@@ -239,10 +257,13 @@ function choiceProblems(ai: AiChoice, cands: StyleCandidate[], library: Characte
     if (!ai.style) out.push("lemo-code를 골랐는데 style이 비어 있어요");
     else if (!c) out.push(`style ${ai.style}는 후보 목록에 없어요`);
     else if (!c.selectable) out.push(`style ${ai.style}는 selectable=false라 고를 수 없어요(${c.blockers.join(", ")})`);
-    if (!ai.characters.length) out.push("lemo-code인데 배역(characters)이 비어 있어요");
+    // 캐릭터 없이 설명하는 스타일은 배역을 두지 않는다(상품 배역 규칙도 캐릭터 연기 방식에만)
+    const withCast = !c || c.needs_characters;
+    if (!withCast && ai.characters.length) out.push(`style ${ai.style}는 캐릭터 없이 설명하는 방식이라 characters는 빈 배열이어야 해요`);
+    if (withCast && !ai.characters.length) out.push("lemo-code인데 배역(characters)이 비어 있어요");
     const ids = new Set(library.map((x) => x.id));
     for (const ch of ai.characters) if (ch.reuse && !ids.has(ch.reuse)) out.push(`배역 ${ch.role}: 재사용 id ${ch.reuse}가 이 계정 라이브러리에 없어요`);
-    if (facts) {
+    if (facts && withCast) {
       const key = productKey(facts);
       const product = ai.characters.filter((ch) => ch.product);
       if (!product.length) out.push(`${PRODUCT_ROLE_TAG} 상품 자료가 있는데 product=true인 배역이 없어요. 소개하는 상품(${facts.name}) 자체를 그린 배역을 하나 넣어 주세요`);
@@ -262,6 +283,40 @@ function choiceProblems(ai: AiChoice, cands: StyleCandidate[], library: Characte
   if (!lemoOnly && otherBackend && !rejected.has(otherBackend)) missing.push(otherBackend);
   if (missing.length) out.push(`rejected에 이유가 빠진 선택지: ${missing.join(", ")}`);
   return out;
+}
+
+/**
+ * 캐릭터 없는 방식으로 다시 만들 때의 선택(AI를 부르지 않는다 — 규칙 점수로 고른다).
+ * 캐릭터 준비가 끝내 실패한 영상(run.ts LemoCastError)을 캐릭터 없이 그림 · 도형 · 글자로 설명하는 스타일로 처음부터 다시 만들 때 쓴다.
+ * 고를 수 있는 캐릭터 없는 스타일이 없으면 null(다시 만들지 않는다).
+ */
+export function chooseNoCharacterStyle(input: {
+  account: AccountContext;
+  facts: ProductFacts | null;
+  script: string[];
+  library: CharacterSpec[];
+  sources: { photos: number; gifs: number; archive: number };
+  why: string;
+}): { choice: ProductionChoice; candidates: StyleCandidate[] } | null {
+  const candidates = shortlistStyles({ account: input.account, facts: input.facts, script: input.script, sources: input.sources, library: input.library }, { lemoOnly: true });
+  const open = candidates.filter((c) => c.selectable && !c.needs_characters).sort((a, b) => b.score - a.score);
+  const pick = open[0];
+  if (!pick) return null;
+  const profile = styleProfile(pick.slug);
+  const choice = productionChoiceSchema.parse({
+    backend: "lemo-code",
+    style: pick.slug,
+    render_mode: profile?.render_mode ?? pick.render_mode,
+    reason: `${input.why} — 캐릭터 없이 설명하는 스타일 중 규칙 점수가 가장 높은 ${pick.name}(${pick.slug}, ${pick.score}점)으로 처음부터 다시 만든다${pick.reasons.length ? `(${pick.reasons.slice(0, 2).join(" / ")})` : ""}`,
+    rejected: [
+      ...candidates.filter((c) => c.slug !== pick.slug).map((c) => ({ option: c.slug, why: c.needs_characters ? "캐릭터 연기 스타일 — 캐릭터 준비가 실패해 쓰지 않음" : c.selectable ? `규칙 점수 ${c.score}가 ${pick.slug}보다 낮음` : `고를 수 없음(${c.blockers.join(", ")})` })),
+      { option: "auto-video", why: "lemo로 만들기로 정해져 있어 고르지 않음" },
+    ],
+    characters: [],
+    cost_class: profile?.cost ?? pick.cost,
+    approach: "no-characters",
+  });
+  return { choice, candidates };
 }
 
 /**
@@ -310,7 +365,7 @@ ${librarySummary(input.library)}${input.facts ? `\n이 상품을 그린 라이�
 ${candidateBlock(candidates)}`;
 
   const messages: Message[] = [
-    { role: "system", content: lemoOnly ? SYSTEM_LEMO_ONLY : SYSTEM },
+    { role: "system", content: lemoOnly ? SYSTEM_LEMO_ONLY_TEMPLATE.replace("{{APPROACH}}", approachBlock(candidates)) : SYSTEM },
     { role: "user", content: user },
   ];
   const usages: AiUsage[] = [];
@@ -336,7 +391,9 @@ ${candidateBlock(candidates)}`;
   for (const b of BACKENDS) if (b !== ai.backend && !have.has(b)) rejected.push({ option: b, why: lemoOnly ? "lemo로 만들기로 정해져 있어 고르지 않음" : "AI가 이유를 남기지 않음" });
 
   const profile = ai.style ? styleProfile(ai.style) : undefined;
-  const roles = ai.backend === "lemo-code" ? withProductRole(ai.characters, input.facts, input.library) : [];
+  // 캐릭터 없이 설명하는 스타일이면 배역(상품 배역 포함)을 두지 않는다
+  const withCast = ai.backend === "lemo-code" && !!ai.style && styleNeedsCharacters(ai.style);
+  const roles = withCast ? withProductRole(ai.characters, input.facts, input.library) : [];
   const newChars = roles.filter((c) => !c.reuse).length;
   let cost: ProductionChoice["cost_class"] = "mid";
   if (ai.backend === "lemo-code" && profile) {
@@ -351,6 +408,7 @@ ${candidateBlock(candidates)}`;
     rejected,
     characters: roles,
     cost_class: cost,
+    ...(ai.backend === "lemo-code" ? { approach: withCast ? "characters" : "no-characters" } : {}),
   });
   return { choice, candidates, usage: sumUsage("lemo.select", usages) };
 }

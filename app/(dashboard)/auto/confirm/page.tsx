@@ -171,6 +171,8 @@ export default async function ConfirmPage({ searchParams }: { searchParams: Prom
       issues: ((p.check_result as { issues?: { detail: string }[] } | null)?.issues ?? []).map((i) => i.detail),
       jobStatus: p.publish_jobs?.status ?? null,
       hasStoryboard: !!p.board_at,
+      // lemo로 끝내 못 만들어 영상 없이 멈춘 칸의 이유(워커가 video.needsRemake에 남긴다)
+      needsRemake: p.status === "BLOCKED" ? ((p.video as { needsRemake?: { reason?: string } } | null)?.needsRemake?.reason ?? null) : null,
       // 장면표를 쓸 때 받은 근거 중 실제로 쓴 것 — 승인 · 초안을 나눠 보여 준다
       evidence: Array.isArray(p.board_scenes) && p.board_knowledge ? usedEvidence(p.board_scenes as { evidence?: string[] }[], p.board_knowledge as unknown as VideoKnowledge) : null,
       video: (() => {

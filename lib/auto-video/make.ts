@@ -258,7 +258,7 @@ export async function makeAutoVideo(input: {
   redo?: RedoRequest | null;
   /** 장면표를 새로 확정하면 영상을 만들기 전에 부른다. 워커가 저장하고 SCRIPTED로 바꾼다. 저장하지 못하면 throw해 영상을 만들지 않는다 */
   onBoard?: (saved: SavedStoryboard, script: ScriptOutput & { fixed?: unknown }) => Promise<void>;
-  /** 영상 단계 제작 방식. lemo(기본)면 lemo 코드 애니메이션을 먼저 시도하고, 안 되면 사진 · 스톡 컷으로 만든다. kit이면 사진 · 스톡 컷만 */
+  /** 영상 단계 제작 방식. lemo(기본)면 lemo 코드 애니메이션으로 만들고, 안 되면 LemoBlocked로 멈춘다(사진 · 스톡 컷으로 넘어가지 않는다). kit이면 사진 · 스톡 컷만 */
   engine?: AutoVideoEngine;
 }) {
   const { service, planId, account, productId, rules, workDir } = input;
@@ -711,7 +711,8 @@ export async function makeAutoVideo(input: {
 
   // AI가 고른 글꼴. lemo · 사진 컷 경로가 같은 값을 쓴다. 스킬 글꼴 목록을 못 읽었으면 null(자막 디자인 AI가 고른다)
   const pickedFonts = fontChoices.length ? chosenFonts(fontChoices, { key_font: board.key_font, small_font: board.small_font }) : null;
-  // 3-0. 기본은 lemo 코드 애니메이션(2026-11-11 사용자 결정). 제작 방식 선택이 기존 방식을 고르거나 lemo가 실패하면 아래 사진 · 스톡 컷으로 만든다
+  // 3-0. 기본은 lemo 코드 애니메이션(2026-11-11 사용자 결정). lemo로 끝내 못 만들면 사진 · 스톡 컷으로 넘어가지 않고 LemoBlocked로 멈춘다(2026-11-13 사용자 결정).
+  //      워커가 그 칸을 "다시 만들기 필요"(BLOCKED)로 두고 이유를 남긴다. 아래 사진 · 스톡 컷은 AUTO_VIDEO_ENGINE=kit일 때만 쓴다
   let kit: KitResult | null = null;
   let lemo: LemoAttempt["record"] | null = null;
   // lemo 화면에 그린 글자(장면표의 화면 글자). 완성본 글자 점검에 넣는다
@@ -737,7 +738,8 @@ export async function makeAutoVideo(input: {
     lemo = tried.record;
     kit = tried.kit;
     lemoTexts = tried.screenTexts;
-    if (kit) sources.push({ no: 1, kind: "lemo", style: tried.record.choice?.style ?? null, characters: [...tried.record.characters.reused, ...tried.record.characters.created] });
+    if (!kit) throw new LemoBlocked(tried.record.blocked ?? "lemo 코드 애니메이션 완성본이 없어요", tried.record);
+    sources.push({ no: 1, kind: "lemo", style: tried.record.choice?.style ?? null, characters: [...tried.record.characters.reused, ...tried.record.characters.created] });
   }
   if (!kit) {
     // 3. 이미지 → 컷. 같은 사진을 또 쓰면 앞 장면이 끝난 곳부터 잇는다
@@ -948,6 +950,18 @@ export async function makeAutoVideo(input: {
 }
 
 export class StopError extends Error {}
+/**
+ * lemo로 끝내 못 만들어 이 칸을 "다시 만들기 필요"로 둔다(사진 · 스톡 컷으로 넘어가지 않는다, 2026-11-13 사용자 결정).
+ * reason은 확인 화면에 보이는 이유, record는 선택 · 캐릭터 · 사용량 기록(칸의 video.lemo)이다.
+ */
+export class LemoBlocked extends StopError {
+  constructor(
+    readonly reason: string,
+    readonly record: LemoAttempt["record"],
+  ) {
+    super(`lemo 코드 애니메이션으로 만들지 못했어요: ${reason}`);
+  }
+}
 /** 시험(--dry-run --board-only)에서 장면표까지 만들고 멈췄다는 표시. left = 고친 뒤에도 남은 문제 */
 export class BoardOnlyDone extends Error {
   constructor(readonly left: string[]) {

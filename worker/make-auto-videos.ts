@@ -8,7 +8,7 @@ import { markArchiveUsed } from "@/lib/auto-video/archive";
 import type { AutoVideoEngine } from "@/lib/auto-video/lemo";
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { scoreHooks } from "@/lib/agents/ko-skills";
-import { BoardOnlyDone, makeAutoVideo, StopError, type RedoRequest, type SavedStoryboard } from "@/lib/auto-video/make";
+import { BoardOnlyDone, LemoBlocked, makeAutoVideo, StopError, type RedoRequest, type SavedStoryboard } from "@/lib/auto-video/make";
 import { scheduleAutoVideo, type AutoVideo } from "@/lib/auto-video/publish";
 import { kstDate } from "@/lib/automation/time";
 import type { ContentRule } from "@/lib/rules/check";
@@ -23,8 +23,9 @@ import type { Json } from "@/types/database";
 //   같은 칸은 making_since 조건부 UPDATE로 한 실행만 집는다.
 //   참고 내용은 자동 콘텐츠 설정(auto_*)만 읽는다. 직접 촬영의 shoot_* 값은 읽지 않는다.
 //   통과하면 RENDERED. AUTO_VIDEO_PUBLISH=1이고 사람이 볼 경고가 없을 때만 바로 발행 대기열로 간다.
-//   영상 단계는 기본이 lemo 코드 애니메이션(lib/auto-video/lemo.ts, 2026-11-11). 제작 방식 선택이 기존 방식을 고르거나 lemo가 실패하면
-//   사진 · 스톡 컷으로 만든다. 러너 변수 AUTO_VIDEO_ENGINE=kit이면 lemo를 부르지 않고 사진 · 스톡 컷만 쓴다.
+//   영상 단계는 기본이 lemo 코드 애니메이션(lib/auto-video/lemo.ts, 2026-11-11). lemo로 끝내 못 만들면 사진 · 스톡 컷으로 넘어가지 않고
+//   그 칸을 영상 없이 BLOCKED로 두고 이유를 남긴다(video.needsRemake — 확인 화면의 "다시 만들기 필요", 2026-11-13).
+//   러너 변수 AUTO_VIDEO_ENGINE=kit이면 lemo를 부르지 않고 사진 · 스톡 컷만 쓴다.
 //
 // 옵션: --dry-run (DB에 안 쓰고 결과 파일 위치만 출력) · --plan <id> (그 칸만)
 //       --board-only (--dry-run과 함께: 대본 · 장면표까지만 만들고 영상은 만들지 않는다. --out에 storyboard-review.json)
@@ -45,7 +46,7 @@ async function main() {
   const onlyPlan = arg(argv, "--plan");
   const autoPublish = process.env.AUTO_VIDEO_PUBLISH === "1";
   const engine: AutoVideoEngine = process.env.AUTO_VIDEO_ENGINE === "kit" ? "kit" : "lemo";
-  console.log(`[auto-video] 영상 제작 방식: ${engine === "lemo" ? "lemo 우선(안 되면 사진 · 스톡 컷)" : "사진 · 스톡 컷"}`);
+  console.log(`[auto-video] 영상 제작 방식: ${engine === "lemo" ? "lemo(안 되면 다시 만들기 필요로 멈춤)" : "사진 · 스톡 컷"}`);
   const service = createServiceClient();
 
   const { data: ruleRows } = await service.from("content_rules").select("id, scope, rule_type, phrase, match_type, reason, suggestion").eq("active", true);
@@ -166,7 +167,7 @@ async function main() {
       });
       const { kit, check, blocking } = made;
       const seconds = Math.round((Date.now() - t0) / 1000);
-      console.log(`  제작 방식: ${made.engine}${made.lemo?.choice?.style ? ` (${made.lemo.choice.style})` : ""}${made.lemo?.fallback ? ` — ${made.lemo.fallback}` : ""}`);
+      console.log(`  제작 방식: ${made.engine}${made.lemo?.choice?.style ? ` (${made.lemo.choice.style})` : ""}`);
       console.log(`  완성 ${kit.seconds.toFixed(1)}초 · ${seconds}초 걸림 · 토큰 입력 ${made.tokens.input} 출력 ${made.tokens.output} · ${kit.loudness} LUFS · 음성 ${kit.usedVoice} · 글자 "${kit.plan.look?.reading ?? ""}"`);
       console.log(`  소재: ${JSON.stringify(made.sources.map((s) => { const x = s as { no: number; kind: string }; return `${x.no}:${x.kind}`; }))}`);
       for (const b of kit.plan.beats) console.log(`  · ${b.tts} | ${b.captions.join(" / ")} | ${b.cuts.map((c) => `${c.clip}:${c.in}-${c.out}`).join(",")}`);
@@ -286,12 +287,30 @@ async function main() {
       if (dryRun && arg(argv, "--out")) {
         const out = arg(argv, "--out")!;
         mkdirSync(out, { recursive: true });
-        writeFileSync(join(out, `${plan.id}-failure.json`), JSON.stringify({ error: message }, null, 2));
+        writeFileSync(join(out, `${plan.id}-failure.json`), JSON.stringify({ error: message, ...(err instanceof LemoBlocked ? { needsRemake: err.reason, lemo: err.record } : {}) }, null, 2));
         for (const [name, file] of [["storyboard-review", join(workDir, "storyboard-review.json")], ["quality", join(workDir, "kit", "quality.json")]]) {
           try { copyFileSync(file, join(out, `${plan.id}-${name}.json`)); } catch { /* 이 단계 전 실패면 기록 없음 */ }
         }
       }
-      if (!dryRun) {
+      if (!dryRun && err instanceof LemoBlocked) {
+        // lemo로 끝내 못 만든 칸: 사진 · 스톡 컷으로 만들지 않고 영상 없이 멈춘다. 이유는 확인 화면의 "다시 만들기 필요"에 보인다.
+        // 같은 장면표로 다시 돌려도 결과가 같을 가능성이 높아 시도 횟수가 남아도 저절로 다시 만들지 않는다(사람이 다시 만들기를 누른다).
+        // error는 비운다 — 확인 화면이 error를 "다음 실행에 다시 시도"로 보여 주기 때문이다
+        warnIfError(
+          await service
+            .from("content_plans")
+            .update({
+              status: "BLOCKED",
+              note: `다시 만들기 필요: ${err.reason}`.slice(0, 300),
+              error: null,
+              making_since: null,
+              video: { ...(prev.remake ? { remake: true } : {}), state: "done", attempts, engine: "lemo", lemo: err.record, needsRemake: { reason: err.reason, at: new Date().toISOString() } } as unknown as Json,
+            })
+            .eq("id", plan.id)
+            .in("status", ["CONFIRMED", "SCRIPTED"]),
+          `칸 멈춤 기록 (plan=${plan.id})`,
+        );
+      } else if (!dryRun) {
         const stop = err instanceof StopError || attempts >= MAX_ATTEMPTS;
         warnIfError(
           await service

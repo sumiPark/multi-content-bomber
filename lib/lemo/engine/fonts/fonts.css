@@ -1,2 +1,4 @@
 /* Gaegu(OFL, Google Fonts) — 화면 속 손글씨 소품(word)용. 나레이션 자막에는 쓰지 않는다 */
 @font-face { font-family: 'Gaegu'; font-weight: 700; src: url(Gaegu-Bold.ttf); font-display: block; }
+/* Pretendard ExtraBold(OFL, 저장소 .claude/skills/ig-edit-ko/assets/fonts에서 복사) — 캐릭터 없는 픽토그램 스타일의 화면 글자(word)용 */
+@font-face { font-family: 'Pretendard'; font-weight: 800; src: url(Pretendard-ExtraBold.woff2) format('woff2'); font-display: block; }
