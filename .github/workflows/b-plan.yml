@@ -23,7 +23,8 @@ permissions:
 jobs:
   plan-b:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 분석 전 상품을 고르면 그 자리에서 상세페이지를 분석한다(상품당 1~2분, 0057) — 그만큼 여유를 둔다.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,3 +39,5 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+          # 그 자리 상품 분석 모델(비우면 기본 gpt-6.1-terra) — products.yml과 같은 변수
+          PRODUCT_ANALYSIS_MODEL: ${{ vars.PRODUCT_ANALYSIS_MODEL }}

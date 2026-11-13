@@ -72,6 +72,14 @@ export async function triggerProductsRun(reason: string): Promise<void> {
 }
 
 /**
+ * 상세페이지 분석만 즉시 실행시킨다(수집 건너뜀) — 사람이 분석 전 상품을 골랐을 때(0057).
+ * 같은 products 워크플로라 수집 · 분석 run이 돌고 있으면 그 뒤에 시작한다.
+ */
+export async function triggerProductAnalysisRun(reason: string): Promise<void> {
+  await dispatch(PRODUCTS_DISPATCH_EVENT, reason, { analyze_only: "true" });
+}
+
+/**
  * 직접 촬영 기획안 후보 만들기 — "다시 만들기"로 칸 제안을 지운 뒤. date가 있으면 그 날짜 칸을 채운다.
  * 평소엔 매일 05시(KST) schedule이 내일 칸을 채운다.
  */

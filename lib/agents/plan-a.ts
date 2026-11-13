@@ -3,7 +3,7 @@ import { conceptBlock } from "@/lib/agents/concept";
 import { SHOW_SECONDS } from "@/lib/agents/edit-plan";
 import { editKit } from "@/lib/agents/ko-skills";
 import { runAgent, type AgentResult } from "@/lib/agents/runner";
-import { selectSkills, type SelectContext } from "@/lib/agents/select";
+import { ensureUsable, newPickCache, selectSkills, type SelectContext } from "@/lib/agents/select";
 import { KIND_LABEL, SHOPS } from "@/lib/products/shops";
 
 // 직접 촬영 기획 — 계정별 기획 목록(날짜 · 시각 없음, 계정당 5개 유지)에 넣을 기획을 낸다(상품 선정(1) + 기획(2)을 한 번에).
@@ -52,6 +52,7 @@ function systemPrompt(ctx: PlanAContext): string {
 
 할 일: 이 계정의 촬영 기획 목록에 넣을 기획 ${ctx.count}개. 날짜 · 시각은 정하지 않는다. 사람이 찍을 수 있을 때 고른다.
 - 반드시 list_candidates로 후보를 받고 그 안의 id만 쓴다. 상품을 지어내지 않는다.
+- analyzed=false 상품은 상세페이지를 아직 분석하지 않은 상품이다. 고르려면 get_product로 분석 결과를 먼저 받고(1~2분), usable=false면 쓰지 않는다.
 - 기획마다 상품이 달라야 하고, 형식도 되도록 겹치지 않아야 고르는 의미가 있다.
 - 실제로 찍을 수 있는 기획만: 휴대폰 한 대, 사무실 · 집, 혼자 또는 둘. 보여 주는 영상은 ${SHOW_SECONDS.min}~${SHOW_SECONDS.max}초, 사람이 나와 설명하는 영상은 내용에 맞게 30~85초. 촬영 장비 · 장소 섭외가 필요한 기획은 안 된다. 찍는 사람의 얼굴은 나와도 된다.
 - 찍으면 보이는 것으로 보여 준다: 제형 · 단면 · 크기 비교 · 사용 과정 · 구성. 효과 전후 비교, 장기 사용 결과처럼 촬영으로 증명할 수 없는 기획은 안 된다.
@@ -65,7 +66,7 @@ function systemPrompt(ctx: PlanAContext): string {
 }
 
 export async function planShootIdeas(ctx: PlanAContext, opts: { log: boolean }): Promise<AgentResult<PlanAOutput>> {
-  const cache = { ids: new Set<string>() };
+  const cache = newPickCache();
   const result = await runAgent({
     agent: "plan",
     system: systemPrompt(ctx),
@@ -81,13 +82,20 @@ export async function planShootIdeas(ctx: PlanAContext, opts: { log: boolean }):
   });
 
   // 코드로 한 번 더: 후보에서 받은 id만, 한 상품은 한 기획에만, 정한 개수까지.
+  // 분석 전 상품을 get_product 없이 골랐으면 여기서 분석하고, 쓸 수 없으면 그 기획을 뺀다
+  // (대본 초안이 분석 없이 쓰였으니 다른 상품으로 바꾸지 않는다 — 빈자리는 다음 실행이 채운다).
   const used = new Set<string>();
-  const ideas = result.output.ideas
-    .filter((i) => {
-      if (!cache.ids.has(i.product_id) || used.has(i.product_id)) return false;
-      used.add(i.product_id);
-      return true;
-    })
-    .slice(0, ctx.count);
+  const ideas: PlanAIdea[] = [];
+  for (const i of result.output.ideas) {
+    if (ideas.length >= ctx.count) break;
+    if (!cache.ids.has(i.product_id) || used.has(i.product_id)) continue;
+    const check = await ensureUsable(ctx.service, cache, i.product_id);
+    if (!check.ok) {
+      console.log(`[plan-a] 기획 "${i.title}" 제외 — ${check.reason}`);
+      continue;
+    }
+    used.add(i.product_id);
+    ideas.push(i);
+  }
   return { ...result, output: { ideas } };
 }

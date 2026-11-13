@@ -2,6 +2,7 @@ name: products
 
 # 상품 수집 워커(worker/collect-products.ts) — 오늘과일 · 쿠마마켓 · 리유 상품을 공개 API로 받는다.
 # 수집이 끝나면 같은 run에서 상세 이미지 분석(worker/analyze-products.ts)을 이어 붙인다.
+# 수집은 새 상품을 분석 전(pending)으로만 두고, 분석은 요청된(queued) 상품만 한다 — 다시 분석 · 사람이 직접 고른 상품(0057).
 on:
   # 매일 03시(KST) = 18시(UTC). 하루 한 번이면 되고, 몇 시간 밀려도 괜찮다.
   schedule:
@@ -34,7 +35,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # 사람이 분석 전 상품을 골라 분석만 요청한 실행(analyze_only)은 수집을 건너뛰고 바로 분석한다(0057).
       - name: Collect products
+        if: ${{ github.event.client_payload.analyze_only != 'true' }}
         run: npm run worker:products
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}

@@ -65,7 +65,7 @@ export function CollectionStatus({
   collectRun: WorkerRunRow | null;
   analyzeRun: WorkerRunRow | null;
   // 판매 중 상품 기준 (분석 대상)
-  progress: { total: number; done: number; queued: number; analyzing: number; failed: number };
+  progress: { total: number; done: number; pending: number; queued: number; analyzing: number; failed: number };
   failed: FailedProduct[];
   now: number;
 }) {
@@ -99,7 +99,7 @@ export function CollectionStatus({
               {cs.shops!.map((s) => (
                 <li key={s.shop} className={s.failed ? "text-destructive" : undefined}>
                   {SHOPS[s.shop as ShopCode]?.name ?? s.shop}:{" "}
-                  {s.failed ? "실패" : `${s.saved ?? 0}개 받음 · 새로 분석할 것 ${s.queued ?? 0}개`}
+                  {s.failed ? "실패" : `${s.saved ?? 0}개 받음 · 새 상품 · 바뀐 상품 ${s.queued ?? 0}개`}
                   {!!s.errorCount && !s.failed && <span className="text-warn"> · 오류 {s.errorCount}건</span>}
                 </li>
               ))}
@@ -122,7 +122,9 @@ export function CollectionStatus({
               <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
             <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-              남은 것 {progress.queued + progress.analyzing}개{progress.analyzing > 0 && ` (지금 ${progress.analyzing}개 분석 중)`}
+              분석 전 {progress.pending}개(쓰려고 고를 때 분석)
+              {progress.queued + progress.analyzing > 0 && ` · 분석 요청 ${progress.queued + progress.analyzing}개`}
+              {progress.analyzing > 0 && ` (지금 ${progress.analyzing}개 분석 중)`}
               {progress.failed > 0 && <span className="text-destructive"> · 실패 {progress.failed}개</span>}
             </p>
           </div>

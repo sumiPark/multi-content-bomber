@@ -3,17 +3,20 @@ import "./load-env";
 
 import { triggerProductsRun } from "@/lib/github-dispatch";
 import { analysisModel, emptyUsage, type TokenUsage } from "@/lib/products/analysis/analyze";
-import { analyzeProduct, type AnalysisResult, type StoredExtract } from "@/lib/products/analysis/run";
+import { analyzeProduct, type AnalysisResult } from "@/lib/products/analysis/run";
+import { ANALYSIS_LOCK_MINUTES, QuotaExhaustedError, analyzeClaimedProduct } from "@/lib/products/analysis/store";
 import { fetchProduct } from "@/lib/products/shop-api";
 import { SHOP_CODES, type ProductKind, type ShopCode } from "@/lib/products/shops";
-import { mustOk, warnIfError } from "@/lib/supabase/result";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
-import type { Database, Json } from "@/types/database";
+import type { Database } from "@/types/database";
 import { startRunLog } from "./run-log";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 상세페이지 분석 워커 — 수집기가 분석 대기(queued)로 둔 판매 중 상품의 상세 이미지를 읽어
+// 상세페이지 분석 워커 — 분석 요청(queued)된 판매 중 상품의 상세 이미지를 읽어
 // product_image_extracts · product_analyses에 쌓는다. products.yml에서 수집 다음에 이어 돈다.
+// 수집은 새 상품을 분석 전(pending)으로만 둔다(0057). queued는 "다시 분석" · 사람이 직접 고른 분석 전 상품뿐이다.
+// 분석 코드는 lib/products/analysis/store.ts (AI 상품 고르기가 그 자리에서 분석할 때도 같이 쓴다).
 //
 // 이미지 하나 읽을 때마다 바로 저장해서, run이 시간 예산에 걸리거나 죽어도 다음 run이 읽은
 // 이미지는 건너뛰고 이어 간다. 3번 실패한 상품은 failed로 멈춘다(상품 화면에서 다시 시도).
@@ -27,22 +30,9 @@ import { startRunLog } from "./run-log";
 // products.yml job timeout(60분) 안에서 스스로 끝낸다. 수집에 쓰는 시간을 빼고.
 const RUN_DEADLINE_MS = 45 * 60_000;
 const CLAIM_BATCH = 4;
-const LOCK_MINUTES = 30;
-const MAX_ATTEMPTS = 3;
 // 첫 run 실측(2026-11-03, gpt-6.1-terra): 동시 2개로 45분에 76개. 3개로 올린다.
 const PRODUCT_CONCURRENCY = 3;
 
-type Service = ReturnType<typeof createServiceClient>;
-
-// OpenAI 크레딧 · 한도 소진 — 상품 문제가 아니라 계정 문제라 그 상품의 실패로 세지 않고 run 전체를 멈춘다.
-// (2026-11-03 크레딧이 바닥난 채로 돌아 대기 상품이 줄줄이 "실패"로 쌓일 뻔했다.)
-class QuotaExhaustedError extends Error {}
-
-function isQuotaError(err: unknown): boolean {
-  const e = err as { status?: number; code?: string; error?: { code?: string; type?: string } };
-  const code = e?.code ?? e?.error?.code ?? e?.error?.type;
-  return e?.status === 429 && (code === "insufficient_quota" || code === "credit_balance_exhausted");
-}
 type ProductRow = Database["public"]["Tables"]["products"]["Row"];
 
 function arg(argv: string[], flag: string): string | undefined {
@@ -93,153 +83,6 @@ async function dryRun(argv: string[]) {
   printUsage(usage);
 }
 
-async function saveResult(service: Service, product: ProductRow, r: AnalysisResult) {
-  const { data: prev } = await service
-    .from("product_analyses")
-    .select("edited")
-    .eq("product_id", product.id)
-    .maybeSingle();
-
-  // 사람이 고친 요약은 덮어쓰지 않는다 — 상세페이지가 바뀌었으니 다시 보라고만 남긴다.
-  if (prev?.edited) {
-    mustOk(
-      await service
-        .from("products")
-        .update({
-          analysis_state: "review",
-          analysis_note: "사람이 고친 요약이 있어 새 분석으로 덮어쓰지 않았어요. 상세페이지가 바뀌었는지 확인해 주세요.",
-          analysis_error: null,
-          analysis_locked_until: null,
-        })
-        .eq("id", product.id),
-      `상품 분석 상태 저장 (id=${product.id})`,
-    );
-    return;
-  }
-
-  const { error } = await service.from("product_analyses").upsert({
-    product_id: product.id,
-    kind: product.kind ?? "OTHER",
-    summary: (r.summary ?? {}) as unknown as Json,
-    claims: r.claims as unknown as Json,
-    rejected_claims: r.rejectedClaims as unknown as Json,
-    health_functional: r.healthFunctional,
-    functional_claims: r.functionalClaims,
-    uncertainties: r.uncertainties,
-    model: r.model,
-    source_hash: product.source_hash,
-    analyzed_at: new Date().toISOString(),
-    approved_by: null,
-    approved_at: null,
-  });
-  if (error) throw new Error(`product_analyses 저장 실패: ${error.message}`);
-
-  mustOk(
-    await service
-      .from("products")
-      .update({
-        analysis_state: r.state,
-        analysis_note: r.reason,
-        analysis_error: null,
-        analysis_locked_until: null,
-      })
-      .eq("id", product.id),
-    `상품 분석 상태 저장 (id=${product.id})`,
-  );
-}
-
-async function analyzeOne(service: Service, product: ProductRow, usage: TokenUsage): Promise<string> {
-  try {
-    const { data: rows } = await service
-      .from("product_image_extracts")
-      .select("*")
-      .eq("product_id", product.id);
-    const reuse = new Map<string, StoredExtract>();
-    for (const e of rows ?? []) {
-      reuse.set(e.image_url, {
-        imageUrl: e.image_url,
-        imageIndex: e.image_index,
-        text: e.text,
-        facts: ((e.data as { facts?: StoredExtract["facts"] })?.facts ?? []),
-        ingredients: ((e.data as { ingredients?: string[] })?.ingredients ?? []),
-        fullIngredientsVisible: !!(e.data as { fullIngredientsVisible?: boolean })?.fullIngredientsVisible,
-        uncertainties: e.uncertainties,
-        partCount: e.part_count,
-        width: e.width,
-        height: e.height,
-      });
-    }
-    // 상세페이지에서 빠진 이미지의 추출 결과는 지운다.
-    const stale = [...reuse.keys()].filter((u) => !product.detail_image_urls.includes(u));
-    if (stale.length) {
-      warnIfError(
-        await service.from("product_image_extracts").delete().eq("product_id", product.id).in("image_url", stale),
-        `빠진 이미지 추출 결과 삭제 (product=${product.id})`,
-      );
-    }
-
-    const r = await analyzeProduct(
-      {
-        shop: product.shop_code as ShopCode,
-        kind: (product.kind ?? "OTHER") as ProductKind,
-        name: product.name,
-        summaryTitle: product.summary_title,
-        categoryName: product.category_name,
-        detailImageUrls: product.detail_image_urls,
-      },
-      usage,
-      reuse,
-      async (e) => {
-        const { error } = await service.from("product_image_extracts").upsert({
-          product_id: product.id,
-          image_url: e.imageUrl,
-          image_index: e.imageIndex,
-          text: e.text,
-          data: { facts: e.facts, ingredients: e.ingredients, fullIngredientsVisible: e.fullIngredientsVisible } as unknown as Json,
-          uncertainties: e.uncertainties,
-          part_count: e.partCount,
-          width: e.width,
-          height: e.height,
-          model: analysisModel(),
-          analyzed_at: new Date().toISOString(),
-        });
-        if (error) throw new Error(`product_image_extracts 저장 실패: ${error.message}`);
-      },
-    );
-    await saveResult(service, product, r);
-    return r.state;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (isQuotaError(err)) {
-      // 시도 횟수는 그대로 두고 대기로 되돌린다 — 크레딧을 채우면 다음 run이 그대로 이어 간다.
-      warnIfError(
-        await service
-          .from("products")
-          .update({ analysis_state: "queued", analysis_error: null, analysis_locked_until: null })
-          .eq("id", product.id),
-        `상품 대기로 되돌리기 (id=${product.id})`,
-      );
-      throw new QuotaExhaustedError(`OpenAI 크레딧 · 한도 소진 — 분석을 멈춤: ${message.slice(0, 200)}`);
-    }
-    const attempts = product.analysis_attempts + 1;
-    warnIfError(
-      await service
-        .from("products")
-        .update({
-          analysis_state: attempts >= MAX_ATTEMPTS ? "failed" : "queued",
-          analysis_attempts: attempts,
-          analysis_next_at: new Date(Date.now() + attempts * 10 * 60_000).toISOString(),
-          analysis_error: message.slice(0, 500),
-          analysis_locked_until: null,
-        })
-        .eq("id", product.id),
-      `상품 분석 실패 기록 (id=${product.id})`,
-    );
-    console.error(`[analyze-products] ${product.shop_code} ${product.shop_product_id} 실패(${attempts}회): ${message}`);
-    return "error";
-  }
-}
-
 async function main() {
   const argv = process.argv.slice(2);
   if (argv.includes("--dry-run")) return dryRun(argv);
@@ -256,7 +99,7 @@ async function main() {
   while (Date.now() - startedAt < RUN_DEADLINE_MS && done < limit) {
     const { data, error } = await service.rpc("claim_products_for_analysis", {
       p_limit: Math.min(CLAIM_BATCH, limit - done),
-      p_lock_minutes: LOCK_MINUTES,
+      p_lock_minutes: ANALYSIS_LOCK_MINUTES,
     });
     if (error) {
       console.error("[analyze-products] claim RPC 실패:", error.message);
@@ -270,7 +113,7 @@ async function main() {
     try {
       for (let i = 0; i < batch.length; i += PRODUCT_CONCURRENCY) {
         const results = await Promise.all(
-          batch.slice(i, i + PRODUCT_CONCURRENCY).map((p) => analyzeOne(service, p, usage)),
+          batch.slice(i, i + PRODUCT_CONCURRENCY).map((p) => analyzeClaimedProduct(service, p, usage)),
         );
         for (const r of results) tally[r] = (tally[r] ?? 0) + 1;
       }

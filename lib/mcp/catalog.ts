@@ -17,6 +17,7 @@ const INSTRUCTIONS = `MCB 상품 카탈로그 MCP입니다. 오늘과일(과일 
 콘텐츠 작성 원칙:
 - 특징 · 효능은 claims(원문 근거가 확인된 문장)와 sourceText에 있는 내용만 씁니다. uncertainties의 항목은 단정하지 않습니다.
 - analysisState가 ready가 아니면(review · insufficient 등) 사람이 아직 확인하지 않은 요약이니 초안에만 쓰고 그렇게 밝힙니다.
+- analysisState가 pending · queued · analyzing이면 상세페이지를 아직 분석하지 않은 상품입니다. 요약 · 근거가 비어 있으니 특징 · 효능을 쓰지 않습니다.
 - 건강기능식품: approvedClaims(사람이 확정한 심의 문구)만 기능성 표현으로 씁니다. 비어 있으면 기능성 표현을 쓰지 않습니다.
   healthFunctional이 false인 식품에는 기능성 표현을 붙이지 않습니다.
 - 화장품: 질병 치료 · 예방, 의약품 오인 표현(치료, 완치, 염증 개선, 재생), 기능성 표기 없는 미백 · 주름 · 자외선 차단 주장,
@@ -28,6 +29,9 @@ const db = () => createServiceClient();
 
 // PostgREST or() 필터에 들어갈 검색어 — 구분 문자를 지운다.
 const safeQuery = (q: string) => q.replace(/[,()%*\\]/g, " ").trim();
+
+// 분석 전으로 보는 상태(0057) — 상세페이지를 아직 분석하지 않았거나 분석 중
+const NOT_ANALYZED = ["pending", "queued", "analyzing"];
 
 type AnalysisSummary = { oneLine?: string; usage?: string; cautions?: string; details?: Record<string, unknown> };
 
@@ -60,7 +64,8 @@ const searchProducts: McpTool = {
     return {
       total: data.length,
       products: data.map((p) => {
-        const an = p.product_analyses;
+        // 분석 전(0057) 상품에 남은 예전 분석은 상세페이지가 바뀐 뒤라 내보내지 않는다
+        const an = NOT_ANALYZED.includes(p.analysis_state) ? null : p.product_analyses;
         return {
           id: p.id,
           shop: SHOPS[p.shop_code as ShopCode]?.name ?? p.shop_code,
@@ -104,10 +109,12 @@ const getProducts: McpTool = {
     if (error) throw new Error(error.message);
 
     return (products ?? []).map((p) => {
-      const an = p.product_analyses;
+      // 분석 전(0057) 상품은 요약 · 근거 · 원문을 비워 둔다(예전 분석이 남아 있어도 상세페이지가 바뀐 뒤다)
+      const notAnalyzed = NOT_ANALYZED.includes(p.analysis_state);
+      const an = notAnalyzed ? null : p.product_analyses;
       const summary = (an?.summary ?? {}) as AnalysisSummary;
       let budget = SOURCE_TEXT_LIMIT;
-      const sourceText = (extracts ?? [])
+      const sourceText = (notAnalyzed ? [] : (extracts ?? []))
         .filter((e) => e.product_id === p.id)
         .sort((x, y) => x.image_index - y.image_index)
         .map((e) => {
@@ -128,7 +135,7 @@ const getProducts: McpTool = {
         url: p.url,
         images: { main: p.represent_image_url, detail: p.detail_image_urls },
         analysisState: p.analysis_state,
-        analysisNote: p.analysis_note,
+        analysisNote: notAnalyzed ? "분석 전 — 상세페이지를 아직 분석하지 않은 상품이라 요약 · 근거가 없어요. 콘텐츠에 쓰려면 MCB 상품 화면에서 분석을 요청해 주세요." : p.analysis_note,
         oneLine: summary.oneLine ?? null,
         usage: summary.usage ?? null,
         cautions: summary.cautions ?? null,

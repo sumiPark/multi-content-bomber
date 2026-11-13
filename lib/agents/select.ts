@@ -3,13 +3,18 @@ import { conceptBlock } from "@/lib/agents/concept";
 import { videoProductName } from "@/lib/agents/product-facts";
 import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner";
 import { addDays } from "@/lib/automation/time";
+import { emptyUsage } from "@/lib/products/analysis/analyze";
+import { analyzeNow } from "@/lib/products/analysis/store";
 import { KIND_LABEL, SHOPS, type ProductKind, type ShopCode } from "@/lib/products/shops";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 상품 선정 에이전트(1) — B 트랙 칸마다 어떤 상품으로 영상을 만들지 제안한다. 사람은 컨펌만.
 // AI 판단에 맡기면 안 되는 규칙은 스킬(코드)이 먼저 걸러서 후보에서 뺀다:
-//   판매 중 · 제외 안 됨 · 상세페이지 분석 완료(ready), 건강기능식품은 확정 심의 문구가 있어야,
+//   판매 중 · 제외 안 됨 · 상세페이지 분석 완료(ready) 또는 분석 전(pending), 건강기능식품은 확정 심의 문구가 있어야,
 //   이 계정에서 repeat_gap_days 안에 쓴 상품 빼기, 같은 날 다른 계정이 쓰는 상품 빼기.
+// 분석 전 상품(0057)은 이름 · 가격 · 판매량 · 후기 수만 보고 후보에 올리고, get_product를 부르거나 최종으로 고르면
+// 그 자리에서 분석한다(1~2분, 상품당 약 $0.04). 분석 결과 쓸 수 없으면(확인 필요 · 근거 부족 · 심의 문구 없는 건기식) 후보에서 뺀다.
+// 그 자리 분석은 워커(GitHub Actions)에서만 돈다 — 이 파일은 서버 액션에서 부르지 않는다.
 
 type Service = ReturnType<typeof createServiceClient>;
 export type ProductScope = { shop: ShopCode; kind: Exclude<ProductKind, "OTHER"> };
@@ -56,6 +61,19 @@ export type SelectOutput = z.infer<typeof pickSchema>;
 
 type AnalysisSummary = { oneLine?: string };
 
+// 분석 전으로 보는 상태 — queued는 사람이 분석을 요청해 둔 것(아직 결과 없음)
+const PENDING_STATES = ["pending", "queued"];
+
+/** 한 번의 고르기 실행에서 후보로 보여 준 id(ids)와, 분석까지 끝나 바로 쓸 수 있는 id(usable) */
+export interface PickCache {
+  ids: Set<string>;
+  usable: Set<string>;
+}
+
+export function newPickCache(): PickCache {
+  return { ids: new Set(), usable: new Set() };
+}
+
 // 직접 촬영 기획(plan-a.ts)도 같은 후보 규칙을 쓴다.
 export async function candidateRows(ctx: Pick<SelectContext, "service" | "accountId" | "scopes" | "repeatGapDays" | "slotDate" | "alsoBlocked" | "shootPlanning">) {
   const s = ctx.service;
@@ -99,6 +117,7 @@ export async function candidateRows(ctx: Pick<SelectContext, "service" | "accoun
   }
 
   const rows = [];
+  const pendingRows = [];
   for (const scope of ctx.scopes) {
     const { data, error } = await s
       .from("products")
@@ -111,6 +130,19 @@ export async function candidateRows(ctx: Pick<SelectContext, "service" | "accoun
       .limit(300);
     if (error) throw new Error(error.message);
     rows.push(...(data ?? []));
+    // 건강기능식품은 분석해도 사람이 심의 문구를 확정해야 쓸 수 있어 분석 전 상품을 후보에 올리지 않는다
+    if (scope.kind === "HEALTH_FOOD") continue;
+    const { data: pending, error: pendingError } = await s
+      .from("products")
+      .select("id, shop_code, kind, name, price, raw")
+      .eq("shop_code", scope.shop)
+      .eq("kind", scope.kind)
+      .eq("stock_status", "available")
+      .eq("excluded", false)
+      .in("analysis_state", PENDING_STATES)
+      .limit(300);
+    if (pendingError) throw new Error(pendingError.message);
+    pendingRows.push(...(pending ?? []));
   }
 
   // 건강기능식품은 사람이 확정한 심의 문구가 있어야 B에 쓴다(없으면 기능성 표현을 못 씀).
@@ -121,33 +153,85 @@ export async function candidateRows(ctx: Pick<SelectContext, "service" | "accoun
     for (const a of data ?? []) approved.add(a.product_id);
   }
 
-  return rows
+  type Raw = { salesQuantity?: number | null; reviewCount?: number | null; scoreAverage?: number | null };
+  const base = (r: { id: string; shop_code: string; kind: string | null; name: string; price: number | null; raw: unknown }) => {
+    const raw = (r.raw ?? {}) as Raw;
+    return {
+      id: r.id,
+      shop: SHOPS[r.shop_code as ShopCode]?.name ?? r.shop_code,
+      kind: KIND_LABEL[(r.kind ?? "OTHER") as ProductKind],
+      name: videoProductName(r.name),
+      price: r.price,
+      sales: raw.salesQuantity ?? null,
+      reviews: raw.reviewCount ?? null,
+      rating: raw.scoreAverage ?? null,
+    };
+  };
+  const analyzed = rows
     .filter((r) => !blocked.has(r.id))
     .filter((r) => !r.product_analyses.health_functional || approved.has(r.id))
     .map((r) => {
-      const raw = (r.raw ?? {}) as { salesQuantity?: number | null; reviewCount?: number | null; scoreAverage?: number | null };
       const claims = (Array.isArray(r.product_analyses.claims) ? r.product_analyses.claims : []) as { claim: string }[];
       return {
-        id: r.id,
-        shop: SHOPS[r.shop_code as ShopCode]?.name ?? r.shop_code,
-        kind: KIND_LABEL[(r.kind ?? "OTHER") as ProductKind],
-        name: videoProductName(r.name),
-        price: r.price,
+        ...base(r),
+        analyzed: true,
         oneLine: (r.product_analyses.summary as AnalysisSummary)?.oneLine ?? null,
         topClaims: claims.slice(0, 3).map((c) => c.claim),
-        healthFunctional: r.product_analyses.health_functional,
-        sales: raw.salesQuantity ?? null,
-        reviews: raw.reviewCount ?? null,
-        rating: raw.scoreAverage ?? null,
+        healthFunctional: r.product_analyses.health_functional as boolean | null,
       };
     });
+  const notYet = pendingRows
+    .filter((r) => !blocked.has(r.id))
+    .map((r) => ({ ...base(r), analyzed: false, oneLine: null, topClaims: [] as string[], healthFunctional: null }));
+  return [...analyzed, ...notYet];
 }
 
-export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: { ids: Set<string> }): AgentSkill[] {
+/**
+ * 고른 상품을 바로 쓸 수 있는지 확인한다. 분석 전이면 그 자리에서 분석한다(1~2분).
+ * 쓸 수 없으면 후보(cache.ids)에서 빼고 이유를 돌려준다.
+ */
+export async function ensureUsable(
+  service: Service,
+  cache: PickCache,
+  id: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (cache.usable.has(id)) return { ok: true };
+  if (!cache.ids.has(id)) return { ok: false, reason: "list_candidates에 없던 상품" };
+  const usage = emptyUsage();
+  const startedAt = Date.now();
+  const state = await analyzeNow(service, id, usage);
+  console.log(
+    `[select] 상품 ${id} 그 자리 분석 → ${state} (${((Date.now() - startedAt) / 1000).toFixed(0)}초 · 입력 ${usage.input} · 출력 ${usage.output} 토큰)`,
+  );
+  let reason: string | null = null;
+  if (state !== "ready") {
+    reason =
+      state === "review"
+        ? "분석 결과 사람 확인이 필요한 상품"
+        : state === "insufficient"
+          ? "상세페이지 근거가 부족한 상품"
+          : "상세페이지 분석에 실패한 상품";
+  } else {
+    const { data } = await service.from("product_analyses").select("health_functional").eq("product_id", id).maybeSingle();
+    if (data?.health_functional) {
+      const { data: ok } = await service.from("product_claim_approvals").select("product_id").eq("product_id", id).limit(1);
+      if (!ok?.length) reason = "심의 문구를 확정하지 않은 건강기능식품";
+    }
+  }
+  if (reason) {
+    cache.ids.delete(id);
+    return { ok: false, reason };
+  }
+  cache.usable.add(id);
+  return { ok: true };
+}
+
+export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: PickCache): AgentSkill[] {
   const listCandidates: AgentSkill = {
     name: "list_candidates",
     description:
-      "이 계정이 쓸 수 있는 상품 후보 (판매 중 · 분석 완료 · 최근 사용 안 함 · 다른 계정과 겹치지 않는 것만). 판매량 · 후기 수 많은 순.",
+      "이 계정이 쓸 수 있는 상품 후보 (판매 중 · 최근 사용 안 함 · 다른 계정과 겹치지 않는 것만). 판매량 · 후기 수 많은 순. " +
+      "analyzed=false는 상세페이지를 아직 분석하지 않은 상품이라 oneLine · topClaims가 비어 있다. 이런 상품은 get_product를 부르면 그 자리에서 분석한다(1~2분).",
     input: z.object({
       kind: z.enum(["FRUIT", "FOOD", "COSMETIC", "HEALTH_FOOD", "CLOTHING"]).nullable().describe("종류로 좁히기, 전체면 null"),
       limit: z.number().int().min(5).max(60).describe("최대 개수 (보통 30)"),
@@ -159,17 +243,26 @@ export function selectSkills(ctx: Parameters<typeof candidateRows>[0], cache: { 
         .filter((c) => !a.kind || c.kind === KIND_LABEL[a.kind])
         .sort((x, y) => (y.sales ?? 0) + (y.reviews ?? 0) * 5 - ((x.sales ?? 0) + (x.reviews ?? 0) * 5))
         .slice(0, a.limit);
-      for (const c of filtered) cache.ids.add(c.id);
+      for (const c of filtered) {
+        cache.ids.add(c.id);
+        if (c.analyzed) cache.usable.add(c.id);
+      }
       return { total: all.length, candidates: filtered };
     },
   };
 
   const getProduct: AgentSkill = {
     name: "get_product",
-    description: "후보 상품 하나의 상세 요약 · 원문 근거가 확인된 특징 · 주의사항",
+    description:
+      "후보 상품 하나의 상세 요약 · 원문 근거가 확인된 특징 · 주의사항. 분석 전 상품이면 그 자리에서 분석한다(1~2분). " +
+      "usable=false가 오면 쓸 수 없는 상품이라 후보에서 빠졌으니 다른 상품을 고른다.",
     input: z.object({ id: z.string() }),
     async run(args) {
       const { id } = args as { id: string };
+      if (cache.ids.has(id) && !cache.usable.has(id)) {
+        const check = await ensureUsable(ctx.service, cache, id);
+        if (!check.ok) return { usable: false, reason: `${check.reason}이라 후보에서 뺐어요. 다른 상품을 고르세요.` };
+      }
       const { data, error } = await ctx.service
         .from("products")
         .select("name, price, category_name, detail_image_urls, product_analyses(summary, claims, uncertainties)")
@@ -233,6 +326,7 @@ function systemPrompt(ctx: SelectContext): string {
 
 할 일: ${ctx.slotDate}의 B 칸(${ctx.slotTimes.join(", ")})마다 상품 하나씩 고른다.
 - 반드시 list_candidates로 후보를 받고, 그 안의 id만 쓴다. 후보에 없는 상품을 지어내지 않는다.
+- analyzed=false 상품을 고를 때는 먼저 get_product로 분석 결과를 확인한다. usable=false면 그 상품은 쓰지 않는다.
 - 같은 날 두 칸에 같은 상품을 쓰지 않는다. 가능하면 종류 · 가격대가 다른 상품으로 섞는다.
 - B 영상은 사람이 보지 않고 나가므로, 원문 근거가 있는 특징(topClaims)이 분명하고 영상 소재(상세 이미지)가 넉넉한 상품을 우선한다.
 - 판매량 · 후기가 많은 상품은 근거가 되지만 그것만 보지 말고, 최근 게시물 반응(account_recent_posts)이 있으면 참고한다.
@@ -245,7 +339,7 @@ export async function selectProducts(
   ctx: SelectContext,
   opts: { log: boolean },
 ): Promise<AgentResult<SelectOutput>> {
-  const cache = { ids: new Set<string>() };
+  const cache = newPickCache();
   const result = await runAgent({
     agent: "select",
     system: systemPrompt(ctx),
@@ -260,20 +354,36 @@ export async function selectProducts(
   });
 
   // 코드로 한 번 더: 후보에서 받은 id만, 칸마다 하나, 같은 상품 중복 없음.
+  // 고른 상품이 분석 전이면 여기서 분석하고, 쓸 수 없으면 대안 중 쓸 수 있는 것으로 바꾼다(대안은 앞에서부터 차례로).
+  // 대안은 분석 전이어도 남긴다 — 사람이 바꿀 때 분석을 시작하고 몇 분 뒤 다시 고르게 한다(확인 화면).
   const seen = new Set<string>();
-  const picks = result.output.picks.filter((p) => {
-    if (!ctx.slotTimes.includes(p.slot_time) || !cache.ids.has(p.product_id) || seen.has(p.product_id)) return false;
-    seen.add(p.product_id);
-    return true;
-  });
-  const bySlot = new Map(picks.map((p) => [p.slot_time, p]));
-  return {
-    ...result,
-    output: {
-      picks: [...bySlot.values()].map((p) => ({
-        ...p,
-        alternatives: p.alternatives.filter((a) => cache.ids.has(a.product_id) && a.product_id !== p.product_id).slice(0, 3),
-      })),
-    },
-  };
+  const bySlot = new Map<string, SelectOutput["picks"][number]>();
+  for (const p of result.output.picks) {
+    if (!ctx.slotTimes.includes(p.slot_time) || bySlot.has(p.slot_time)) continue;
+    const options = [{ product_id: p.product_id, reason: p.reason }, ...p.alternatives];
+    let chosen: { product_id: string; reason: string } | null = null;
+    for (const o of options) {
+      if (seen.has(o.product_id) || !cache.ids.has(o.product_id)) continue;
+      const check = await ensureUsable(ctx.service, cache, o.product_id);
+      if (check.ok) {
+        chosen = o;
+        break;
+      }
+      console.log(`[select] ${p.slot_time} 후보 ${o.product_id} 제외 — ${check.reason}`);
+    }
+    if (!chosen) continue;
+    const pickedId = chosen.product_id;
+    seen.add(pickedId);
+    bySlot.set(p.slot_time, {
+      slot_time: p.slot_time,
+      product_id: pickedId,
+      reason: chosen.reason,
+      alternatives: options
+        .filter((a) => a.product_id !== pickedId && cache.ids.has(a.product_id))
+        // 이미 분석이 끝난 대안을 앞에
+        .sort((a, b) => Number(cache.usable.has(b.product_id)) - Number(cache.usable.has(a.product_id)))
+        .slice(0, 3),
+    });
+  }
+  return { ...result, output: { picks: [...bySlot.values()] } };
 }

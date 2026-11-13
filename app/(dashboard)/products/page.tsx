@@ -96,6 +96,8 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const progress = {
     total: target.length,
     done: target.filter((r) => ["ready", "review", "insufficient"].includes(r.analysis_state)).length,
+    // 분석 전 = 수집만 한 상품(쓰려고 고를 때 분석, 0057) · queued = 다시 분석 · 직접 고르기로 분석을 요청한 상품
+    pending: target.filter((r) => r.analysis_state === "pending").length,
     queued: target.filter((r) => r.analysis_state === "queued").length,
     analyzing: target.filter((r) => r.analysis_state === "analyzing").length,
     failed: target.filter((r) => r.analysis_state === "failed").length,
@@ -196,7 +198,7 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                   <p className="text-xs tabular-nums text-muted-foreground">
                     분석 완료 {count((r) => mine(r) && r.analysis_state === "ready")}
                     {" · "}확인 필요 {count((r) => mine(r) && r.analysis_state === "review")}
-                    {" · "}대기 {count((r) => mine(r) && r.analysis_state === "queued" && r.stock_status === "available")}
+                    {" · "}분석 전 {count((r) => mine(r) && (r.analysis_state === "pending" || r.analysis_state === "queued") && r.stock_status === "available")}
                   </p>
                 </Link>
               );

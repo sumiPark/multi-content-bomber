@@ -8,6 +8,8 @@ export const STOCK_LABEL: Record<string, string> = {
 };
 
 export const ANALYSIS_LABEL: Record<string, string> = {
+  // 수집만 하고 아직 분석하지 않은 상품 — 쓰려고 고를 때 분석한다(0057)
+  pending: "분석 전",
   queued: "분석 대기",
   analyzing: "분석 중",
   ready: "분석 완료",
@@ -18,6 +20,7 @@ export const ANALYSIS_LABEL: Record<string, string> = {
 };
 
 export const ANALYSIS_BADGE: Record<string, "secondary" | "outline" | "destructive" | "default"> = {
+  pending: "outline",
   queued: "outline",
   analyzing: "outline",
   ready: "secondary",

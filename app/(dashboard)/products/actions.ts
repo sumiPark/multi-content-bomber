@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
-import { triggerProductsRun } from "@/lib/github-dispatch";
+import { triggerProductAnalysisRun, triggerProductsRun } from "@/lib/github-dispatch";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -111,8 +111,8 @@ export async function reanalyzeAction(input: z.infer<typeof reanalyzeSchema>): P
     })
     .eq("id", parsed.data.productId);
   if (error) return { ok: false, error: error.message };
-  // 깨우지 못해도 다음 03시 실행이 집어 간다 — 즉시성만 손해
-  await triggerProductsRun(`reanalyze:${parsed.data.productId}`).catch((e) => console.error("[products] 분석 트리거 실패:", e));
+  // 수집은 건너뛰고 분석만 돈다(0057). 깨우지 못해도 다음 03시 실행이 집어 간다 — 즉시성만 손해
+  await triggerProductAnalysisRun(`reanalyze:${parsed.data.productId}`).catch((e) => console.error("[products] 분석 트리거 실패:", e));
   refresh(parsed.data.productId);
   return { ok: true };
 }

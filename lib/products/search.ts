@@ -18,12 +18,19 @@ export interface SearchHit {
   name: string;
   price: number | null;
   image: string | null;
+  /** 분석 전 상품은 요약 대신 "분석 전" 안내가 들어간다 */
   oneLine: string | null;
+  /** 상세페이지 분석이 끝났는지 — 분석 전 상품을 고르면 분석을 시작하고 몇 분 뒤 다시 고르게 한다(0057) */
+  analyzed: boolean;
 }
+
+// 검색에 보여 주는 분석 상태 — 분석 완료와 분석 전(요청됨 · 분석 중 포함). 확인 필요 · 근거 부족 · 실패는 뺀다
+const SEARCH_STATES = ["ready", "pending", "queued", "analyzing"];
+const NOT_ANALYZED_LINE = "분석 전 — 고르면 상세페이지 분석을 시작해요";
 
 export interface SearchGroup {
   label: string;
-  /** 검색어에 걸린 상품 수(판매 중 · 분석 완료) — 보여 주는 수보다 많으면 화면이 더 자세히 입력하라고 안내한다 */
+  /** 검색어에 걸린 상품 수(판매 중 · 분석 완료 또는 분석 전) — 보여 주는 수보다 많으면 화면이 더 자세히 입력하라고 안내한다 */
   total: number;
   hits: SearchHit[];
 }
@@ -72,14 +79,14 @@ export async function searchScopedProducts(
       const { data, count, error } = await service
         .from("products")
         .select(
-          "id, name, price, represent_image_url, product_analyses(summary)",
+          "id, name, price, represent_image_url, analysis_state, product_analyses(summary)",
           { count: "exact" },
         )
         .eq("shop_code", scope.shop)
         .eq("kind", scope.kind)
         .eq("stock_status", "available")
         .eq("excluded", false)
-        .eq("analysis_state", "ready")
+        .in("analysis_state", SEARCH_STATES)
         .filter("name", "imatch", pattern)
         .limit(FETCH);
       if (error) throw new Error(`상품 찾기 실패: ${error.message}`);
@@ -91,20 +98,27 @@ export async function searchScopedProducts(
         .sort(
           (a, b) =>
             a.rank - b.rank ||
+            // 검색어에 똑같이 가까우면 분석이 끝난 상품을 앞에
+            Number(b.p.analysis_state === "ready") - Number(a.p.analysis_state === "ready") ||
             a.p.name.length - b.p.name.length ||
             a.p.name.localeCompare(b.p.name),
         )
         .map(({ p }) => p)
         .slice(0, PER_GROUP)
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          price: p.price,
-          image: p.represent_image_url,
-          oneLine:
-            (p.product_analyses?.summary as { oneLine?: string } | null)
-              ?.oneLine ?? null,
-        }));
+        .map((p) => {
+          const analyzed = p.analysis_state === "ready";
+          return {
+            id: p.id,
+            name: p.name,
+            price: p.price,
+            image: p.represent_image_url,
+            // 분석 전 상품에 남아 있는 예전 요약은 상세페이지가 바뀐 뒤라 보여 주지 않는다
+            oneLine: analyzed
+              ? ((p.product_analyses?.summary as { oneLine?: string } | null)?.oneLine ?? null)
+              : NOT_ANALYZED_LINE,
+            analyzed,
+          };
+        });
       const shop = SHOPS[scope.shop as ShopCode]?.name ?? scope.shop;
       // 뺀 후보만큼 총 개수에서도 뺀다(받은 범위 안에서 확인한 만큼)
       return {

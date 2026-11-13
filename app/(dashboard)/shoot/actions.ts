@@ -9,6 +9,7 @@ import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { getInstagramAuth } from "@/lib/episode-alerts/server";
 import { triggerShootEditRun, triggerShootPlanRun, triggerShotlistRun } from "@/lib/github-dispatch";
 import { listRecentMedia } from "@/lib/platforms/instagram-insights";
+import { notReadyMessage } from "@/lib/products/on-demand";
 import { groupNameOf, pickShopTag, withShopTagText } from "@/lib/products/shop-tag";
 import { searchScopedProducts, type SearchGroup, type SearchHit } from "@/lib/products/search";
 import type { ProductKind } from "@/lib/products/shops";
@@ -139,7 +140,8 @@ export async function addWantedProductAction(input: z.infer<typeof wantedSchema>
   const scopes = (settings.product_scopes ?? []) as { shop: string; kind: string }[];
   if (!scopes.some((s) => s.shop === product.shop_code && s.kind === product.kind)) return { ok: false, error: "이 계정에서 쓰지 않는 상품 종류예요." };
   if (product.stock_status !== "available" || product.excluded) return { ok: false, error: "지금 판매 중인 상품만 고를 수 있어요." };
-  if (product.analysis_state !== "ready") return { ok: false, error: "상세페이지 분석이 끝난 상품만 고를 수 있어요." };
+  // 분석 전이면 분석을 시작하고 몇 분 뒤 다시 고르게 한다(0057 — 60초 안에 분석이 끝나지 않는다)
+  if (product.analysis_state !== "ready") return { ok: false, error: await notReadyMessage(service, product, "shoot-pick") };
 
   if (!parsed.data.force) {
     const warning = await duplicateWarning(service, { accountId: parsed.data.accountId, productId: product.id, gapDays: settings.repeat_gap_days });
@@ -172,7 +174,7 @@ export type ProductHit = SearchHit;
 
 const searchSchema = z.object({ accountId: z.string().uuid(), query: z.string().trim().min(1).max(50) });
 
-/** 원하는 상품 찾기 — 이 계정이 쓰는 몰 · 종류, 판매 중, 분석 완료만. 종류별로 묶어 검색어에 가까운 순서로. */
+/** 원하는 상품 찾기 — 이 계정이 쓰는 몰 · 종류, 판매 중, 분석 완료 또는 분석 전(고르면 분석 시작). 종류별로 묶어 검색어에 가까운 순서로. */
 export async function searchProductsAction(
   input: z.infer<typeof searchSchema>,
 ): Promise<{ ok: true; groups: SearchGroup[] } | { ok: false; error: string }> {

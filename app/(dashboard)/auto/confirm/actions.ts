@@ -6,6 +6,7 @@ import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { isPastSlot } from "@/lib/automation/deadline";
 import { releaseOldPublish, scheduleAutoVideo } from "@/lib/auto-video/publish";
 import { triggerAutoVideoRun } from "@/lib/github-dispatch";
+import { notReadyMessage } from "@/lib/products/on-demand";
 import { searchScopedProducts, type SearchGroup, type SearchHit } from "@/lib/products/search";
 import { duplicateWarning } from "@/lib/shoot/duplicates";
 import type { Json } from "@/types/database";
@@ -77,7 +78,7 @@ export async function confirmPlanAction(input: z.infer<typeof confirmSchema>): P
     const clash = await sameDayClash(service, plan, nextProduct, auth.orgId);
     if (clash) return clash;
   }
-  const sellable = await checkSellable(service, nextProduct);
+  const sellable = await checkSellable(service, nextProduct, !!parsed.data.productId && parsed.data.productId !== plan.product_id);
   if (!sellable.ok) return sellable;
   return applyConfirm(service, plan, nextProduct, auth.userId);
 }
@@ -108,9 +109,12 @@ async function sameDayClash(service: Service, plan: Plan, productId: string, org
 }
 
 // 판매 중이 아니면 확인하지 않는다 — 확인해도 대본 단계에서 멈춘다(2026-11-04, 예전엔 그대로 확인됐다)
-async function checkSellable(service: Service, productId: string): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { data: product } = await service.from("products").select("stock_status").eq("id", productId).maybeSingle();
+// AI가 낸 다른 후보는 분석 전일 수 있다(0057) — 다른 후보로 바꿀 때(switching) 분석 전이면 분석을 시작하고 몇 분 뒤 다시 고르게 한다.
+// AI가 처음 고른 상품은 고를 때 분석을 마쳤으니 그대로 확인한다(예전과 같다)
+async function checkSellable(service: Service, productId: string, switching: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: product } = await service.from("products").select("id, stock_status, analysis_state").eq("id", productId).maybeSingle();
   if (product?.stock_status !== "available") return { ok: false, error: "지금 판매 중이 아닌 상품이에요. 다른 후보로 바꾸거나 건너뛰어 주세요." };
+  if (switching && product.analysis_state !== "ready") return { ok: false, error: await notReadyMessage(service, product, "auto-alternative") };
   return { ok: true };
 }
 
@@ -236,7 +240,8 @@ export async function pickProductAction(input: z.infer<typeof pickSchema>): Prom
   if (!product) return { ok: false, error: "상품을 찾을 수 없습니다." };
   if (!settings?.scopes.some((s) => s.shop === product.shop_code && s.kind === product.kind)) return { ok: false, error: "이 계정에서 쓰지 않는 상품 종류예요." };
   if (product.stock_status !== "available" || product.excluded) return { ok: false, error: "지금 판매 중인 상품만 고를 수 있어요." };
-  if (product.analysis_state !== "ready") return { ok: false, error: "상세페이지 분석이 끝난 상품만 고를 수 있어요." };
+  // 분석 전이면 분석을 시작하고 몇 분 뒤 다시 고르게 한다(0057 — 60초 안에 분석이 끝나지 않는다)
+  if (product.analysis_state !== "ready") return { ok: false, error: await notReadyMessage(service, product, "auto-pick") };
   if ((await unapprovedHealth(service, [productId])).size) return { ok: false, error: "심의 문구를 확정하지 않은 건강기능식품이에요. 상품 화면에서 문구를 확정한 뒤 골라 주세요." };
   const clash = await sameDayClash(service, plan, productId, auth.orgId);
   if (clash) return clash;

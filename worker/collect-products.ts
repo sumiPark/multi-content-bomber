@@ -27,7 +27,8 @@ import { startRunLog } from "./run-log";
 // 몰마다:
 //   1. 카테고리 트리 → shop_categories (새 카테고리만 기본 수집 규칙 적용, 기존 값은 유지)
 //   2. 수집하는 카테고리의 상품 id 목록 → 상세를 하나씩 받아 products에 upsert
-//      이름 · 요약 · 상세 이미지가 바뀐 상품만 analysis_state=queued (가격 · 재고만 바뀌면 그대로)
+//      이름 · 요약 · 상세 이미지가 바뀐 상품만 analysis_state=pending(분석 전, 가격 · 재고만 바뀌면 그대로).
+//      분석은 수집 때 하지 않고 실제로 쓰려고 고를 때 한다(0057, 2026-11-13).
 //   3. 목록을 끝까지 다 읽었을 때만, 이번에 안 보인 상품을 unavailable로 내린다
 //
 // 옵션: --dry-run (DB에 안 씀, 몰 API만 읽고 요약 출력) · --shop cuma|cm|ru · --limit N (몰당 상세 N개)
@@ -258,10 +259,10 @@ async function collectShop(service: Service | null, shop: ShopCode, args: Args):
       source_hash: p.sourceHash,
       raw: p.raw as Json,
       last_seen_at: new Date().toISOString(),
-      // 상세페이지나 종류가 바뀐 상품만 다시 분석 대기로. 종류가 기타면 분석하지 않는다.
+      // 상세페이지나 종류가 바뀐 상품만 분석 전으로(쓰려고 고를 때 분석). 종류가 기타면 분석하지 않는다.
       ...(changed
         ? {
-            analysis_state: kind === "OTHER" ? "skipped" : "queued",
+            analysis_state: kind === "OTHER" ? "skipped" : "pending",
             analysis_attempts: 0,
             analysis_next_at: new Date().toISOString(),
             analysis_error: null,
@@ -328,7 +329,7 @@ async function main() {
       });
       console.log(
         `[collect-products] ${shop}: 카테고리 ${s.categories} | 수집 카테고리 ${s.collectRoots.join(", ") || "없음"}\n` +
-          `  목록 ${s.listed}개 → 저장 ${s.saved}개 (분석 대기 ${s.queued}, 꺼진 하위 카테고리 ${s.skippedByCategory}, 사라짐 처리 ${s.markedUnavailable})\n` +
+          `  목록 ${s.listed}개 → 저장 ${s.saved}개 (분석 전으로 ${s.queued}, 꺼진 하위 카테고리 ${s.skippedByCategory}, 사라짐 처리 ${s.markedUnavailable})\n` +
           `  종류 ${JSON.stringify(s.byKind)} | 판매 상태 ${JSON.stringify(s.byStock)}` +
           (s.errors.length ? `\n  오류 ${s.errors.length}건: ${s.errors.slice(0, 5).join(" / ")}` : ""),
       );
