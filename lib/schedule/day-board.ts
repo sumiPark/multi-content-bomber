@@ -198,7 +198,9 @@ export async function loadYesterday(supabase: Supabase, now = Date.now()): Promi
   const [{ data: daily }, { data: posts }] = await Promise.all([
     supabase
       .from("account_daily")
-      .select("social_account_id, day, followers_count, social_accounts(display_name)")
+      // 인스타 계정만 — TikTok 성과도 같은 표에 쌓이지만(2026-11-13) 화면은 아직 인스타만 보여 준다.
+      .select("social_account_id, day, followers_count, social_accounts!inner(display_name, platform)")
+      .eq("social_accounts.platform", "INSTAGRAM")
       .in("day", [today, yesterday, dayBefore]),
     supabase
       .from("social_posts")

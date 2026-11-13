@@ -41,7 +41,14 @@ export async function loadCollectionHealth(supabase: Supabase, now: number): Pro
         .order("started_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
-      supabase.from("account_daily").select("day").order("day", { ascending: false }).limit(1).maybeSingle(),
+      // 인스타 수집 상태 — TikTok 행(2026-11-13부터 같은 표)이 인스타 수집 실패를 가리지 않게 인스타만 본다.
+      supabase
+        .from("account_daily")
+        .select("day, social_accounts!inner(platform)")
+        .eq("social_accounts.platform", "INSTAGRAM")
+        .order("day", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
       supabase
         .from("social_accounts")
         .select("id", { count: "exact", head: true })

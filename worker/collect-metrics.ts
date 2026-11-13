@@ -18,7 +18,9 @@ import {
 import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
+import { processTokenRefreshSweep } from "./processors/token-refresh-processor";
 import { startRunLog } from "./run-log";
+import { collectTikTokAccount, type TikTokAccountResult, type TikTokAccountRow } from "./tiktok-metrics";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 성과 수집 워커 — 성과 분석 에이전트(6)의 수집 부분. "한 번 실행하고 종료"하는 배치.
@@ -292,28 +294,76 @@ async function main() {
     return;
   }
   const accounts = (data ?? []) as AccountRow[];
+  const results: (AccountResult | TikTokAccountResult)[] = [];
   if (accounts.length === 0) {
     console.log("[collect-metrics] 수집할 인스타 계정 없음");
-    await log.finish("success", { accounts: [] });
-    return;
+  } else {
+    // 계정이 4개라 순서대로 — 계정마다 호출 한도가 따로라 병렬의 이득이 작고, 로그가 읽기 쉽다.
+    const systemAccess = await loadSystemAccess();
+    for (const account of accounts) {
+      const r = await collectAccount(service, account, win, systemAccess);
+      console.log(
+        `[collect-metrics] ${r.account}: ${r.status} | 게시물 ${r.posts}개 | 성과 ${r.insights ? `있음(${r.source === "system" ? "시스템 키" : "계정 토큰"})` : "없음"}` +
+          (r.message ? ` | ${r.message}` : ""),
+      );
+      results.push(r);
+    }
   }
 
-  // 계정이 4개라 순서대로 — 계정마다 호출 한도가 따로라 병렬의 이득이 작고, 로그가 읽기 쉽다.
-  const systemAccess = await loadSystemAccess();
-  const results: AccountResult[] = [];
-  for (const account of accounts) {
-    const r = await collectAccount(service, account, win, systemAccess);
+  // TikTok — 수집만(화면은 아직 인스타만). 접근 토큰이 24시간이라 수집 전에 갱신이 필요한 계정을 먼저 갱신한다.
+  for (const r of await collectTikTok(service, win.today)) {
     console.log(
-      `[collect-metrics] ${r.account}: ${r.status} | 게시물 ${r.posts}개 | 성과 ${r.insights ? `있음(${r.source === "system" ? "시스템 키" : "계정 토큰"})` : "없음"}` +
+      `[collect-metrics] ${r.account}: ${r.status} | 게시물 ${r.posts}개 | 성과 ${r.insights ? "있음" : "없음"}` +
         (r.message ? ` | ${r.message}` : ""),
     );
     results.push(r);
   }
 
+  if (results.length === 0) {
+    await log.finish("success", { accounts: [] });
+    return;
+  }
   if (results.every((r) => r.status !== "ok")) process.exitCode = 1;
   await log.finish(process.exitCode ? "failed" : "success", { day: win.today, accounts: results });
   const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`[collect-metrics] 완료 day=${win.today} | ${elapsed}s`);
+}
+
+// 갱신 창(12시간) — token-refresh-processor의 TikTok 기준과 같다.
+const TIKTOK_REFRESH_BEFORE_MS = 12 * 60 * 60_000;
+const TIKTOK_SELECT = "id, organization_id, display_name, platform_account_id, access_token_encrypted, token_expires_at";
+
+async function collectTikTok(service: Service, today: string): Promise<TikTokAccountResult[]> {
+  const load = () =>
+    service
+      .from("social_accounts")
+      .select(TIKTOK_SELECT)
+      .eq("platform", "TIKTOK")
+      .eq("is_active", true)
+      .is("disconnected_at", null)
+      .not("access_token_encrypted", "is", null);
+  const { data, error } = await load();
+  if (error) {
+    console.error("[collect-metrics] TikTok 계정 조회 실패:", error.message);
+    return [];
+  }
+  if (!data?.length) return [];
+
+  const due = data
+    .filter((a) => !a.token_expires_at || Date.parse(a.token_expires_at) - Date.now() < TIKTOK_REFRESH_BEFORE_MS)
+    .map((a) => a.id);
+  if (due.length > 0) {
+    const stats = await processTokenRefreshSweep(due);
+    console.log(`[collect-metrics] TikTok 토큰 갱신`, stats);
+  }
+
+  // 갱신된 토큰으로 다시 읽는다(갱신이 거절된 계정은 비활성으로 바뀌어 빠진다).
+  const { data: fresh } = await load();
+  const results: TikTokAccountResult[] = [];
+  for (const account of (fresh ?? []) as TikTokAccountRow[]) {
+    results.push(await collectTikTokAccount(service, account, today));
+  }
+  return results;
 }
 
 main()

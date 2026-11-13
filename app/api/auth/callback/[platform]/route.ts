@@ -24,7 +24,8 @@ export async function GET(
   const platform = platformUpper as Platform;
 
   const url = new URL(request.url);
-  const code = url.searchParams.get("code");
+  // TikTok 비즈니스 API는 auth_code로 줄 때가 있다(토큰 교환 필드 이름도 auth_code).
+  const code = url.searchParams.get("code") ?? url.searchParams.get("auth_code");
   const state = url.searchParams.get("state");
   const providerError =
     url.searchParams.get("error_description") ||

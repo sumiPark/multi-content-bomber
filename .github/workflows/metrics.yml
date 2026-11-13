@@ -41,3 +41,6 @@ jobs:
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           # 비즈니스 시스템 사용자 mcb 키 — 할당된 계정의 성과를 읽는다. 없으면 계정 토큰으로 수집.
           IG_DISCOVERY_TOKEN: ${{ secrets.IG_DISCOVERY_TOKEN }}
+          # TikTok 접근 토큰(24시간)을 수집 전에 갱신한다.
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}

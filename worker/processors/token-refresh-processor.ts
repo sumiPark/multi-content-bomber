@@ -15,11 +15,15 @@ const REFRESH_THRESHOLD_MS = 60 * 60 * 1000;
 // 7일 전부터 갱신한다(2026-11-04). 발급 24시간 안 된 토큰은 갱신이 거절되지만 그런 토큰은 이 창에 들지 않는다.
 const INSTAGRAM_REFRESH_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 
+// TikTok 비즈니스 접근 토큰은 24시간이다. 예약 실행이 몇 시간씩 밀려도 접근 토큰이 살아 있는 동안
+// 갱신되도록 12시간 남았을 때부터 갱신한다(성과 수집 워커도 수집 전에 확인한다).
+const TIKTOK_REFRESH_THRESHOLD_MS = 12 * 60 * 60 * 1000;
+
 function thresholdOf(platform: Platform): number {
   // 스레드 60일 토큰(0056)도 인스타와 같다 — 만료되면 th_refresh_token으로 살릴 수 없다.
-  return platform === "INSTAGRAM" || platform === "THREADS"
-    ? INSTAGRAM_REFRESH_THRESHOLD_MS
-    : REFRESH_THRESHOLD_MS;
+  if (platform === "INSTAGRAM" || platform === "THREADS") return INSTAGRAM_REFRESH_THRESHOLD_MS;
+  if (platform === "TIKTOK") return TIKTOK_REFRESH_THRESHOLD_MS;
+  return REFRESH_THRESHOLD_MS;
 }
 
 // 한 번 sweep에서 처리할 최대 계정 수. 만료가 동시에 몰려도 외부 API 호출이 너무
