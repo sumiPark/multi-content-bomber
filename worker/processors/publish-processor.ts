@@ -2,7 +2,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import { recordPublishedEpisode } from "@/lib/episode-alerts/server";
 import { prepublishCheck } from "@/lib/products/prepublish-check";
-import { groupNameOf, shopTagForGroup, withShopTag } from "@/lib/products/shop-tag";
+import { groupNameOf, pickShopTag, withShopTag } from "@/lib/products/shop-tag";
 import {
   getAdapter,
   MediaError,
@@ -462,10 +462,19 @@ async function runPublish(
   const instagramCoverUrl = account.platform === "INSTAGRAM" && typeof igCoverPath === "string" && igCoverPath ? await signCover(supabase, igCoverPath) : null;
 
   // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID/커버/이어받기 상태 주입
-  //   계정 그룹이 오늘과일 · 쿠마마켓 · 리유코스메틱이면 그 상점 태그를 덧붙인다(이미 있으면 그대로).
+  //   상점 태그(#오늘과일 등)를 덧붙인다(이미 있으면 그대로). AI 자동 콘텐츠처럼 기획(content_plans)에 상품이 있으면
+  //   그 상품의 몰, 없으면 계정 그룹을 따른다(lib/products/shop-tag.ts). 조회가 실패하면 계정 그룹만 본다.
   //   틱톡은 해시태그가 본문 안에 있어 본문 끝에, 나머지는 해시태그 배열 끝에 둔다 — 스레드 주제 태그(첫 태그)는 그대로.
   const baseCtx = buildPublishContext(content, account.platform);
-  const shopTag = shopTagForGroup(groupNameOf(account.account_groups));
+  const { data: planRow } = await supabase
+    .from("content_plans")
+    .select("products(shop_code)")
+    .eq("content_id", content.id)
+    .not("product_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+  const productShop = (planRow?.products as { shop_code?: string } | null | undefined)?.shop_code ?? null;
+  const shopTag = pickShopTag(productShop, groupNameOf(account.account_groups));
   if (shopTag && account.platform === "TIKTOK") {
     const withTag = withShopTag([], baseCtx.caption, shopTag);
     if (withTag.length > 0) baseCtx.caption = [baseCtx.caption?.trim(), shopTag].filter(Boolean).join(" ");

@@ -1,14 +1,29 @@
-// 계정 그룹(0009)별 상점 태그 — 오늘과일 그룹 계정은 #오늘과일, 쿠마마켓은 #쿠마마켓, 리유코스메틱은 #리유코스메틱
-// (사용자 요청, 2026-11-12). 계정과 상점의 연결은 계정 연동 화면의 그룹이 기준이다.
-// "리유코스메틱 (일본)"처럼 이름이 정확히 같지 않은 그룹 · 그룹 없는 계정에는 붙이지 않는다.
+// 상점 태그 — 오늘과일은 #오늘과일, 쿠마마켓은 #쿠마마켓, 리유코스메틱은 #리유코스메틱 (사용자 요청, 2026-11-12).
+// 고르는 순서(2026-11-13): AI 자동 콘텐츠 · 직접 촬영처럼 상품이 정해진 콘텐츠는 그 상품의 몰을 따른다
+// (joongdi처럼 리유 · 쿠마마켓 상품을 같이 다루는 계정 때문). 상품이 없으면 계정 연동 화면의 계정 그룹(0009)을 따르고,
+// 아래 목록에 없는 그룹 · 그룹 없는 계정에는 붙이지 않는다.
 // AI가 쓰는 해시태그 3개와 별개로, 발행할 때(worker/processors/publish-processor.ts)와
 // 직접 촬영 완성본 받기 캡션에 덧붙인다. 이미 들어 있으면 다시 붙이지 않는다.
+
+import { SHOPS, type ShopCode } from "@/lib/products/shops";
 
 const SHOP_TAG_BY_GROUP: Record<string, string> = {
   오늘과일: "#오늘과일",
   쿠마마켓: "#쿠마마켓",
   리유코스메틱: "#리유코스메틱",
+  "리유코스메틱 (일본)": "#리유코스메틱",
 };
+
+/** 몰 코드 → 상점 태그 (#오늘과일 · #쿠마마켓 · #리유코스메틱). */
+export function shopTagForShop(code: string | null | undefined): string | null {
+  if (!code || !(code in SHOPS)) return null;
+  return `#${SHOPS[code as ShopCode].name}`;
+}
+
+/** 상품의 몰이 있으면 그 몰, 없으면 계정 그룹으로 상점 태그를 고른다. */
+export function pickShopTag(productShop: string | null | undefined, groupName: string | null | undefined): string | null {
+  return shopTagForShop(productShop) ?? shopTagForGroup(groupName);
+}
 
 /** 계정 그룹 이름 → 상점 태그. 해당 없으면 null. */
 export function shopTagForGroup(groupName: string | null | undefined): string | null {

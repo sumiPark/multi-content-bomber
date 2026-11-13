@@ -9,7 +9,7 @@ import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { getInstagramAuth } from "@/lib/episode-alerts/server";
 import { triggerShootEditRun, triggerShootPlanRun, triggerShotlistRun } from "@/lib/github-dispatch";
 import { listRecentMedia } from "@/lib/platforms/instagram-insights";
-import { groupNameOf, shopTagForGroup, withShopTagText } from "@/lib/products/shop-tag";
+import { groupNameOf, pickShopTag, withShopTagText } from "@/lib/products/shop-tag";
 import { searchScopedProducts, type SearchGroup, type SearchHit } from "@/lib/products/search";
 import type { ProductKind } from "@/lib/products/shops";
 import type { ContentRule } from "@/lib/rules/check";
@@ -1022,7 +1022,7 @@ export async function getShootFilesAction(input: z.infer<typeof filesSchema>): P
   }
 
   const account = plan.social_accounts?.display_name ?? "";
-  const { data: productRow } = plan.product_id ? await service.from("products").select("name").eq("id", plan.product_id).maybeSingle() : { data: null };
+  const { data: productRow } = plan.product_id ? await service.from("products").select("name, shop_code").eq("id", plan.product_id).maybeSingle() : { data: null };
   const productName = productRow?.name ?? "";
   const base = safeFileName(`${account}_${productName}`);
   const sign = async (path: string, name: string, size: number | null): Promise<ShootFile> => {
@@ -1049,7 +1049,7 @@ export async function getShootFilesAction(input: z.infer<typeof filesSchema>): P
     const texts = buildPackageTexts({
       account,
       productName,
-      caption: withShopTagText(script?.caption?.text ?? "", shopTagForGroup(groupNameOf(plan.social_accounts?.account_groups))),
+      caption: withShopTagText(script?.caption?.text ?? "", pickShopTag(productRow?.shop_code, groupNameOf(plan.social_accounts?.account_groups))),
       script,
       cuts: (req.cuts ?? []) as unknown as PackageCut[],
       segments: edit.segments ?? [],
