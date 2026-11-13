@@ -1842,7 +1842,7 @@ function Step3Caption({
                 captions={captions}
                 savedAt={savedAt}
                 thumbnails={thumbnailUrls}
-                initialEditing={captionMode === "manual"}
+                alwaysEditing
                 onSaved={(c, at) => {
                   onCaptionsSaved(c);
                   onSavedAtChange(at);
@@ -2123,7 +2123,7 @@ function Step5Schedule({
   scheduleMode: ScheduleMode;
   scheduledAt: string;
   selectedAccountCount: number;
-  // 틱톡은 앱 심사 전이라 '나만 보기'로만 올라간다(lib/platforms/tiktok.ts privacy_level SELF_ONLY)
+  // 틱톡은 비즈니스 API로 전체 공개로만 올라간다(lib/platforms/tiktok.ts — 비공개 옵션 없음)
   hasTikTok: boolean;
   threadsRows: ThreadsRow[];
   threadsChoice: Record<string, boolean>;
@@ -2225,10 +2225,10 @@ function Step5Schedule({
         )}
 
         {hasTikTok && (
-          <div className="flex gap-2.5 rounded-lg border border-warn/40 bg-warn-soft px-3.5 py-3 text-sm text-ink-2">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warn" />
+          <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-sm text-ink-2">
+            <Info className="mt-0.5 size-4 shrink-0 text-primary" />
             <p>
-              틱톡은 지금 <b>&lsquo;나만 보기&rsquo;</b>로 올라가요. 틱톡 앱 심사를 마치기 전이라 공개로 올릴 수 없어요. 올라간 뒤 틱톡 앱에서 공개로 바꿔 주세요.
+              틱톡은 <b>전체 공개</b>로 바로 올라가요. 비공개로 올리는 선택지는 없어요.
             </p>
           </div>
         )}

@@ -40,6 +40,11 @@ interface CaptionResultProps {
   savedAt: string;
   thumbnails: string[];
   initialEditing?: boolean;
+  /**
+   * 처음부터 칸을 바로 고칠 수 있게 둔다("수정" 버튼 없이). 업로드 마법사용 —
+   * 다음 단계로 넘어갈 때 commit()이 저장하고, 중간에 "저장"으로 먼저 저장할 수도 있다.
+   */
+  alwaysEditing?: boolean;
   /** 저장 성공 시 부모에게 최신 캡션/저장시각을 알린다 (업로드 마법사 상태 동기화용). */
   onSaved?: (captions: Captions, savedAt: string) => void;
 }
@@ -146,11 +151,13 @@ export const CaptionResult = forwardRef<
     savedAt,
     thumbnails,
     initialEditing = false,
+    alwaysEditing = false,
     onSaved,
   },
   ref,
 ) {
-  const [isEditing, setIsEditing] = useState(initialEditing);
+  const [isEditingState, setIsEditing] = useState(initialEditing);
+  const isEditing = alwaysEditing || isEditingState;
   const [draft, setDraft] = useState<DraftCaptions>(() => toDraft(captions));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,16 +256,37 @@ export const CaptionResult = forwardRef<
           <div>
             <CardTitle>AI 캡션</CardTitle>
             <CardDescription className="mt-1">
-              플랫폼별 결과를 수정할 수 있습니다.
+              {alwaysEditing
+                ? "칸을 눌러 바로 고칠 수 있어요. 다음 단계로 넘어가면 저장돼요."
+                : "플랫폼별 결과를 수정할 수 있습니다."}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            {!isEditing && (
+            {alwaysEditing ? (
+              <>
+                {dirty ? (
+                  <Badge variant="warn">저장 전</Badge>
+                ) : (
+                  <Badge variant="secondary">
+                    저장됨 · <RelativeTime iso={lastSaved} />
+                  </Badge>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleSave}
+                  disabled={saving || !dirty}
+                >
+                  <Check className="size-4" />
+                  {saving ? "저장 중..." : "저장"}
+                </Button>
+              </>
+            ) : !isEditing ? (
               <Badge variant="secondary">
                 저장됨 · <RelativeTime iso={lastSaved} />
               </Badge>
-            )}
-            {isEditing ? (
+            ) : null}
+            {alwaysEditing ? null : isEditing ? (
               <>
                 <Button
                   variant="ghost"
