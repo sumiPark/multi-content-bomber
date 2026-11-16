@@ -63,7 +63,7 @@ interface ContentRow {
 
 function contentPaths(c: ContentRow): string[] {
   const meta = (c.metadata && typeof c.metadata === "object" ? c.metadata : {}) as Record<string, unknown>;
-  const extra = [meta.thumbnail_path, meta.cover_path, meta.ig_cover_path].filter((p): p is string => typeof p === "string");
+  const extra = [meta.thumbnail_path, meta.cover_path, meta.cover_image_path, meta.ig_cover_path].filter((p): p is string => typeof p === "string");
   return [...(c.media_urls ?? []), ...extra];
 }
 

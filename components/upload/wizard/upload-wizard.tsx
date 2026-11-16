@@ -190,6 +190,8 @@ export function UploadWizard({
   const [coverSeconds, setCoverSeconds] = useState<number | null>(null);
   // 고른 프레임을 캡처한 JPEG. YouTube 썸네일 업로드용 (TikTok/IG는 시점 ms만 사용).
   const [coverBlob, setCoverBlob] = useState<Blob | null>(null);
+  // 따로 올린 표지 이미지(JPEG). 있으면 세 플랫폼 모두 이 이미지를 표지로 쓴다(metadata.cover_image_path).
+  const [coverImage, setCoverImage] = useState<Blob | null>(null);
   const [mediaPaths, setMediaPaths] = useState<string[]>(
     draft?.mediaPaths ?? [],
   );
@@ -439,6 +441,7 @@ export function UploadWizard({
     setVideoFile(null);
     setCoverSeconds(null);
     setCoverBlob(null);
+    setCoverImage(null);
     setMediaPaths([]);
     setAnalyzePaths([]);
     setMediaMetadata({});
@@ -454,6 +457,7 @@ export function UploadWizard({
     setVideoFile(file);
     setCoverSeconds(null);
     setCoverBlob(null);
+    setCoverImage(null);
   }
 
   function handleChangeFiles(next: File[]) {
@@ -480,11 +484,21 @@ export function UploadWizard({
     setThumbnailUrls([]);
   }
 
-  // 올린 사진 · 영상의 지문 — 같은 파일 · 순서 · 커버면 다시 올리지 않는다
+  // 올린 사진 · 영상의 지문 — 같은 파일 · 순서 · 커버 · 표지 이미지면 다시 올리지 않는다
   const uploadedKeyRef = useRef<string | null>(null);
+  // 표지 이미지는 고를 때마다 새 Blob이라 객체마다 번호를 매겨 바뀐 것을 알아챈다
+  const blobIdsRef = useRef({ ids: new WeakMap<Blob, number>(), next: 1 });
+  function blobId(b: Blob | null): string {
+    if (!b) return "";
+    const reg = blobIdsRef.current;
+    if (!reg.ids.has(b)) reg.ids.set(b, reg.next++);
+    return String(reg.ids.get(b));
+  }
   function mediaKey(): string {
     const sig = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
-    return mediaType === "IMAGE" ? `I|${files.map(sig).join("|")}` : `V|${videoFile ? sig(videoFile) : ""}|${coverSeconds ?? ""}`;
+    return mediaType === "IMAGE"
+      ? `I|${files.map(sig).join("|")}`
+      : `V|${videoFile ? sig(videoFile) : ""}|${coverSeconds ?? ""}|${blobId(coverImage)}`;
   }
 
   async function advanceFromStep2() {
@@ -547,12 +561,13 @@ export function UploadWizard({
         // 커버 프레임: 사용자가 미리보기에서 캡처한 시점이 있으면 metadata에 ms로 기록.
         //  - TikTok/Instagram은 이 ms(cover_ms)만 있으면 됨(워커가 그대로 전달).
         //  - YouTube는 프레임 타임스탬프 API가 없어, 캡처해둔 그 프레임 이미지(coverBlob)를
-        //    업로드(cover_path)하고 워커가 thumbnails.set으로 올린다. 유튜브가 선택된
-        //    경우에만 이미지를 올린다(불필요한 업로드 방지).
+        //    업로드(cover_path)하고 워커가 thumbnails.set으로 올린다.
+        //    고른 계정과 상관없이 늘 올린다 — 표지를 고른 뒤 1단계로 돌아가 유튜브를 더하면 영상을
+        //    다시 올리지 않아 cover_path가 빠지고 유튜브가 아무 장면이나 썸네일로 골랐다(2026-11-16).
         const coverMeta: Record<string, unknown> = {};
         if (coverSeconds !== null) {
           coverMeta.cover_ms = Math.round(coverSeconds * 1000);
-          if (coverBlob && selectedPlatforms.includes("YOUTUBE")) {
+          if (coverBlob) {
             const coverUpload = await uploadOne({
               file: coverBlob,
               contentType: "image/jpeg",
@@ -561,6 +576,17 @@ export function UploadWizard({
             });
             coverMeta.cover_path = coverUpload.path;
           }
+        }
+        // 따로 올린 표지 이미지 — 워커가 유튜브(thumbnails.set) · 인스타(cover_url) · 틱톡(custom_thumbnail_url)
+        // 모두에 이 이미지를 넘긴다. 고른 장면(cover_ms)은 표지 이미지가 거절될 때의 대체로 남는다.
+        if (coverImage) {
+          const coverImageUpload = await uploadOne({
+            file: coverImage,
+            contentType: "image/jpeg",
+            organizationId,
+            userId,
+          });
+          coverMeta.cover_image_path = coverImageUpload.path;
         }
 
         setMediaMetadata({
@@ -898,6 +924,8 @@ export function UploadWizard({
             includesTiktok={includesTiktok}
             coverSeconds={coverSeconds}
             onChangeCover={handleCoverChange}
+            coverImage={coverImage}
+            onChangeCoverImage={setCoverImage}
             onSwitchType={switchMediaType}
             onChangeFiles={handleChangeFiles}
             onChangeVideo={handleChangeVideo}
@@ -1474,6 +1502,8 @@ function Step2Media({
   includesTiktok,
   coverSeconds,
   onChangeCover,
+  coverImage,
+  onChangeCoverImage,
   onSwitchType,
   onChangeFiles,
   onChangeVideo,
@@ -1491,6 +1521,8 @@ function Step2Media({
   includesTiktok: boolean;
   coverSeconds: number | null;
   onChangeCover: (seconds: number, blob: Blob | null) => void;
+  coverImage: Blob | null;
+  onChangeCoverImage: (blob: Blob | null) => void;
   onSwitchType: (t: MediaType) => void;
   onChangeFiles: (f: File[]) => void;
   onChangeVideo: (f: File | null) => void;
@@ -1537,6 +1569,8 @@ function Step2Media({
             initialFile={videoFile}
             coverSeconds={coverSeconds}
             onCoverChange={onChangeCover}
+            coverImage={coverImage}
+            onCoverImageChange={onChangeCoverImage}
           />
         )}
         {validation && (

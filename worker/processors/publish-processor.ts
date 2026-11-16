@@ -453,13 +453,17 @@ async function runPublish(
   // 3e-2. 커버(썸네일) — 사용자가 마법사에서 고른 프레임. metadata에서 추출.
   //   cover_ms:   TikTok/Instagram에 프레임 오프셋(ms)으로 전달.
   //   cover_path: YouTube용으로 추출해둔 커버 이미지. 있으면 서명해서 넘긴다.
+  //   cover_image_path: 마법사에서 따로 올린 표지 이미지 — 세 플랫폼 모두 이 이미지를 표지로 쓴다.
   const cover = extractCover(content.metadata);
-  const coverSignedUrl = cover.path
-    ? await signCover(supabase, cover.path)
-    : null;
+  const imagePath = cover.imagePath ?? cover.path;
+  const coverSignedUrl =
+    account.platform === "YOUTUBE" && imagePath ? await signCover(supabase, imagePath) : null;
 
   const igCoverPath = (content.metadata as { ig_cover_path?: unknown } | null)?.ig_cover_path;
-  const instagramCoverUrl = account.platform === "INSTAGRAM" && typeof igCoverPath === "string" && igCoverPath ? await signCover(supabase, igCoverPath) : null;
+  const igPath = typeof igCoverPath === "string" && igCoverPath ? igCoverPath : cover.imagePath;
+  const instagramCoverUrl = account.platform === "INSTAGRAM" && igPath ? await signCover(supabase, igPath) : null;
+  const tiktokCoverUrl =
+    account.platform === "TIKTOK" && cover.imagePath ? await signCover(supabase, cover.imagePath) : null;
 
   // 3f. 캡션 컨텍스트 조립 + 미디어 URL/계정 ID/커버/이어받기 상태 주입
   //   상점 태그(#오늘과일 등)를 덧붙인다(이미 있으면 그대로). AI 자동 콘텐츠처럼 기획(content_plans)에 상품이 있으면
@@ -489,6 +493,7 @@ async function runPublish(
     coverTimestampMs: cover.ms,
     coverSignedUrl,
     instagramCoverUrl,
+    tiktokCoverUrl,
     resumeState: row.resume_state ?? null,
     saveResumeState,
     deadlineAt,
@@ -604,17 +609,15 @@ async function signMedia(
 function extractCover(metadata: Json | null): {
   ms: number | null;
   path: string | null;
+  imagePath: string | null;
 } {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    return { ms: null, path: null };
+    return { ms: null, path: null, imagePath: null };
   }
   const m = metadata as Record<string, unknown>;
   const ms = typeof m.cover_ms === "number" ? m.cover_ms : null;
-  const path =
-    typeof m.cover_path === "string" && m.cover_path.length > 0
-      ? m.cover_path
-      : null;
-  return { ms, path };
+  const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : null);
+  return { ms, path: str(m.cover_path), imagePath: str(m.cover_image_path) };
 }
 
 async function signCover(

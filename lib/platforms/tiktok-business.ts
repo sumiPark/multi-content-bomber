@@ -319,17 +319,26 @@ export interface TikTokPostInfo {
  * 영상을 주소로 게시한다(전체 공개 — 이 API에는 비공개 옵션이 없다).
  * video_url은 TikTok에 소유 인증된 주소(URL property)여야 한다 — tiktokMediaUrl()로 만든다.
  * 돌려주는 share_id는 게시물 id가 아니라 상태 확인용 publish_id다.
+ * customThumbnailUrl: 표지 이미지 주소. 넣으면 TikTok이 post_info.thumbnail_offset을 무시한다.
+ *   영상과 같이 소유 인증한 주소여야 한다(tiktokMediaUrl). 필드는 post_info가 아니라 최상위
+ *   (공식 문서를 옮긴 bububa/tiktok-business model/business/video/publish.go, 2026-11-16 확인).
  */
 export async function publishVideo(
   accessToken: string,
   businessId: string,
   videoUrl: string,
   postInfo: TikTokPostInfo,
+  customThumbnailUrl?: string | null,
 ): Promise<string> {
   const data = await call<{ share_id?: string }>("/business/video/publish/", {
     method: "POST",
     accessToken,
-    body: { business_id: businessId, video_url: videoUrl, post_info: postInfo },
+    body: {
+      business_id: businessId,
+      video_url: videoUrl,
+      ...(customThumbnailUrl ? { custom_thumbnail_url: customThumbnailUrl } : {}),
+      post_info: postInfo,
+    },
   });
   if (!data.share_id) throw new PublishError("TikTok 게시 응답에 share_id가 없어요");
   return String(data.share_id);

@@ -50,13 +50,16 @@ export interface PublishContext {
   // 커버(썸네일) — 영상 한정. 사용자가 마법사에서 고른 프레임 한 시점이 출처.
   //   coverTimestampMs: 영상 내 프레임 오프셋(ms). TikTok=video_cover_timestamp_ms,
   //                     Instagram(REELS)=thumb_offset 로 그대로 전달.
-  //   coverSignedUrl:   그 프레임을 이미지로 추출해 Storage에 올린 파일의 서명 URL.
-  //                     YouTube는 프레임 타임스탬프 API가 없어 thumbnails.set에 이 이미지를 업로드.
+  //   coverSignedUrl:   YouTube thumbnails.set에 올릴 표지 이미지의 서명 URL. 마법사에서 따로 올린
+  //                     표지 이미지(metadata.cover_image_path)가 있으면 그것, 없으면 고른 프레임 이미지(cover_path).
   // 둘 다 null이면 커버 미지정(어댑터 기본 동작).
   coverTimestampMs: number | null;
   coverSignedUrl: string | null;
-  // 인스타 릴스 표지 이미지. AI 자동 콘텐츠만 넣는다(metadata.ig_cover_path). 없으면 지금처럼 thumb_offset
+  // 인스타 릴스 표지 이미지(cover_url). AI 자동 콘텐츠의 metadata.ig_cover_path, 아니면 마법사에서 따로 올린
+  // 표지 이미지(cover_image_path). 없으면 지금처럼 thumb_offset
   instagramCoverUrl?: string | null;
+  // 틱톡 표지 이미지(custom_thumbnail_url). 마법사에서 따로 올린 표지 이미지만. 없으면 thumbnail_offset
+  tiktokCoverUrl?: string | null;
   // ── 재시도 이어받기 ──
   // 플랫폼이 서버에서 오래 처리하는 작업(Instagram 컨테이너 인코딩 등)은 한 시도의
   // 폴링 상한 안에 안 끝날 수 있다. 그때 진행분을 버리지 않도록, 어댑터가 다음 시도가

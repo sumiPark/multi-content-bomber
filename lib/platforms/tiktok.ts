@@ -126,8 +126,10 @@ export const tiktok: PlatformAdapter = {
       throw new MediaError("TikTok 게시: 미디어 서명 주소가 비어 있어요");
     }
     const videoUrl = tiktokMediaUrl(signedUrl);
+    // 마법사에서 따로 올린 표지 이미지 — 영상처럼 소유 인증한 우리 도메인 주소로 바꿔 넘긴다.
+    const coverUrl = ctx.tiktokCoverUrl ? tiktokMediaUrl(ctx.tiktokCoverUrl) : null;
 
-    const publishId = await publishVideo(accessToken, businessId, videoUrl, {
+    const postInfo = {
       caption: buildTikTokCaption(ctx),
       disable_comment: false,
       disable_duet: false,
@@ -138,8 +140,23 @@ export const tiktok: PlatformAdapter = {
       is_brand_organic: true,
       is_branded_content: false,
       // 커버 프레임: 사용자가 마법사에서 고른 시점(ms). 미지정이면 1초 프레임.
+      // 표지 이미지(coverUrl)를 넣으면 TikTok이 이 값을 무시한다.
       thumbnail_offset: ctx.coverTimestampMs ?? 1000,
-    });
+    };
+
+    let publishId: string;
+    try {
+      publishId = await publishVideo(accessToken, businessId, videoUrl, postInfo, coverUrl);
+    } catch (err) {
+      // 표지 이미지 때문에 거절되면(형식 · 주소 문제) 게시 자체는 안 된 상태다 — 표지 이미지 없이
+      // 고른 장면(thumbnail_offset)으로 한 번 더 요청한다. 표지 때문에 영상이 안 올라가면 안 된다.
+      const message = err instanceof Error ? err.message : String(err);
+      if (!coverUrl || !(err instanceof PublishError || err instanceof MediaError) || !/thumbnail|cover/i.test(message)) {
+        throw err;
+      }
+      console.warn(`[tiktok] 표지 이미지가 거절돼 고른 장면으로 다시 요청해요: ${message}`);
+      publishId = await publishVideo(accessToken, businessId, videoUrl, postInfo);
+    }
 
     // 게시 요청이 들어갔으니 publish_id를 바로 남긴다 — 이번 폴링이 끊겨도 다음 시도가 이어받는다.
     await ctx.saveResumeState({

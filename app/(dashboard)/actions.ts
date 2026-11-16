@@ -732,6 +732,7 @@ export async function deleteContentsAction(
     const rest = { ...meta };
     delete rest.thumbnail_path;
     delete rest.cover_path;
+    delete rest.cover_image_path;
     delete rest.item_thumbs;
     const { data: erased, error: eraseError } = await supabase
       .from("contents")
@@ -774,7 +775,7 @@ export async function deleteContentsAction(
   const pathsOf = (t: { media_urls: string[]; metadata: unknown }) => {
     const meta = (t.metadata && typeof t.metadata === "object" ? t.metadata : {}) as Record<string, unknown>;
     // item_thumbs = 사진 게시물에 섞인 영상 장의 첫 프레임(lib/upload/media-kind.ts)
-    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path, meta.ig_cover_path, ...Object.values(itemThumbs(meta))].filter((x): x is string => typeof x === "string" && !!x);
+    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path, meta.cover_image_path, meta.ig_cover_path, ...Object.values(itemThumbs(meta))].filter((x): x is string => typeof x === "string" && !!x);
   };
   const candidatePaths = Array.from(new Set(targets.filter((t) => deletedIds.has(t.id)).flatMap(pathsOf)));
 
@@ -787,7 +788,7 @@ export async function deleteContentsAction(
     const { data: stillMeta, error: metaErr } = await service
       .from("contents")
       .select("media_urls, metadata")
-      .or(candidatePaths.map((x) => `metadata->>thumbnail_path.eq.${x},metadata->>cover_path.eq.${x}`).join(","));
+      .or(candidatePaths.map((x) => `metadata->>thumbnail_path.eq.${x},metadata->>cover_path.eq.${x},metadata->>cover_image_path.eq.${x}`).join(","));
     // 파일을 이미 지운 콘텐츠(erased_at)는 경로만 남아 있을 뿐 쓰지 않는다
     const inUse = (c: { metadata: unknown }) => !(c.metadata as { erased_at?: string } | null)?.erased_at;
     const keep = new Set([...(still ?? []), ...(stillMeta ?? [])].filter(inUse).flatMap(pathsOf));
