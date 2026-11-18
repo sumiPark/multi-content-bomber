@@ -45,6 +45,7 @@ import {
 } from "@/app/(dashboard)/actions";
 import type { Captions } from "@/lib/ai/caption-generator";
 import type { ContentPlatform as Platform } from "@/lib/platforms";
+import { TEXT_ONLY_PLATFORMS } from "@/lib/platforms/types";
 import type { WizardDraft, WizardDraftState } from "@/lib/upload/draft";
 import { uploadMedia, uploadOne } from "@/lib/storage/upload";
 import { isVideoFile } from "@/lib/upload/media-kind";
@@ -73,6 +74,7 @@ const PLATFORM_LABEL: Record<Platform, string> = {
   INSTAGRAM: "인스타그램",
   YOUTUBE: "유튜브",
   TIKTOK: "틱톡",
+  THREADS: "스레드",
 };
 
 interface SocialAccountSummary {
@@ -106,18 +108,6 @@ interface SeriesOption {
   pendingCount: number;
 }
 
-interface ThreadsAccountSummary {
-  id: string;
-  display_name: string | null;
-}
-
-// 고른 인스타 계정 하나와, 이름이 같은 스레드 계정(없으면 null).
-// 스레드 프로필은 인스타 프로필에서 만들어져 사용자 이름이 같다.
-interface ThreadsRow {
-  account: SocialAccountSummary;
-  threads: ThreadsAccountSummary | null;
-}
-
 interface UploadWizardProps {
   organizationId: string;
   userId: string;
@@ -125,8 +115,6 @@ interface UploadWizardProps {
   accountGroups: AccountGroupSummary[];
   presets: PresetSummary[];
   seriesOptions?: SeriesOption[];
-  /** 연결한 스레드 계정(0056). 인스타 계정과 이름이 같으면 마지막 단계에 "스레드에도 올리기"가 나온다. */
-  threadsAccounts?: ThreadsAccountSummary[];
   /** 보관함에서 '이어서 하기'로 열었을 때 임시 저장한 상태 (0033). */
   initialDraft?: WizardDraft | null;
 }
@@ -154,7 +142,8 @@ function restoredValidationFor(
   };
 }
 
-type MediaType = "IMAGE" | "VIDEO";
+// TEXT = 사진 · 영상 없이 글만(0058). 고른 플랫폼이 모두 스레드일 때만 고를 수 있다.
+type MediaType = "IMAGE" | "VIDEO" | "TEXT";
 type ScheduleMode = "now" | "scheduled";
 type CaptionMode = "ai" | "manual";
 
@@ -165,7 +154,6 @@ export function UploadWizard({
   accountGroups = [],
   presets = [],
   seriesOptions = [],
-  threadsAccounts = [],
   initialDraft = null,
 }: UploadWizardProps) {
   const router = useRouter();
@@ -253,8 +241,6 @@ export function UploadWizard({
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(
     draft?.draftSavedAt ?? null,
   );
-  // 인스타 계정 id → 같은 이름의 스레드 계정에도 올릴지. 기본 꺼짐.
-  const [threadsChoice, setThreadsChoice] = useState<Record<string, boolean>>({});
   const [savingDraft, setSavingDraft] = useState(false);
   const [completing, setCompleting] = useState(false);
   // '완료' 재진입 잠금 — state 반영(다음 렌더)보다 먼저 걸린다. 성공하면 페이지를
@@ -295,39 +281,29 @@ export function UploadWizard({
     [selectedAccounts, seriesOptions],
   );
 
-  // 스레드 계정을 하나라도 연결했을 때만 보여 준다(연결 안 했으면 마지막 단계에 아무것도 안 늘어난다).
-  const threadsRows = useMemo<ThreadsRow[]>(() => {
-    if (threadsAccounts.length === 0) return [];
-    const byName = new Map(
-      threadsAccounts
-        .filter((t) => t.display_name)
-        .map((t) => [t.display_name!.toLowerCase(), t]),
-    );
-    return selectedAccounts
-      .filter((a) => a.platform === "INSTAGRAM")
-      .map((account) => ({
-        account,
-        threads: account.display_name
-          ? (byName.get(account.display_name.toLowerCase()) ?? null)
-          : null,
-      }));
-  }, [selectedAccounts, threadsAccounts]);
+  // 글만 올리기(0058) — 고른 플랫폼이 모두 스레드일 때만.
+  const textAllowed =
+    selectedPlatforms.length > 0 &&
+    selectedPlatforms.every((p) => TEXT_ONLY_PLATFORMS.includes(p));
 
-  const threadsAccountIds = threadsRows.flatMap((r) =>
-    r.threads && threadsChoice[r.account.id] ? [r.threads.id] : [],
-  );
-
-  // TikTok이 포함되면 영상 모드 강제 (TikTok Content Posting API는 영상만 지원)
+  // TikTok이 포함되면 영상 모드 강제 (TikTok Content Posting API는 영상만 지원).
+  // 글만 올리기를 고른 뒤 스레드 아닌 계정을 더하면 사진 · 영상으로 돌린다.
   useEffect(() => {
-    if (includesTiktok && mediaType === "IMAGE") {
-      setMediaType("VIDEO");
+    const next =
+      includesTiktok && mediaType !== "VIDEO"
+        ? "VIDEO"
+        : mediaType === "TEXT" && !textAllowed && selectedPlatforms.length > 0
+          ? "IMAGE"
+          : null;
+    if (next) {
+      setMediaType(next);
       setResumedMedia(false);
       setFiles([]);
       setMediaPaths([]);
       setAnalyzePaths([]);
       setMediaMetadata({});
     }
-  }, [includesTiktok, mediaType]);
+  }, [includesTiktok, mediaType, textAllowed, selectedPlatforms.length]);
 
   // 메타데이터(해상도/길이) 추출 후 정확한 검증.
   // 드롭 직후와 "다음" 직후의 검증 결과가 달라지지 않도록 처음부터 메타를 뽑는다.
@@ -339,6 +315,10 @@ export function UploadWizard({
     let cancelled = false;
 
     async function run() {
+      if (mediaType === "TEXT") {
+        setValidation(validateMedia("TEXT", [], selectedPlatforms));
+        return;
+      }
       if (mediaType === "IMAGE") {
         if (files.length === 0) {
           setValidation(
@@ -420,6 +400,7 @@ export function UploadWizard({
     (mediaType === "IMAGE" ? files.length === 0 : !videoFile);
 
   const canAdvanceStep2 = useMemo(() => {
+    if (mediaType === "TEXT") return validation?.ok ?? false;
     if (usingResumedMedia) return validation?.ok ?? false;
     if (mediaType === "IMAGE" && files.length === 0) return false;
     if (mediaType === "VIDEO" && !videoFile) return false;
@@ -496,6 +477,7 @@ export function UploadWizard({
   }
   function mediaKey(): string {
     const sig = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
+    if (mediaType === "TEXT") return "T";
     return mediaType === "IMAGE"
       ? `I|${files.map(sig).join("|")}`
       : `V|${videoFile ? sig(videoFile) : ""}|${coverSeconds ?? ""}|${blobId(coverImage)}`;
@@ -504,6 +486,21 @@ export function UploadWizard({
   async function advanceFromStep2() {
     setError(null);
     if (!canAdvanceStep2) return;
+    // 글만 올리기 — 올릴 파일이 없다. 사진 · 영상으로 캡션을 만들어 둔 콘텐츠였다면 캡션을 다시 쓰게 한다.
+    if (mediaType === "TEXT") {
+      if (contentId && uploadedKeyRef.current !== "T" && !(resumedMedia && mediaPaths.length === 0)) {
+        setCaptions(null);
+        setContentId(null);
+        setSavedAt(null);
+        setThumbnailUrls([]);
+      }
+      uploadedKeyRef.current = "T";
+      setMediaPaths([]);
+      setAnalyzePaths([]);
+      setMediaMetadata({});
+      setStep(3);
+      return;
+    }
     if (usingResumedMedia) {
       setStep(3);
       return;
@@ -757,7 +754,6 @@ export function UploadWizard({
       accountIds: selectedAccountIds,
       scheduledFor,
       seriesByAccount,
-      threadsAccountIds,
     });
     if (!result.ok) {
       completingRef.current = false;
@@ -933,6 +929,7 @@ export function UploadWizard({
             onNext={advanceFromStep2}
             canAdvance={canAdvanceStep2}
             usingResumedMedia={usingResumedMedia}
+            textAllowed={textAllowed}
           />
         )}
 
@@ -962,6 +959,7 @@ export function UploadWizard({
             onNext={advanceFromStep3}
             canAdvance={canAdvanceStep3}
             draftButton={draftButton}
+            textOnly={mediaType === "TEXT"}
           />
         )}
 
@@ -988,13 +986,8 @@ export function UploadWizard({
           <Step5Schedule
             scheduleMode={scheduleMode}
             scheduledAt={scheduledAt}
-            selectedAccountCount={selectedAccountIds.length + threadsAccountIds.length}
+            selectedAccountCount={selectedAccountIds.length}
             hasTikTok={selectedPlatforms.includes("TIKTOK")}
-            threadsRows={threadsRows}
-            threadsChoice={threadsChoice}
-            onChangeThreads={(accountId, on) =>
-              setThreadsChoice((prev) => ({ ...prev, [accountId]: on }))
-            }
             seriesRows={seriesRows}
             seriesChoice={seriesChoice}
             onChangeSeries={(accountId, seriesId) => {
@@ -1082,6 +1075,12 @@ function formatLocalInput(v: string): string {
   return `${Number(m[2])}월 ${Number(m[3])}일 ${m[4]}:${m[5]}`;
 }
 
+function captionPlatformCount(captions: Captions | null): number {
+  if (!captions) return 0;
+  return [captions.youtube, captions.instagram, captions.tiktok, captions.threads].filter(Boolean)
+    .length;
+}
+
 function WizardSummary({
   className,
   step,
@@ -1107,10 +1106,7 @@ function WizardSummary({
   scheduleMode: ScheduleMode;
   scheduledAt: string;
 }) {
-  const captionPlatforms = captions
-    ? [captions.youtube, captions.instagram, captions.tiktok].filter(Boolean)
-        .length
-    : 0;
+  const captionPlatforms = captionPlatformCount(captions);
   const rows: Array<{ label: string; value: React.ReactNode }> = [
     {
       label: "이름",
@@ -1135,7 +1131,9 @@ function WizardSummary({
     {
       label: "올릴 것",
       value:
-        mediaType === "IMAGE" ? (
+        mediaType === "TEXT" ? (
+          "글만 (사진 · 영상 없음)"
+        ) : mediaType === "IMAGE" ? (
           fileCount > 0 ? (
             `사진 ${fileCount}장`
           ) : (
@@ -1511,8 +1509,11 @@ function Step2Media({
   onNext,
   canAdvance,
   usingResumedMedia,
+  textAllowed,
 }: {
   mediaType: MediaType;
+  /** 고른 계정이 모두 스레드라 글만 올릴 수 있는지. */
+  textAllowed: boolean;
   files: File[];
   videoFile: File | null;
   uploading: boolean;
@@ -1552,6 +1553,8 @@ function Step2Media({
             options={[
               { value: "IMAGE", label: "사진 1~10장", disabled: includesTiktok },
               { value: "VIDEO", label: "영상 1개" },
+              // 글만 올리기는 스레드만 골랐을 때만 보여 준다(0058)
+              ...(textAllowed ? [{ value: "TEXT" as const, label: "글만" }] : []),
             ]}
           />
           {includesTiktok && (
@@ -1561,7 +1564,12 @@ function Step2Media({
             </span>
           )}
         </div>
-        {mediaType === "IMAGE" ? (
+        {mediaType === "TEXT" ? (
+          <div className="flex gap-2.5 rounded-lg bg-brand-soft px-3.5 py-3 text-sm text-ink-2">
+            <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+            <p>사진 · 영상 없이 글만 올려요. 다음 단계에서 글을 써요.</p>
+          </div>
+        ) : mediaType === "IMAGE" ? (
           <ImageDropzone onChange={onChangeFiles} initialFiles={files} allowVideo />
         ) : (
           <VideoDropzone
@@ -1704,11 +1712,14 @@ function Step3Caption({
   onNext,
   canAdvance,
   draftButton,
+  textOnly,
 }: {
   captions: Captions | null;
   contentId: string | null;
   savedAt: string | null;
   thumbnailUrls: string[];
+  /** 사진 · 영상 없이 글만(스레드). AI로 쓰려면 설명이 꼭 있어야 한다. */
+  textOnly: boolean;
   description: string;
   presetId: string;
   presets: PresetSummary[];
@@ -1801,24 +1812,33 @@ function Step3Caption({
                   </div>
                 )}
                 <div className="space-y-1.5">
-                  <FieldLabel htmlFor="description" optional>
+                  <FieldLabel htmlFor="description" optional={!textOnly}>
                     어떤 내용인지
                   </FieldLabel>
                   <Textarea
                     id="description"
                     value={description}
                     onChange={(e) => onChangeDescription(e.target.value)}
-                    placeholder="예) 홍대 브런치 카페 후기, 따뜻하고 일상적인 말투로"
-                    rows={2}
+                    placeholder={
+                      textOnly
+                        ? "예) 이번 주 들어온 샤인머스캣 당도 측정 결과, 고르는 법 세 가지"
+                        : "예) 홍대 브런치 카페 후기, 따뜻하고 일상적인 말투로"
+                    }
+                    rows={textOnly ? 4 : 2}
                     disabled={generating}
                   />
                 </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">
-                  사진 · 영상과 설명을 보고 플랫폼마다 따로 써요.
+                  {textOnly
+                    ? "사진 · 영상이 없어서 적은 설명만 참고해 써요. 설명에 없는 내용은 쓰지 않아요."
+                    : "사진 · 영상과 설명을 보고 플랫폼마다 따로 써요."}
                 </p>
-                <Button onClick={onGenerate} disabled={generating}>
+                <Button
+                  onClick={onGenerate}
+                  disabled={generating || (textOnly && !description.trim())}
+                >
                   <Sparkles className="size-4" />
                   {generating ? "캡션 쓰는 중…" : "캡션 만들기"}
                 </Button>
@@ -1946,10 +1966,7 @@ function Step4Review({
   const verdicts = validation?.perPlatform ?? [];
   const blocked = verdicts.filter((v) => v.status === "blocked").length;
   const warned = verdicts.filter((v) => v.status === "warning").length;
-  const captionCount = captions
-    ? [captions.youtube, captions.instagram, captions.tiktok].filter(Boolean)
-        .length
-    : 0;
+  const captionCount = captionPlatformCount(captions);
   return (
     <>
       <StepBody>
@@ -1986,7 +2003,7 @@ function Step4Review({
               계정 바꾸기
             </Button>
             <Button variant="ghost" size="sm" onClick={() => onJump(2)}>
-              {mediaType === "IMAGE" ? "사진" : "영상"} 바꾸기
+              {mediaType === "IMAGE" ? "사진" : mediaType === "VIDEO" ? "영상" : "올릴 것"} 바꾸기
             </Button>
           </span>
         </div>
@@ -2059,7 +2076,9 @@ function PreviewCard({
       ? captions?.youtube?.title
       : platform === "INSTAGRAM"
         ? captions?.instagram?.caption
-        : captions?.tiktok?.caption;
+        : platform === "THREADS"
+          ? captions?.threads?.caption
+          : captions?.tiktok?.caption;
   const firstLine = (text ?? "").split("\n")[0];
   const who = accounts[0]?.display_name ?? "";
   return (
@@ -2070,7 +2089,18 @@ function PreviewCard({
           mediaType === "VIDEO" ? "aspect-[9/16]" : "aspect-[4/5]",
         )}
       >
-        {thumbnailUrl ? (
+        {mediaType === "TEXT" ? (
+          // 글만 올리는 스레드 게시물 — 글 카드로 보여 준다
+          <div className="size-full space-y-1.5 overflow-hidden bg-card p-3 text-xs">
+            <p className="truncate font-semibold">
+              {who}
+              {accounts.length > 1 && ` 외 ${accounts.length - 1}개`}
+            </p>
+            <p className="line-clamp-[12] whitespace-pre-line text-ink-2">
+              {text || <span className="text-faint">글을 아직 안 썼어요</span>}
+            </p>
+          </div>
+        ) : thumbnailUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={thumbnailUrl} alt="" className="size-full object-cover" />
         ) : (
@@ -2084,22 +2114,24 @@ function PreviewCard({
           </span>
         )}
         {/* 캡션 미리보기: 어두운 미리보기 위 흰 글자 (DESIGN.md 2장 예외) */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3 pt-10 text-xs text-white">
-          <p className="truncate font-semibold">
-            {who}
-            {accounts.length > 1 && ` 외 ${accounts.length - 1}개`}
-          </p>
-          {firstLine && (
-            <p
-              className={cn(
-                "mt-0.5 line-clamp-3",
-                platform === "YOUTUBE" && "font-semibold",
-              )}
-            >
-              {firstLine}
+        {mediaType !== "TEXT" && (
+          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3 pt-10 text-xs text-white">
+            <p className="truncate font-semibold">
+              {who}
+              {accounts.length > 1 && ` 외 ${accounts.length - 1}개`}
             </p>
-          )}
-        </div>
+            {firstLine && (
+              <p
+                className={cn(
+                  "mt-0.5 line-clamp-3",
+                  platform === "YOUTUBE" && "font-semibold",
+                )}
+              >
+                {firstLine}
+              </p>
+            )}
+          </div>
+        )}
       </div>
       <div className="flex items-center justify-between gap-1">
         <span className="flex min-w-0 items-center gap-1.5 text-xs">
@@ -2140,9 +2172,6 @@ function Step5Schedule({
   scheduledAt,
   selectedAccountCount,
   hasTikTok,
-  threadsRows,
-  threadsChoice,
-  onChangeThreads,
   seriesRows,
   seriesChoice,
   onChangeSeries,
@@ -2160,9 +2189,6 @@ function Step5Schedule({
   selectedAccountCount: number;
   // 틱톡은 비즈니스 API로 전체 공개로만 올라간다(lib/platforms/tiktok.ts — 비공개 옵션 없음)
   hasTikTok: boolean;
-  threadsRows: ThreadsRow[];
-  threadsChoice: Record<string, boolean>;
-  onChangeThreads: (accountId: string, on: boolean) => void;
   seriesRows: { account: SocialAccountSummary; options: SeriesOption[] }[];
   seriesChoice: Record<string, string>;
   onChangeSeries: (accountId: string, seriesId: string) => void;
@@ -2265,46 +2291,6 @@ function Step5Schedule({
             <p>
               틱톡은 <b>전체 공개</b>로 바로 올라가요. 비공개로 올리는 선택지는 없어요.
             </p>
-          </div>
-        )}
-
-        {threadsRows.length > 0 && (
-          <div className="space-y-3 rounded-lg border p-4">
-            <div>
-              <p className="text-sm font-semibold text-ink-2">
-                스레드에도 올리기{" "}
-                <span className="text-xs font-normal text-faint">선택</span>
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                인스타 캡션을 스레드에 맞춰 500자 · 태그 1개로 줄여 같은 시각에 올려요. 스레드가 실패해도 인스타 발행은 그대로예요.
-              </p>
-            </div>
-            <ul className="space-y-2">
-              {threadsRows.map(({ account, threads }) => (
-                <li key={account.id}>
-                  {threads ? (
-                    <label className="flex cursor-pointer items-center gap-2.5 text-sm">
-                      <input
-                        type="checkbox"
-                        id={`threads-${account.id}`}
-                        checked={threadsChoice[account.id] === true}
-                        onChange={(e) => onChangeThreads(account.id, e.target.checked)}
-                        disabled={completing}
-                        className="size-4 accent-primary"
-                      />
-                      <span className="min-w-0 truncate font-semibold">
-                        @{threads.display_name}
-                      </span>
-                      <span className="text-xs text-muted-foreground">스레드</span>
-                    </label>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      @{account.display_name ?? "(이름 없음)"} · 같은 이름의 스레드 계정이 연결되지 않았어요. 계정 연동에서 연결해 주세요.
-                    </p>
-                  )}
-                </li>
-              ))}
-            </ul>
           </div>
         )}
 

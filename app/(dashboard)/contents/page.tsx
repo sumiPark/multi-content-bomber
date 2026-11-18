@@ -33,7 +33,7 @@ export default async function ContentsPage() {
   // 응답 전체를 명시 타입으로 cast (재생성 후 cast 제거).
   type ContentRow = {
     id: string;
-    media_type: "IMAGE" | "VIDEO";
+    media_type: "IMAGE" | "VIDEO" | "TEXT";
     media_urls: string[];
     metadata: unknown;
     draft_saved_at: string | null;
@@ -63,6 +63,7 @@ export default async function ContentsPage() {
       ? (parsed.data.youtube?.title ??
         parsed.data.instagram?.caption ??
         parsed.data.tiktok?.caption ??
+        parsed.data.threads?.caption ??
         "")
       : "";
     return {

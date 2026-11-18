@@ -70,7 +70,7 @@ export interface PostingItem {
   thumbnailUrl: string | null;
   // 파일과 캡션을 지운 콘텐츠 — 발행 기록만 남아 있다
   contentErased: boolean;
-  mediaType: "IMAGE" | "VIDEO";
+  mediaType: "IMAGE" | "VIDEO" | "TEXT";
   mediaCount: number;
   captions: unknown;
   internalTitle: string | null;
@@ -225,6 +225,7 @@ function captionPreview(captions: unknown, maxLen = 30): string {
     c.youtube?.title ??
     c.instagram?.caption ??
     c.tiktok?.caption ??
+    c.threads?.caption ??
     "(캡션 없음)";
   // 글자 단위(코드 포인트)로 자른다 — 이모지 가운데가 잘리면 깨진 글자가 생기고 서버 · 브라우저 렌더가 달라진다
   const chars = Array.from(text);
@@ -1106,7 +1107,8 @@ function PostingsTable({
   );
 }
 
-function mediaSummary(item: { mediaType: "IMAGE" | "VIDEO"; mediaCount: number }) {
+function mediaSummary(item: { mediaType: "IMAGE" | "VIDEO" | "TEXT"; mediaCount: number }) {
+  if (item.mediaType === "TEXT") return "글만";
   return item.mediaType === "VIDEO" ? "영상" : `사진 ${item.mediaCount}장`;
 }
 
@@ -1304,7 +1306,7 @@ function DetailDrawer({
 
   const captions = item.captions as
     | Record<
-        "youtube" | "instagram" | "tiktok",
+        "youtube" | "instagram" | "tiktok" | "threads",
         | {
             title?: string;
             description?: string;
@@ -1465,6 +1467,14 @@ function DetailDrawer({
                   primary=""
                   body={captions.tiktok.caption ?? ""}
                   tags={captions.tiktok.hashtags ?? []}
+                />
+              )}
+              {captions.threads && (
+                <CaptionBlock
+                  title="스레드"
+                  primary=""
+                  body={captions.threads.caption ?? ""}
+                  tags={captions.threads.hashtags ?? []}
                 />
               )}
             </section>

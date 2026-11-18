@@ -1,10 +1,12 @@
 import type { Json } from "@/types/database";
 
-// 캡션 칸 · 업로드 규격 · 마법사 계정 고르기가 있는 플랫폼. 스레드는 인스타 캡션을 같이 쓰는
-// '스레드에도 올리기'로만 올라가서 여기에 없다(0056).
-export type ContentPlatform = "INSTAGRAM" | "TIKTOK" | "YOUTUBE";
+// 캡션 칸 · 업로드 규격 · 마법사 계정 고르기가 있는 플랫폼. 스레드도 0058부터 마법사에서 따로 고른다.
+export type ContentPlatform = "INSTAGRAM" | "TIKTOK" | "YOUTUBE" | "THREADS";
 // 연결 · 발행 어댑터가 있는 플랫폼 전체.
-export type Platform = ContentPlatform | "THREADS";
+export type Platform = ContentPlatform;
+
+/** 사진 · 영상 없이 글만 올릴 수 있는 플랫폼(0058). 지금은 스레드만. */
+export const TEXT_ONLY_PLATFORMS: readonly ContentPlatform[] = ["THREADS"];
 
 export interface OAuthTokens {
   accessToken: string;
@@ -35,7 +37,8 @@ export interface PublishContext {
   // Graph API는 `/{ig-user-id}/media` 형태로 path에 ID가 들어간다.
   platformAccountId: string;
   // DB contents.media_type enum과 같은 값. ("PHOTO"가 아니다 — 실제 값은 "IMAGE")
-  mediaType: "VIDEO" | "IMAGE";
+  // TEXT는 사진 · 영상 없는 글 게시물(0058) — 스레드만 받는다.
+  mediaType: "VIDEO" | "IMAGE" | "TEXT";
   // Storage 단기 서명 URL 배열. 어댑터가 cURL/fetch로 가져갈 수 있는 형태.
   mediaSignedUrls: string[];
   // mediaSignedUrls와 같은 순서로 장마다 사진/영상. 사진 게시물(IMAGE)에도 인스타 캐러셀용

@@ -29,7 +29,13 @@ import {
 } from "@/app/(dashboard)/actions";
 import type { Captions } from "@/lib/ai/caption-generator";
 import {
+  cleanTopicTag,
+  THREADS_MAX_TAG,
+  THREADS_MAX_TEXT,
+} from "@/lib/platforms/threads-text";
+import {
   InstagramPreview,
+  ThreadsPreview,
   TiktokPreview,
   YoutubeShortsPreview,
 } from "./caption-previews";
@@ -70,6 +76,11 @@ type InstagramDraft = {
 type TiktokDraft = {
   caption: string;
 };
+type ThreadsDraft = {
+  caption: string;
+  /** 주제 태그 하나(# 없이). 비우면 태그 없이 올라간다. */
+  tag: string;
+};
 
 function extractHashtags(text: string): string[] {
   const matches = text.match(/#[^\s#]+/g);
@@ -88,6 +99,7 @@ type DraftCaptions = {
   youtube?: YoutubeDraft;
   instagram?: InstagramDraft;
   tiktok?: TiktokDraft;
+  threads?: ThreadsDraft;
 };
 
 function toDraft(c: Captions): DraftCaptions {
@@ -109,6 +121,12 @@ function toDraft(c: Captions): DraftCaptions {
     tiktok: c.tiktok
       ? {
           caption: mergeTiktokCaption(c.tiktok.caption, c.tiktok.hashtags),
+        }
+      : undefined,
+    threads: c.threads
+      ? {
+          caption: c.threads.caption,
+          tag: (c.threads.hashtags[0] ?? "").replace(/^#+/, ""),
         }
       : undefined,
   };
@@ -138,7 +156,25 @@ function fromDraft(d: DraftCaptions): Captions {
           hashtags: extractHashtags(d.tiktok.caption),
         }
       : undefined,
+    threads: d.threads
+      ? {
+          caption: d.threads.caption.trim(),
+          hashtags: d.threads.tag.trim() ? [`#${d.threads.tag.trim()}`] : [],
+        }
+      : undefined,
   };
+}
+
+// 스레드 글 · 태그가 올릴 수 있는 모양인지. 문제가 있으면 저장을 막는다(발행 때 잘리거나 태그가 빠지지 않게).
+function threadsProblem(d: ThreadsDraft | undefined): string | null {
+  if (!d) return null;
+  if (d.caption.trim().length > THREADS_MAX_TEXT) {
+    return `스레드 글은 ${THREADS_MAX_TEXT}자까지예요.`;
+  }
+  if (d.tag.trim() && !cleanTopicTag(d.tag)) {
+    return `스레드 주제 태그는 띄어쓰기 · 마침표 · & 없이 ${THREADS_MAX_TAG}자까지예요.`;
+  }
+  return null;
 }
 
 export const CaptionResult = forwardRef<
@@ -186,15 +222,23 @@ export const CaptionResult = forwardRef<
   );
 
   const activeTabs = useMemo(() => {
-    const tabs: Array<"youtube" | "instagram" | "tiktok"> = [];
+    const tabs: Array<"youtube" | "instagram" | "tiktok" | "threads"> = [];
     if (draft.youtube) tabs.push("youtube");
     if (draft.instagram) tabs.push("instagram");
     if (draft.tiktok) tabs.push("tiktok");
+    if (draft.threads) tabs.push("threads");
     return tabs;
   }, [draft]);
 
+  const threadsIssue = threadsProblem(draft.threads);
+
   // 실제 저장 로직 — 성공 여부 반환. 버튼/commit() 양쪽에서 재사용.
   const persist = useCallback(async (): Promise<boolean> => {
+    const problem = threadsProblem(draft.threads);
+    if (problem) {
+      setError(problem);
+      return false;
+    }
     setSaving(true);
     setError(null);
     const next = fromDraft(draft);
@@ -352,6 +396,9 @@ export const CaptionResult = forwardRef<
             {activeTabs.includes("tiktok") && (
               <TabsTrigger value="tiktok">TikTok</TabsTrigger>
             )}
+            {activeTabs.includes("threads") && (
+              <TabsTrigger value="threads">Threads</TabsTrigger>
+            )}
           </TabsList>
 
           {draft.youtube && (
@@ -489,6 +536,63 @@ export const CaptionResult = forwardRef<
                 <div className="lg:sticky lg:top-4 lg:self-start">
                   <TiktokPreview
                     caption={draft.tiktok.caption}
+                    thumbnailUrl={thumbnails[0]}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+          )}
+
+          {draft.threads && (
+            <TabsContent value="threads" className="pt-4">
+              <div className="grid gap-6 lg:grid-cols-[1fr_240px]">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Field
+                      label={`글 (${THREADS_MAX_TEXT}자 이내)`}
+                      value={draft.threads.caption}
+                      readOnly={!isEditing}
+                      rows={8}
+                      onChange={(v) =>
+                        setDraft({
+                          ...draft,
+                          threads: { ...draft.threads!, caption: v },
+                        })
+                      }
+                    />
+                    <p
+                      className={
+                        draft.threads.caption.trim().length > THREADS_MAX_TEXT
+                          ? "text-right text-xs tabular-nums text-destructive"
+                          : "text-right text-xs tabular-nums text-muted-foreground"
+                      }
+                    >
+                      {draft.threads.caption.trim().length}/{THREADS_MAX_TEXT}자
+                    </p>
+                  </div>
+                  <Field
+                    label="주제 태그 (1개, # 없이)"
+                    value={draft.threads.tag}
+                    readOnly={!isEditing}
+                    rows={1}
+                    onChange={(v) =>
+                      setDraft({
+                        ...draft,
+                        threads: { ...draft.threads!, tag: v.replace(/^#+/, "") },
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    스레드는 태그를 한 개만 붙여요. 글 안에 쓴 #태그는 올릴 때 제외돼요.
+                  </p>
+                  {threadsIssue && (
+                    <p className="text-xs text-destructive">{threadsIssue}</p>
+                  )}
+                </div>
+                <div className="lg:sticky lg:top-4 lg:self-start">
+                  <ThreadsPreview
+                    caption={draft.threads.caption}
+                    topicTag={draft.threads.tag.trim()}
                     thumbnailUrl={thumbnails[0]}
                   />
                 </div>

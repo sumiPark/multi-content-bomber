@@ -28,7 +28,8 @@ export interface WizardDraftState {
 /** 이어서 하기로 마법사를 열 때 넘기는 값 (upload/page.tsx가 만든다). */
 export interface WizardDraft {
   contentId: string;
-  mediaType: "IMAGE" | "VIDEO";
+  /** TEXT = 사진 · 영상 없는 스레드 글(0058). */
+  mediaType: "IMAGE" | "VIDEO" | "TEXT";
   mediaPaths: string[];
   metadata: Record<string, unknown>;
   captions: Captions;

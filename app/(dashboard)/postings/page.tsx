@@ -46,7 +46,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
     completed_at: string | null;
     contents: {
       id: string;
-      media_type: "IMAGE" | "VIDEO";
+      media_type: "IMAGE" | "VIDEO" | "TEXT";
       media_urls: string[];
       ai_captions: unknown;
       metadata: unknown;
@@ -55,7 +55,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
     };
     social_accounts: {
       id: string;
-      platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
+      platform: "YOUTUBE" | "INSTAGRAM" | "TIKTOK" | "THREADS";
       display_name: string | null;
       avatar_url: string | null;
       disconnected_at: string | null;

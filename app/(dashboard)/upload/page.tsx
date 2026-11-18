@@ -14,7 +14,7 @@ async function loadDraft(
 ): Promise<WizardDraft | null> {
   type DraftRow = {
     id: string;
-    media_type: "IMAGE" | "VIDEO";
+    media_type: "IMAGE" | "VIDEO" | "TEXT";
     media_urls: string[];
     metadata: unknown;
     ai_captions: unknown;
@@ -42,8 +42,8 @@ async function loadDraft(
     data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
       ? (data.metadata as Record<string, unknown>)
       : {};
-  // 캡션 분석 경로 — 저장된 값이 없으면 업로드 때 규칙대로(영상은 첫 프레임, 사진은 그대로).
-  if (state.analyzePaths.length === 0) {
+  // 캡션 분석 경로 — 저장된 값이 없으면 업로드 때 규칙대로(영상은 첫 프레임, 사진은 그대로). 글만이면 없다.
+  if (state.analyzePaths.length === 0 && data.media_type !== "TEXT") {
     const thumb = metadata.thumbnail_path;
     state.analyzePaths =
       data.media_type === "VIDEO"
@@ -164,14 +164,8 @@ export default async function UploadPage({
       Math.max(0, ...s.series_episodes.map((e) => e.episode_no)) + 1 + (pendingBySeries.get(s.id) ?? 0),
   }));
 
-  // 스레드 계정(0056)은 계정 고르기에 따로 나오지 않고, 마지막 단계의 "스레드에도 올리기"로만 고른다.
-  const allAccounts = accountsRes.data ?? [];
-  const contentAccounts = allAccounts.flatMap((a) =>
-    a.platform === "THREADS" ? [] : [{ ...a, platform: a.platform }],
-  );
-  const threadsAccounts = allAccounts
-    .filter((a) => a.platform === "THREADS" && a.is_active)
-    .map((a) => ({ id: a.id, display_name: a.display_name }));
+  // 스레드 계정도 다른 플랫폼처럼 1단계에서 고른다(0058).
+  const contentAccounts = accountsRes.data ?? [];
 
   const initialDraft = draftId ? await loadDraft(supabase, draftId) : null;
 
@@ -195,7 +189,6 @@ export default async function UploadPage({
         organizationId={profile.organization_id}
         userId={user.id}
         socialAccounts={contentAccounts}
-        threadsAccounts={threadsAccounts}
         accountGroups={groupsRes.data ?? []}
         presets={presetsRes.data ?? []}
         seriesOptions={seriesOptions}

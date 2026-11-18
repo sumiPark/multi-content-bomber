@@ -59,7 +59,8 @@ interface AccountRow {
 
 interface ContentRow {
   id: string;
-  media_type: "VIDEO" | "IMAGE";
+  // TEXT = 사진 · 영상 없는 스레드 글 게시물(0058). media_urls가 비어 있다.
+  media_type: "VIDEO" | "IMAGE" | "TEXT";
   media_urls: string[];
   title: string | null;
   internal_title: string | null;
@@ -447,8 +448,12 @@ async function runPublish(
   // 3d. 토큰 — 만료 임박이면 refresh
   const accessToken = await ensureFreshToken(supabase, account, adapter);
 
-  // 3e. Storage 단기 서명 URL
-  const mediaSignedUrls = await signMedia(supabase, content.media_urls);
+  // 3e. Storage 단기 서명 URL. 글만 있는 게시물(TEXT)은 스레드만 받고 서명할 미디어가 없다.
+  if (content.media_type === "TEXT" && account.platform !== "THREADS") {
+    throw new PublishError(`글만 있는 콘텐츠는 스레드에만 올릴 수 있어요 (${account.platform})`, { permanent: true });
+  }
+  const mediaSignedUrls =
+    content.media_type === "TEXT" ? [] : await signMedia(supabase, content.media_urls);
 
   // 3e-2. 커버(썸네일) — 사용자가 마법사에서 고른 프레임. metadata에서 추출.
   //   cover_ms:   TikTok/Instagram에 프레임 오프셋(ms)으로 전달.
@@ -665,6 +670,7 @@ async function saveResumeState(
 //   youtube   { title, description, hashtags, category? }
 //   instagram { caption, hashtags }
 //   tiktok    { caption, hashtags }
+//   threads   { caption, hashtags }  — hashtags는 주제 태그 1개(없으면 instagram을 쓴다)
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildPublishContext(
@@ -725,8 +731,16 @@ function buildPublishContext(
   }
 
   if (platform === "THREADS") {
-    // 스레드는 따로 쓰는 캡션 칸이 없다 — "스레드에도 올리기"는 인스타 캡션을 그대로 쓰고,
-    // 어댑터(lib/platforms/threads.ts)가 500자 · 주제 태그 1개로 맞춘다.
+    // 스레드 캡션(0058부터 마법사 3단계에서 따로 씀)을 쓴다. 없으면(0056 "스레드에도 올리기"로 등록한 예전 job)
+    // 인스타 캡션을 쓴다. 어느 쪽이든 어댑터(lib/platforms/threads.ts)가 500자 · 주제 태그 1개로 맞춘다.
+    const th = (captions.threads ?? null) as { caption?: string; hashtags?: string[] } | null;
+    if (th && typeof th.caption === "string" && th.caption.trim()) {
+      return {
+        ...empty,
+        caption: th.caption,
+        hashtags: Array.isArray(th.hashtags) ? th.hashtags : [],
+      };
+    }
     const ig = (captions.instagram ?? {}) as { caption?: string; hashtags?: string[] };
     return {
       ...empty,

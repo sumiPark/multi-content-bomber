@@ -4,6 +4,7 @@ import { getOpenAI, OPENAI_TEXT_MODEL } from "@/lib/openai";
 import type { ContentPlatform as Platform } from "@/lib/platforms";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
+import { buildThreadsText, pickTopicTag } from "@/lib/platforms/threads-text";
 import type { MediaItemKind } from "@/lib/upload/media-kind";
 import { breakCaptionLines } from "./caption-layout";
 import {
@@ -40,6 +41,14 @@ export const captionsSchema = z.object({
       hashtags: z.array(z.string()),
     })
     .optional(),
+  // 스레드 글(0058). hashtags는 주제 태그 하나(없으면 빈 배열). 이 키가 없는 예전 콘텐츠는
+  // 발행할 때 인스타 캡션을 500자에 맞춰 쓴다(worker/processors/publish-processor.ts).
+  threads: z
+    .object({
+      caption: z.string(),
+      hashtags: z.array(z.string()),
+    })
+    .optional(),
 });
 
 export type Captions = z.infer<typeof captionsSchema>;
@@ -51,10 +60,20 @@ const LIMITS = {
   tiktok: { caption: 300, hashtags: 5 },
 } as const;
 
-const PLATFORM_KEYS: Record<Platform, "youtube" | "instagram" | "tiktok"> = {
+type CaptionKey = "youtube" | "instagram" | "tiktok" | "threads";
+
+const PLATFORM_KEYS: Record<Platform, CaptionKey> = {
   YOUTUBE: "youtube",
   INSTAGRAM: "instagram",
   TIKTOK: "tiktok",
+  THREADS: "threads",
+};
+
+const PLATFORM_LABELS: Record<Platform, string> = {
+  YOUTUBE: "YouTube Shorts",
+  INSTAGRAM: "Instagram",
+  TIKTOK: "TikTok",
+  THREADS: "Threads",
 };
 
 const PROPERTY_DEFS = {
@@ -87,6 +106,15 @@ const PROPERTY_DEFS = {
       hashtags: { type: "array" as const, items: { type: "string" as const } },
     },
   },
+  threads: {
+    type: "object" as const,
+    additionalProperties: false,
+    required: ["caption", "hashtags"],
+    properties: {
+      caption: { type: "string" as const },
+      hashtags: { type: "array" as const, items: { type: "string" as const } },
+    },
+  },
 };
 
 function buildResponseSchema(platforms: Platform[]) {
@@ -108,7 +136,7 @@ function buildResponseSchema(platforms: Platform[]) {
   };
 }
 
-const ALL_PLATFORMS: Platform[] = ["YOUTUBE", "INSTAGRAM", "TIKTOK"];
+const ALL_PLATFORMS: Platform[] = ["YOUTUBE", "INSTAGRAM", "TIKTOK", "THREADS"];
 
 // 2026-11-04 비교(같은 상품 · 같은 프롬프트 각 4회): gpt-4o는 4회 모두 설명에 없는 효과 · 사용법을 지어냈고,
 // gpt-6.1-terra는 한 번도 지어내지 않았다. 추론 모델이라 temperature를 받지 않아 callOptions를 쓴다.
@@ -117,7 +145,8 @@ const ALL_PLATFORMS: Platform[] = ["YOUTUBE", "INSTAGRAM", "TIKTOK"];
 const CAPTION_FIX_BUDGET_MS = 25_000;
 
 interface GenerateCaptionsOptions {
-  mediaType: "IMAGE" | "VIDEO";
+  /** TEXT = 사진 · 영상 없는 스레드 글(0058). 이미지 없이 설명만 보고 쓴다. */
+  mediaType: "IMAGE" | "VIDEO" | "TEXT";
   description?: string;
   presetInstructions?: string;
   platforms?: Platform[];
@@ -148,7 +177,11 @@ export async function generateCaptions(
   imageDataUrls: string[],
   options: GenerateCaptionsOptions,
 ): Promise<GenerateCaptionsOutput> {
-  if (imageDataUrls.length === 0) throw new Error("이미지가 없습니다.");
+  const textOnly = options.mediaType === "TEXT";
+  if (textOnly && !options.description?.trim()) {
+    throw new Error("글만 올릴 땐 어떤 내용인지 적어 주세요. AI가 그 설명을 보고 글을 써요.");
+  }
+  if (!textOnly && imageDataUrls.length === 0) throw new Error("이미지가 없습니다.");
   if (imageDataUrls.length > 10)
     throw new Error("최대 10장까지 분석할 수 있습니다.");
 
@@ -157,11 +190,7 @@ export async function generateCaptions(
       ? Array.from(new Set(options.platforms))
       : ALL_PLATFORMS;
 
-  const platformLabels = platforms
-    .map((p) =>
-      p === "YOUTUBE" ? "YouTube Shorts" : p === "INSTAGRAM" ? "Instagram" : "TikTok",
-    )
-    .join(", ");
+  const platformLabels = platforms.map((p) => PLATFORM_LABELS[p]).join(", ");
 
   // 장 순서와 종류가 맞을 때만 섞인 캐러셀로 본다 — 어긋나면 잘못된 구성을 알리느니 전처럼 쓴다.
   const kinds =
@@ -176,7 +205,9 @@ export async function generateCaptions(
         .join("\n")}`
     : null;
 
-  const baseInstruction = mixedCarousel
+  const baseInstruction = textOnly
+    ? "사진 · 영상 없이 글만 올리는 게시물이에요. [사용자 입력 기본 설명]만 보고 위 형식으로 글을 써주세요."
+    : mixedCarousel
     ? "이 사진 · 영상들의 흐름과 관계를 분석해 위 형식으로 캡션을 생성해주세요. 영상은 첫 장면 이미지만 첨부했어요."
     : imageDataUrls.length > 1
       ? "이 이미지들의 흐름과 관계를 분석해 위 형식으로 캡션을 생성해주세요."
@@ -372,6 +403,17 @@ function postProcessTiktok(
   return { caption, hashtags };
 }
 
+// 스레드: 글 500자, 주제 태그 1개. 본문 안의 #태그는 발행 때도 지워지니 미리 지워 보이는 글과 올라갈 글을 맞춘다.
+function postProcessThreads(
+  c: NonNullable<Captions["threads"]>,
+): NonNullable<Captions["threads"]> {
+  const tag = pickTopicTag([...c.hashtags, ...extractInlineHashtags(c.caption)]);
+  return {
+    caption: buildThreadsText(c.caption.replace(/[ \t]*[—―][ \t]*/g, ", ")),
+    hashtags: tag ? [`#${tag}`] : [],
+  };
+}
+
 function postProcess(captions: Captions): Captions {
   return {
     youtube: captions.youtube ? postProcessYoutube(captions.youtube) : undefined,
@@ -379,5 +421,6 @@ function postProcess(captions: Captions): Captions {
       ? postProcessInstagram(captions.instagram)
       : undefined,
     tiktok: captions.tiktok ? postProcessTiktok(captions.tiktok) : undefined,
+    threads: captions.threads ? postProcessThreads(captions.threads) : undefined,
   };
 }

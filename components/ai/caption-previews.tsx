@@ -116,6 +116,47 @@ export function InstagramPreview({
   );
 }
 
+// 스레드는 글이 먼저 보이는 피드라 세로 화면 대신 글 카드로 보여 준다. 사진 · 영상이 있으면 글 아래에 첫 장.
+export function ThreadsPreview({
+  caption,
+  topicTag,
+  thumbnailUrl,
+}: BasePreviewProps & {
+  caption: string;
+  topicTag: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <PreviewLabel>Threads</PreviewLabel>
+      <div className="mx-auto w-full max-w-[240px] space-y-2 rounded-xl border bg-card p-3 text-xs shadow-sm">
+        <p className="font-semibold">
+          username
+          {topicTag && (
+            <span className="font-normal text-muted-foreground"> › {topicTag}</span>
+          )}
+        </p>
+        <p className="line-clamp-[10] whitespace-pre-line text-ink-2">
+          {caption || "글을 입력하세요"}
+        </p>
+        {thumbnailUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumbnailUrl}
+            alt=""
+            className="aspect-[4/5] w-full rounded-md object-cover"
+          />
+        )}
+        <div className="flex gap-3 text-muted-foreground">
+          <Heart className="size-4" />
+          <MessageCircle className="size-4" />
+          <Share2 className="size-4" />
+          <Send className="size-4" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function TiktokPreview({
   caption,
   thumbnailUrl,

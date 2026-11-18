@@ -1,11 +1,13 @@
 import type { ContentPlatform as Platform } from "@/lib/platforms";
+import { TEXT_ONLY_PLATFORMS } from "@/lib/platforms/types";
 import {
   CAROUSEL_VIDEO_MAX_SEC,
   CAROUSEL_VIDEO_MIN_SEC,
   isVideoFile,
 } from "@/lib/upload/media-kind";
 
-export type MediaType = "IMAGE" | "VIDEO";
+// TEXT = 사진 · 영상 없이 글만(0058). 스레드만 받는다(TEXT_ONLY_PLATFORMS).
+export type MediaType = "IMAGE" | "VIDEO" | "TEXT";
 
 export interface MediaItem {
   file: File;
@@ -104,7 +106,21 @@ const CONSTRAINTS: Record<Platform, PlatformConstraints> = {
     recommendedAspectName: "9:16 (세로 전체화면)",
     recommendedMinResolution: { width: 1080, height: 1920 },
   },
+  THREADS: {
+    // 스레드 게시 규격: 사진 JPEG · PNG 8MB, 영상 MP4 · MOV 1GB · 5분, 캐러셀 2~20장(사진 · 영상 섞기 가능).
+    // 콘텐츠 한 개는 사진 10장까지라(contents.media_urls_count) 여기서도 10장. 비율 · 해상도 권장값은 따로 없다.
+    supportsImage: true,
+    supportsVideo: true,
+    maxImagesPerPost: 10,
+    maxFileSizeBytes: 1024 * MB,
+    maxVideoDurationSec: 5 * 60,
+    imageMimes: ["image/jpeg", "image/png"],
+    videoMimes: ["video/mp4", "video/quicktime"],
+  },
 };
+
+// 스레드 사진 한 장 한도. 영상(1GB)과 달라 따로 검사한다.
+const THREADS_MAX_IMAGE_BYTES = 8 * MB;
 
 const ASPECT_TOLERANCE = 0.05;
 
@@ -112,6 +128,7 @@ const PLATFORM_KO: Record<Platform, { name: string; topic: string }> = {
   YOUTUBE: { name: "유튜브", topic: "유튜브는" },
   INSTAGRAM: { name: "인스타그램", topic: "인스타그램은" },
   TIKTOK: { name: "틱톡", topic: "틱톡은" },
+  THREADS: { name: "스레드", topic: "스레드는" },
 };
 
 function ratio(width?: number, height?: number): number | null {
@@ -135,6 +152,18 @@ function evaluatePlatform(
       code: "image_unsupported",
       message: `${topic} 사진을 올릴 수 없어요 (영상만 가능). 1단계에서 이 계정을 빼거나 영상으로 바꿔 주세요.`,
     });
+  }
+  if (mediaType === "TEXT") {
+    // 글만 올리기는 2단계에서 스레드만 골랐을 때만 나온다 — 다른 플랫폼이 섞이면 막는다.
+    if (!TEXT_ONLY_PLATFORMS.includes(platform)) {
+      issues.push({
+        severity: "error",
+        platform,
+        code: "text_unsupported",
+        message: `${topic} 사진이나 영상이 있어야 해요. 사진 · 영상을 올리거나 1단계에서 이 계정을 빼 주세요.`,
+      });
+    }
+    return { platform, status: issues.length > 0 ? "blocked" : "ok", issues };
   }
   if (mediaType === "VIDEO" && !c.supportsVideo) {
     issues.push({
@@ -219,6 +248,16 @@ function evaluatePlatform(
       });
     }
 
+    if (platform === "THREADS" && !itemIsVideo && item.file.size > THREADS_MAX_IMAGE_BYTES) {
+      const fileMB = (item.file.size / MB).toFixed(1);
+      issues.push({
+        severity: "error",
+        platform,
+        code: "file_too_large",
+        message: `스레드 사진은 한 장에 8MB까지예요 (${item.file.name}: ${fileMB}MB).`,
+      });
+    }
+
     if (item.file.size > c.maxFileSizeBytes) {
       const maxMB = Math.floor(c.maxFileSizeBytes / MB);
       const fileMB = (item.file.size / MB).toFixed(1);
@@ -230,10 +269,11 @@ function evaluatePlatform(
       });
     }
 
+    // 인스타 캐러셀 안 영상 길이(3~60초). 스레드 캐러셀 영상은 아래 5분 한도만 본다.
     if (
       mediaType === "IMAGE" &&
       itemIsVideo &&
-      c.supportsImage &&
+      platform === "INSTAGRAM" &&
       item.durationSeconds !== undefined &&
       (item.durationSeconds < CAROUSEL_VIDEO_MIN_SEC ||
         item.durationSeconds > CAROUSEL_VIDEO_MAX_SEC)
@@ -248,7 +288,7 @@ function evaluatePlatform(
     }
 
     if (
-      mediaType === "VIDEO" &&
+      (mediaType === "VIDEO" || (platform === "THREADS" && itemIsVideo)) &&
       item.durationSeconds !== undefined &&
       item.durationSeconds > c.maxVideoDurationSec
     ) {
@@ -305,7 +345,7 @@ export function validateMedia(
   items: MediaItem[],
   selectedPlatforms: Platform[],
 ): ValidationResult {
-  if (items.length === 0) {
+  if (items.length === 0 && mediaType !== "TEXT") {
     return {
       ok: false,
       blockedPlatforms: [],

@@ -291,7 +291,10 @@ export const instagram: PlatformAdapter = {
     // 영상은 media_urls가 항상 1개(DB 제약). 2장 이상 이미지 = 캐러셀.
     const isCarousel = ctx.mediaType !== "VIDEO" && signedUrls.length > 1;
     // 장마다 사진/영상 — 사진 게시물에도 영상이 섞일 수 있다(2026-11-10, lib/upload/media-kind.ts).
-    const itemKinds = signedUrls.map((_, i) => ctx.mediaItemKinds?.[i] ?? ctx.mediaType);
+    // TEXT(글만, 스레드 전용)는 워커가 인스타로 보내기 전에 막는다 — 여기선 사진으로 본다.
+    const itemKinds = signedUrls.map(
+      (_, i): "IMAGE" | "VIDEO" => ctx.mediaItemKinds?.[i] ?? (ctx.mediaType === "VIDEO" ? "VIDEO" : "IMAGE"),
+    );
     if (!isCarousel && ctx.mediaType === "IMAGE" && itemKinds[0] === "VIDEO") {
       // 마법사가 막지만 DB를 직접 읽는 워커에서도 막는다 — 영상 1개를 사진으로 만들면 늘 ERROR.
       throw new PublishError(

@@ -2829,7 +2829,7 @@ export type Database = {
       }
     }
     Enums: {
-      media_type: "VIDEO" | "IMAGE"
+      media_type: "VIDEO" | "IMAGE" | "TEXT"
       post_type:
         | "SHORTS"
         | "REELS"
@@ -2838,6 +2838,7 @@ export type Database = {
         | "PHOTO_MODE"
         | "VIDEO"
         | "PHOTO"
+        | "TEXT"
       publish_status:
         | "PENDING"
         | "PROCESSING"
@@ -2974,7 +2975,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      media_type: ["VIDEO", "IMAGE"],
+      media_type: ["VIDEO", "IMAGE", "TEXT"],
       post_type: [
         "SHORTS",
         "REELS",
@@ -2983,6 +2984,7 @@ export const Constants = {
         "PHOTO_MODE",
         "VIDEO",
         "PHOTO",
+        "TEXT",
       ],
       publish_status: [
         "PENDING",

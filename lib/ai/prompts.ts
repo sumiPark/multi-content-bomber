@@ -7,7 +7,21 @@ import { CAPTION_LINE_RULE } from "./caption-layout";
 // Instagram 규칙의 출처는 한국어 인스타 스킬 ig-caption-ko · ig-human-ko(.claude/skills)다.
 // YouTube · TikTok은 클릭/체류/저장 카피 원칙을 그대로 쓰고, Instagram 캡션에는 적용하지 않는다.
 
-type MediaType = "IMAGE" | "VIDEO";
+// TEXT = 사진 · 영상 없는 스레드 글(0058). 인스타 · 유튜브 · 틱톡은 TEXT로 쓰지 않는다.
+type MediaType = "IMAGE" | "VIDEO" | "TEXT";
+
+// 사실 · 광고 심의 — 인스타 · 스레드 공통.
+const FACT_RULES = `사실 · 광고 심의:
+- 사진·영상과 사용자가 적은 설명에서 확인되는 것만 쓴다. 숫자·가격·산지·성분·사용법·후기·체험담을 지어내지 않는다.
+- 효과나 변화를 약속하지 않는다. "달라져요", "촉촉해져요", "깨끗해져요", "해결돼요" 같은 결과 문장과 설명에 없는 고민은 쓰지 않는다. 설명에 그 내용이 있을 때만 그 범위에서 쓴다.
+- 설명이 짧으면 캡션도 짧게 쓴다. 분량을 채우려고 내용을 만들지 않는다.
+- 재고·할인·마감 같은 판매 상태는 설명에 없으면 말하지 않는다.
+- 치료, 완치, 재생, 염증, 질병 예방, 부작용 없음은 쓰지 않는다. 최고, 유일, 100%, 1위, 최초 같은 단정도 쓰지 않는다.
+- 화장품·건강식품의 효능은 설명에 적힌 범위 안에서만 말하고 개인차가 있음을 밝힌다.`;
+
+// 말투 금지어 — 인스타 · 스레드 공통.
+const BANNED_WORDS =
+  "다양한, 특별한, 프리미엄, 놓치지 마세요, 놓치면 후회, 끝까지 보세요, 강력 추천, 인생템, 필수템, 지금 바로, 또한, 뿐만 아니라, ~에 대해, 오늘은 ~ 소개합니다";
 
 /** 캡션을 쓸 때 참고할 인스타 계정 정보. 직접 올리는 영상이라 직접 촬영 쪽 설정(account_concepts.shoot_*)을 쓴다. */
 export interface CaptionAccount {
@@ -46,7 +60,7 @@ const OUTPUT_PROMPT = `[출력 규칙]
 - 빈 문자열 금지 — 항목이 없으면 짧게라도 의미 있는 텍스트로 채운다.
 - 응답에는 요청된 플랫폼 키만 포함한다.`;
 
-const OTHER_PLATFORM_PROMPTS: Record<Exclude<Platform, "INSTAGRAM">, string> = {
+const OTHER_PLATFORM_PROMPTS: Record<"YOUTUBE" | "TIKTOK", string> = {
   YOUTUBE: `YouTube Shorts
 - title (최대 100자): SEO 키워드 앞배치. **Curiosity Gap** 활용 — 결과는 보여주되 방법은 숨김. 숫자/구체정보 우선. 대괄호 [ ] 또는 파이프 | 로 카테고리 표시 가능. 어그로/낚시 금지 (CTR 높아도 시청 완료율 떨어지면 알고리즘이 처벌).
 - description (5000자 이내, 권장 500~1500자): 구조 = ①첫 2~3줄 핵심 요약 (검색 결과에 노출되는 부분, 가장 중요) → ②본문 3~5문장에서 **Open Loop** 활용 ("끝까지 보면", "후반부에 가장 중요한 비밀") → ③타임스탬프(영상 길이 모르면 생략) → ④**Question-Driven CTA** (구독·좋아요·댓글). SEO 키워드 자연 반복 2~3회.
@@ -86,18 +100,40 @@ caption 모양 (600자 안쪽. 2200자 한도를 채우지 않는다):
 말투:
 - 말하듯 짧은 구어체. 같은 어미를 세 문장 연속 쓰지 않는다.
 - 시적인 광고 문장을 쓰지 않는다("~의 힘으로", "감싸는 순간", "느껴보세요"). 보이는 것과 쓰는 상황을 그대로 말한다.
-- 쓰지 않는 말: 다양한, 특별한, 프리미엄, 놓치지 마세요, 놓치면 후회, 끝까지 보세요, 강력 추천, 인생템, 필수템, 지금 바로, 또한, 뿐만 아니라, ~에 대해, 오늘은 ~ 소개합니다.
+- 쓰지 않는 말: ${BANNED_WORDS}.
 - em dash(—)를 쓰지 않고, 줄임표로 뜸 들이지 않는다. 이모지는 장식이 아니라 문장부호처럼 쓰고 100자당 4개를 넘기지 않는다.
 
-사실 · 광고 심의:
-- 사진·영상과 사용자가 적은 설명에서 확인되는 것만 쓴다. 숫자·가격·산지·성분·사용법·후기·체험담을 지어내지 않는다.
-- 효과나 변화를 약속하지 않는다. "달라져요", "촉촉해져요", "깨끗해져요", "해결돼요" 같은 결과 문장과 설명에 없는 고민은 쓰지 않는다. 설명에 그 내용이 있을 때만 그 범위에서 쓴다.
-- 설명이 짧으면 캡션도 짧게 쓴다. 분량을 채우려고 내용을 만들지 않는다.
-- 재고·할인·마감 같은 판매 상태는 설명에 없으면 말하지 않는다.
-- 치료, 완치, 재생, 염증, 질병 예방, 부작용 없음은 쓰지 않는다. 최고, 유일, 100%, 1위, 최초 같은 단정도 쓰지 않는다.
-- 화장품·건강식품의 효능은 설명에 적힌 범위 안에서만 말하고 개인차가 있음을 밝힌다.
+${FACT_RULES}
 
 hashtags: 정확히 3개. 상품명, 품목, 설명에 적힌 고민처럼 이 게시물의 주제를 가리키는 말로만 고른다. #일상 #데일리 #소통 #맞팔 #좋아요 #릴스 #추천 #fyp 같이 아무것도 설명하지 않는 태그는 쓰지 않는다.
+
+[캡션 스타일 가이드]가 있으면 말투와 구성에만 반영한다. 위 규칙과 부딪치면 위 규칙을 따른다.`;
+}
+
+// 스레드(0058). 피드에서 글이 먼저 읽히는 곳이라 인스타 캡션을 줄인 글이 아니라 따로 쓴다.
+function threadsPrompt(mediaType: MediaType): string {
+  const textOnly = mediaType === "TEXT";
+  return `Threads ${textOnly ? "글 게시물 (사진 · 영상 없음)" : mediaType === "VIDEO" ? "영상 게시물" : "사진 게시물"}
+이 글의 일: 스레드는 피드에서 글이 먼저 읽힌다. 인스타 캡션을 줄인 글이 아니라, 아는 사람에게 말 거는 짧은 글로 따로 쓴다.${
+    textOnly
+      ? "\n사진 · 영상이 없다. '사진 보면', '영상처럼' 같은 말을 쓰지 않고, [사용자 입력 기본 설명]에 있는 내용만으로 쓴다."
+      : ""
+  }
+
+caption 모양 (500자 한도, 150~350자 권장):
+- 첫 줄: 한 문장으로 무엇에 대한 글인지 바로 말한다. 인사 · 해시태그 · 이모지로 시작하지 않는다.
+- 본문: 짧은 문단 1~4개. 경험 · 알게 된 것 · 의견을 말하듯 쓴다.
+- 끝: 답하기 쉬운 질문 하나나 끝맺는 한 줄. 저장 · DM 요청은 하지 않는다.
+- 해시태그 · 링크 · URL을 caption에 넣지 않는다. 이모지는 0~2개.
+
+말투:
+- 해요체 구어체. 같은 어미를 세 문장 연속 쓰지 않는다. 시적인 광고 문장을 쓰지 않는다.
+- 쓰지 않는 말: ${BANNED_WORDS}.
+- em dash(—)를 쓰지 않는다.
+
+${FACT_RULES}
+
+hashtags: 정확히 1개. 스레드 주제 태그로 쓴다. 이 글의 주제를 가리키는 말로, 띄어쓰기 · 마침표 · & 없이 짧게.
 
 [캡션 스타일 가이드]가 있으면 말투와 구성에만 반영한다. 위 규칙과 부딪치면 위 규칙을 따른다.`;
 }
@@ -128,15 +164,17 @@ export function buildCaptionSystemPrompt(
   accounts: CaptionAccount[],
   mixedCarousel = false,
 ): string {
-  const hasOtherPlatform = platforms.some((p) => p !== "INSTAGRAM");
+  const hasVideoPlatform = platforms.some((p) => p === "YOUTUBE" || p === "TIKTOK");
   const guides = platforms.map((p) =>
     p === "INSTAGRAM"
       ? instagramPrompt(mediaType, mixedCarousel) + accountPrompt(accounts)
-      : OTHER_PLATFORM_PROMPTS[p],
+      : p === "THREADS"
+        ? threadsPrompt(mediaType)
+        : OTHER_PLATFORM_PROMPTS[p],
   );
   return [
     COMMON_PROMPT,
-    hasOtherPlatform ? VIDEO_PLATFORM_PROMPT : null,
+    hasVideoPlatform ? VIDEO_PLATFORM_PROMPT : null,
     OUTPUT_PROMPT,
     `[플랫폼별 가이드 — 응답에 포함된 플랫폼만]\n\n${guides.join("\n\n")}`,
   ]
@@ -144,7 +182,7 @@ export function buildCaptionSystemPrompt(
     .join("\n\n");
 }
 
-export const REGENERATE_INSTRUCTION = `위 결과와 다른 톤·각도로 캡션을 다시 생성해주세요. 같은 정보를 다르게 풀어내세요. YouTube·TikTok은 다른 hook 전략(Pattern Interruption / Curiosity Gap / Loss Aversion 중 다른 것)을 시도하고, Instagram은 Instagram 가이드를 그대로 지키면서 첫 문장과 본문 구성을 바꿔주세요. 단순히 어순만 바꾸지 말고 구조 자체를 다르게.`;
+export const REGENERATE_INSTRUCTION = `위 결과와 다른 톤·각도로 캡션을 다시 생성해주세요. 같은 정보를 다르게 풀어내세요. YouTube·TikTok은 다른 hook 전략(Pattern Interruption / Curiosity Gap / Loss Aversion 중 다른 것)을 시도하고, Instagram · Threads는 각 가이드를 그대로 지키면서 첫 문장과 본문 구성을 바꿔주세요. 단순히 어순만 바꾸지 말고 구조 자체를 다르게.`;
 
 export function captionFixInstruction(problems: string[]): string {
   return `방금 쓴 Instagram 캡션이 점검에서 걸렸습니다. 아래를 고쳐 같은 JSON 형식으로 전체를 다시 답해주세요. 다른 플랫폼 내용은 그대로 두고, 고치면서 사실을 새로 만들지 마세요.\n${problems.map((p) => `- ${p}`).join("\n")}`;

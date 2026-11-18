@@ -10,6 +10,7 @@ import {
 } from "@/lib/ai/caption-generator";
 import type { CaptionAccount } from "@/lib/ai/prompts";
 import { triggerPublishRun } from "@/lib/github-dispatch";
+import { TEXT_ONLY_PLATFORMS, type ContentPlatform } from "@/lib/platforms/types";
 import type { ContentRule } from "@/lib/rules/check";
 import { createServiceClient } from "@/lib/supabase/service";
 import { itemThumbs, mediaItemKinds } from "@/lib/upload/media-kind";
@@ -17,45 +18,63 @@ import type { Json } from "@/types/database";
 
 const SIGNED_URL_TTL_SECONDS = 600;
 
-const generateInputSchema = z.object({
-  mediaType: z.enum(["IMAGE", "VIDEO"]),
-  mediaPaths: z
-    .array(z.string().min(1))
-    .min(1, "미디어를 1개 이상 추가해주세요.")
-    .max(10, "최대 10개까지 처리할 수 있습니다."),
-  analyzePaths: z
-    .array(z.string().min(1))
-    .min(1)
-    .max(10),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  description: z.string().max(500).optional(),
-  presetId: z.string().uuid().optional(),
-  accountIds: z.array(z.string().uuid()).max(50).optional(),
-  platforms: z
-    .array(z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK"]))
-    .min(1, "플랫폼을 1개 이상 선택해주세요.")
-    .max(3),
-  internalTitle: z.string().max(200).optional(),
-});
+const PLATFORMS = ["YOUTUBE", "INSTAGRAM", "TIKTOK", "THREADS"] as const;
+// TEXT = 사진 · 영상 없는 스레드 글(0058).
+const MEDIA_TYPES = ["IMAGE", "VIDEO", "TEXT"] as const;
+
+// 글만 올리기(TEXT)는 스레드만 고르고 미디어가 없어야 하고, 사진 · 영상은 미디어가 1개 이상 있어야 한다.
+function checkMedia(
+  data: { mediaType: (typeof MEDIA_TYPES)[number]; platforms: readonly string[]; mediaPaths?: string[]; analyzePaths: string[] },
+  ctx: z.RefinementCtx,
+) {
+  if (data.mediaType === "TEXT") {
+    if (data.platforms.some((p) => !TEXT_ONLY_PLATFORMS.includes(p as ContentPlatform))) {
+      ctx.addIssue({ code: "custom", message: "사진 · 영상 없이 글만 올리기는 스레드에만 쓸 수 있어요." });
+    }
+    if ((data.mediaPaths?.length ?? 0) > 0 || data.analyzePaths.length > 0) {
+      ctx.addIssue({ code: "custom", message: "글만 올리기에는 사진 · 영상을 넣지 않아요." });
+    }
+    return;
+  }
+  if ((data.mediaPaths && data.mediaPaths.length === 0) || data.analyzePaths.length === 0) {
+    ctx.addIssue({ code: "custom", message: "미디어를 1개 이상 추가해주세요." });
+  }
+}
+
+const generateInputSchema = z
+  .object({
+    mediaType: z.enum(MEDIA_TYPES),
+    mediaPaths: z.array(z.string().min(1)).max(10, "최대 10개까지 처리할 수 있습니다."),
+    analyzePaths: z.array(z.string().min(1)).max(10),
+    metadata: z.record(z.string(), z.unknown()).default({}),
+    description: z.string().max(500).optional(),
+    presetId: z.string().uuid().optional(),
+    accountIds: z.array(z.string().uuid()).max(50).optional(),
+    platforms: z
+      .array(z.enum(PLATFORMS))
+      .min(1, "플랫폼을 1개 이상 선택해주세요.")
+      .max(PLATFORMS.length),
+    internalTitle: z.string().max(200).optional(),
+  })
+  .superRefine(checkMedia);
 
 const updateInputSchema = z.object({
   contentId: z.string().uuid(),
   captions: captionsSchema,
 });
 
-const regenerateInputSchema = z.object({
-  contentId: z.string().uuid(),
-  mediaType: z.enum(["IMAGE", "VIDEO"]),
-  analyzePaths: z.array(z.string().min(1)).min(1).max(10),
-  description: z.string().max(500).optional(),
-  presetId: z.string().uuid().optional(),
-  accountIds: z.array(z.string().uuid()).max(50).optional(),
-  platforms: z
-    .array(z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK"]))
-    .min(1)
-    .max(3),
-  previousCaptions: captionsSchema,
-});
+const regenerateInputSchema = z
+  .object({
+    contentId: z.string().uuid(),
+    mediaType: z.enum(MEDIA_TYPES),
+    analyzePaths: z.array(z.string().min(1)).max(10),
+    description: z.string().max(500).optional(),
+    presetId: z.string().uuid().optional(),
+    accountIds: z.array(z.string().uuid()).max(50).optional(),
+    platforms: z.array(z.enum(PLATFORMS)).min(1).max(PLATFORMS.length),
+    previousCaptions: captionsSchema,
+  })
+  .superRefine(checkMedia);
 
 const createJobsInputSchema = z.object({
   contentId: z.string().uuid(),
@@ -66,21 +85,18 @@ const createJobsInputSchema = z.object({
   seriesByAccount: z
     .record(z.string().uuid(), z.object({ seriesId: z.string().uuid(), reply: z.boolean() }))
     .optional(),
-  // "스레드에도 올리기"(0056)로 고른 스레드 계정. 인스타 캡션으로 같은 시각에 따로 올린다.
-  threadsAccountIds: z.array(z.string().uuid()).max(20).optional(),
 });
 
-const createBlankInputSchema = z.object({
-  mediaType: z.enum(["IMAGE", "VIDEO"]),
-  mediaPaths: z.array(z.string().min(1)).min(1).max(10),
-  analyzePaths: z.array(z.string().min(1)).min(1).max(10),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  platforms: z
-    .array(z.enum(["YOUTUBE", "INSTAGRAM", "TIKTOK"]))
-    .min(1)
-    .max(3),
-  internalTitle: z.string().max(200).optional(),
-});
+const createBlankInputSchema = z
+  .object({
+    mediaType: z.enum(MEDIA_TYPES),
+    mediaPaths: z.array(z.string().min(1)).max(10),
+    analyzePaths: z.array(z.string().min(1)).max(10),
+    metadata: z.record(z.string(), z.unknown()).default({}),
+    platforms: z.array(z.enum(PLATFORMS)).min(1).max(PLATFORMS.length),
+    internalTitle: z.string().max(200).optional(),
+  })
+  .superRefine(checkMedia);
 
 const updateInternalTitleSchema = z.object({
   contentId: z.string().uuid(),
@@ -135,8 +151,8 @@ export type RegenerateCaptionsResult =
     }
   | { ok: false; error: string };
 
-type Platform = "YOUTUBE" | "INSTAGRAM" | "TIKTOK";
-type MediaType = "VIDEO" | "IMAGE";
+type Platform = ContentPlatform;
+type MediaType = (typeof MEDIA_TYPES)[number];
 
 function buildBlankCaptions(platforms: Platform[]): Captions {
   return {
@@ -149,11 +165,31 @@ function buildBlankCaptions(platforms: Platform[]): Captions {
     tiktok: platforms.includes("TIKTOK")
       ? { caption: "", hashtags: [] }
       : undefined,
+    threads: platforms.includes("THREADS")
+      ? { caption: "", hashtags: [] }
+      : undefined,
   };
 }
 
+// 분석할 사진 · 영상 첫 장면의 서명 URL. 글만 올리기(TEXT)는 분석할 미디어가 없어 빈 배열.
+async function signAnalyzePaths(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  paths: string[],
+): Promise<{ ok: true; urls: string[] } | { ok: false; error: string }> {
+  if (paths.length === 0) return { ok: true, urls: [] };
+  const { data: signed, error } = await supabase.storage
+    .from("media")
+    .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
+  if (error || !signed) {
+    return { ok: false, error: `서명 URL 생성 실패: ${error?.message ?? "unknown"}` };
+  }
+  const failed = signed.find((s) => s.error || !s.signedUrl);
+  if (failed) return { ok: false, error: `서명 URL 생성 실패: ${failed.error}` };
+  return { ok: true, urls: signed.map((s) => s.signedUrl as string) };
+}
+
 function pickPostType(
-  platform: Platform | "THREADS",
+  platform: Platform,
   mediaType: MediaType,
   count: number,
 ):
@@ -163,8 +199,10 @@ function pickPostType(
   | "CAROUSEL"
   | "PHOTO_MODE"
   | "VIDEO"
-  | "PHOTO" {
+  | "PHOTO"
+  | "TEXT" {
   if (platform === "THREADS") {
+    if (mediaType === "TEXT") return "TEXT";
     if (mediaType === "VIDEO") return "VIDEO";
     return count > 1 ? "CAROUSEL" : "PHOTO";
   }
@@ -271,21 +309,8 @@ export async function generateCaptionsAction(
     presetInstructions = preset?.instructions ?? undefined;
   }
 
-  const { data: signed, error: signedError } = await supabase.storage
-    .from("media")
-    .createSignedUrls(parsed.data.analyzePaths, SIGNED_URL_TTL_SECONDS);
-
-  if (signedError || !signed) {
-    return {
-      ok: false,
-      error: `서명 URL 생성 실패: ${signedError?.message ?? "unknown"}`,
-    };
-  }
-
-  const failed = signed.find((s) => s.error || !s.signedUrl);
-  if (failed) {
-    return { ok: false, error: `서명 URL 생성 실패: ${failed.error}` };
-  }
+  const signed = await signAnalyzePaths(supabase, parsed.data.analyzePaths);
+  if (!signed.ok) return signed;
 
   let captions: Captions;
   let reviewNotes: string[];
@@ -295,9 +320,8 @@ export async function generateCaptionsAction(
       parsed.data.accountIds,
       parsed.data.platforms,
     );
-    // `failed` check above guarantees every entry has a non-null signedUrl.
     ({ captions, reviewNotes } = await generateCaptions(
-      signed.map((s) => s.signedUrl as string),
+      signed.urls,
       {
         mediaType: parsed.data.mediaType,
         description: parsed.data.description,
@@ -350,7 +374,7 @@ export async function generateCaptionsAction(
     captions,
     reviewNotes,
     savedAt: content.updated_at,
-    thumbnailUrls: signed.map((s) => s.signedUrl as string),
+    thumbnailUrls: signed.urls,
   };
 }
 
@@ -542,19 +566,8 @@ export async function regenerateCaptionsAction(
     presetInstructions = preset?.instructions ?? undefined;
   }
 
-  const { data: signed, error: signedError } = await supabase.storage
-    .from("media")
-    .createSignedUrls(parsed.data.analyzePaths, SIGNED_URL_TTL_SECONDS);
-  if (signedError || !signed) {
-    return {
-      ok: false,
-      error: `서명 URL 생성 실패: ${signedError?.message ?? "unknown"}`,
-    };
-  }
-  const failed = signed.find((s) => s.error || !s.signedUrl);
-  if (failed) {
-    return { ok: false, error: `서명 URL 생성 실패: ${failed.error}` };
-  }
+  const signed = await signAnalyzePaths(supabase, parsed.data.analyzePaths);
+  if (!signed.ok) return signed;
 
   let captions: Captions;
   let reviewNotes: string[];
@@ -565,7 +578,7 @@ export async function regenerateCaptionsAction(
       supabase.from("contents").select("media_urls").eq("id", parsed.data.contentId).maybeSingle(),
     ]);
     ({ captions, reviewNotes } = await generateCaptions(
-      signed.map((s) => s.signedUrl as string),
+      signed.urls,
       {
         mediaType: parsed.data.mediaType,
         description: parsed.data.description,
@@ -612,7 +625,7 @@ export async function regenerateCaptionsAction(
     captions,
     reviewNotes,
     savedAt: updated.updated_at,
-    thumbnailUrls: signed.map((s) => s.signedUrl as string),
+    thumbnailUrls: signed.urls,
   };
 }
 
@@ -664,9 +677,12 @@ export async function createBlankContentAction(
     };
   }
 
-  const { data: thumbSigned } = await supabase.storage
-    .from("media")
-    .createSignedUrls(parsed.data.analyzePaths, SIGNED_URL_TTL_SECONDS);
+  const { data: thumbSigned } =
+    parsed.data.analyzePaths.length > 0
+      ? await supabase.storage
+          .from("media")
+          .createSignedUrls(parsed.data.analyzePaths, SIGNED_URL_TTL_SECONDS)
+      : { data: [] };
   const thumbnailUrls =
     thumbSigned
       ?.map((s) => s.signedUrl)
@@ -847,40 +863,33 @@ export async function createPublishJobsAction(
 
   const { data: content } = await supabase
     .from("contents")
-    .select("media_type, media_urls")
+    .select("media_type, media_urls, ai_captions")
     .eq("id", parsed.data.contentId)
     .maybeSingle();
   if (!content) return { ok: false, error: "콘텐츠를 찾을 수 없습니다." };
 
   // 연결 해제(0016)된 계정으로는 새 발행을 만들지 않는다 — 토큰이 없어 실패만 쌓인다.
-  const { data: pickedAccounts } = await supabase
+  const { data: accounts } = await supabase
     .from("social_accounts")
     .select("id, platform")
     .in("id", parsed.data.accountIds)
-    .neq("platform", "THREADS")
     .is("disconnected_at", null);
-  if (!pickedAccounts || pickedAccounts.length === 0) {
+  if (!accounts || accounts.length === 0) {
     return { ok: false, error: "계정 조회 실패" };
   }
-  // 스레드 계정은 "스레드에도 올리기"로 고른 것만, 인스타를 같이 올릴 때만 받는다.
-  // 스레드 발행은 인스타와 따로 도는 job이라 한쪽이 실패해도 다른 쪽은 그대로 올라간다.
-  const threadsIds = parsed.data.threadsAccountIds ?? [];
-  const withInstagram = pickedAccounts.some((a) => a.platform === "INSTAGRAM");
-  let threadsAccounts: { id: string; platform: string }[] = [];
-  if (threadsIds.length > 0 && withInstagram) {
-    const { data } = await supabase
-      .from("social_accounts")
-      .select("id, platform")
-      .in("id", threadsIds)
-      .eq("platform", "THREADS")
-      .eq("is_active", true)
-      .is("disconnected_at", null);
-    threadsAccounts = data ?? [];
-    if (threadsAccounts.length < threadsIds.length) {
-      return { ok: false, error: "스레드 계정 연결이 끊겼어요. 계정 연동에서 다시 연결하거나 체크를 해제해 주세요." };
+  // 글만 있는 콘텐츠(0058)는 스레드에만 올라간다. 스레드 글이 비어 있으면 발행이 늘 실패하니 미리 막는다.
+  if (
+    content.media_type === "TEXT" &&
+    accounts.some((a) => !TEXT_ONLY_PLATFORMS.includes(a.platform as ContentPlatform))
+  ) {
+    return { ok: false, error: "글만 있는 콘텐츠는 스레드에만 올릴 수 있어요. 1단계에서 다른 계정을 빼 주세요." };
+  }
+  if (accounts.some((a) => a.platform === "THREADS")) {
+    const saved = captionsSchema.safeParse(content.ai_captions);
+    if (!saved.success || !saved.data.threads?.caption.trim()) {
+      return { ok: false, error: "스레드 글이 비어 있어요. 3단계에서 스레드 글을 써 주세요." };
     }
   }
-  const accounts = [...pickedAccounts, ...threadsAccounts];
 
   // 중복 발행 가드 — 같은 콘텐츠에 대해 아직 처리가 안 끝난 job이 있는 계정은 제외한다.
   // (마법사 '완료'가 두 번 눌리면 5초 간격으로 같은 배치가 두 번 등록돼 릴스가 2개씩
@@ -928,7 +937,7 @@ export async function createPublishJobsAction(
     content_id: parsed.data.contentId,
     social_account_id: a.id,
     post_type: pickPostType(
-      a.platform as Platform | "THREADS",
+      a.platform as Platform,
       content.media_type as MediaType,
       mediaCount,
     ),

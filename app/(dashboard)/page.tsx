@@ -208,9 +208,13 @@ async function renderContentDetail(
   if (latest?.ai_captions) {
     const parsed = captionsSchema.safeParse(latest.ai_captions);
     if (parsed.success) {
-      const { data: signed } = await supabase.storage
-        .from("media")
-        .createSignedUrls(latest.media_urls, THUMBNAIL_TTL_SECONDS);
+      // 글만 있는 스레드 게시물(0058)은 서명할 미디어가 없다.
+      const { data: signed } =
+        latest.media_urls.length > 0
+          ? await supabase.storage
+              .from("media")
+              .createSignedUrls(latest.media_urls, THUMBNAIL_TTL_SECONDS)
+          : { data: [] };
       const thumbnails =
         signed?.map((s) => s.signedUrl).filter((u): u is string => Boolean(u)) ??
         [];
@@ -258,7 +262,7 @@ interface JobRow {
   completed_at: string | null;
   created_at: string;
   contents: {
-    media_type: "IMAGE" | "VIDEO";
+    media_type: "IMAGE" | "VIDEO" | "TEXT";
     media_urls: string[];
     ai_captions: unknown;
     internal_title: string | null;
@@ -439,6 +443,7 @@ function labelForJob(j: JobRow): string | null {
     parsed.data.youtube?.title ??
     parsed.data.instagram?.caption ??
     parsed.data.tiktok?.caption ??
+    parsed.data.threads?.caption ??
     null;
   if (!text) return null;
   return text.length > 40 ? `${text.slice(0, 40)}…` : text;

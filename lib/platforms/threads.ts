@@ -12,6 +12,7 @@ import {
   type RefreshedTokens,
 } from "./types";
 import type { Json } from "@/types/database";
+import { buildThreadsText, pickTopicTag } from "./threads-text";
 
 // 스레드(Threads) API. 인스타 발행 API에는 스레드 공유 옵션이 없어 따로 연결한다(0056).
 // Meta 앱의 "Threads API" 사용 사례에서 받은 THREADS_APP_ID / THREADS_APP_SECRET을 쓴다
@@ -24,8 +25,7 @@ const LONG_LIVED_URL = "https://graph.threads.net/access_token";
 const REFRESH_URL = "https://graph.threads.net/refresh_access_token";
 const API_BASE = "https://graph.threads.net/v1.0";
 
-// 스레드 규격: 글 500자, 캐러셀 2~20장, 주제 태그 1개.
-const MAX_TEXT = 500;
+// 스레드 규격: 글 500자 · 주제 태그 1개(threads-text.ts), 캐러셀 2~20장.
 const CAROUSEL_MIN_ITEMS = 2;
 const CAROUSEL_MAX_ITEMS = 20;
 
@@ -72,32 +72,6 @@ function appCredentials(): { clientId: string; clientSecret: string } {
     throw new Error("THREADS_APP_ID / THREADS_APP_SECRET 환경변수 없음");
   }
   return { clientId, clientSecret };
-}
-
-// 스레드 주제 태그 — 1~50자, 마침표 · & 불가. 인스타 해시태그 중 첫 번째로 쓸 수 있는 것.
-function pickTopicTag(hashtags: string[]): string | null {
-  for (const raw of hashtags) {
-    const tag = raw.replace(/^#+/, "").trim();
-    if (tag && tag.length <= 50 && !/[.&\s]/.test(tag)) return tag;
-  }
-  return null;
-}
-
-// 인스타 캡션을 스레드 500자에 맞춘다. 본문 안의 #해시태그는 스레드가 첫 하나만 태그로
-// 쓰고 나머지는 글자로 남아 지저분하니 지우고, 태그는 topic_tag로 하나만 보낸다.
-// 넘치면 문장 · 줄 경계에서 자르고 말줄임표를 붙인다.
-export function buildThreadsText(caption: string | null): string {
-  const body = (caption ?? "")
-    .replace(/(^|\s)#[^\s#]+/g, "$1")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  if (body.length <= MAX_TEXT) return body;
-  const room = MAX_TEXT - 1;
-  const cut = body.slice(0, room);
-  const boundary = Math.max(cut.lastIndexOf("\n"), cut.lastIndexOf(". "));
-  const head = boundary > room * 0.6 ? cut.slice(0, boundary + 1) : cut;
-  return `${head.trimEnd()}…`;
 }
 
 export const threads: PlatformAdapter = {
@@ -172,7 +146,7 @@ export const threads: PlatformAdapter = {
 
   // ───────────────────────────────────────────────────────────────────────────
   // 게시 흐름 (인스타와 같은 컨테이너 방식):
-  //   1. POST /{user-id}/threads  (media_type=IMAGE|VIDEO, text, topic_tag) → 컨테이너
+  //   1. POST /{user-id}/threads  (media_type=TEXT|IMAGE|VIDEO, text, topic_tag) → 컨테이너
   //      캐러셀은 장마다 is_carousel_item=true 자식 → 부모(media_type=CAROUSEL, children)
   //   2. GET  /{container-id}?fields=status,error_message → FINISHED까지 대기
   //   3. POST /{user-id}/threads_publish?creation_id=... → 게시 id
@@ -181,26 +155,44 @@ export const threads: PlatformAdapter = {
   async publish(ctx, accessToken): Promise<PublishResult> {
     if (!ctx.platformAccountId) throw new PublishError("스레드 발행: 계정 id 누락");
     const urls = ctx.mediaSignedUrls;
-    if (urls.length === 0) throw new MediaError("스레드 발행: 미디어 서명 URL이 비어 있어요");
-
     const text = buildThreadsText(ctx.caption);
     const topicTag = pickTopicTag(ctx.hashtags);
-    const kinds = urls.map((_, i) => ctx.mediaItemKinds?.[i] ?? ctx.mediaType);
+
+    // 글만 올리는 게시물(0058, media_type TEXT) — 사진 · 영상 없이 글 컨테이너 하나.
+    if (ctx.mediaType === "TEXT") {
+      if (!text) throw new PublishError("스레드 글 게시물인데 글이 비어 있어요", { permanent: true });
+      return publishContainer(ctx, accessToken, {
+        fingerprint: buildFingerprint(ctx, text, topicTag),
+        pollMax: IMAGE_POLL_MAX_MS,
+        create: () =>
+          createContainer(ctx.platformAccountId, accessToken, {
+            media_type: "TEXT",
+            text,
+            ...(topicTag ? { topic_tag: topicTag } : {}),
+          }),
+      });
+    }
+
+    if (urls.length === 0) throw new MediaError("스레드 발행: 미디어 서명 URL이 비어 있어요");
+    const kinds = urls.map((_, i) => ctx.mediaItemKinds?.[i] ?? (ctx.mediaType === "VIDEO" ? "VIDEO" : "IMAGE"));
     const isCarousel = urls.length > 1;
     if (isCarousel && urls.length > CAROUSEL_MAX_ITEMS) {
       throw new PublishError(`스레드 캐러셀은 최대 ${CAROUSEL_MAX_ITEMS}장이에요 (${urls.length}장)`, { permanent: true });
     }
-    const hasVideo = kinds.includes("VIDEO");
-    const pollMax = hasVideo ? VIDEO_POLL_MAX_MS : IMAGE_POLL_MAX_MS;
-    const fingerprint = buildFingerprint(ctx, text, topicTag);
-
-    let containerId = await resumePreviousContainer(ctx, accessToken, fingerprint);
-    if (!containerId) {
-      const base: Record<string, string> = {
-        ...(text ? { text } : {}),
-        ...(topicTag ? { topic_tag: topicTag } : {}),
-      };
-      if (isCarousel) {
+    const base: Record<string, string> = {
+      ...(text ? { text } : {}),
+      ...(topicTag ? { topic_tag: topicTag } : {}),
+    };
+    return publishContainer(ctx, accessToken, {
+      fingerprint: buildFingerprint(ctx, text, topicTag),
+      pollMax: kinds.includes("VIDEO") ? VIDEO_POLL_MAX_MS : IMAGE_POLL_MAX_MS,
+      create: async () => {
+        if (!isCarousel) {
+          return createContainer(ctx.platformAccountId, accessToken, {
+            ...base,
+            ...mediaParams(kinds[0], urls[0]),
+          });
+        }
         if (urls.length < CAROUSEL_MIN_ITEMS) throw new PublishError("스레드 캐러셀은 2장 이상이어야 해요");
         const children: string[] = [];
         for (let i = 0; i < urls.length; i++) {
@@ -214,38 +206,13 @@ export const threads: PlatformAdapter = {
           });
           children.push(childId);
         }
-        containerId = await createContainer(ctx.platformAccountId, accessToken, {
+        return createContainer(ctx.platformAccountId, accessToken, {
           ...base,
           media_type: "CAROUSEL",
           children: children.join(","),
         });
-      } else {
-        containerId = await createContainer(ctx.platformAccountId, accessToken, {
-          ...base,
-          ...mediaParams(kinds[0], urls[0]),
-        });
-      }
-      await ctx.saveResumeState({ threadsContainerId: containerId, fingerprint, createdAt: new Date().toISOString() });
-    }
-
-    await pollContainerReady(containerId, accessToken, { maxWaitMs: pollMax, deadlineAt: ctx.deadlineAt });
-
-    const publishUrl = new URL(`${API_BASE}/${ctx.platformAccountId}/threads_publish`);
-    publishUrl.searchParams.set("creation_id", containerId);
-    publishUrl.searchParams.set("access_token", accessToken);
-    const published = (await callApi(publishUrl.toString(), { method: "POST" })) as { id?: string };
-    if (!published.id) throw new PublishError("스레드 threads_publish 응답에 id 없음");
-
-    let permalink: string | null = null;
-    try {
-      const res = (await callApi(
-        `${API_BASE}/${published.id}?fields=permalink&access_token=${encodeURIComponent(accessToken)}`,
-      )) as { permalink?: string };
-      permalink = res.permalink ?? null;
-    } catch (err) {
-      console.warn(`[threads] permalink 조회 실패 (media_id=${published.id}):`, err instanceof Error ? err.message : err);
-    }
-    return { platformPostId: published.id, platformPostUrl: permalink ?? "https://www.threads.net/" };
+      },
+    });
   },
 
   // 60일 토큰 자신을 th_refresh_token으로 연장한다(발급 24시간 뒤부터 가능).
@@ -269,6 +236,42 @@ export const threads: PlatformAdapter = {
     };
   },
 };
+
+// 컨테이너를 만들고(이전 시도 것이 있으면 이어받고) 처리 완료를 기다려 게시한 뒤 permalink를 받는다.
+async function publishContainer(
+  ctx: PublishContext,
+  accessToken: string,
+  opts: { fingerprint: string; pollMax: number; create: () => Promise<string> },
+): Promise<PublishResult> {
+  let containerId = await resumePreviousContainer(ctx, accessToken, opts.fingerprint);
+  if (!containerId) {
+    containerId = await opts.create();
+    await ctx.saveResumeState({
+      threadsContainerId: containerId,
+      fingerprint: opts.fingerprint,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  await pollContainerReady(containerId, accessToken, { maxWaitMs: opts.pollMax, deadlineAt: ctx.deadlineAt });
+
+  const publishUrl = new URL(`${API_BASE}/${ctx.platformAccountId}/threads_publish`);
+  publishUrl.searchParams.set("creation_id", containerId);
+  publishUrl.searchParams.set("access_token", accessToken);
+  const published = (await callApi(publishUrl.toString(), { method: "POST" })) as { id?: string };
+  if (!published.id) throw new PublishError("스레드 threads_publish 응답에 id 없음");
+
+  let permalink: string | null = null;
+  try {
+    const res = (await callApi(
+      `${API_BASE}/${published.id}?fields=permalink&access_token=${encodeURIComponent(accessToken)}`,
+    )) as { permalink?: string };
+    permalink = res.permalink ?? null;
+  } catch (err) {
+    console.warn(`[threads] permalink 조회 실패 (media_id=${published.id}):`, err instanceof Error ? err.message : err);
+  }
+  return { platformPostId: published.id, platformPostUrl: permalink ?? "https://www.threads.net/" };
+}
 
 function mediaParams(kind: "IMAGE" | "VIDEO", url: string): Record<string, string> {
   return kind === "VIDEO" ? { media_type: "VIDEO", video_url: url } : { media_type: "IMAGE", image_url: url };
