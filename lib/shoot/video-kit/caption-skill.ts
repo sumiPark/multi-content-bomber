@@ -426,7 +426,18 @@ export function pickSubtitleFonts(list: SkillFont[], design: Pick<CaptionDesign,
   };
 }
 
-export interface CaptionOverlayInput { dir: string; video: string; captions: TimedCaption[]; zones: Zone[]; design: CaptionDesign; workDir: string; blocks?: SkillBlock[]; name?: string }
+export interface CaptionOverlayInput {
+  dir: string;
+  video: string;
+  captions: TimedCaption[];
+  zones: Zone[];
+  design: CaptionDesign;
+  workDir: string;
+  blocks?: SkillBlock[];
+  name?: string;
+  // 스타일 쇼츠 편집용 묶음: 스킬이 찍은 투명 자막 프레임을 이 폴더에 남긴다. 없으면 예전과 같다
+  keepFrames?: string;
+}
 
 /** 프로덕션 렌더와 미리보기가 같은 모션·글꼴·시각 파일을 쓴다. */
 export function prepareCaptionFile(input: CaptionOverlayInput): string {
@@ -447,12 +458,24 @@ export function prepareCaptionFile(input: CaptionOverlayInput): string {
 export function overlayCaptions(input: CaptionOverlayInput): string {
   const file = prepareCaptionFile(input);
   const out = join(input.workDir, `${input.name ?? "final"}-captioned.mp4`);
-  const res = spawnSync(process.execPath, [join(input.dir, "scripts", "subs.cjs"), file, "--out", out], {
-    encoding: "utf8",
-    timeout: 20 * 60_000,
-    maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, CMS_NO_UPDATE_CHECK: "1" },
-  });
+  const run = (script: string, args: string[]) =>
+    spawnSync(process.execPath, [join(input.dir, "scripts", script), ...args], {
+      encoding: "utf8",
+      timeout: 20 * 60_000,
+      maxBuffer: 16 * 1024 * 1024,
+      env: { ...process.env, CMS_NO_UPDATE_CHECK: "1" },
+    });
+  let res: ReturnType<typeof run>;
+  if (input.keepFrames) {
+    // 장면 파일만 만든 뒤(subs.cjs와 같은 파일) 렌더를 직접 불러 투명 프레임을 남긴다. 결과 영상은 예전과 같다
+    const spec = run("subs.cjs", [file, "--no-render"]);
+    if (spec.status !== 0) throw new Error(`자막 모션 장면 만들기 실패: ${(spec.stderr || String(spec.error ?? "")).slice(-300)}`);
+    const specPath = file.replace(/\.json$/i, ".js");
+    res = run("render.cjs", [specPath, "--over", input.video, "--out", out, "--keep", input.keepFrames]);
+    res = { ...res, stdout: `${spec.stdout}${res.stdout}`, stderr: `${spec.stderr}${res.stderr}` };
+  } else {
+    res = run("subs.cjs", [file, "--out", out]);
+  }
   if (res.status !== 0) throw new Error(`자막 모션 렌더 실패: ${(res.stderr || String(res.error ?? "")).slice(-300)}`);
   // 글꼴을 못 불러오면 스킬이 엉뚱한 글꼴로 그리고 넘어간다. 호출하는 쪽이 대체 글꼴 자막으로 다시 만든다
   if (`${res.stdout}${res.stderr}`.includes("못 불러온 폰트")) throw new Error("자막 모션 렌더에서 글꼴을 불러오지 못했어요");

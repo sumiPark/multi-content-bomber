@@ -21,6 +21,7 @@ import { applyHumanText } from "@/lib/shoot/video-kit/human-text";
 import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
+import { buildEditParts } from "@/lib/shoot/video-kit/edit-parts";
 import { captionZones, hookPlace, writeCoverProject, writeProject, type BehindWord, type VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import { layoutBeats, snapCuts, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
@@ -84,6 +85,8 @@ export interface KitInput {
   revise?: { plan: EditPlan; request: string; items: string[] } | null;
   // 스타일 쇼츠 주석 수정만: 지난 완성본의 주석 시각 화면(번호 동그라미). revise와 함께 넘긴다
   reviseFrames?: { no: number; image: string }[];
+  // 스타일 쇼츠만: 편집용 파일 묶음(자막 없는 영상 · 자막 영상 · srt · 소리 트랙)도 만든다. 없으면 예전과 같다
+  exportParts?: boolean;
   // 예전 방식(칸별 입력)으로 저장된 컷별 문구. 새로 저장하지 않지만 남아 있는 값은 반영한다
   overrides?: { no: number; onScreen?: string | null; subtitle?: string | null }[];
   // 이미 만든 음성(lemo 경로). 있으면 음성을 새로 만들지 않고 비트마다 이 음성을 쓴다.
@@ -119,6 +122,8 @@ export interface KitResult {
   usedVoice: boolean;
   visuals: UsedVisual[];
   quality?: VideoQuality;
+  // exportParts일 때만: 편집용 파일 묶음 zip. 못 만들면 null(경고는 warnings에)
+  partsZip?: string | null;
   captionMode: "motion" | "basic";
 }
 
@@ -368,7 +373,15 @@ function buildVoiceTrack(tl: Timeline, workDir: string): string {
 }
 
 /** 내레이션 + 효과음 + 음악. 말할 때 음악과 효과음이 자동으로 줄어든다. */
-function buildMix(tl: Timeline, voice: string, dest: string, music: MusicToUse, placed?: PlacedSfx[]): { sfx: string[]; music: string | null; musicSource: MusicSource | null } {
+export function buildMix(
+  tl: Timeline,
+  voice: string,
+  dest: string,
+  music: MusicToUse,
+  placed?: PlacedSfx[],
+  // 편집용 묶음: 섞기 직전의 음성 · 음악 · 효과음을 이 폴더에 따로 남긴다(말할 때 줄어드는 것까지 적용된 상태)
+  stemsDir?: string,
+): { sfx: string[]; music: string | null; musicSource: MusicSource | null; stems?: { voice: string; music: string; sfx: string } } {
   const kit = editKit();
   const D = tl.duration.toFixed(3);
   // 스타일 쇼츠는 미리 만든 효과음(placed), 나머지는 kit.json 효과음
@@ -397,9 +410,20 @@ function buildMix(tl: Timeline, voice: string, dest: string, music: MusicToUse, 
   parts.push(`[${m + 1}:a]aformat=channel_layouts=stereo,asplit=3[k1][k2][vm]`);
   parts.push("[bg][k1]sidechaincompress=threshold=0.05:ratio=3.5:attack=20:release=260:makeup=1[bgd]");
   parts.push("[sfx][k2]sidechaincompress=threshold=0.06:ratio=2:attack=5:release=120:makeup=1[sfxd]");
-  parts.push(`[vm][sfxd][bgd]amix=inputs=3:normalize=0:duration=first,volume=1dB,alimiter=limit=0.84:level=false,atrim=0:${D}[mix]`);
-  ffmpeg(["-y", "-v", "error", ...inputs, "-filter_complex", parts.join(";"), "-map", "[mix]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", dest]);
-  return { sfx: [...new Set(used.map((s) => s.name))], music: music.name, musicSource: music.source };
+  const result = { sfx: [...new Set(used.map((s) => s.name))], music: music.name, musicSource: music.source };
+  if (!stemsDir) {
+    parts.push(`[vm][sfxd][bgd]amix=inputs=3:normalize=0:duration=first,volume=1dB,alimiter=limit=0.84:level=false,atrim=0:${D}[mix]`);
+    ffmpeg(["-y", "-v", "error", ...inputs, "-filter_complex", parts.join(";"), "-map", "[mix]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", dest]);
+    return result;
+  }
+  mkdirSync(stemsDir, { recursive: true });
+  const stems = { voice: join(stemsDir, "voice.wav"), music: join(stemsDir, "music.wav"), sfx: join(stemsDir, "sfx.wav") };
+  parts.push("[vm]asplit=2[vmA][vmS]", "[sfxd]asplit=2[sfA][sfS]", "[bgd]asplit=2[bgA][bgS]");
+  parts.push(`[vmA][sfA][bgA]amix=inputs=3:normalize=0:duration=first,volume=1dB,alimiter=limit=0.84:level=false,atrim=0:${D}[mix]`);
+  parts.push(`[vmS]atrim=0:${D}[vo]`, `[sfS]apad=whole_dur=${D},atrim=0:${D}[fx]`, `[bgS]apad=whole_dur=${D},atrim=0:${D}[bm]`);
+  const wav = ["-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"];
+  ffmpeg(["-y", "-v", "error", ...inputs, "-filter_complex", parts.join(";"), "-map", "[mix]", ...wav, dest, "-map", "[vo]", ...wav, stems.voice, "-map", "[fx]", ...wav, stems.sfx, "-map", "[bm]", ...wav, stems.music]);
+  return { ...result, stems };
 }
 
 function lufs(file: string): number | null {
@@ -723,7 +747,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     placedSfx = made.placed;
     warnings.push(...made.warnings);
   }
-  const sounds = buildMix(tl, voice, mix, music, placedSfx);
+  const { stems, ...sounds } = buildMix(tl, voice, mix, music, placedSfx, input.exportParts ? join(workDir, "stems") : undefined);
   // 장면마다 상품 · 사람이 있는 자리를 읽어 글자가 피하게 한다. 못 읽으면 기본 자리
   const zones = input.presetZones ?? subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
     const owner = allClips.find((c) => c.no === tl.cuts[i]?.clip);
@@ -814,11 +838,18 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     hyperframes(version, project, ["render", "-o", final, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
   }
   if (!existsSync(final) || mediaSeconds(final) < 1) throw new Error("렌더 결과가 없어요");
+  // 편집용 묶음: 모션 자막을 얹기 전 렌더는 자막 · 첫 화면 글자 · 끝 화면 글자가 없는 영상이다
+  let noTextVideo: string | null = null;
+  const captionFrames = input.exportParts ? join(workDir, "caption-frames") : undefined;
+  if (input.exportParts && design && skillDir) {
+    noTextVideo = join(workDir, "no-text.mp4");
+    copyFileSync(final, noTextVideo);
+  }
   if (design && skillDir) {
     try {
       // 후킹 글자와 끝 화면도 자막과 같은 스킬로 얹는다
       const blocks = motionBlocks(tl, zones, design);
-      final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, workDir, blocks });
+      final = overlayCaptions({ dir: skillDir, video: final, captions: tl.captions, zones: captionZones(tl, zones), design, workDir, blocks, keepFrames: captionFrames });
     } catch (e) {
       console.warn("[video-kit] 자막 모션 실패, 기본 자막으로 다시 렌더:", e instanceof Error ? e.message : e);
       warnings.push(`${CAPTION_FALLBACK_WARNING} (${e instanceof Error ? e.message : e})`.slice(0, 300));
@@ -888,6 +919,26 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   }
   cover ??= makeCover(version, workDir, coverClip, plan.thumbnail, look, videoFonts);
 
+  // 편집용 묶음(스타일 쇼츠). 못 만들어도 완성본은 그대로 낸다
+  let partsZip: string | null | undefined;
+  if (input.exportParts) {
+    try {
+      if (!noTextVideo) {
+        // 기본 자막으로 만든 영상은 자막을 뺀 렌더를 한 번 더 한다
+        noTextVideo = join(workDir, "no-text.mp4");
+        writeProject(project, tl, { look: finalLook, zones: finalZones, behind: null, noCaptions: true, fonts: videoFonts, readable });
+        hyperframes(version, project, ["render", "-o", noTextVideo, "-q", "standard", "--video-bitrate", "10M", "--skill", "hyperframes"]);
+      }
+      // 모션 자막이 실패해 기본 자막으로 만들었으면 남은 프레임은 완성본과 다르다 — 쓰지 않는다
+      const parts = buildEditParts({ workDir, noTextVideo, captionFrames: design && captionFrames ? captionFrames : null, stems: stems ?? null, tl });
+      partsZip = parts.zip;
+      warnings.push(...parts.warnings);
+    } catch (e) {
+      partsZip = null;
+      warnings.push(`편집용 파일을 만들지 못했어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+    }
+  }
+
   const hookText = plan.hook.on_screen.replace(/\n+/g, " ");
   plan.look = finalLook;
   // 이번 편집에서 쓰고 끝나는 표시라 저장하는 계획에는 남기지 않는다
@@ -908,6 +959,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     visuals: visual.used,
     quality,
     captionMode: design ? "motion" : "basic",
+    ...(input.exportParts ? { partsZip } : {}),
   };
 }
 

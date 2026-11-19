@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { AlertCircle, AlertTriangle, Download, Loader2, MessageSquarePlus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, Download, FileArchive, Loader2, MessageSquarePlus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { deleteJobAction, remakeJobAction, retryVersionAction, type StyleResult } from "@/app/(dashboard)/style-shorts/actions";
 import { formatTime, NoteEditor, type NoteView } from "@/components/style-shorts/note-editor";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,8 @@ export interface VersionView {
   videoUrl: string | null;
   coverUrl: string | null;
   downloadUrl: string | null;
+  // 편집용 파일 묶음(zip). 이 기능 전에 만든 버전은 null
+  partsUrl: string | null;
   seconds: number | null;
   warnings: string[];
   music: { title: string; creator: string; license: string; url: string } | null;
@@ -133,6 +135,12 @@ function VersionCard({
                   <a href={v.downloadUrl} className={buttonVariants({ variant: latest ? "default" : "outline" })}>
                     <Download className="size-4" aria-hidden />
                     완성본 받기
+                  </a>
+                )}
+                {v.partsUrl && (
+                  <a href={v.partsUrl} className={buttonVariants({ variant: "outline" })}>
+                    <FileArchive className="size-4" aria-hidden />
+                    편집용 파일 받기
                   </a>
                 )}
                 {v.status === "DONE" && (

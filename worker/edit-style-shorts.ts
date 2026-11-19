@@ -20,7 +20,7 @@ import { captionFontDirective } from "@/lib/style-shorts/caption-look";
 import { transcribeWords } from "@/lib/shoot/video-kit/tools";
 import type { StyleCard } from "@/lib/style-shorts/card";
 import { renderStyleSfx } from "@/lib/style-shorts/sfx";
-import { CLIP_KEEP_DAYS, type JobClip, type VersionRequest, type VersionTimeline } from "@/lib/style-shorts/jobs";
+import { CLIP_KEEP_DAYS, PARTS_BUCKET, type JobClip, type VersionRequest, type VersionTimeline } from "@/lib/style-shorts/jobs";
 import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
@@ -234,6 +234,8 @@ async function main() {
         revise: revise?.revise ?? null,
         reviseFrames: revise?.frames,
         sfxRenderer: renderStyleSfx,
+        // 캡컷 등에서 이어 편집할 파일 묶음(2026-11-19 사용자 결정)
+        exportParts: true,
         // 자막 디자인 AI가 참고하는 글 — 레퍼런스 자막 모양(글꼴 · 모션 지시)과 카드의 자막 · 화면 설명
         editStyleText: [refLook ? captionFontDirective(refLook) : "", card.sections.captions, card.sections.visual].filter(Boolean).join("\n"),
         tone: concept,
@@ -258,6 +260,18 @@ async function main() {
       };
       await up(`${base}.mp4`, kit.final, "video/mp4");
       await up(`${base}.jpg`, kit.cover, "image/jpeg");
+      // 편집용 파일 묶음은 못 올려도 완성본은 저장한다
+      let partsPath: string | null = null;
+      if (kit.partsZip) {
+        try {
+          // media 버킷은 zip을 받지 않아 비공개 버킷 edit-parts에 둔다(0061)
+          const { error: e } = await service.storage.from(PARTS_BUCKET).upload(`${base}-edit.zip`, readFileSync(kit.partsZip), { contentType: "application/zip", upsert: true });
+          if (e) throw new Error(e.message);
+          partsPath = `${base}-edit.zip`;
+        } catch (e) {
+          kit.warnings.push(`편집용 파일을 올리지 못했어요. (${e instanceof Error ? e.message : e})`.slice(0, 300));
+        }
+      }
 
       const { data: done, error: saveErr } = await service
         .from("style_short_versions")
@@ -265,6 +279,7 @@ async function main() {
           status: "DONE",
           video_path: `${base}.mp4`,
           cover_path: `${base}.jpg`,
+          parts_path: partsPath,
           seconds: Math.round(kit.seconds * 10) / 10,
           plan: kit.plan as unknown as Json,
           timeline: timelineSummary(kit) as unknown as Json,
@@ -281,6 +296,7 @@ async function main() {
       if (!done?.length) {
         console.log(`  편집하는 사이 버전이 지워져 결과를 버림`);
         await service.storage.from("media").remove([`${base}.mp4`, `${base}.jpg`]);
+        if (partsPath) await service.storage.from(PARTS_BUCKET).remove([partsPath]);
         continue;
       }
       warnIfError(await service.from("style_short_jobs").update({ updated_at: new Date().toISOString() }).eq("id", job.id), `요청 갱신 (${job.id})`);

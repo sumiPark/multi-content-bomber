@@ -2881,6 +2881,7 @@ export type Database = {
           id: string
           job_id: string
           organization_id: string
+          parts_path: string | null
           plan: Json | null
           request: Json | null
           seconds: number | null
@@ -2901,6 +2902,7 @@ export type Database = {
           id?: string
           job_id: string
           organization_id: string
+          parts_path?: string | null
           plan?: Json | null
           request?: Json | null
           seconds?: number | null
@@ -2921,6 +2923,7 @@ export type Database = {
           id?: string
           job_id?: string
           organization_id?: string
+          parts_path?: string | null
           plan?: Json | null
           request?: Json | null
           seconds?: number | null

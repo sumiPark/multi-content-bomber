@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { triggerStyleEditRun, triggerStyleRefsRun } from "@/lib/github-dispatch";
 import { cardEditSchema, MAX_REFERENCES, parseInstagramUrl, type StyleCard } from "@/lib/style-shorts/card";
-import { CONCEPT_MAX, MAX_CLIP_BYTES, MAX_CLIPS, SCRIPT_MAX, type JobClip, type VersionRequest } from "@/lib/style-shorts/jobs";
+import { CONCEPT_MAX, MAX_CLIP_BYTES, MAX_CLIPS, PARTS_BUCKET, SCRIPT_MAX, type JobClip, type VersionRequest } from "@/lib/style-shorts/jobs";
 import { NOTE_MAX, NOTES_PER_VERSION } from "@/lib/style-shorts/revise";
 import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -541,7 +541,8 @@ export async function deleteJobAction(input: z.infer<typeof idSchema>): Promise<
   if (!job) return { ok: false, error: "요청을 찾지 못했어요." };
   const { busy } = await busyOrLatest(service, job.id);
   if (busy) return { ok: false, error: "편집 중에는 지울 수 없어요. 끝난 뒤 지워 주세요." };
-  const { data: versions } = await service.from("style_short_versions").select("video_path, cover_path").eq("job_id", job.id);
+  const { data: versions } = await service.from("style_short_versions").select("video_path, cover_path, parts_path").eq("job_id", job.id);
+  const partPaths = (versions ?? []).map((v) => v.parts_path).filter((p): p is string => !!p);
   const paths = [
     ...(job.clips_deleted_at ? [] : ((job.clips ?? []) as unknown as JobClip[]).map((c) => c.path)),
     ...(versions ?? []).flatMap((v) => [v.video_path, v.cover_path]).filter((p): p is string => !!p),
@@ -551,6 +552,10 @@ export async function deleteJobAction(input: z.infer<typeof idSchema>): Promise<
   if (paths.length) {
     const { error: rmError } = await service.storage.from("media").remove(paths);
     if (rmError) console.error("[style-shorts] 파일 지우기 실패:", rmError.message);
+  }
+  if (partPaths.length) {
+    const { error: rmError } = await service.storage.from(PARTS_BUCKET).remove(partPaths);
+    if (rmError) console.error("[style-shorts] 편집용 파일 지우기 실패:", rmError.message);
   }
   revalidateJob();
   return { ok: true };

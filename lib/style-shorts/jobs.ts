@@ -6,6 +6,8 @@ export const MAX_CLIPS = 20;
 // 촬영본 하나 한도 — media 버킷 한도(0014)와 같게
 export const MAX_CLIP_BYTES = 1024 * 1024 * 1024;
 export const SCRIPT_MAX = 3000;
+// 편집용 파일 묶음(zip) 버킷(0061). 비공개라 링크는 서버가 service_role로 만든다
+export const PARTS_BUCKET = "edit-parts";
 export const CONCEPT_MAX = 1000;
 
 export interface JobClip {
