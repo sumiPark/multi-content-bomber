@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type KeyboardEvent, type MouseEvent } from "react";
 import { Loader2, Pause, Pencil, Play, Send, X } from "lucide-react";
 import { deleteNoteAction, saveNoteAction, sendRevisionAction } from "@/app/(dashboard)/style-shorts/actions";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,18 @@ export function NoteEditor({
 
   const nextNo = (notes.at(-1)?.no ?? 0) + 1;
   const full = notes.length >= NOTES_PER_VERSION;
+
+  // Esc — 입력칸에 커서가 없어도 적고 있는 새 주석 · 고치던 주석을 취소한다
+  useEffect(() => {
+    if (!draft && !editing) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing) return;
+      setDraft(null);
+      setEditing(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [draft, editing]);
 
   const seek = (t: number) => {
     const v = videoRef.current;
@@ -173,7 +185,7 @@ export function NoteEditor({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-4 lg:flex-row">
+      <div className="flex flex-col gap-4 md:flex-row">
         {/* 영상 + 동그라미 */}
         <div className="w-full max-w-[360px] shrink-0 space-y-2">
           <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg bg-black">
@@ -193,38 +205,7 @@ export function NoteEditor({
             {visible.map((n) => (
               <Circle key={n.id} no={n.no} x={n.x!} y={n.y!} onClick={() => seek(n.at!)} />
             ))}
-            {draft && (
-              <>
-                <Circle no={nextNo} x={draft.x} y={draft.y} active />
-                <div
-                  className="absolute z-10 w-[220px] max-w-[80%] space-y-1.5 rounded-md border bg-card p-2 shadow-lg"
-                  style={{
-                    left: `${draft.x * 100}%`,
-                    top: `${draft.y * 100}%`,
-                    transform: `translate(${draft.x > 0.5 ? "calc(-100% - 36px)" : "36px"}, ${draft.y > 0.6 ? "-100%" : "-50%"})`,
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <p className="text-xs text-muted-foreground">
-                    {nextNo}번 · {formatTime(draft.at)}
-                  </p>
-                  <Input
-                    autoFocus
-                    value={draft.text}
-                    maxLength={NOTE_MAX}
-                    placeholder="고칠 내용을 적고 Enter"
-                    disabled={saving}
-                    onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (isSubmit(e)) {
-                        e.preventDefault();
-                        void saveDraft();
-                      } else if (e.key === "Escape") setDraft(null);
-                    }}
-                  />
-                </div>
-              </>
-            )}
+            {draft && <Circle no={nextNo} x={draft.x} y={draft.y} active />}
           </div>
 
           {/* 재생 막대 — 주석 번호가 찍힌다 */}
@@ -270,7 +251,7 @@ export function NoteEditor({
           <p className="text-sm font-semibold">
             주석 {notes.length}개 <span className="font-normal text-muted-foreground">· v{version}에서 고칠 곳</span>
           </p>
-          {notes.length === 0 && <p className="text-sm text-muted-foreground">아직 주석이 없어요. 영상을 멈추고 고칠 곳을 눌러 주세요.</p>}
+          {notes.length === 0 && !draft && <p className="text-sm text-muted-foreground">아직 주석이 없어요. 영상을 멈추고 고칠 곳을 눌러 주세요.</p>}
           <ul className="space-y-2">
             {notes.map((n) => (
               <li key={n.id} className="flex items-start gap-2 rounded-md border bg-card p-2">
@@ -305,6 +286,35 @@ export function NoteEditor({
                 </Button>
               </li>
             ))}
+            {/* 영상에서 누른 자리의 새 주석 — 여기에 적는다 */}
+            {draft && (
+              <li className="flex items-start gap-2 rounded-md border border-primary bg-brand-soft p-2">
+                <NoteBadge no={nextNo} className="mt-0.5" />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-xs text-muted-foreground tabular-nums">{formatTime(draft.at)}</p>
+                  <Input
+                    // 영상에서 자리를 다시 누르면 입력칸으로 돌아온다
+                    key={`${draft.at}-${draft.x}-${draft.y}`}
+                    autoFocus
+                    value={draft.text}
+                    maxLength={NOTE_MAX}
+                    placeholder="고칠 내용을 적고 Enter"
+                    disabled={saving}
+                    onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (isSubmit(e)) {
+                        e.preventDefault();
+                        void saveDraft();
+                      }
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">Enter로 저장 · Esc로 취소</p>
+                </div>
+                <Button type="button" size="icon" variant="ghost" disabled={saving} onClick={() => setDraft(null)} aria-label="이 주석 취소">
+                  <X className="size-4" aria-hidden />
+                </Button>
+              </li>
+            )}
           </ul>
 
           <div className="space-y-1">
