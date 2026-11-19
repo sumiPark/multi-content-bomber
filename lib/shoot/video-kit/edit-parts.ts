@@ -48,6 +48,8 @@ export function partSubtitles(tl: Timeline): { captions: string; titles: string 
     ...tl.graphics
       .filter((g) => g.type === "end_card")
       .map((g) => ({ start: g.start, end: g.end, text: [g.g.chip, g.g.text, g.g.sub, g.g.note].map((t) => t?.trim()).filter(Boolean).join("\n") })),
+    // 반응 · 속마음 글자(스타일 쇼츠)도 자막 없는 영상에는 빠져 있어 같이 넣는다
+    ...(tl.reactions ?? []).map((r) => ({ start: r.start, end: r.end, text: r.text })),
   ];
   return { captions: toSrt(tl.captions), titles: toSrt(titles) };
 }

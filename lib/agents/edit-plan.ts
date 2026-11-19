@@ -7,6 +7,7 @@ import type { ProductKind } from "@/lib/products/shops";
 import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner";
 import { writerSkills } from "@/lib/agents/script";
 import type { ContentRule } from "@/lib/rules/check";
+import { REACTION_FX } from "@/lib/shoot/video-kit/caption-skill";
 import { lookSchema } from "@/lib/shoot/video-kit/caption-style";
 import { styleReviseBlock, styleSystemPrompt, type StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
 import { SFX_IDS } from "@/lib/style-shorts/sfx-palette";
@@ -141,8 +142,33 @@ export const textPlacesSchema = z.object({
 });
 export type TextPlaces = z.infer<typeof textPlacesSchema>;
 
+// 반응 · 속마음 글자와 화면 확대(스타일 쇼츠만, 2026-11-19 사용자 결정) — 레퍼런스에서 1초마다 잰 화면 위 글자 · 확대 빈도에 맞춰 넣는다.
+// 말 자막과 따로 화면에 툭 얹는 짧은 글자이고, 자막 모션 스킬이 예능 모션 · 모양으로 그린다
+export const reactionSchema = z.object({
+  beat: z.number().int().describe("비트 번호(0부터)"),
+  at_word: z.string().describe("이 낱말을 말할 때 나온다. 없으면 빈 문자열"),
+  at: z.number().describe("at_word가 없을 때 비트 안의 위치 0~1"),
+  kind: z.enum(["reaction", "inner_voice"]).describe("reaction 감탄 · 반응 한마디, inner_voice 괄호 속마음 · 혼잣말"),
+  text: z.string().describe("8자 안팎. 속마음은 괄호째로 (화난 거 아님). 말 자막과 같은 말을 되풀이하지 않는다. 이모지는 쓰지 않는다"),
+  place: z.enum(["top", "mid", "lower"]).describe("화면 위 · 가운데 · 아래. 얼굴 · 물건을 가리지 않는 쪽"),
+  fx: z.enum(REACTION_FX).describe("등장 모션. popIn 톡, slam 쿵, shake 부들부들, riseUp 튀어오름, springY 통통, kkk 글자 하나씩(ㅋㅋㅋ), creep 스르르(속마음)"),
+  look: z.string().describe("예능 모양 이름(목록 그대로). 레퍼런스 글자색에 맞는 모양이 없으면 빈 문자열"),
+  color: z.string().describe("look이 빈 문자열일 때 글자색 #RRGGBB(레퍼런스 화면 위 글자 색). look이 있으면 빈 문자열"),
+});
+export const zoomSchema = z.object({
+  beat: z.number().int().describe("비트 번호(0부터)"),
+  at_word: z.string().describe("이 낱말을 말할 때 확대한다. 없으면 빈 문자열"),
+  at: z.number().describe("at_word가 없을 때 비트 안의 위치 0~1"),
+});
+export type EditReaction = z.infer<typeof reactionSchema>;
+export type EditZoom = z.infer<typeof zoomSchema>;
+
 export const editPlanSchema = makeEditPlanSchema(sfxNames);
-const styleEditPlanSchema = makeEditPlanSchema(SFX_IDS).extend({ text_places: textPlacesSchema });
+const styleEditPlanSchema = makeEditPlanSchema(SFX_IDS).extend({
+  text_places: textPlacesSchema,
+  reactions: z.array(reactionSchema).describe("반응 · 속마음 글자. 레퍼런스에 없으면 빈 배열"),
+  zooms: z.array(zoomSchema).describe("같은 컷 안에서 화면을 확 당기는 곳(펀치인). 그 컷 끝까지 확대가 이어진다. 레퍼런스에 없으면 빈 배열"),
+});
 type ParsedEditPlan = z.infer<typeof editPlanSchema>;
 // caption_style · big · components는 나중에 생긴 값이라 그 전에 저장된 계획(다시 편집)과 코드가 만든 계획(lemo)에는 없다. 없으면 예전 방식(keyword)이다
 export type EditPlan = Omit<ParsedEditPlan, "caption_style" | "beats" | "components"> & {
@@ -150,6 +176,9 @@ export type EditPlan = Omit<ParsedEditPlan, "caption_style" | "beats" | "compone
   components?: ParsedEditPlan["components"];
   // 스타일 쇼츠만. 없으면 모두 자동 자리
   text_places?: TextPlaces;
+  // 스타일 쇼츠만(2026-11-19). 그 전에 저장된 계획과 다른 경로에는 없다
+  reactions?: EditReaction[];
+  zooms?: EditZoom[];
   beats: (Omit<ParsedEditPlan["beats"][number], "big"> & { big?: boolean })[];
 };
 export type EditBeat = EditPlan["beats"][number];

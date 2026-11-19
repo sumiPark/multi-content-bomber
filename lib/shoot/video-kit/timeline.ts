@@ -71,6 +71,26 @@ export interface TimedSfx {
   t: number;
 }
 
+// 반응 · 속마음 글자(스타일 쇼츠). 자막 모션 스킬이 블록으로 얹는다
+export interface TimedReaction {
+  id: string;
+  text: string;
+  kind: "reaction" | "inner_voice";
+  place: "top" | "mid" | "lower";
+  fx: string;
+  look: string;
+  color: string;
+  start: number;
+  end: number;
+  beat: number;
+}
+
+// 화면 확대(펀치인). start에 확 당겨 end(그 컷 끝)까지 유지한다
+export interface TimedZoom {
+  start: number;
+  end: number;
+}
+
 export interface TimedLine {
   beat: number;
   start: number;
@@ -90,7 +110,16 @@ export interface Timeline {
   graphics: TimedGraphic[];
   sfx: TimedSfx[];
   hook: { start: number; end: number; onScreen: string; highlight: string; position: "top" | "lower"; pin?: "top" | "mid" | "lower" };
+  // 스타일 쇼츠만. 다른 경로에는 없다
+  reactions?: TimedReaction[];
+  zooms?: TimedZoom[];
 }
+
+// 반응 글자가 화면에 머무는 시간(초) — 글자 수로 어림한다
+const REACTION_MIN = 0.9;
+const REACTION_MAX = 1.6;
+// 확대는 컷 끝과 이만큼은 떨어져야 보인다
+const ZOOM_MIN_HOLD = 0.35;
 
 /**
  * 이미 확정된 줄 시각(lemo 경로 · 비교 시험). 있으면 줄 시각과 영상 길이를 계산하지 않고 이 값을 쓴다.
@@ -279,6 +308,32 @@ export function timeText(plan: EditPlan, base: Omit<Timeline, "captions" | "grap
     if (g.type === "end_card") g.end = base.duration;
   });
 
+  // 반응 · 속마음 글자와 화면 확대(스타일 쇼츠). 계획에 없으면 칸도 만들지 않는다
+  const timeAt = (beat: number, word: string, fraction: number): number | null => {
+    const line = base.lines[beat];
+    if (!line) return null;
+    return round(wordTime(words, line, word) ?? line.start + (line.end - line.start) * clamp(fraction, 0, 1));
+  };
+  const reactions = plan.reactions
+    ?.flatMap((r, n) => {
+      const start = timeAt(r.beat, r.at_word, r.at);
+      const text = r.text.trim();
+      if (start == null || !text || start >= base.duration - 0.3) return [];
+      const show = clamp(0.6 + 0.12 * squash(text).length, REACTION_MIN, REACTION_MAX);
+      return [{ id: `r${n}`, text, kind: r.kind, place: r.place, fx: r.fx, look: r.look, color: r.color, start, end: round(Math.min(start + show, base.duration)), beat: r.beat }];
+    })
+    .sort((a, b) => a.start - b.start);
+  const zooms = plan.zooms
+    ?.flatMap((z) => {
+      const start = timeAt(z.beat, z.at_word, z.at);
+      const cut = start == null ? null : base.cuts.find((c) => c.start <= start && start < c.end);
+      if (start == null || !cut || cut.end - start < ZOOM_MIN_HOLD) return [];
+      return [{ start, end: cut.end }];
+    })
+    .sort((a, b) => a.start - b.start)
+    // 한 컷에 확대는 한 번
+    .filter((z, i, all) => i === 0 || all[i - 1].end !== z.end);
+
   const first = base.lines[0];
   // 사람이 정한 글자 자리(스타일 쇼츠 주석). 계획에 없으면 지금처럼 자동 자리
   const pinOf = new Map((plan.text_places?.captions ?? []).map((p) => [p.beat, p.place]));
@@ -296,6 +351,8 @@ export function timeText(plan: EditPlan, base: Omit<Timeline, "captions" | "grap
       position: plan.hook.position ?? "top",
       ...(hookPin ? { pin: hookPin } : {}),
     },
+    ...(reactions ? { reactions } : {}),
+    ...(zooms ? { zooms } : {}),
   };
 }
 

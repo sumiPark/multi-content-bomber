@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { editKitAsset } from "@/lib/agents/ko-skills";
 import type { EditPlan } from "@/lib/agents/edit-plan";
 import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, readableCaptionBlock, readableRows, ZONE_BOX, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
-import type { TimedGraphic, Timeline } from "@/lib/shoot/video-kit/timeline";
+import type { TimedGraphic, TimedReaction, Timeline } from "@/lib/shoot/video-kit/timeline";
 
 // 시각표 → HyperFrames 프로젝트(index.html + compositions). 글자 · 그래픽 틀은 ig-edit-ko/kit.json과 같은 이름을 쓴다.
 // 인스타 화면 규칙: 글자는 위 168px 아래, 1330px 위. 첫 프레임부터 후킹 글자가 보인다.
@@ -101,6 +101,21 @@ function graphicHtml(g: TimedGraphic): string {
   }
 }
 
+// 반응 · 속마음 글자 — 자막 모션 스킬이 없을 때만 여기서 그린다(있으면 스킬이 예능 모양으로 얹는다)
+function reactionHtml(r: TimedReaction): string {
+  const box = ZONE_BOX[r.place];
+  const color = /^#[0-9a-f]{6}$/i.test(r.color) ? r.color : "#FFFFFF";
+  const size = r.kind === "inner_voice" ? 64 : 84;
+  return `<div id="${r.id}" class="g clip" data-start="${r.start}" data-duration="${(r.end - r.start).toFixed(3)}" style="left:0;right:0;top:${box.top + Math.round(box.height / 2) - size}px;text-align:center"><span style="display:inline-block;font-weight:800;font-size:${size}px;letter-spacing:-2px;color:${color};-webkit-text-stroke:12px #111;paint-order:stroke fill">${esc(r.text)}</span></div>`;
+}
+
+function reactionMotion(r: TimedReaction): string {
+  return `tl.fromTo("#${r.id}",{opacity:0,scale:.5},{opacity:1,scale:1,duration:.2,ease:"back.out(2.6)"},${r.start});tl.to("#${r.id}",{opacity:0,duration:.1,ease:"power2.in"},${(r.end - 0.1).toFixed(3)});`;
+}
+
+// 화면 확대(펀치인) 배율
+const ZOOM_SCALE = 1.15;
+
 function graphicMotion(g: TimedGraphic): string {
   const sel = `#${g.id}`;
   const start = g.start;
@@ -173,7 +188,13 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   const blocks = opts.noCaptions ? [] : tl.captions.map((c, i) => opts.readable ? readableCaptionBlock(c, look, places[i]) : captionBlock(c, look, places[i]));
   const behind = opts.behind ?? null;
   // 제품 뒤 글자 구간에서 화면을 당기면 제품 레이어와 어긋난다
-  const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.cutStart - 0.4 && t < behind.end)) : [];
+  const firstCutEnd = tl.cuts[0]?.end ?? 1;
+  // 화면 확대(스타일 쇼츠): 첫 컷의 밀려 들어오는 움직임 · 제품 뒤 글자 구간과 겹치는 확대는 뺀다
+  const zooms = (tl.zooms ?? []).filter((z) => z.start >= Math.min(firstCutEnd, 1.2) + 0.05 && !(behind && z.end > behind.cutStart - 0.4 && z.start < behind.end));
+  const inZoom = (t: number) => zooms.some((z) => t >= z.start - 0.3 && t < z.end);
+  const punches = look.punch ? blocks.map((b) => b.keyAt).filter((t): t is number => t != null && t > 1.3 && !(behind && t >= behind.cutStart - 0.4 && t < behind.end) && !inZoom(t)) : [];
+  // 반응 글자: 스킬이 얹을 때(noCaptions)는 여기서 그리지 않는다
+  const reactions = opts.noCaptions ? [] : (tl.reactions ?? []);
   const behindSize = behind ? Math.min(470, Math.floor(980 / Math.max(1, [...behind.word].length))) : 0;
   mkdirSync(join(dir, "compositions"), { recursive: true });
   installFonts(dir, fonts);
@@ -247,6 +268,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   <div id="root" data-composition-id="graphics" data-width="1080" data-height="1920">
     ${opts.noCaptions ? "" : `<div id="hook" class="lk clip" data-start="0" data-duration="${tl.hook.end}" style="top:${ZONE_BOX[hookAt].top}px;height:${ZONE_BOX[hookAt].height}px">${bigText(lines, tl.hook.highlight, look, Math.max(112, Math.min(150, look.size * 1.7)), opts.readable ? 880 : 950, !!opts.readable)}</div>`}
     ${shown.map(graphicHtml).join("\n    ")}
+    ${reactions.map(reactionHtml).join("\n    ")}
   </div>
   <script>
     const tl = gsap.timeline({ paused: true });
@@ -255,13 +277,13 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
     ${opts.noCaptions ? "" : `tl.fromTo("#hook", { scale: 1 }, { scale: 1.035, duration: ${Math.max(0.4, tl.hook.end - 0.1).toFixed(3)}, ease: "none" }, 0);
     tl.to("#hook", { opacity: 0, duration: 0.1, ease: "power2.in" }, ${(tl.hook.end - 0.1).toFixed(3)});`}
     ${shown.map(graphicMotion).join("\n    ")}
+    ${reactions.map(reactionMotion).join("\n    ")}
     window.__timelines["graphics"] = tl;
   </script>
 </template>
 `,
   );
 
-  const firstCutEnd = tl.cuts[0]?.end ?? 1;
   writeFileSync(
     join(dir, "index.html"),
     `<!doctype html>
@@ -298,6 +320,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
       tl.fromTo("#stage", { scale: ${opts.readable ? 1 : 1.1} }, { scale: 1, duration: ${Math.min(firstCutEnd, 1.2).toFixed(3)}, ease: "power2.out" }, 0);
       ${behind ? `tl.fromTo("#bword", { scale: 0.86, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.3, ease: "expo.out" }, ${behind.start});` : ""}
       ${punches.map((t) => `tl.to("#stage", { scale: 1.035, duration: 0.09, ease: "power2.out" }, ${t.toFixed(3)}); tl.to("#stage", { scale: 1, duration: 0.26, ease: "power2.inOut" }, ${(t + 0.09).toFixed(3)});`).join("\n      ")}
+      ${zooms.map((z) => `tl.to("#stage", { scale: ${ZOOM_SCALE}, duration: 0.12, ease: "power3.out" }, ${z.start.toFixed(3)}); tl.set("#stage", { scale: 1 }, ${z.end.toFixed(3)});`).join("\n      ")}
       window.__timelines["main"] = tl;
     </script>
   </body>

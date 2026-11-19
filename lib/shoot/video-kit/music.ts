@@ -110,11 +110,13 @@ function measure(file: string, seconds: number): { lufs: number; start: number; 
 }
 
 /** 검색해서 고른다. 없거나 실패하면 null. */
-export async function findMusic(opts: { service: Service | null; readService?: Service; query: string; intent: string; workDir: string }): Promise<MusicToUse | null> {
+export async function findMusic(opts: { service: Service | null; readService?: Service; query: string; intent: string; workDir: string; singleWords?: boolean }): Promise<MusicToUse | null> {
   const words = opts.query.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return null;
-  // 검색 결과는 낱말을 모두 포함한 것만 나와 긴 검색어는 비기 쉽다. 없으면 낱말을 줄여 다시 찾는다
-  const tries = [...new Set([words.join(" "), words.slice(-2).join(" "), words.slice(0, 2).join(" ")])];
+  // 검색 결과는 낱말을 모두 포함한 것만 나와 긴 검색어는 비기 쉽다. 없으면 낱말을 줄여 다시 찾는다.
+  // singleWords(스타일 쇼츠만): 두 낱말도 몇 곡뿐이라 최근 사용 · 무음 검사에서 다 빠질 수 있다
+  // (2026-11-19 실측: "playful funk pop" 1곡, "funk pop" 6곡 → 대체 곡). 마지막엔 한 낱말씩 찾는다
+  const tries = [...new Set([words.join(" "), words.slice(-2).join(" "), words.slice(0, 2).join(" "), ...(opts.singleWords ? words : [])])];
   for (const query of tries) {
     const found = await findWith({ ...opts, query });
     if (found) return found;

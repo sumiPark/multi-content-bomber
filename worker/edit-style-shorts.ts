@@ -88,7 +88,12 @@ function timelineSummary(kit: KitResult): VersionTimeline {
     duration: r(tl.duration),
     cuts: tl.cuts.map((c) => ({ start: r(c.start), end: r(c.end), clip: c.clip, in: r(c.in) })),
     captions: tl.captions.map((c) => ({ start: r(c.start), end: r(c.end), text: c.text })),
-    graphics: tl.graphics.map((g) => ({ start: r(g.start), end: r(g.end), type: g.type, text: g.g.text ?? "" })),
+    // 반응 · 속마음 글자와 화면 확대도 그래픽 칸에 같이 남긴다 — 주석이 그 시각의 무엇을 말하는지 찾을 수 있게
+    graphics: [
+      ...tl.graphics.map((g) => ({ start: r(g.start), end: r(g.end), type: g.type, text: g.g.text ?? "" })),
+      ...(tl.reactions ?? []).map((x) => ({ start: r(x.start), end: r(x.end), type: x.kind === "inner_voice" ? "속마음 글자" : "반응 글자", text: x.text })),
+      ...(tl.zooms ?? []).map((z) => ({ start: r(z.start), end: r(z.end), type: "화면 확대", text: "" })),
+    ].sort((a, b) => a.start - b.start),
     sfx: tl.sfx.map((s) => ({ t: r(s.t), name: s.name })),
   };
 }

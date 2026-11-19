@@ -252,14 +252,14 @@ export async function rebuildCardAction(input: z.infer<typeof idSchema>): Promis
     .select("id");
   if (error) return { ok: false, error: `요청하지 못했어요: ${error.message}` };
   if (!data?.length) return { ok: false, error: "카드를 만드는 중이에요. 끝난 뒤 다시 눌러 주세요." };
-  // 자막 모양(2026-11-19 추가)을 읽기 전에 분석한 레퍼런스는 다시 분석한다 — 카드에 자막 모양이 들어가게
+  // 자막 모양 · 화면 위 글자 · 점프 컷(2026-11-19 추가)을 재기 전에 분석한 레퍼런스는 다시 분석한다 — 카드에 새 값이 들어가게
   await service
     .from("style_references")
     .update({ status: "PENDING", error: null, updated_at: new Date().toISOString() })
     .eq("folder_id", parsed.data.id)
     .eq("status", "DONE")
     .eq("analyzed_from", "VIDEO")
-    .is("analysis->read->captionLook", null);
+    .or("analysis->read->captionLook.is.null,analysis->overlays.is.null");
   const warning = await wake("카드 다시 만들기", parsed.data.id);
   revalidate(parsed.data.id);
   return { ok: true, warning };

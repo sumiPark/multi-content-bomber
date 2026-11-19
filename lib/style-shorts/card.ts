@@ -61,8 +61,65 @@ export const visualReadSchema = z.object({
 });
 export type VisualRead = z.infer<typeof visualReadSchema>;
 
+// ─── 화면 위 글자 · 그래픽 촘촘히 보기(2026-11-19 사용자 결정) ────────────────
+// 1초마다 프레임을 보고, 말 자막 말고 화면에 얹은 것(반응 · 속마음 글자, 스티커, 동그라미 · 화살표, 안내 카드)과
+// 화면 확대를 적는다. 횟수 · 비율은 코드가 이 표시로 센다(AI가 숫자를 지어내지 않게).
+
+export const OVERLAY_KINDS = ["reaction", "inner_voice", "sticker", "pointer", "info_card", "title"] as const;
+export type OverlayKind = (typeof OVERLAY_KINDS)[number];
+export const OVERLAY_KIND_LABEL: Record<OverlayKind, string> = {
+  reaction: "반응 · 감탄 글자",
+  inner_voice: "속마음 · 괄호 글자",
+  sticker: "스티커 · 이모지 · 하트",
+  pointer: "동그라미 · 화살표",
+  info_card: "안내 · 가격 카드",
+  title: "제목 글자",
+};
+
+export const overlayScanSchema = z.object({
+  frames: z
+    .array(
+      z.object({
+        t: z.number().describe("프레임 시각(초). 주어진 시각 그대로"),
+        overlays: z
+          .array(
+            z.object({
+              kind: z.enum(OVERLAY_KINDS).describe("reaction 감탄 · 반응 한마디, inner_voice 괄호 · 속마음 · 혼잣말, sticker 하트 · 이모지 · 그림, pointer 동그라미 · 화살표, info_card 가격 · 안내 상자 · 휴대폰 화면 같은 카드, title 큰 제목 글자"),
+              text: z.string().describe("보이는 글자 그대로. 글자가 없으면 무엇인지 짧게(예: 하트 두 개)"),
+              color: z.string().describe("글자 · 그림의 주된 색 #RRGGBB"),
+              place: z.enum(["top", "mid", "lower"]).describe("화면 위 · 가운데 · 아래"),
+            }),
+          )
+          .describe("말 자막(말을 받아 적은 글자)은 넣지 않는다. 없으면 빈 배열"),
+        zoomed: z.boolean().describe("바로 앞 프레임과 같은 장면인데 화면을 확대해 더 가깝게 잡았으면 true"),
+      }),
+    )
+    .describe("받은 프레임마다 하나씩"),
+});
+export type OverlayScan = z.infer<typeof overlayScanSchema>;
+
+/** 레퍼런스 하나의 화면 위 글자 · 그래픽 통계(코드가 overlayScan으로 센 값) */
+export interface OverlayStats {
+  // 새로 나타난 화면 위 요소 수(같은 글자가 이어지면 하나로 센다)
+  count: number;
+  per10s: number;
+  kinds: Partial<Record<OverlayKind, number>>;
+  // 많이 쓴 색(많은 순, 4개까지)
+  colors: string[];
+  places: Partial<Record<"top" | "mid" | "lower", number>>;
+  // 화면 확대가 시작된 횟수
+  zooms: number;
+  zoomPer10s: number;
+  // 마지막 3초에 안내 카드가 있는지
+  endCard: boolean;
+  // 글자 예(형식 참고용, 8개까지)
+  examples: { kind: OverlayKind; text: string; color: string }[];
+}
+
 export interface ReferenceAnalysis {
   durationSec: number;
+  // 화면 위 글자 · 그래픽(2026-11-19 추가). 그 전에 분석한 레퍼런스는 없다
+  overlays?: OverlayStats | null;
   // 컷 시각(초). 화면이 크게 바뀐 곳을 코드가 잰 값
   cuts: number[];
   avgShotSec: number | null;
@@ -105,6 +162,14 @@ export interface StyleCardNumbers {
   captionStyle: "sentence" | "keyword" | "none" | "mixed";
   // 효과음 종류별 비율(0~1), 많은 순
   sfxKinds: { kind: string; share: number }[];
+  // 화면 위 글자 · 그래픽(2026-11-19 추가). 예전 카드에는 없다
+  overlayPer10s?: number | null;
+  overlayKinds?: { kind: OverlayKind; share: number }[];
+  overlayColors?: string[];
+  zoomPer10s?: number | null;
+  // 안내 카드로 끝나는 레퍼런스 비율(0~1)
+  endCardShare?: number | null;
+  overlayExamples?: { kind: OverlayKind; text: string; color: string }[];
 }
 
 export interface StyleCard {

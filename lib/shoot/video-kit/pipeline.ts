@@ -12,7 +12,7 @@ import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
-import { normalizeLook, readableCaptions, readableLook, readableRows, type CutZones, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { normalizeLook, readableCaptions, readableLook, readableRows, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import { CAPTION_FALLBACK_WARNING, selectCaptionRenderer } from "@/lib/shoot/video-kit/caption-renderer";
 import { inspectAndRepairVideo, type VideoQuality, type VideoReview } from "@/lib/shoot/video-kit/quality";
 import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
@@ -199,7 +199,10 @@ export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolea
         },
       }
     : {};
-  return { ...plan, beats, visuals, thumbnail: thumb, ...places };
+  const kept = fixed.map(keep);
+  const reactions = remapBeats(plan.reactions, kept);
+  const zooms = remapBeats(plan.zooms, kept);
+  return { ...plan, beats, visuals, thumbnail: thumb, ...places, ...(reactions ? { reactions } : {}), ...(zooms ? { zooms } : {}) };
 }
 
 /**
@@ -215,7 +218,15 @@ export interface StyleNumbers {
   // 사람이 넣은 대본을 AI 음성이 그대로 읽는다 — 길이는 대본이 정한다
   fixedScript?: boolean;
   footageSeconds?: number;
+  // 화면 위 글자 · 그래픽(말 자막 제외)과 화면 확대의 10초당 빈도(2026-11-19 추가). 예전 카드에는 없다
+  overlayPer10s?: number | null;
+  zoomPer10s?: number | null;
+  // 주석 수정은 주석이 말한 것만 고친다 — 컷 속도 · 화면 위 글자 · 확대 빈도로 다시 쓰게 하지 않는다
+  revise?: boolean;
 }
+
+// 컷 평균이 레퍼런스 평균의 이 배수를 넘으면 다시 쓴다(2026-11-19: 레퍼런스 1.4~2.2초인데 완성본 컷이 길었다)
+const STYLE_SHOT_SLACK = 1.5;
 
 // 레퍼런스 길이에서 이만큼은 넘어간다(말 길이 어림값이라)
 const STYLE_LENGTH_SLACK = 0.15;
@@ -263,12 +274,44 @@ export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, 
   // 스타일 쇼츠는 레퍼런스 빈도로만 잰다. 레퍼런스 측정값이 없으면 개수를 제한하지 않는다(2026-11-19 사용자 결정)
   const sfxMax = style?.sfxPer10s != null ? Math.max(3, Math.ceil((seconds / 10) * style.sfxPer10s * 1.5) + 1) : style ? Infinity : Math.max(3, Math.ceil((seconds / 15) * 3) + 1);
   if (sfxCount > sfxMax) problems.push(`효과음이 ${sfxCount}개예요. ${sfxMax}개 이하로 줄여 ${style ? "레퍼런스 빈도에 맞추세요" : "시작 · 완성 · 반전처럼 힘을 줄 곳에만 남기세요"}.`);
+  if (style && !style.revise && seconds > 0) problems.push(...styleRhythmProblems(plan, all.length, seconds, style));
   if (plan.caption_style === "sentence") {
     const big = plan.beats.filter((b) => b.big).length;
     if (big > 3) problems.push(`큰 강조 자막(big)이 ${big}곳이에요. 두 번째 약속 · 완성 · 반전처럼 2~3곳만 남기세요.`);
   }
   if (squash(plan.hook.on_screen).length > 22) problems.push("후킹 글자가 너무 길어요. 12자 안팎으로 줄이세요.");
   return [...new Set(problems)];
+}
+
+/**
+ * 스타일 쇼츠의 컷 속도 · 화면 위 글자 · 확대가 레퍼런스와 맞는지(2026-11-19 사용자 결정: 레퍼런스와 최대한 비슷하게).
+ * 레퍼런스 측정값이 없는 칸은 재지 않는다. 화면 위 글자 · 확대는 AI가 프레임을 보고 센 값이라 넉넉하게 잰다.
+ */
+export function styleRhythmProblems(plan: EditPlan, cuts: number, seconds: number, style: StyleNumbers): string[] {
+  const problems: string[] = [];
+  const live = plan.beats.some((b) => b.mode === "live");
+  if (style.avgShotSec && cuts > 0) {
+    const avg = seconds / cuts;
+    if (avg > style.avgShotSec * STYLE_SHOT_SLACK) {
+      const need = Math.ceil(seconds / style.avgShotSec);
+      problems.push(
+        `컷이 평균 ${avg.toFixed(1)}초라 레퍼런스(평균 ${style.avgShotSec}초)보다 느려요. 컷을 ${need}개 안팎으로 나누세요. ${
+          live ? "말소리 영상은 말을 문장 · 구절마다 다른 비트로 나누고, 사이의 쉼 · 군말은 빼서 이어 붙이세요(점프 컷)." : "한 비트에 말이 바뀌는 곳마다 다른 구간의 컷을 이어 쓰세요."
+        }`,
+      );
+    }
+  }
+  const expected = (per10s: number | null | undefined) => (per10s != null ? (seconds / 10) * per10s : null);
+  const overlays = expected(style.overlayPer10s);
+  if (overlays != null && overlays >= 1) {
+    const count = (plan.reactions?.length ?? 0) + plan.beats.reduce((s, b) => s + b.graphics.filter((g) => g.type !== "end_card").length, 0);
+    const target = Math.round(overlays);
+    if (count < overlays * 0.5) problems.push(`화면 위 글자 · 그래픽이 ${count}개예요. 레퍼런스는 10초당 ${style.overlayPer10s}개라 ${target}개 안팎이 되게 반응 · 속마음 글자나 그래픽을 더 넣으세요.`);
+    else if (count > overlays * 2 + 2) problems.push(`화면 위 글자 · 그래픽이 ${count}개예요. 레퍼런스는 10초당 ${style.overlayPer10s}개라 ${target}개 안팎으로 줄이세요.`);
+  }
+  const zooms = expected(style.zoomPer10s);
+  if (zooms != null && zooms >= 1 && !(plan.zooms?.length)) problems.push(`화면 확대가 없어요. 레퍼런스는 10초당 ${style.zoomPer10s}번 확대하니 반응 · 강조 순간에 ${Math.round(zooms)}번 안팎 넣으세요.`);
+  return problems;
 }
 
 export async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: string, voiceId: string | null | undefined): Promise<{ voices: VoiceClip[]; usedVoice: boolean; warnings: string[] }> {
@@ -557,7 +600,25 @@ function motionBlocks(tl: Timeline, zones: CutZones[] | null, design: CaptionDes
     const rows = [...(p.chip ? blockRows(p.chip, "small", 18) : []), ...blockRows(p.text), ...(p.sub ? blockRows(p.sub, "small", 18) : []), ...(p.note ? blockRows(p.note, "small", 18) : [])];
     if (rows.length) blocks.push({ start: endCard.start, end: tl.duration, zone: "top", fx: design.finish_fx, rows });
   }
+  // 반응 · 속마음 글자(스타일 쇼츠). 같은 시각의 후킹 · 자막 · 끝 화면 · 다른 반응 글자와 자리가 겹치면 빈 자리로 옮기고, 빈 자리가 없으면 뺀다
+  const places = captionZones(tl, zones);
+  for (const r of tl.reactions ?? []) {
+    const overlaps = (a: number, b: number) => a < r.end && r.start < b;
+    const busy = new Set<Zone>([
+      ...blocks.filter((b) => overlaps(b.start, b.end)).map((b) => b.zone),
+      ...tl.captions.flatMap((c, i) => (overlaps(c.start, c.end) ? [places[i]] : [])),
+    ]);
+    const zone = [r.place, "mid", "top", "lower"].find((z): z is Zone => !busy.has(z as Zone));
+    if (!zone) continue;
+    blocks.push({ start: r.start, end: r.end, zone, fx: r.fx, small: true, ...(r.look ? { look: r.look } : r.color ? { color: r.color } : {}), rows: blockRows(r.text, "key", 10) });
+  }
   return blocks;
+}
+
+/** 스타일 쇼츠: 비트가 빠지면 반응 글자 · 확대의 비트 번호도 당긴다. 없는 비트를 가리키는 것은 버린다. */
+function remapBeats<T extends { beat: number }>(items: T[] | undefined, kept: boolean[]): T[] | undefined {
+  if (!items) return undefined;
+  return items.filter((x) => kept[x.beat]).map((x) => ({ ...x, beat: kept.slice(0, x.beat).filter(Boolean).length }));
 }
 
 export async function renderKitEdit(input: KitInput): Promise<KitResult> {
@@ -623,6 +684,9 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
           durationSec: input.stylePlan.card.numbers.durationSec,
           fixedScript: input.stylePlan.voiceMode === "AI" && !!input.stylePlan.script?.trim(),
           footageSeconds: clips.reduce((s, c) => s + c.duration, 0),
+          overlayPer10s: input.stylePlan.card.numbers.overlayPer10s ?? null,
+          zoomPer10s: input.stylePlan.card.numbers.zoomPer10s ?? null,
+          revise: !!input.revise,
         }
       : undefined;
     const problems = planProblems(applyHumanText(plan, input), show, styleNumbers);
@@ -738,6 +802,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       query: (input.stylePlan && !input.revise ? input.stylePlan.card.music.query : "") || look.music_query || input.stylePlan?.card.music.query || "",
       intent: (input.stylePlan && !input.revise ? input.stylePlan.card.music.mood : "") || look.music_intent || input.stylePlan?.card.music.mood || "",
       workDir,
+      singleWords: !!input.stylePlan,
     })) ??
     libraryMusic(look.music);
   console.log(`[video-kit] 음악: ${music.name}${music.source ? ` (${music.source.creator}, ${music.source.license}, 검색어 "${music.query}")` : " (대체 곡)"}`);

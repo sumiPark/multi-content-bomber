@@ -129,7 +129,8 @@ test("스타일 쇼츠는 레퍼런스 길이로 재고, 대본을 그대로 읽
   const plan = planOf([beat(long, []), ...Array.from({ length: 6 }, (_, i) => beat("나".repeat(10), [], { cuts: [{ clip: 1, in: i, out: i + 0.9, what: "" }] }))]);
   const style = { sfxPer10s: null, avgShotSec: 1.5, durationSec: [20, 30] as [number, number], footageSeconds: 100 };
   assert.ok(planProblems(plan, undefined, style).some((p) => p.includes("레퍼런스(20~30초)보다 길어요")));
-  assert.ok(!planProblems(plan, undefined, { ...style, fixedScript: true }).some((p) => p.includes("레퍼런스")));
+  // 길이 점검만 빠진다(컷 속도 점검은 대본을 그대로 읽어도 한다, 2026-11-19)
+  assert.ok(!planProblems(plan, undefined, { ...style, fixedScript: true }).some((p) => p.includes("레퍼런스(20~30초)")));
   const noisy = planOf(plan.beats.map((b) => ({ ...b, tts: "다".repeat(25), sfx: [{ name: "pop", at_word: "", at: 0 }, { name: "pop", at_word: "", at: 0.5 }] })));
   assert.ok(!planProblems(noisy, undefined, style).some((p) => p.includes("효과음")));
   assert.ok(planProblems(noisy).some((p) => p.includes("효과음")));

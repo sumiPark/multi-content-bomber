@@ -67,6 +67,14 @@ const LOOKS: Record<string, { hint: string; extra?: Record<string, unknown>; fx?
   "괴담": { hint: "회색 질감에 획 끝 핏물. 무섭다 · 소름 · 충격", extra: { blood: true }, pinFont: true },
 };
 const lookOf = (name: string | null | undefined): string | null => (name && LOOKS[name] ? name : null);
+
+// 스타일 쇼츠의 반응 · 속마음 글자(2026-11-19 사용자 결정). 레퍼런스처럼 말 자막과 따로 화면에 툭 얹는 짧은 글자라 예능 모션만 쓴다.
+// 편집 계획(lib/agents/edit-plan.ts)이 고르고, 후킹 글자처럼 스킬 블록으로 얹는다
+export const REACTION_FX = ["popIn", "slam", "shake", "riseUp", "springY", "kkk", "creep"] as const;
+// 테이프 · 무작위 모션은 짧은 반응에 안 맞아 넣지 않았다. 예능 모양 이름 · 생김새는 편집 지시문에 그대로 보여 준다
+export function reactionLookLines(): string {
+  return Object.entries(LOOKS).map(([name, l]) => `${name}: ${l.hint}`).join("\n");
+}
 // 손글씨 작은 줄은 글자 몸통이 작아 키운다
 const SMALL_SIZE = 96;
 const PLAIN_SMALL_SIZE = 80;
@@ -277,7 +285,15 @@ export interface SkillBlock {
   highlight?: string;
   // 후킹 글자처럼 영상에서 가장 크게 보여 줄 글자
   big?: boolean;
+  // 반응 · 속마음 글자(스타일 쇼츠)만: 강조어 줄에 입힐 예능 모양과 글자색. 없으면 예전 그대로
+  look?: string;
+  color?: string;
+  // 반응 글자는 후킹보다 작게
+  small?: boolean;
 }
+
+// 반응 글자 크기 상한. 말 자막 강조어 줄보다 작게 두어 말 자막을 가리지 않는다
+const REACTION_MAX = 104;
 
 /** 긴 문구를 글자 수에 맞춰 줄로 나눈다. 줄바꿈이 있으면 그대로 따른다. */
 export function blockRows(text: string, role: "key" | "small" = "key", chars = 13): SkillBlock["rows"] {
@@ -297,6 +313,9 @@ export function blockRows(text: string, role: "key" | "small" = "key", chars = 1
 
 function blockLine(b: SkillBlock, bright: boolean, fonts: SubtitleFonts) {
   const box = ZONE_BOX[b.zone];
+  // 밝은 배경은 어두운 글자가 먼저라 모양 · 색을 입히지 않는다(말 자막과 같은 규칙)
+  const look = bright ? null : lookOf(b.look);
+  const paint = look ? { look, ...LOOKS[look].extra, ...(LOOKS[look].pinFont ? { font: fonts.key } : {}) } : !bright && b.color ? { color: b.color } : {};
   return {
     t0: Number(b.start.toFixed(3)),
     t1: Number(b.end.toFixed(3)),
@@ -308,8 +327,8 @@ function blockLine(b: SkillBlock, bright: boolean, fonts: SubtitleFonts) {
       return {
         text: marked,
         ...motion(r.role === "key" ? b.fx : "cut", r.role === "key"),
-        size: r.role === "key" ? keySize(r.text, b.big ? HOOK_MAX : KEY_MAX) : fonts.smallSize,
-        ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts) } : {}),
+        size: r.role === "key" ? keySize(r.text, b.big ? HOOK_MAX : b.small ? REACTION_MAX : KEY_MAX) : fonts.smallSize,
+        ...(r.role === "key" ? { key: true, ...keyWeightOf(fonts), ...(onTape ? {} : paint) } : {}),
         ...(onTape ? ON_TAPE : {}),
         ...(bright ? { color: DARK_TEXT, glow: "rgba(255,255,255,.75)" } : {}),
         ...(i > 0 ? { gapPx: TAPE[b.fx] !== undefined ? TAPE_GAP : ROW_GAP } : {}),

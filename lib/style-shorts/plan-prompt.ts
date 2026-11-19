@@ -1,7 +1,8 @@
 import { editKit } from "@/lib/agents/ko-skills";
 import type { EditPlan, EditPlanContext } from "@/lib/agents/edit-plan";
 import { captionLookText } from "@/lib/style-shorts/caption-look";
-import { CARD_SECTIONS, type StyleCard } from "@/lib/style-shorts/card";
+import { reactionLookLines } from "@/lib/shoot/video-kit/caption-skill";
+import { CARD_SECTIONS, OVERLAY_KIND_LABEL, type StyleCard } from "@/lib/style-shorts/card";
 import { SFX_PALETTE } from "@/lib/style-shorts/sfx-palette";
 
 // 스타일 쇼츠 편집 지시문 — 직접 촬영 편집 에이전트(edit-plan.ts)가 ctx.style이 있을 때만 쓴다.
@@ -30,14 +31,45 @@ export function cardText(card: StyleCard): string {
     n.sfxKinds.length && `효과음 종류 비율 ${n.sfxKinds.map((k) => `${k.kind} ${Math.round(k.share * 100)}%`).join(", ")}`,
     n.tempo != null && `음악 ${n.tempo}BPM`,
     `자막 방식 ${n.captionStyle}`,
+    n.overlayPer10s != null && `화면 위 글자 · 그래픽(말 자막 제외) 10초당 ${n.overlayPer10s}개`,
+    n.overlayKinds?.length && `그 종류 비율 ${n.overlayKinds.map((k) => `${OVERLAY_KIND_LABEL[k.kind]} ${Math.round(k.share * 100)}%`).join(", ")}`,
+    n.overlayColors?.length && `화면 위 글자 색 ${n.overlayColors.join(", ")}`,
+    n.zoomPer10s != null && `화면 확대 10초당 ${n.zoomPer10s}번`,
+    n.endCardShare != null && `안내 카드로 끝나는 레퍼런스 ${Math.round(n.endCardShare * 100)}%`,
   ].filter(Boolean);
+  const examples = n.overlayExamples?.length ? `화면 위 글자 예(형식만 참고, 글을 베끼지 않는다): ${n.overlayExamples.map((e) => `[${OVERLAY_KIND_LABEL[e.kind]}] ${e.text} ${e.color}`).join(" / ")}` : "";
   return [
     `요약: ${card.summary}`,
     `측정값: ${numbers.join(" · ")}`,
+    ...(examples ? [examples] : []),
     ...CARD_SECTIONS.map((s) => `[${s.title}]\n${card.sections[s.key] || "-"}`),
     ...(card.captionLook ? [`[자막 모양]\n${captionLookText(card.captionLook)}\n글자색 · 강조색 · 상자 · 크기는 코드가 이 값으로 고정한다. 자막 자리(hook.position 포함)와 한 줄 길이를 이 값에 맞춘다.`] : []),
     `[배경음악] ${card.music.mood} (검색어: ${card.music.query})`,
   ].join("\n");
+}
+
+/** 반응 · 속마음 글자 · 화면 확대 · 끝 카드 지시(2026-11-19 사용자 결정 — 레퍼런스에서 잰 빈도에 맞춘다). */
+function reactionStep(card: StyleCard): string {
+  const n = card.numbers;
+  const per = n.overlayPer10s;
+  const share = (kinds: string[]) => Math.round((n.overlayKinds ?? []).filter((k) => kinds.includes(k.kind)).reduce((s, k) => s + k.share, 0) * 100);
+  const textShare = share(["reaction", "inner_voice", "sticker", "title"]);
+  const freq =
+    per != null
+      ? `레퍼런스는 말 자막 말고 화면 위 글자 · 그래픽이 10초당 ${per}개다(그중 반응 · 속마음 · 스티커 · 제목 글자 ${textShare}%). 영상 길이에 맞춰 같은 빈도로 넣는다. 반응 · 속마음 글자는 reactions에, 동그라미 · 화살표는 ring · arrow 그래픽, 안내 · 가격 카드는 notice · chip 그래픽으로 넣는다.`
+      : "레퍼런스 화면 위 글자 측정값이 없다. 카드의 그래픽 설명만큼 넣는다.";
+  const zoom =
+    n.zoomPer10s != null && n.zoomPer10s > 0
+      ? `화면 확대(zooms): 레퍼런스는 10초당 ${n.zoomPer10s}번 같은 장면을 확 당긴다. 놀람 · 반응 · 강조하는 순간에 넣는다. 확대는 그 컷 끝까지 이어지고 다음 컷에서 풀린다.`
+      : "화면 확대(zooms): 카드에 확대 설명이 없으면 빈 배열로 둔다.";
+  const ending =
+    n.endCardShare != null && n.endCardShare >= 0.5
+      ? "끝맺음: 레퍼런스 대부분이 안내 카드로 끝난다. 마지막 비트에 end_card 그래픽을 넣고, 카드 글은 컨셉 · 대본에 있는 내용으로만 쓴다(없는 가격 · 혜택을 지어내지 않는다)."
+      : "";
+  return `   반응 · 속마음 글자(reactions): 사람이 놀라거나 웃거나 혼잣말하는 순간에 말 자막과 따로 화면에 툭 얹는 짧은 글자다(예: 헉!, 진짜?, (화난 거 아님)). 말 자막과 같은 말을 되풀이하지 않고, 프레임에서 보이는 표정 · 행동에 맞는 말만 쓴다. ${freq} 색은 카드의 화면 위 글자 색을 따르고, 맞는 예능 모양이 있으면 look에 그 이름을 쓴다. 스티커 · 이모지는 만들 수 없으니 반응 글자로 대신한다.
+   ${zoom}${ending ? `\n   ${ending}` : ""}
+   쓸 수 있는 예능 모양(이름: 생김새):
+${reactionLookLines()}`;
 }
 
 function voiceBlock(g: StylePlanGuide): string {
@@ -46,6 +78,7 @@ function voiceBlock(g: StylePlanGuide): string {
     return `소리: 찍은 영상의 말소리를 그대로 쓴다. 모든 비트를 mode live로 쓰고 tts는 빈 문자열로 둔다.
 - 말이 있는 촬영본은 받아쓰기(transcript)를 보고 NG · 말 더듬기 · 같은 말 되풀이 · 긴 침묵을 빼고, 가장 또렷하게 말한 구간만 고른다. 한 문장이 끊기지 않게 낱말 시각에 맞춰 in · out을 잡는다.
 - 말이 없는 장면도 mode live로 쓴다(원본의 현장 소리가 그대로 나간다). live 비트는 컷이 정확히 1개다.
+- live 비트는 컷이 1개라 비트 수가 곧 컷 수다. 레퍼런스 컷이 짧으면(점프 컷) 한 문장도 구절마다 다른 비트로 나누고, 구절 사이의 쉼 · "어 · 음" 같은 군말은 빼서 바로 이어 붙인다. 비트 5~14개 제한보다 레퍼런스 컷 속도가 먼저다.
 - 자막은 코드가 받아쓰기로 넣는다. captions는 빈 배열로 둔다.${script ? `\n- 아래 대본은 찍을 때 말하려던 내용이다. 받아쓰기의 맞춤법 · 고유명사를 맞출 때와 어떤 구간을 어떤 순서로 쓸지 정할 때 참고한다. 대본에 없는 말을 새로 넣지 않는다.\n"""\n${script}\n"""` : ""}`;
   }
   if (script) {
@@ -82,6 +115,7 @@ export function styleReviseBlock(revise: { plan: EditPlan; request: string; item
 - 주석이 말하지 않은 것은 지난 계획 그대로 둔다: 후킹 · 표지 · 읽는 말 · 자막 · 비트 순서 · 컷 · 그래픽 · 효과음 · look · caption_style. 후킹 공식 · 채점 도구는 후킹을 고치라는 주석이 있을 때만 쓴다.
 - 장면을 바꾸거나 더 넣으라는 주석은 촬영본 프레임을 다시 보고 고른다. 시각이 애매하면 look_closer로 확인한다.
 - 효과음 · 그래픽을 넣으라 · 빼라는 주석은 그 시각의 비트에서 고친다. 효과음은 위 목록의 id만 쓴다.
+- 반응 · 속마음 글자, 화면 확대를 넣으라 · 빼라 · 고치라는 주석은 reactions · zooms에서 고친다. 지난 계획의 reactions · zooms는 주석이 말하지 않으면 그대로 옮겨 적는다(지난 계획에 없으면 빈 배열).
 - 글자 자리(위 · 가운데 · 아래)를 옮기라는 주석은 text_places로 정한다. 후킹 글자(첫 화면의 큰 글자)면 hook에, 말 자막이면 그 자막이 나오는 비트를 captions에 { beat, place }로 넣는다. 위 = top, 가운데 = mid, 아래 = lower. "가운데"가 좌우 정렬인지 위아래 자리인지 애매하면 위아래 자리로 본다(자막은 이미 좌우 가운데 정렬이다). 지난 계획의 text_places는 주석이 바꾸라고 하지 않으면 그대로 옮겨 적는다. 지난 계획에 text_places가 없으면 hook auto, captions 빈 배열에서 시작한다.
 - 음악을 바꾸라는 주석이 있으면 look.music_query(영어 2~4낱말, 악기 · 분위기)와 look.music_intent를 주석대로 고친다. 코드가 그 검색어로 다른 곡을 찾는다. 없으면 지난 값 그대로 둔다.
 - 레퍼런스 스타일 카드보다 주석이 먼저다. 주석이 없는 부분은 계속 카드를 따른다.
@@ -143,8 +177,9 @@ ${voiceBlock(g)}
 1. 프레임 묶음에서 촬영본마다 쓸 구간과 뺄 구간을 판단한다(analysis). 시각이 애매하면 look_closer로 확인한다. components는 빈 배열로 둔다.
 2. 후킹: 카드의 후킹 방식대로 첫 컷과 첫 화면 글자를 정한다.${g.voiceMode === "AI" && g.script?.trim() ? " 첫 말은 대본의 첫 문장이다." : " 필요하면 list_hook_formulas · score_hooks를 써도 된다."} hook.on_screen은 카드 자막 · 화면 글자 스타일에 맞춘다.
 3. 표지: 카드 분위기에 맞는 프레임과 짧은 글자.
-4. 대본과 컷: ${duration} 컷 길이 · 개수는 카드의 컷 · 속도를 따른다(평균 컷 ${n.avgShotSec ?? "-"}초). 비트마다 한 가지만 말하고 장면과 말이 맞게 한다.
-5. 자막 · 그래픽 · 효과음: 카드대로. caption_style은 ${n.captionStyle === "keyword" ? "keyword" : "sentence"}${n.captionStyle === "none" ? "로 두되, 레퍼런스가 말 자막을 쓰지 않으니 captions는 비워 두고 꼭 필요한 화면 글자만 그래픽으로 넣는다" : ""}. 효과음은 ${sfxDensity}, 카드의 효과음 종류 비율에 맞춰 아래 목록에서만 고른다.
+4. 대본과 컷: ${duration} 컷 길이 · 개수는 카드의 컷 · 속도를 따른다(평균 컷 ${n.avgShotSec ?? "-"}초${n.avgShotSec ? `, 영상 10초에 컷 약 ${Math.round(10 / n.avgShotSec)}개` : ""}). 레퍼런스 컷 수에는 같은 구도에서 말 사이를 잘라 붙인 점프 컷이 들어 있다. 같은 촬영본 안에서도 말이 바뀌는 곳마다 컷을 나눠 이 속도를 맞춘다(같은 구간을 두 번 쓰지는 않는다). 비트마다 한 가지만 말하고 장면과 말이 맞게 한다.
+5. 자막 · 그래픽 · 효과음: 카드대로. caption_style은 ${n.captionStyle === "keyword" ? "keyword" : "sentence"}${n.captionStyle === "none" ? "로 두되, 레퍼런스가 말 자막을 쓰지 않으니 captions는 비워 두고 꼭 필요한 화면 글자만 그래픽으로 넣는다" : ""}. 효과음은 ${sfxDensity}, 카드의 효과음 종류 비율에 맞춰 아래 목록에서만 고른다. 효과음은 컷이 바뀌는 순간 · 반응 글자가 뜨는 순간 · 화면 확대 순간 · 카드가 나오는 순간에 붙인다.
+${reactionStep(g.card)}
 6. look: 카드의 자막 · 화면 설명대로 글자 디자인을 정한다. music_query는 "${g.card.music.query}", music_intent는 "${g.card.music.mood}"로 쓴다.
 7. text_places는 hook을 auto, captions를 빈 배열로 둔다. 글자 자리는 코드가 상품 · 사람을 피해 정한다(사람이 자리를 정했을 때만 쓰는 칸이다).
 8. 쓰는 말 전체를 check_ai_tone으로 점검하고${g.voiceMode === "AI" ? " read_tts로 읽기용 원고를 확인한다" : "다"}. visuals는 빈 배열로 둔다.
