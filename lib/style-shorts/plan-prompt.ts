@@ -82,6 +82,7 @@ export function styleReviseBlock(revise: { plan: EditPlan; request: string; item
 - 주석이 말하지 않은 것은 지난 계획 그대로 둔다: 후킹 · 표지 · 읽는 말 · 자막 · 비트 순서 · 컷 · 그래픽 · 효과음 · look · caption_style. 후킹 공식 · 채점 도구는 후킹을 고치라는 주석이 있을 때만 쓴다.
 - 장면을 바꾸거나 더 넣으라는 주석은 촬영본 프레임을 다시 보고 고른다. 시각이 애매하면 look_closer로 확인한다.
 - 효과음 · 그래픽을 넣으라 · 빼라는 주석은 그 시각의 비트에서 고친다. 효과음은 위 목록의 id만 쓴다.
+- 글자 자리(위 · 가운데 · 아래)를 옮기라는 주석은 text_places로 정한다. 후킹 글자(첫 화면의 큰 글자)면 hook에, 말 자막이면 그 자막이 나오는 비트를 captions에 { beat, place }로 넣는다. 위 = top, 가운데 = mid, 아래 = lower. "가운데"가 좌우 정렬인지 위아래 자리인지 애매하면 위아래 자리로 본다(자막은 이미 좌우 가운데 정렬이다). 지난 계획의 text_places는 주석이 바꾸라고 하지 않으면 그대로 옮겨 적는다. 지난 계획에 text_places가 없으면 hook auto, captions 빈 배열에서 시작한다.
 - 음악을 바꾸라는 주석이 있으면 look.music_query(영어 2~4낱말, 악기 · 분위기)와 look.music_intent를 주석대로 고친다. 코드가 그 검색어로 다른 곡을 찾는다. 없으면 지난 값 그대로 둔다.
 - 레퍼런스 스타일 카드보다 주석이 먼저다. 주석이 없는 부분은 계속 카드를 따른다.
 - 주석에서 따옴표로 적은 글자는 다듬지 않고 글자 그대로 쓴다.${live}${g.card.captionLook ? "\n- 자막 글자색 · 강조색 · 상자 · 크기는 레퍼런스 자막 모양으로 코드가 고정한다. 이것을 바꾸라는 주석은 warnings에 \"주석 N번: 자막 색 · 크기는 레퍼런스 자막 모양으로 고정돼 있어 바꾸지 않았어요\"라고 적는다. 글꼴 · 움직임은 코드가 주석을 보고 다시 고른다." : ""}
@@ -97,11 +98,30 @@ ${revise.request}
 ${JSON.stringify(past)}`;
 }
 
+// 스타일 쇼츠에서 빼는 기본 규칙(2026-11-19 사용자 결정 — 레퍼런스대로 유연하게):
+// 후킹의 흔한 말 금지 · 후킹이 가장 큰 글자, 그래픽 양(15초 3개 · 40%) · 가리지 않기, 효과음 15초 2~3개 · 힘줄 곳에만
+const DROP_HOOK = ["흔한 말", "가장 큰 글자"];
+const DROP_GRAPHICS = ["15초에 3개", "가리지 않게"];
+
+function styleKitRules(kit: ReturnType<typeof editKit>) {
+  return {
+    hook: kit.hook_rules.filter((r) => !DROP_HOOK.some((d) => r.includes(d))),
+    // 가리지 않기 규칙에 붙어 있던 "자막과 같은 말 되풀이 금지"는 남긴다
+    graphics: [...kit.graphics_rules.filter((r) => !DROP_GRAPHICS.some((d) => r.includes(d))), "그래픽 글은 자막과 같은 말을 되풀이하지 않는다."],
+  };
+}
+
 export function styleSystemPrompt(ctx: EditPlanContext, g: StylePlanGuide): string {
   const kit = editKit();
+  const rules = styleKitRules(kit);
   const n = g.card.numbers;
   const concept = g.concept?.trim();
-  const duration = n.durationSec ? `레퍼런스 길이(${n.durationSec[0]}~${n.durationSec[1]}초) 근처로 맞추되, 촬영본에 쓸 장면이 모자라면 짧게 끝낸다.` : "내용에 맞게 15~60초.";
+  const fixedScript = g.voiceMode === "AI" && !!g.script?.trim();
+  const duration = fixedScript
+    ? "길이는 넣은 대본을 그대로 읽은 길이다."
+    : n.durationSec
+      ? `영상 길이는 레퍼런스 길이(${n.durationSec[0]}~${n.durationSec[1]}초, 코드가 잰 값) 안에 맞춘다. ${g.voiceMode === "AI" ? "AI 음성은 읽는 글자(띄어쓰기 · 문장부호 제외) 약 6~7자가 1초다." : "영상 내 음성은 고른 구간 길이의 합이 영상 길이다."} 촬영본에 쓸 장면이 모자랄 때만 짧게 끝낸다.`
+      : "내용에 맞게 15~60초.";
   const palette = SFX_PALETTE.map((s) => `${s.id} [${s.kind}] ${s.use}`).join("\n");
   const sfxDensity = n.sfxPer10s != null ? `영상 10초마다 약 ${n.sfxPer10s}개(레퍼런스 측정값)` : "카드에 적힌 만큼";
   return `너는 숏폼 영상 편집자다. 사람이 찍은 원본 영상을 보고, 아래 "레퍼런스 스타일 카드"와 같은 스타일로 보이는 편집 계획을 세운다. 계획은 코드가 그대로 만든다.
@@ -126,13 +146,14 @@ ${voiceBlock(g)}
 4. 대본과 컷: ${duration} 컷 길이 · 개수는 카드의 컷 · 속도를 따른다(평균 컷 ${n.avgShotSec ?? "-"}초). 비트마다 한 가지만 말하고 장면과 말이 맞게 한다.
 5. 자막 · 그래픽 · 효과음: 카드대로. caption_style은 ${n.captionStyle === "keyword" ? "keyword" : "sentence"}${n.captionStyle === "none" ? "로 두되, 레퍼런스가 말 자막을 쓰지 않으니 captions는 비워 두고 꼭 필요한 화면 글자만 그래픽으로 넣는다" : ""}. 효과음은 ${sfxDensity}, 카드의 효과음 종류 비율에 맞춰 아래 목록에서만 고른다.
 6. look: 카드의 자막 · 화면 설명대로 글자 디자인을 정한다. music_query는 "${g.card.music.query}", music_intent는 "${g.card.music.mood}"로 쓴다.
-7. 쓰는 말 전체를 check_ai_tone으로 점검하고${g.voiceMode === "AI" ? " read_tts로 읽기용 원고를 확인한다" : "다"}. visuals는 빈 배열로 둔다.
+7. text_places는 hook을 auto, captions를 빈 배열로 둔다. 글자 자리는 코드가 상품 · 사람을 피해 정한다(사람이 자리를 정했을 때만 쓰는 칸이다).
+8. 쓰는 말 전체를 check_ai_tone으로 점검하고${g.voiceMode === "AI" ? " read_tts로 읽기용 원고를 확인한다" : "다"}. visuals는 빈 배열로 둔다.
 
 기본 편집 규칙(카드와 다르면 카드를 따른다):
 글자 디자인:
 ${bullets(kit.look_rules)}
 후킹:
-${bullets(kit.hook_rules)}
+${bullets(rules.hook)}
 표지:
 ${bullets(kit.thumbnail_rules)}
 컷:
@@ -146,7 +167,7 @@ ${JSON.stringify(kit.music_library.map((m) => ({ file: m.file, mood: m.mood })))
 
 그래픽 틀 (이것만 쓴다. 쓰지 않는 칸은 빈 문자열, 숫자는 0):
 ${JSON.stringify(kit.graphics)}
-${bullets(kit.graphics_rules)}
+${bullets(rules.graphics)}
 
 효과음 (이 id만 쓴다. at_word가 있으면 그 낱말을 말할 때, 없으면 비트 안 위치 at 0~1. 휙 · 상승음은 장면이 바뀌는 순간에, 팝 · 클릭은 글자 · 그래픽이 나올 때 둔다):
 ${palette}
@@ -154,7 +175,6 @@ ${palette}
 절대 규칙:
 - 대본 · 컨셉 · 화면에 없는 사실(숫자 · 효과 · 성분)을 지어내지 않는다. 체험담처럼 들리는 말을 대본에 없이 지어내지 않는다.
 - 효과를 단정하지 않는다. 최고 · 유일 · 100% 같은 단정을 쓰지 않는다. em dash를 쓰지 않는다.
-- 인사 · 자기소개로 시작하지 않는다(대본에 있으면 그대로 둔다).
 - 구간은 촬영본 길이 안에서만 고른다. 같은 구간을 두 번 쓰지 않는다.
 - warnings에는 사람이 확인할 문제만 시각과 함께 쓴다(카드대로 못 한 것과 그 이유 포함).`;
 }

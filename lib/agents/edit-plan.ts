@@ -132,13 +132,24 @@ export function makeEditPlanSchema<S extends readonly [string, ...string[]]>(sfx
   });
 }
 
+// 글자 자리 고정(스타일 쇼츠만, 2026-11-19 사용자 결정) — 보통은 auto(코드가 상품 · 사람을 피해 고른다). 주석으로 자리를 정하면 그 자리에 둔다
+export const textPlacesSchema = z.object({
+  hook: z.enum(["auto", "top", "mid", "lower"]).describe("후킹 글자 자리. 사람이 자리를 정했을 때만 top 위 · mid 가운데 · lower 아래, 아니면 auto"),
+  captions: z
+    .array(z.object({ beat: z.number().int().describe("비트 번호(0부터)"), place: z.enum(["top", "mid", "lower"]) }))
+    .describe("사람이 자리를 정한 비트의 자막 자리. 정하지 않은 비트는 넣지 않는다. 없으면 빈 배열"),
+});
+export type TextPlaces = z.infer<typeof textPlacesSchema>;
+
 export const editPlanSchema = makeEditPlanSchema(sfxNames);
-const styleEditPlanSchema = makeEditPlanSchema(SFX_IDS);
+const styleEditPlanSchema = makeEditPlanSchema(SFX_IDS).extend({ text_places: textPlacesSchema });
 type ParsedEditPlan = z.infer<typeof editPlanSchema>;
 // caption_style · big · components는 나중에 생긴 값이라 그 전에 저장된 계획(다시 편집)과 코드가 만든 계획(lemo)에는 없다. 없으면 예전 방식(keyword)이다
 export type EditPlan = Omit<ParsedEditPlan, "caption_style" | "beats" | "components"> & {
   caption_style?: ParsedEditPlan["caption_style"];
   components?: ParsedEditPlan["components"];
+  // 스타일 쇼츠만. 없으면 모두 자동 자리
+  text_places?: TextPlaces;
   beats: (Omit<ParsedEditPlan["beats"][number], "big"> & { big?: boolean })[];
 };
 export type EditBeat = EditPlan["beats"][number];

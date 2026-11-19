@@ -53,6 +53,8 @@ export interface TimedCaption {
   sentence?: boolean;
   // sentence 영상에서 크게 강조하는 자막
   big?: boolean;
+  // 사람이 정한 자리(스타일 쇼츠 주석). 없으면 코드가 상품 · 사람을 피해 고른다
+  pin?: "top" | "mid" | "lower";
 }
 
 export interface TimedGraphic {
@@ -87,7 +89,7 @@ export interface Timeline {
   captions: TimedCaption[];
   graphics: TimedGraphic[];
   sfx: TimedSfx[];
-  hook: { start: number; end: number; onScreen: string; highlight: string; position: "top" | "lower" };
+  hook: { start: number; end: number; onScreen: string; highlight: string; position: "top" | "lower"; pin?: "top" | "mid" | "lower" };
 }
 
 /**
@@ -278,9 +280,12 @@ export function timeText(plan: EditPlan, base: Omit<Timeline, "captions" | "grap
   });
 
   const first = base.lines[0];
+  // 사람이 정한 글자 자리(스타일 쇼츠 주석). 계획에 없으면 지금처럼 자동 자리
+  const pinOf = new Map((plan.text_places?.captions ?? []).map((p) => [p.beat, p.place]));
+  const hookPin = plan.text_places?.hook && plan.text_places.hook !== "auto" ? plan.text_places.hook : undefined;
   return {
     ...base,
-    captions,
+    captions: pinOf.size ? captions.map((c) => (pinOf.has(c.beat) ? { ...c, pin: pinOf.get(c.beat) } : c)) : captions,
     graphics,
     sfx: sfx.sort((a, b) => a.t - b.t),
     hook: {
@@ -289,6 +294,7 @@ export function timeText(plan: EditPlan, base: Omit<Timeline, "captions" | "grap
       onScreen: plan.hook.on_screen,
       highlight: plan.hook.highlight,
       position: plan.hook.position ?? "top",
+      ...(hookPin ? { pin: hookPin } : {}),
     },
   };
 }

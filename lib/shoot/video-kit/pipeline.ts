@@ -12,7 +12,7 @@ import { getOpenAI } from "@/lib/openai";
 import { callOptions } from "@/lib/products/analysis/analyze";
 import type { ContentRule } from "@/lib/rules/check";
 import { DEFAULT_EDIT_STYLE, type EditStyle } from "@/lib/shoot/edit-style";
-import { hookZone, normalizeLook, readableCaptions, readableLook, readableRows, type CutZones, type Look } from "@/lib/shoot/video-kit/caption-style";
+import { normalizeLook, readableCaptions, readableLook, readableRows, type CutZones, type Look } from "@/lib/shoot/video-kit/caption-style";
 import { CAPTION_FALLBACK_WARNING, selectCaptionRenderer } from "@/lib/shoot/video-kit/caption-renderer";
 import { inspectAndRepairVideo, type VideoQuality, type VideoReview } from "@/lib/shoot/video-kit/quality";
 import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
@@ -21,7 +21,7 @@ import { applyHumanText } from "@/lib/shoot/video-kit/human-text";
 import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
 import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
-import { captionZones, writeCoverProject, writeProject, type BehindWord, type VideoFonts } from "@/lib/shoot/video-kit/compose";
+import { captionZones, hookPlace, writeCoverProject, writeProject, type BehindWord, type VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import { layoutBeats, snapCuts, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
@@ -185,7 +185,16 @@ export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolea
     .filter((v) => fixed[v.beat] && keep(fixed[v.beat]))
     .map((v) => ({ ...v, beat: fixed.slice(0, v.beat).filter(keep).length }));
   const thumb = seconds.has(plan.thumbnail.clip) ? plan.thumbnail : { ...plan.thumbnail, clip: beats[0].cuts[0].clip, at: beats[0].cuts[0].in };
-  return { ...plan, beats, visuals, thumbnail: thumb };
+  // 사람이 정한 자막 자리(스타일 쇼츠)도 비트 번호를 같이 당긴다
+  const places = plan.text_places
+    ? {
+        text_places: {
+          hook: plan.text_places.hook,
+          captions: plan.text_places.captions.filter((p) => fixed[p.beat] && keep(fixed[p.beat])).map((p) => ({ ...p, beat: fixed.slice(0, p.beat).filter(keep).length })),
+        },
+      }
+    : {};
+  return { ...plan, beats, visuals, thumbnail: thumb, ...places };
 }
 
 /**
@@ -193,7 +202,20 @@ export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolea
  * show를 주면(사람이 말하지 않는 직접 촬영) 대본 길이를 보여 주는 영상 기준(SHOW_SECONDS)으로 잰다.
  * 촬영본 합계가 기준보다 짧으면 촬영본 합계까지만 요구한다 — 없는 장면을 느리게 늘이지 않게.
  */
-export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, style?: { sfxPer10s: number | null; avgShotSec: number | null }): string[] {
+/** 스타일 쇼츠의 기준 — 레퍼런스에서 잰 값. durationSec가 있으면 영상 길이를 그 범위로 잰다(대본을 그대로 쓰면 재지 않는다). */
+export interface StyleNumbers {
+  sfxPer10s: number | null;
+  avgShotSec: number | null;
+  durationSec?: [number, number] | null;
+  // 사람이 넣은 대본을 AI 음성이 그대로 읽는다 — 길이는 대본이 정한다
+  fixedScript?: boolean;
+  footageSeconds?: number;
+}
+
+// 레퍼런스 길이에서 이만큼은 넘어간다(말 길이 어림값이라)
+const STYLE_LENGTH_SLACK = 0.15;
+
+export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, style?: StyleNumbers): string[] {
   const problems: string[] = [];
   const all = plan.beats.flatMap((b) => b.cuts);
   for (const [i, a] of all.entries()) {
@@ -209,6 +231,19 @@ export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, 
     if (seconds < min * 0.9)
       problems.push(`대본이 약 ${Math.round(seconds)}초 분량(읽는 글자 ${syllables}자)이라 짧아요. ${range}가 되게 늘리세요. 같은 말을 늘이지 말고 상품 구성 · 약속 · 결과를 떠올리게 하는 말처럼 빠진 내용을 채우고, 늘어난 말에 맞는 컷을 더 쓰세요.`);
     else if (seconds > SHOW_SECONDS.max * 1.1) problems.push(`대본이 약 ${Math.round(seconds)}초 분량(읽는 글자 ${syllables}자)이라 길어요. ${range} 안에 들어오게 줄이세요.`);
+  } else if (style) {
+    // 스타일 쇼츠(2026-11-19 사용자 결정): 길이는 레퍼런스 길이로 잰다. 대본을 그대로 읽는 영상은 대본이 길이를 정해 재지 않는다
+    const range = style.durationSec;
+    if (range && !style.fixedScript) {
+      const hasTts = plan.beats.some((b) => b.mode === "tts");
+      const seconds = hasTts ? syllables / SYLLABLES_PER_SECOND : all.reduce((s, c) => s + Math.max(0, c.out - c.in), 0);
+      // 촬영본에 쓸 장면이 모자라면 짧아도 된다
+      const min = Math.min(range[0], Math.floor((style.footageSeconds ?? Infinity) * 0.9));
+      const max = range[1];
+      const what = hasTts ? `대본이 약 ${Math.round(seconds)}초 분량(읽는 글자 ${syllables}자)` : `고른 구간이 모두 ${Math.round(seconds)}초`;
+      if (seconds < min * (1 - STYLE_LENGTH_SLACK)) problems.push(`${what}이라 레퍼런스(${range[0]}~${max}초)보다 짧아요. ${min}~${max}초가 되게 늘리세요.`);
+      else if (seconds > max * (1 + STYLE_LENGTH_SLACK)) problems.push(`${what}이라 레퍼런스(${range[0]}~${max}초)보다 길어요. ${max}초 안에 들어오게 줄이세요.`);
+    } else if (!style.fixedScript && syllables > 630) problems.push("대본이 너무 길어요. 85초 안에 들어오게 줄이세요.");
   } else {
     if (plan.beats.some((b) => b.mode === "tts") && syllables < 60) problems.push("대본이 너무 짧아요. 15초 이상 나오게 쓰세요.");
     if (syllables > 630) problems.push("대본이 너무 길어요. 85초 안에 들어오게 줄이세요.");
@@ -220,7 +255,8 @@ export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, 
   const sfxCount = plan.beats.reduce((s, b) => s + b.sfx.length, 0);
   // 스타일 쇼츠의 말소리 영상(tts 없음)은 고른 구간 길이로 어림한다
   const seconds = style && !syllables ? all.reduce((s, c) => s + Math.max(0, c.out - c.in), 0) : syllables / SYLLABLES_PER_SECOND;
-  const sfxMax = style?.sfxPer10s != null ? Math.max(3, Math.ceil((seconds / 10) * style.sfxPer10s * 1.5) + 1) : Math.max(3, Math.ceil((seconds / 15) * 3) + 1);
+  // 스타일 쇼츠는 레퍼런스 빈도로만 잰다. 레퍼런스 측정값이 없으면 개수를 제한하지 않는다(2026-11-19 사용자 결정)
+  const sfxMax = style?.sfxPer10s != null ? Math.max(3, Math.ceil((seconds / 10) * style.sfxPer10s * 1.5) + 1) : style ? Infinity : Math.max(3, Math.ceil((seconds / 15) * 3) + 1);
   if (sfxCount > sfxMax) problems.push(`효과음이 ${sfxCount}개예요. ${sfxMax}개 이하로 줄여 ${style ? "레퍼런스 빈도에 맞추세요" : "시작 · 완성 · 반전처럼 힘을 줄 곳에만 남기세요"}.`);
   if (plan.caption_style === "sentence") {
     const big = plan.beats.filter((b) => b.big).length;
@@ -490,7 +526,7 @@ function makeCover(version: string, workDir: string, clip: KitClip, thumb: EditP
 }
 
 function motionBlocks(tl: Timeline, zones: CutZones[] | null, design: CaptionDesign): SkillBlock[] {
-  const blocks: SkillBlock[] = [{ start: 0, end: tl.hook.end, zone: hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position), fx: design.key_fx, highlight: tl.hook.highlight, big: true, rows: readableRows(tl.hook.onScreen).map((text) => ({ text, role: "key" })) }];
+  const blocks: SkillBlock[] = [{ start: 0, end: tl.hook.end, zone: hookPlace(tl, zones), fx: design.key_fx, highlight: tl.hook.highlight, big: true, rows: readableRows(tl.hook.onScreen).map((text) => ({ text, role: "key" })) }];
   const endCard = tl.graphics.find((g) => g.type === "end_card");
   if (endCard) {
     const p = endCard.g;
@@ -556,7 +592,15 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     // 길이 기준은 사람이 말하지 않는 직접 촬영에만 건다. AI 자동 영상은 장면표가, 말하는 영상은 촬영본이 길이를 정한다
     // 스타일 쇼츠는 길이를 레퍼런스 카드가 정한다
     const show = input.source !== "auto" && input.source !== "style" && !input.liveVoice ? { footageSeconds: clips.reduce((s, c) => s + c.duration, 0) } : undefined;
-    const styleNumbers = input.stylePlan ? { sfxPer10s: input.stylePlan.card.numbers.sfxPer10s, avgShotSec: input.stylePlan.card.numbers.avgShotSec } : undefined;
+    const styleNumbers: StyleNumbers | undefined = input.stylePlan
+      ? {
+          sfxPer10s: input.stylePlan.card.numbers.sfxPer10s,
+          avgShotSec: input.stylePlan.card.numbers.avgShotSec,
+          durationSec: input.stylePlan.card.numbers.durationSec,
+          fixedScript: input.stylePlan.voiceMode === "AI" && !!input.stylePlan.script?.trim(),
+          footageSeconds: clips.reduce((s, c) => s + c.duration, 0),
+        }
+      : undefined;
     const problems = planProblems(applyHumanText(plan, input), show, styleNumbers);
     if (problems.length) {
       console.log(`[video-kit] 계획 다시 쓰기: ${problems.join(" / ")}`);
@@ -795,7 +839,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       repair: async (attempt, issues) => {
         console.log(`[video-kit] 완성본 자동 수정 ${attempt}: ${issues.map((i) => `${i.at.toFixed(1)}초 ${i.detail}`).join(" / ")}`);
         const previousPlaces = captionZones(tl, finalZones);
-        const previousHook = hookZone(finalZones, tl.hook.start, tl.hook.end, tl.hook.position);
+        const previousHook = hookPlace(tl, finalZones);
         const repairZones = (finalZones ?? tl.cuts.map((c) => ({ start: c.start, end: c.end, cover: { top: 0, mid: 0, lower: 0 } }))).map((z) => {
           const cover = { ...z.cover };
           const active = issues.filter((i) => i.at >= z.start - 0.1 && i.at < z.end + 0.1);

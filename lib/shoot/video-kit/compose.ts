@@ -144,12 +144,18 @@ export interface BehindWord {
   file: string;
 }
 
-/** 자막마다 놓을 자리. 후킹 글자와 위쪽 그래픽을 피한다. */
+/** 후킹 글자 자리. 사람이 정한 자리(스타일 쇼츠 주석)가 있으면 그 자리, 없으면 상품 · 사람을 피해 고른다. */
+export function hookPlace(tl: Timeline, zones: CutZones[] | null): Zone {
+  return tl.hook.pin ?? hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
+}
+
+/** 자막마다 놓을 자리. 후킹 글자와 위쪽 그래픽을 피한다. 사람이 정한 자리는 후킹 글자와 겹치지 않으면 그대로 쓴다. */
 export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
-  const hookAt: Zone = hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
+  const hookAt: Zone = hookPlace(tl, zones);
   return tl.captions.map((c) => {
     const busy: Zone[] = [];
     if (c.start < tl.hook.end) busy.push(hookAt);
+    if (c.pin && !busy.includes(c.pin)) return c.pin;
     if (tl.graphics.some((g) => TOP_GRAPHICS.has(g.type) && g.start < c.end && g.end > c.start)) busy.push("top");
     // 문장 자막은 늘 같은 자리(아래)에 둔다. 후킹 글자가 그 자리를 쓰는 동안만 다른 자리로 피한다
     if (c.sentence && !c.big && !busy.includes("lower")) return "lower";
@@ -162,7 +168,7 @@ export function writeProject(dir: string, tl: Timeline, opts: { look?: Look; zon
   const fonts = opts.fonts ?? fallbackFonts();
   const look = opts.look ?? DEFAULT_LOOK;
   const zones = opts.zones ?? null;
-  const hookAt: Zone = hookZone(zones, tl.hook.start, tl.hook.end, tl.hook.position);
+  const hookAt: Zone = hookPlace(tl, zones);
   const places = captionZones(tl, zones);
   const blocks = opts.noCaptions ? [] : tl.captions.map((c, i) => opts.readable ? readableCaptionBlock(c, look, places[i]) : captionBlock(c, look, places[i]));
   const behind = opts.behind ?? null;

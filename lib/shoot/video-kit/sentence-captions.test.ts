@@ -3,8 +3,8 @@ import test from "node:test";
 import type { EditPlan } from "@/lib/agents/edit-plan";
 import { humanPriceLines } from "@/lib/agents/edit-plan";
 import { buildSubtitleFile, type CaptionDesign } from "./caption-skill";
-import { captionZones } from "./compose";
-import { planProblems } from "./pipeline";
+import { captionZones, hookPlace } from "./compose";
+import { planProblems, sanitizePlan } from "./pipeline";
 import { layoutBeats, snapCuts, timeText, type VoiceClip } from "./timeline";
 
 // 문장 자막 · 컷 맞춤 · 끝 화면 겹침 · 특가 문구 조건(2026-11-12 사람 편집본 비교에서 나온 수정)
@@ -105,4 +105,32 @@ test("특가 · 금액은 관리자가 넣은 문구에 있을 때만 쓸 수 �
   assert.deepEqual(humanPriceLines({ brief: "이번 주 특가 중이에요", fixedEnding: "댓글 남겨 주세요" }), ["이번 주 특가 중이에요"]);
   assert.deepEqual(humanPriceLines({ fixedEnding: "지금 19,900원" }), ["지금 19,900원"]);
   assert.deepEqual(humanPriceLines({ brief: "바삭하게 튀기는 법", humanHook: null }), []);
+});
+
+test("사람이 정한 글자 자리(스타일 쇼츠 주석)는 그 자리에 두고, 없으면 예전처럼 자동 자리다", () => {
+  const zones = [{ start: 0, end: 100, cover: { top: 0, mid: 0, lower: 0 } }];
+  const auto = planOf([beat("훅", []), beat("둘째", ["둘째 자막"]), beat("셋째", ["셋째 자막"])], "sentence");
+  const autoTl = timeText(auto, layoutBeats(auto, voices(3), new Map([[1, 10]])), [], new Map());
+  assert.equal(hookPlace(autoTl, zones), "top");
+  assert.deepEqual(captionZones(autoTl, zones), ["lower", "lower"]);
+
+  const pinned = { ...auto, text_places: { hook: "mid", captions: [{ beat: 2, place: "top" }] } } as EditPlan;
+  const tl = timeText(pinned, layoutBeats(pinned, voices(3), new Map([[1, 10]])), [], new Map());
+  assert.equal(hookPlace(tl, zones), "mid");
+  assert.deepEqual(captionZones(tl, zones), ["lower", "top"]);
+
+  // 비트가 빠지면 자리를 정한 비트 번호도 당긴다
+  const dropped = sanitizePlan({ ...pinned, thumbnail: { title: "", highlight: "", position: "top", sub: "", clip: 1, at: 0 }, beats: [pinned.beats[0], { ...pinned.beats[1], cuts: [{ clip: 9, in: 0, out: 1, what: "" }] }, pinned.beats[2]] }, [{ no: 1, duration: 10 }] as never, false);
+  assert.deepEqual(dropped.text_places?.captions, [{ beat: 1, place: "top" }]);
+});
+
+test("스타일 쇼츠는 레퍼런스 길이로 재고, 대본을 그대로 읽으면 길이를 재지 않으며, 효과음 15초 기준을 쓰지 않는다", () => {
+  const long = "가".repeat(400);
+  const plan = planOf([beat(long, []), ...Array.from({ length: 6 }, (_, i) => beat("나".repeat(10), [], { cuts: [{ clip: 1, in: i, out: i + 0.9, what: "" }] }))]);
+  const style = { sfxPer10s: null, avgShotSec: 1.5, durationSec: [20, 30] as [number, number], footageSeconds: 100 };
+  assert.ok(planProblems(plan, undefined, style).some((p) => p.includes("레퍼런스(20~30초)보다 길어요")));
+  assert.ok(!planProblems(plan, undefined, { ...style, fixedScript: true }).some((p) => p.includes("레퍼런스")));
+  const noisy = planOf(plan.beats.map((b) => ({ ...b, tts: "다".repeat(25), sfx: [{ name: "pop", at_word: "", at: 0 }, { name: "pop", at_word: "", at: 0.5 }] })));
+  assert.ok(!planProblems(noisy, undefined, style).some((p) => p.includes("효과음")));
+  assert.ok(planProblems(noisy).some((p) => p.includes("효과음")));
 });
