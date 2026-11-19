@@ -122,6 +122,11 @@ export async function triggerStyleRefsRun(reason: string, folderId?: string): Pr
   await dispatch("style-refs", reason, folderId ? { folder: folderId } : {});
 }
 
+/** 스타일 쇼츠 편집 — 만들기 · 다시 만들기 · 수정 요청 직후. 편집은 FFmpeg · HyperFrames라 Actions에서만. */
+export async function triggerStyleEditRun(reason: string): Promise<void> {
+  await dispatch("style-edit", reason);
+}
+
 /** 다른 계정 비교 — 비교 계정을 추가한 직후. 평소엔 매일 04:50 schedule. */
 export async function triggerBenchmarkRun(reason: string): Promise<void> {
   await dispatch("benchmark-collect", reason);

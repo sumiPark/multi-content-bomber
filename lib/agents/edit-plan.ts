@@ -8,6 +8,8 @@ import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner
 import { writerSkills } from "@/lib/agents/script";
 import type { ContentRule } from "@/lib/rules/check";
 import { lookSchema } from "@/lib/shoot/video-kit/caption-style";
+import { styleSystemPrompt, type StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
+import { SFX_IDS } from "@/lib/style-shorts/sfx-palette";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 편집 에이전트(3) — 올라온 촬영본의 프레임을 보고 편집 계획을 정한다(.claude/skills/ig-edit-ko).
@@ -71,7 +73,9 @@ AI 이미지(visuals) — 말로 성분 · 원료 · 원리를 설명하는데 �
 - 효과가 나타나는 모습을 그리지 않는다. 무엇이 들어 있는지만 보여 준다.${library.length ? `\n이미 만든 그림(같은 내용이면 이 key를 쓴다):\n${library.map((l) => `${l.key}: ${l.subject}`).join("\n")}` : ""}`;
 }
 
-export const editPlanSchema = z.object({
+/** 효과음 이름 목록만 다른 편집 계획 형식. 직접 촬영 · AI 자동은 kit.json 효과음(sfxNames), 스타일 쇼츠는 earshot 목록을 쓴다. */
+export function makeEditPlanSchema<S extends readonly [string, ...string[]]>(sfx: S) {
+  return z.object({
   look: lookSchema.describe("이 영상의 자막 · 큰 글자 디자인과 음악. 계정 설정을 읽고 영상마다 만든다"),
   caption_style: z
     .enum(["sentence", "keyword"])
@@ -117,7 +121,7 @@ export const editPlanSchema = z.object({
           .array(z.object({ clip: z.number().int(), in: z.number(), out: z.number(), what: z.string().describe("이 구간에 보이는 것") }))
           .describe("이 비트에 쓸 원본 구간, 차례대로. live면 정확히 1개"),
         graphics: z.array(graphicSchema),
-        sfx: z.array(z.object({ name: z.enum(sfxNames), at_word: z.string(), at: z.number() })),
+        sfx: z.array(z.object({ name: z.enum(sfx), at_word: z.string(), at: z.number() })),
       }),
     )
     .describe("비트 5~14개. 첫 비트 = 후킹"),
@@ -125,7 +129,11 @@ export const editPlanSchema = z.object({
   warnings: z
     .array(z.string())
     .describe("사람이 확인할 문제만 시각과 함께: 구성품이 아닌 소품, 주의사항과 부딪히는 장면, 근거가 약한 말, 관리자가 쓴 말을 고친 이유. 편집 과정이나 지시 사항은 쓰지 않는다. 없으면 빈 배열"),
-});
+  });
+}
+
+export const editPlanSchema = makeEditPlanSchema(sfxNames);
+const styleEditPlanSchema = makeEditPlanSchema(SFX_IDS);
 type ParsedEditPlan = z.infer<typeof editPlanSchema>;
 // caption_style · big · components는 나중에 생긴 값이라 그 전에 저장된 계획(다시 편집)과 코드가 만든 계획(lemo)에는 없다. 없으면 예전 방식(keyword)이다
 export type EditPlan = Omit<ParsedEditPlan, "caption_style" | "beats" | "components"> & {
@@ -178,8 +186,10 @@ export interface EditPlanContext {
   tone?: string | null;
   editStyle?: string | null;
   lookCloser: (clip: number, from: number, to: number) => Promise<string>;
-  // 소재가 사람이 찍은 촬영본인지, AI 자동 콘텐츠용으로 만든 것인지
-  source?: "shoot" | "auto";
+  // 소재가 사람이 찍은 촬영본인지, AI 자동 콘텐츠용으로 만든 것인지, 스타일 쇼츠(레퍼런스 스타일로 편집, 상품 없음)인지
+  source?: "shoot" | "auto" | "style";
+  // 스타일 쇼츠만: 레퍼런스 스타일 카드 · 대본 · 컨셉(lib/style-shorts/plan-prompt.ts). 있으면 지시문 · 도구 · 효과음 목록이 스타일 쇼츠 것으로 바뀐다
+  style?: StylePlanGuide;
   // AI 자동 콘텐츠: 점검을 통과한 대본. 뜻을 바꾸지 않고 쓴다
   scriptLines?: string[];
   // 저장해 둔 AI 이미지 목록
@@ -350,8 +360,10 @@ ${bullets(kit.sfx_rules)}${visualRules(f.kind, ctx.visualLibrary ?? [])}
 export async function writeEditPlan(ctx: EditPlanContext, opts: { maxSteps?: number } = {}): Promise<AgentResult<EditPlan>> {
   const facts = ctx.facts;
   const shared = writerSkills({ facts, rules: ctx.rules, accountName: ctx.accountName });
+  // 스타일 쇼츠는 상품이 없어 상품 사실 · 광고 문구 도구를 주지 않는다
+  const styleOnly = ctx.style ? new Set(["get_product_facts", "check_rules"]) : new Set<string>();
   const skills: AgentSkill[] = [
-    ...shared.filter((s) => s.name !== "check_caption"),
+    ...shared.filter((s) => s.name !== "check_caption" && !styleOnly.has(s.name)),
     {
       name: "look_closer",
       description: "촬영본 한 구간의 프레임을 촘촘히 본다. 컷 시작 · 끝, 표시창 숫자, 움직임을 확인할 때 쓴다.",
@@ -375,11 +387,12 @@ export async function writeEditPlan(ctx: EditPlanContext, opts: { maxSteps?: num
   );
   return runAgent({
     agent: "edit",
-    system: systemPrompt(ctx),
+    system: ctx.style ? styleSystemPrompt(ctx, ctx.style) : systemPrompt(ctx),
     user: `${facts.name} 촬영본 ${ctx.clips.length}개의 편집 계획을 세워 줘. 프레임 묶음은 촬영본 순서대로이고, 왼쪽 위 글자가 그 촬영본의 시각이다.\n\n${clipLines.join("\n")}${ctx.revise ? reviseBlock(ctx.revise) : ""}${ctx.retry ?`\n\n먼저 낸 계획이 점검에서 걸렸다. 이것을 고쳐서 계획 전체를 다시 내라:\n${ctx.retry.problems.map((p) => `- ${p}`).join("\n")}\n\n먼저 낸 계획:\n${JSON.stringify(ctx.retry.plan.beats.map((b) => ({ tts: b.tts, cuts: b.cuts })))}` : ""}`,
     userImages: ctx.sheets,
     skills,
-    outputSchema: editPlanSchema,
+    // 스타일 쇼츠는 earshot 효과음 목록으로. 계획 형식은 효과음 이름만 다르다
+    outputSchema: (ctx.style ? styleEditPlanSchema : editPlanSchema) as typeof editPlanSchema,
     outputName: "edit_plan",
     maxSteps: opts.maxSteps ?? 16,
     service: ctx.service,

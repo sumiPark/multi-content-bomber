@@ -1,0 +1,90 @@
+name: style-shorts-edit
+
+# 스타일 쇼츠(/style-shorts) 편집 워커 — 찍은 영상을 레퍼런스 스타일 카드대로 편집한다(worker/edit-style-shorts.ts).
+# 직접 촬영과 같은 편집 키트(ffmpeg · HyperFrames · 자막 모션 스킬)에 효과음만 earshot(고정 커밋)으로 만든다.
+# 화면에서 만들기 · 다시 만들기를 누르면 바로 깨운다. schedule은 트리거가 실패했을 때의 백업(하루 두 번).
+on:
+  schedule:
+    # 12:53 · 20:53 KST
+    - cron: "53 3,11 * * *"
+  repository_dispatch:
+    types: [style-edit]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "이 버전만 편집 (비우면 대기 중인 것 전부)"
+        required: false
+      dry_run:
+        description: "편집만 하고 저장하지 않기"
+        type: boolean
+        default: false
+
+concurrency:
+  group: style-shorts-edit
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  EARSHOT_REF: 591fa3e028032e6dce56620a20e932e35667e8d8
+
+jobs:
+  edit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install ffmpeg and Korean font
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-nanum > /dev/null
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: style-edit-pip-${{ env.EARSHOT_REF }}-${{ hashFiles('lib/shoot/video-kit/py/requirements.txt') }}
+      # 글자가 상품 · 사람을 피하게 자리를 읽는 도구. 없으면 기본 자리에 둔다
+      - run: pip install -q -r lib/shoot/video-kit/py/requirements.txt
+        continue-on-error: true
+      - uses: actions/cache@v4
+        with:
+          path: ~/.u2net
+          key: video-models-v1
+      # 효과음(earshot 소리 묶음). 설치가 실패하면 효과음 없이 만들고 경고를 남긴다
+      - name: Install earshot
+        continue-on-error: true
+        run: |
+          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -q "earshot @ git+https://github.com/Leonxlnx/earshot@${EARSHOT_REF}"
+      - name: Prepare HyperFrames browser
+        run: npx --yes hyperframes@0.8.210 browser ensure
+        continue-on-error: true
+      # 구매한 자막 모션 스킬은 저장소에 넣지 않고 비공개 저장 공간에서 받는다. 실패하면 기본 자막으로 만든다
+      - name: Prepare caption skill
+        continue-on-error: true
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          npx tsx worker/fetch-caption-skill.ts "$RUNNER_TEMP/caption-skill"
+          cd "$RUNNER_TEMP/caption-skill/caption-motion-seqc"
+          npm ci --no-audit --no-fund --silent
+          sudo sysctl -q -w kernel.apparmor_restrict_unprivileged_userns=0
+          echo "CAPTION_SKILL_DIR=$PWD" >> "$GITHUB_ENV"
+      - name: Edit style shorts
+        run: npm run worker:style-edit -- ${{ inputs.version && format('--version {0}', inputs.version) || '' }} ${{ inputs.dry_run && '--dry-run' || '' }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
+          FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
+          VIDEO_PYTHON: python
+          EARSHOT_PYTHON: python
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}

@@ -2744,6 +2744,210 @@ export type Database = {
           },
         ]
       }
+      style_short_jobs: {
+        Row: {
+          card: Json
+          clips: Json
+          clips_deleted_at: string | null
+          concept: string | null
+          created_at: string
+          created_by: string | null
+          folder_id: string | null
+          folder_name: string
+          id: string
+          organization_id: string
+          script: string | null
+          title: string | null
+          updated_at: string
+          voice_mode: string
+        }
+        Insert: {
+          card: Json
+          clips: Json
+          clips_deleted_at?: string | null
+          concept?: string | null
+          created_at?: string
+          created_by?: string | null
+          folder_id?: string | null
+          folder_name: string
+          id?: string
+          organization_id: string
+          script?: string | null
+          title?: string | null
+          updated_at?: string
+          voice_mode: string
+        }
+        Update: {
+          card?: Json
+          clips?: Json
+          clips_deleted_at?: string | null
+          concept?: string | null
+          created_at?: string
+          created_by?: string | null
+          folder_id?: string | null
+          folder_name?: string
+          id?: string
+          organization_id?: string
+          script?: string | null
+          title?: string | null
+          updated_at?: string
+          voice_mode?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "style_short_jobs_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "style_folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "style_short_jobs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      style_short_notes: {
+        Row: {
+          at: number | null
+          body: string
+          created_at: string
+          created_by: string | null
+          id: string
+          no: number
+          organization_id: string
+          sent_at: string | null
+          updated_at: string
+          version_id: string
+          x: number | null
+          y: number | null
+        }
+        Insert: {
+          at?: number | null
+          body: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          no: number
+          organization_id: string
+          sent_at?: string | null
+          updated_at?: string
+          version_id: string
+          x?: number | null
+          y?: number | null
+        }
+        Update: {
+          at?: number | null
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          no?: number
+          organization_id?: string
+          sent_at?: string | null
+          updated_at?: string
+          version_id?: string
+          x?: number | null
+          y?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "style_short_notes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "style_short_notes_version_id_fkey"
+            columns: ["version_id"]
+            isOneToOne: false
+            referencedRelation: "style_short_versions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      style_short_versions: {
+        Row: {
+          cover_path: string | null
+          created_at: string
+          created_by: string | null
+          editing_since: string | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          job_id: string
+          organization_id: string
+          plan: Json | null
+          request: Json | null
+          seconds: number | null
+          sounds: Json | null
+          status: string
+          timeline: Json | null
+          version: number
+          video_path: string | null
+          warnings: string[]
+        }
+        Insert: {
+          cover_path?: string | null
+          created_at?: string
+          created_by?: string | null
+          editing_since?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          job_id: string
+          organization_id: string
+          plan?: Json | null
+          request?: Json | null
+          seconds?: number | null
+          sounds?: Json | null
+          status?: string
+          timeline?: Json | null
+          version: number
+          video_path?: string | null
+          warnings?: string[]
+        }
+        Update: {
+          cover_path?: string | null
+          created_at?: string
+          created_by?: string | null
+          editing_since?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          job_id?: string
+          organization_id?: string
+          plan?: Json | null
+          request?: Json | null
+          seconds?: number | null
+          sounds?: Json | null
+          status?: string
+          timeline?: Json | null
+          version?: number
+          video_path?: string | null
+          warnings?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "style_short_versions_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "style_short_jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "style_short_versions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       track_settings: {
         Row: {
           a_shoot_deadline: string

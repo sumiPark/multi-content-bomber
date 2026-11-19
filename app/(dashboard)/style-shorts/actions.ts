@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
-import { triggerStyleRefsRun } from "@/lib/github-dispatch";
+import { triggerStyleEditRun, triggerStyleRefsRun } from "@/lib/github-dispatch";
 import { cardEditSchema, MAX_REFERENCES, parseInstagramUrl, type StyleCard } from "@/lib/style-shorts/card";
+import { CONCEPT_MAX, MAX_CLIP_BYTES, MAX_CLIPS, SCRIPT_MAX, type JobClip, type VersionRequest } from "@/lib/style-shorts/jobs";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -28,10 +29,13 @@ function revalidate(folderId?: string) {
   if (folderId) revalidatePath(`/style-shorts/folders/${folderId}`);
 }
 
-/** 워커를 깨운다. 실패해도 저장은 끝났으니 경고로만 알린다(하루 두 번 백업 실행이 집어 간다). */
+/**
+ * 워커를 깨운다. 실패해도 저장은 끝났으니 경고로만 알린다(하루 두 번 백업 실행이 집어 간다).
+ * 폴더를 지정하지 않는다 — GitHub은 대기 중인 실행을 마지막 하나만 남기므로, 폴더를 지정하면 앞서 넣은 다른 폴더가 밀린다.
+ */
 async function wake(reason: string, folderId: string): Promise<string | undefined> {
   try {
-    await triggerStyleRefsRun(reason, folderId);
+    await triggerStyleRefsRun(`${reason} (folder=${folderId})`);
     return undefined;
   } catch (err) {
     console.error("[style-shorts] 워커 깨우기 실패:", err);
@@ -271,5 +275,157 @@ export async function saveCardAction(input: z.infer<typeof saveCardSchema>): Pro
     .eq("id", parsed.data.folderId);
   if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
   revalidate(parsed.data.folderId);
+  return { ok: true };
+}
+
+// ─── 쇼츠 만들기 · 버전 ───────────────────────────────────────────────────────
+
+function revalidateJob(jobId?: string) {
+  revalidatePath("/style-shorts");
+  if (jobId) revalidatePath(`/style-shorts/jobs/${jobId}`);
+}
+
+/** 편집 워커를 깨운다. 실패해도 저장은 끝났으니 경고로만 알린다(하루 두 번 백업 실행이 집어 간다). */
+async function wakeEdit(reason: string): Promise<string | undefined> {
+  try {
+    await triggerStyleEditRun(reason);
+    return undefined;
+  } catch (err) {
+    console.error("[style-shorts] 편집 워커 깨우기 실패:", err);
+    return "저장했지만 편집을 바로 시작하지 못했어요. 몇 시간 안에 자동으로 편집해요.";
+  }
+}
+
+const createJobSchema = z.object({
+  folderId: z.string().uuid(),
+  draftId: z.string().uuid(),
+  title: z.string().trim().max(60).optional(),
+  voiceMode: z.enum(["AI", "LIVE"]),
+  script: z.string().trim().max(SCRIPT_MAX).optional(),
+  concept: z.string().trim().max(CONCEPT_MAX).optional(),
+  clips: z
+    .array(z.object({ path: z.string().min(1).max(300), name: z.string().trim().max(200), size: z.number().int().min(1).max(MAX_CLIP_BYTES) }))
+    .min(1)
+    .max(MAX_CLIPS),
+});
+
+/** 쇼츠 만들기 — 카드는 지금 것을 그대로 저장하고(폴더를 고쳐도 이 영상은 그대로), v1 편집을 시작한다. */
+export async function createJobAction(input: z.infer<typeof createJobSchema>): Promise<StyleResult> {
+  const parsed = createJobSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "입력을 확인해 주세요. 대본은 3,000자, 컨셉은 1,000자까지예요." };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const d = parsed.data;
+  const prefix = `${auth.orgId}/${auth.userId}/style-shorts/clips/${d.draftId}/`;
+  if (d.clips.some((c) => !c.path.startsWith(prefix) || c.path.includes(".."))) return { ok: false, error: "올린 파일 경로가 올바르지 않아요." };
+  const service = createServiceClient();
+  const { data: folder } = await service.from("style_folders").select("id, name, card, card_status").eq("id", d.folderId).eq("organization_id", auth.orgId).maybeSingle();
+  if (!folder) return { ok: false, error: "스타일 폴더를 찾지 못했어요." };
+  if (!folder.card || folder.card_status !== "READY") return { ok: false, error: "이 폴더의 스타일 카드가 아직 없어요. 카드가 완성된 뒤 만들어 주세요." };
+
+  const { data: job, error } = await service
+    .from("style_short_jobs")
+    .insert({
+      organization_id: auth.orgId,
+      folder_id: folder.id,
+      folder_name: folder.name,
+      card: folder.card,
+      title: d.title || null,
+      voice_mode: d.voiceMode,
+      script: d.script || null,
+      concept: d.concept || null,
+      clips: d.clips as unknown as Json,
+      created_by: auth.userId,
+    })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: `만들기 요청을 저장하지 못했어요: ${error.message}` };
+  const { error: vErr } = await service.from("style_short_versions").insert({ organization_id: auth.orgId, job_id: job.id, version: 1, created_by: auth.userId });
+  if (vErr) {
+    await service.from("style_short_jobs").delete().eq("id", job.id);
+    return { ok: false, error: `편집을 시작하지 못했어요: ${vErr.message}` };
+  }
+  const warning = await wakeEdit("스타일 쇼츠 만들기");
+  revalidateJob(job.id);
+  return { ok: true, id: job.id, warning };
+}
+
+async function loadJob(service: Service, jobId: string, orgId: string) {
+  const { data } = await service.from("style_short_jobs").select("id, clips, clips_deleted_at").eq("id", jobId).eq("organization_id", orgId).maybeSingle();
+  return data;
+}
+
+async function busyOrLatest(service: Service, jobId: string): Promise<{ busy: boolean; latest: number }> {
+  const { data } = await service.from("style_short_versions").select("version, status").eq("job_id", jobId).order("version", { ascending: false });
+  const rows = data ?? [];
+  return { busy: rows.some((r) => r.status === "PENDING" || r.status === "EDITING"), latest: rows[0]?.version ?? 0 };
+}
+
+/** 같은 촬영본 · 카드 · 대본으로 처음부터 다시 만든다 — 새 버전으로 누적된다. */
+export async function remakeJobAction(input: z.infer<typeof idSchema>): Promise<StyleResult> {
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const job = await loadJob(service, parsed.data.id, auth.orgId);
+  if (!job) return { ok: false, error: "요청을 찾지 못했어요." };
+  if (job.clips_deleted_at) return { ok: false, error: "촬영본 보관 기간이 지나 다시 만들 수 없어요. 새로 만들어 주세요." };
+  const { busy, latest } = await busyOrLatest(service, job.id);
+  if (busy) return { ok: false, error: "지금 편집 중이에요. 끝난 뒤 다시 눌러 주세요." };
+  const request: VersionRequest = { kind: "remake", from: latest };
+  const { error } = await service
+    .from("style_short_versions")
+    .insert({ organization_id: auth.orgId, job_id: job.id, version: latest + 1, request: request as unknown as Json, created_by: auth.userId });
+  if (error) return { ok: false, error: `다시 만들기를 시작하지 못했어요: ${error.message}` };
+  const warning = await wakeEdit("스타일 쇼츠 다시 만들기");
+  revalidateJob(job.id);
+  return { ok: true, warning };
+}
+
+/** 실패한 버전을 같은 번호로 다시 편집한다. */
+export async function retryVersionAction(input: z.infer<typeof idSchema>): Promise<StyleResult> {
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data } = await service
+    .from("style_short_versions")
+    .update({ status: "PENDING", error: null, editing_since: null, finished_at: null })
+    .eq("id", parsed.data.id)
+    .eq("organization_id", auth.orgId)
+    .eq("status", "FAILED")
+    .select("job_id");
+  const jobId = data?.[0]?.job_id;
+  if (!jobId) return { ok: false, error: "다시 편집할 수 있는 버전이 아니에요." };
+  const warning = await wakeEdit("스타일 쇼츠 다시 편집");
+  revalidateJob(jobId);
+  return { ok: true, warning };
+}
+
+/** 만든 쇼츠 지우기 — 촬영본 · 모든 버전의 완성본 · 주석까지 지운다. */
+export async function deleteJobAction(input: z.infer<typeof idSchema>): Promise<StyleResult> {
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const job = await loadJob(service, parsed.data.id, auth.orgId);
+  if (!job) return { ok: false, error: "요청을 찾지 못했어요." };
+  const { busy } = await busyOrLatest(service, job.id);
+  if (busy) return { ok: false, error: "편집 중에는 지울 수 없어요. 끝난 뒤 지워 주세요." };
+  const { data: versions } = await service.from("style_short_versions").select("video_path, cover_path").eq("job_id", job.id);
+  const paths = [
+    ...(job.clips_deleted_at ? [] : ((job.clips ?? []) as unknown as JobClip[]).map((c) => c.path)),
+    ...(versions ?? []).flatMap((v) => [v.video_path, v.cover_path]).filter((p): p is string => !!p),
+  ];
+  const { error } = await service.from("style_short_jobs").delete().eq("id", job.id);
+  if (error) return { ok: false, error: `지우지 못했어요: ${error.message}` };
+  if (paths.length) {
+    const { error: rmError } = await service.storage.from("media").remove(paths);
+    if (rmError) console.error("[style-shorts] 파일 지우기 실패:", rmError.message);
+  }
+  revalidateJob();
   return { ok: true };
 }

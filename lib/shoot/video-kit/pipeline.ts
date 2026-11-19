@@ -25,6 +25,8 @@ import { captionZones, writeCoverProject, writeProject, type BehindWord, type Vi
 import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import { layoutBeats, snapCuts, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
+import type { StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
+import type { PlacedSfx } from "@/lib/style-shorts/sfx";
 import type { createServiceClient } from "@/lib/supabase/service";
 
 // 편집 키트 — 촬영본 → 프레임 분석 → 편집 계획(에이전트 3) → 음성 → 컷 → 자막 · 그래픽 → 점검 → 렌더 → 표지.
@@ -48,8 +50,12 @@ export interface KitInput {
   facts: ProductFacts;
   rules: ContentRule[];
   clips: KitClip[];
-  // 소재 종류(편집 지시가 달라진다). 없으면 직접 촬영
-  source?: "shoot" | "auto";
+  // 소재 종류(편집 지시가 달라진다). 없으면 직접 촬영. style = 스타일 쇼츠(레퍼런스 스타일 카드로 편집, 상품 없음)
+  source?: "shoot" | "auto" | "style";
+  // 스타일 쇼츠만: 카드 · 소리 모드 · 대본 · 컨셉. 있으면 편집 지시 · 효과음 목록 · 음악 검색어가 카드 기준으로 바뀐다
+  stylePlan?: StylePlanGuide;
+  // 스타일 쇼츠만: 효과음을 kit.json 파일 대신 만들어 넣는다(earshot). 없으면 지금처럼 kit.json 효과음
+  sfxRenderer?: (sfx: TimedSfx[], workDir: string) => { placed: PlacedSfx[]; warnings: string[] };
   scriptLines?: string[];
   // 계정 설정의 목소리. 없으면 기본 목소리. 모델은 kit.json의 무료 모델 고정
   voiceId?: string | null;
@@ -184,7 +190,7 @@ export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolea
  * show를 주면(사람이 말하지 않는 직접 촬영) 대본 길이를 보여 주는 영상 기준(SHOW_SECONDS)으로 잰다.
  * 촬영본 합계가 기준보다 짧으면 촬영본 합계까지만 요구한다 — 없는 장면을 느리게 늘이지 않게.
  */
-export function planProblems(plan: EditPlan, show?: { footageSeconds: number }): string[] {
+export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, style?: { sfxPer10s: number | null; avgShotSec: number | null }): string[] {
   const problems: string[] = [];
   const all = plan.beats.flatMap((b) => b.cuts);
   for (const [i, a] of all.entries()) {
@@ -204,11 +210,15 @@ export function planProblems(plan: EditPlan, show?: { footageSeconds: number }):
     if (plan.beats.some((b) => b.mode === "tts") && syllables < 60) problems.push("대본이 너무 짧아요. 15초 이상 나오게 쓰세요.");
     if (syllables > 630) problems.push("대본이 너무 길어요. 85초 안에 들어오게 줄이세요.");
   }
-  if (all.length < 6) problems.push(`컷이 ${all.length}개뿐이에요. 비트를 나눠 컷을 더 쓰세요.`);
+  // 스타일 쇼츠는 레퍼런스의 컷 길이 · 효과음 빈도가 기준이다(긴 컷 레퍼런스면 컷이 적어도 된다)
+  const minCuts = style?.avgShotSec && style.avgShotSec > 3 ? 2 : 6;
+  if (all.length < minCuts) problems.push(`컷이 ${all.length}개뿐이에요. 비트를 나눠 컷을 더 쓰세요.`);
   // 효과음은 15초에 2~3개(kit.json sfx_rules). 말 길이는 음절 수로 어림한다
   const sfxCount = plan.beats.reduce((s, b) => s + b.sfx.length, 0);
-  const sfxMax = Math.max(3, Math.ceil((syllables / SYLLABLES_PER_SECOND / 15) * 3) + 1);
-  if (sfxCount > sfxMax) problems.push(`효과음이 ${sfxCount}개예요. ${sfxMax}개 이하로 줄여 시작 · 완성 · 반전처럼 힘을 줄 곳에만 남기세요.`);
+  // 스타일 쇼츠의 말소리 영상(tts 없음)은 고른 구간 길이로 어림한다
+  const seconds = style && !syllables ? all.reduce((s, c) => s + Math.max(0, c.out - c.in), 0) : syllables / SYLLABLES_PER_SECOND;
+  const sfxMax = style?.sfxPer10s != null ? Math.max(3, Math.ceil((seconds / 10) * style.sfxPer10s * 1.5) + 1) : Math.max(3, Math.ceil((seconds / 15) * 3) + 1);
+  if (sfxCount > sfxMax) problems.push(`효과음이 ${sfxCount}개예요. ${sfxMax}개 이하로 줄여 ${style ? "레퍼런스 빈도에 맞추세요" : "시작 · 완성 · 반전처럼 힘을 줄 곳에만 남기세요"}.`);
   if (plan.caption_style === "sentence") {
     const big = plan.beats.filter((b) => b.big).length;
     if (big > 3) problems.push(`큰 강조 자막(big)이 ${big}곳이에요. 두 번째 약속 · 완성 · 반전처럼 2~3곳만 남기세요.`);
@@ -319,19 +329,27 @@ function buildVoiceTrack(tl: Timeline, workDir: string): string {
 }
 
 /** 내레이션 + 효과음 + 음악. 말할 때 음악과 효과음이 자동으로 줄어든다. */
-function buildMix(tl: Timeline, voice: string, dest: string, music: MusicToUse): { sfx: string[]; music: string | null; musicSource: MusicSource | null } {
+function buildMix(tl: Timeline, voice: string, dest: string, music: MusicToUse, placed?: PlacedSfx[]): { sfx: string[]; music: string | null; musicSource: MusicSource | null } {
   const kit = editKit();
   const D = tl.duration.toFixed(3);
-  const used = tl.sfx.filter((s) => kit.sfx[s.name]);
+  // 스타일 쇼츠는 미리 만든 효과음(placed), 나머지는 kit.json 효과음
+  const used = placed ? placed.filter((p) => p.start < tl.duration) : tl.sfx.filter((s) => kit.sfx[s.name]);
   const inputs: string[] = [];
   const parts: string[] = [];
-  used.forEach((s, i) => {
-    const def = kit.sfx[s.name];
-    inputs.push("-i", editKitAsset("sfx", `${s.name}.mp3`));
-    const cutPart = def.slice ? `atrim=${def.slice[0]}:${def.slice[0] + def.slice[1]},` : "";
-    const fade = def.slice ? `afade=t=out:st=${Math.max(0, def.slice[1] - 0.15).toFixed(3)}:d=0.15,` : "";
-    parts.push(`[${i}:a]${cutPart}asetpts=PTS-STARTPTS,afade=t=in:d=0.004,${fade}aresample=48000,aformat=channel_layouts=stereo,volume=${def.gain_db}dB,adelay=${Math.round(Math.max(0, s.t - (def.lead ?? 0)) * 1000)}:all=1[s${i}]`);
-  });
+  if (placed) {
+    (used as PlacedSfx[]).forEach((p, i) => {
+      inputs.push("-i", p.file);
+      parts.push(`[${i}:a]asetpts=PTS-STARTPTS,afade=t=in:d=0.004,aresample=48000,aformat=channel_layouts=stereo,volume=${p.gainDb}dB,adelay=${Math.round(p.start * 1000)}:all=1[s${i}]`);
+    });
+  } else {
+    (used as TimedSfx[]).forEach((s, i) => {
+      const def = kit.sfx[s.name];
+      inputs.push("-i", editKitAsset("sfx", `${s.name}.mp3`));
+      const cutPart = def.slice ? `atrim=${def.slice[0]}:${def.slice[0] + def.slice[1]},` : "";
+      const fade = def.slice ? `afade=t=out:st=${Math.max(0, def.slice[1] - 0.15).toFixed(3)}:d=0.15,` : "";
+      parts.push(`[${i}:a]${cutPart}asetpts=PTS-STARTPTS,afade=t=in:d=0.004,${fade}aresample=48000,aformat=channel_layouts=stereo,volume=${def.gain_db}dB,adelay=${Math.round(Math.max(0, s.t - (def.lead ?? 0)) * 1000)}:all=1[s${i}]`);
+    });
+  }
   const m = used.length;
   parts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${D}[z]`);
   parts.push(`[z]${used.map((_, i) => `[s${i}]`).join("")}amix=inputs=${m + 1}:normalize=0:duration=longest,apad=whole_dur=${D},atrim=0:${D}[sfx]`);
@@ -518,6 +536,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       tone: input.tone,
       editStyle: input.editStyleText,
       source: input.source,
+      style: input.stylePlan,
       scriptLines: input.scriptLines,
       visualLibrary,
       lookCloser: async (no, from, to) => {
@@ -531,15 +550,17 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     tokens.output += res.tokens.output;
     plan = res.output;
     // 길이 기준은 사람이 말하지 않는 직접 촬영에만 건다. AI 자동 영상은 장면표가, 말하는 영상은 촬영본이 길이를 정한다
-    const show = input.source !== "auto" && !input.liveVoice ? { footageSeconds: clips.reduce((s, c) => s + c.duration, 0) } : undefined;
-    const problems = planProblems(applyHumanText(plan, input), show);
+    // 스타일 쇼츠는 길이를 레퍼런스 카드가 정한다
+    const show = input.source !== "auto" && input.source !== "style" && !input.liveVoice ? { footageSeconds: clips.reduce((s, c) => s + c.duration, 0) } : undefined;
+    const styleNumbers = input.stylePlan ? { sfxPer10s: input.stylePlan.card.numbers.sfxPer10s, avgShotSec: input.stylePlan.card.numbers.avgShotSec } : undefined;
+    const problems = planProblems(applyHumanText(plan, input), show, styleNumbers);
     if (problems.length) {
       console.log(`[video-kit] 계획 다시 쓰기: ${problems.join(" / ")}`);
       const again = await ask({ plan, problems });
       tokens.input += again.tokens.input;
       tokens.output += again.tokens.output;
       plan = again.output;
-      for (const p of planProblems(applyHumanText(plan, input), show)) warnings.push(`편집 계획: ${p}`);
+      for (const p of planProblems(applyHumanText(plan, input), show, styleNumbers)) warnings.push(`편집 계획: ${p}`);
     }
     // 완성본 고치기: 따옴표로 적은 글자는 AI가 다듬었어도 글자 그대로 되돌린다
     if (input.revise) plan = restoreQuotedInPlan(plan, quotedTexts(input.revise.request), input.revise.plan);
@@ -635,10 +656,23 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const priorMusic = prior?.pickedMusic;
   const music =
     (priorMusic ? (priorMusic.source ? await reloadMusic(priorMusic, workDir) : libraryMusic(priorMusic.name)) : null) ??
-    (await findMusic({ service: input.service, readService: input.readService, query: look.music_query, intent: look.music_intent, workDir })) ??
+    // 스타일 쇼츠는 카드의 음악 검색어(사람이 고칠 수 있다)로 찾는다
+    (await findMusic({
+      service: input.service,
+      readService: input.readService,
+      query: input.stylePlan?.card.music.query || look.music_query,
+      intent: input.stylePlan?.card.music.mood || look.music_intent,
+      workDir,
+    })) ??
     libraryMusic(look.music);
   console.log(`[video-kit] 음악: ${music.name}${music.source ? ` (${music.source.creator}, ${music.source.license}, 검색어 "${music.query}")` : " (대체 곡)"}`);
-  const sounds = buildMix(tl, voice, mix, music);
+  let placedSfx: PlacedSfx[] | undefined;
+  if (input.sfxRenderer) {
+    const made = input.sfxRenderer(tl.sfx, workDir);
+    placedSfx = made.placed;
+    warnings.push(...made.warnings);
+  }
+  const sounds = buildMix(tl, voice, mix, music, placedSfx);
   // 장면마다 상품 · 사람이 있는 자리를 읽어 글자가 피하게 한다. 못 읽으면 기본 자리
   const zones = input.presetZones ?? subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
     const owner = allClips.find((c) => c.no === tl.cuts[i]?.clip);
