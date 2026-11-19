@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { AlertCircle, AlertTriangle, Download, Loader2, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, Download, Loader2, MessageSquarePlus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { deleteJobAction, remakeJobAction, retryVersionAction, type StyleResult } from "@/app/(dashboard)/style-shorts/actions";
+import { formatTime, NoteEditor, type NoteView } from "@/components/style-shorts/note-editor";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,7 +14,7 @@ import { RelativeTime } from "@/components/ui/relative-time";
 import { toast } from "@/components/ui/toast";
 import { VERSION_STATUS, VOICE_MODE_LABEL } from "@/lib/style-shorts/jobs";
 
-// 만든 쇼츠 화면 — 입력 요약, 완성본 버전(최신이 위), 다시 만들기 · 지우기.
+// 만든 쇼츠 화면 — 입력 요약, 완성본 버전(최신이 위), 주석 수정 · 다시 만들기 · 지우기.
 
 export interface VersionView {
   id: string;
@@ -29,6 +30,10 @@ export interface VersionView {
   sfxCount: number;
   error: string | null;
   finishedAt: string | null;
+  // 아직 보내지 않은 주석(편집 화면에서 이어 단다)
+  draftNotes: NoteView[];
+  // 이 버전을 만든 주석(수정 버전만)
+  sentNotes: Omit<NoteView, "id">[];
 }
 
 export interface JobSummary {
@@ -45,9 +50,40 @@ export interface JobSummary {
   createdAt: string;
 }
 
-function VersionCard({ v, latest, onRetry, pending }: { v: VersionView; latest: boolean; onRetry: () => void; pending: boolean }) {
+function VersionCard({
+  v,
+  latest,
+  onRetry,
+  pending,
+  canRevise,
+  editing,
+  onEdit,
+  onCloseEdit,
+}: {
+  v: VersionView;
+  latest: boolean;
+  onRetry: () => void;
+  pending: boolean;
+  canRevise: boolean;
+  editing: boolean;
+  onEdit: () => void;
+  onCloseEdit: () => void;
+}) {
   const s = VERSION_STATUS[v.status] ?? { label: v.status, variant: "secondary" as const };
   const working = v.status === "PENDING" || v.status === "EDITING";
+  if (editing && v.videoUrl) {
+    return (
+      <Card>
+        <CardContent className="space-y-4 pt-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-base font-semibold tabular-nums">v{v.version}</span>
+            <Badge variant="default">수정하는 중</Badge>
+          </div>
+          <NoteEditor versionId={v.id} version={v.version} videoUrl={v.videoUrl} coverUrl={v.coverUrl} initialNotes={v.draftNotes} onClose={onCloseEdit} />
+        </CardContent>
+      </Card>
+    );
+  }
   return (
     <Card>
       <CardContent className="space-y-4 pt-4">
@@ -92,11 +128,34 @@ function VersionCard({ v, latest, onRetry, pending }: { v: VersionView; latest: 
               className="aspect-[9/16] max-h-[70vh] w-full max-w-[360px] shrink-0 rounded-lg bg-black"
             />
             <div className="min-w-0 flex-1 space-y-3">
-              {v.downloadUrl && (
-                <a href={v.downloadUrl} className={buttonVariants({ variant: latest ? "default" : "outline" })}>
-                  <Download className="size-4" aria-hidden />
-                  완성본 받기
-                </a>
+              <div className="flex flex-wrap gap-2">
+                {v.downloadUrl && (
+                  <a href={v.downloadUrl} className={buttonVariants({ variant: latest ? "default" : "outline" })}>
+                    <Download className="size-4" aria-hidden />
+                    완성본 받기
+                  </a>
+                )}
+                {v.status === "DONE" && (
+                  <Button variant="outline" disabled={!canRevise || pending} onClick={onEdit}>
+                    <MessageSquarePlus className="size-4" aria-hidden />
+                    수정하기{v.draftNotes.length > 0 && ` (주석 ${v.draftNotes.length}개)`}
+                  </Button>
+                )}
+              </div>
+              {v.sentNotes.length > 0 && (
+                <details className="rounded-md border p-3">
+                  <summary className="cursor-pointer text-sm font-semibold">반영한 주석 {v.sentNotes.length}개</summary>
+                  <ul className="mt-2 space-y-1.5">
+                    {v.sentNotes.map((n) => (
+                      <li key={n.no} className="flex items-start gap-2 text-sm text-ink-2">
+                        <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground tabular-nums">{n.no}</span>
+                        <span className="min-w-0">
+                          <span className="text-xs text-muted-foreground tabular-nums">{n.at == null ? "영상 전체" : formatTime(n.at)}</span> {n.body}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               )}
               {v.music && (
                 <p className="text-xs text-muted-foreground">
@@ -135,6 +194,8 @@ function VersionCard({ v, latest, onRetry, pending }: { v: VersionView; latest: 
 export function JobView({ job, versions, busy }: { job: JobSummary; versions: VersionView[]; busy: boolean }) {
   const router = useRouter();
   const [confirm, setConfirm] = useState<"remake" | "delete" | null>(null);
+  // 주석을 다는 중인 버전(한 번에 하나)
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   const run = (fn: () => Promise<StyleResult>, done: string, after?: () => void) =>
@@ -201,7 +262,21 @@ export function JobView({ job, versions, busy }: { job: JobSummary; versions: Ve
 
       <div className="space-y-4">
         {versions.map((v, i) => (
-          <VersionCard key={v.id} v={v} latest={i === 0} pending={pending} onRetry={() => run(() => retryVersionAction({ id: v.id }), "다시 편집해요")} />
+          <VersionCard
+            key={v.id}
+            v={v}
+            latest={i === 0}
+            pending={pending}
+            onRetry={() => run(() => retryVersionAction({ id: v.id }), "다시 편집해요")}
+            canRevise={!busy && !job.clipsDeleted && (editingId === null || editingId === v.id)}
+            editing={editingId === v.id}
+            onEdit={() => setEditingId(v.id)}
+            onCloseEdit={() => {
+              setEditingId(null);
+              // 저장한 주석 수를 버튼에 맞춘다
+              router.refresh();
+            }}
+          />
         ))}
       </div>
 

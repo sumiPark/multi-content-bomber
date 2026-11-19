@@ -7,7 +7,11 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
+import type { EditPlan } from "@/lib/agents/edit-plan";
+import type { SavedEditPlan } from "@/lib/agents/edit-revise";
 import type { ProductFacts } from "@/lib/agents/product-facts";
+import { noteFrames, type NoteFrame } from "@/lib/style-shorts/note-frames";
+import { asksFor, reviseRequestText } from "@/lib/style-shorts/revise";
 import { DEFAULT_EDIT_STYLE } from "@/lib/shoot/edit-style";
 import { setReferencePalette } from "@/lib/shoot/video-kit/caption-skill";
 import { readClip, renderKitEdit, type KitClip, type KitResult } from "@/lib/shoot/video-kit/pipeline";
@@ -89,6 +93,45 @@ function timelineSummary(kit: KitResult): VersionTimeline {
   };
 }
 
+/**
+ * 주석 수정 준비 — 주석을 단 버전의 계획 · 시각표를 읽고, 완성본을 받아 주석 시각의 화면에 번호 동그라미를 그린다.
+ * 음악 · 자막 모양을 바꾸라는 주석이 있으면 지난 곡 · 자막 디자인을 지워 새로 고르게 한다(없으면 그대로 이어 쓴다).
+ * 지난 계획이 없으면 null — 처음부터 다시 편집한다.
+ */
+async function loadRevise(
+  service: Service,
+  jobId: string,
+  request: Extract<VersionRequest, { kind: "revise" }>,
+  workDir: string,
+): Promise<{ revise: { plan: EditPlan; request: string; items: string[] }; frames: NoteFrame[]; warnings: string[] } | null> {
+  const { data: prev } = await service.from("style_short_versions").select("plan, timeline, video_path, seconds").eq("job_id", jobId).eq("version", request.from).maybeSingle();
+  if (!prev?.plan) return null;
+  const timeline = (prev.timeline ?? null) as VersionTimeline | null;
+  const notes = [...request.notes].sort((a, b) => a.no - b.no);
+  const text = reviseRequestText(notes, timeline);
+  const plan = JSON.parse(JSON.stringify(prev.plan)) as SavedEditPlan;
+  const asks = asksFor(notes);
+  if (asks.music) delete plan.pickedMusic;
+  if (asks.captionDesign) delete plan.captionDesign;
+  console.log(`[style-edit] 주석 ${notes.length}개로 v${request.from} 고치기${asks.music ? " · 음악 다시 고름" : ""}${asks.captionDesign ? " · 자막 모양 다시 고름" : ""}`);
+
+  let frames: NoteFrame[] = [];
+  const warnings: string[] = [];
+  if (prev.video_path && notes.some((n) => n.at != null)) {
+    const file = join(workDir, "prev.mp4");
+    try {
+      await download(service, prev.video_path, file);
+      const made = noteFrames(file, notes, Number(prev.seconds ?? timeline?.duration ?? 0) || 9999, workDir);
+      frames = made.frames;
+      warnings.push(...made.warnings);
+    } catch (e) {
+      console.warn("[style-edit] 지난 완성본 받기 실패:", e instanceof Error ? e.message : e);
+      warnings.push("지난 완성본을 받지 못해 주석 화면 없이 주석 글과 시각만으로 고쳤어요.");
+    }
+  }
+  return { revise: { plan, request: text.request, items: text.items }, frames, warnings };
+}
+
 /** 30일이 지난 촬영본을 지운다. 지운 뒤에는 수정 · 다시 만들기를 할 수 없다(화면이 알린다). */
 async function cleanupClips(service: Service): Promise<void> {
   const before = new Date(Date.now() - CLIP_KEEP_DAYS * DAY_MS).toISOString();
@@ -157,8 +200,10 @@ async function main() {
       const concept = job.concept?.trim() || null;
       const request = (v.request ?? null) as VersionRequest | null;
 
-      // 수정 버전(3단계)은 아직 지원하지 않는다 — 처음부터 다시 만든다
-      if (request?.kind === "revise") console.log(`[style-edit] ${label}: 수정 요청은 다음 단계에서 지원해요. 처음부터 다시 편집합니다.`);
+      // 주석 수정(3단계): 주석을 단 버전의 계획 · 시각표 · 완성본을 불러 그 계획에서 주석이 말하는 것만 고친다
+      const revise = request?.kind === "revise" ? await loadRevise(service, v.job_id, request, workDir) : null;
+      const reviseLost = request?.kind === "revise" && !revise ? `v${request.from}의 편집 기록이 없어 주석을 반영하지 못하고 처음부터 다시 만들었어요.` : null;
+      if (reviseLost) console.log(`[style-edit] ${label}: ${reviseLost}`);
 
       const kitClips: KitClip[] = [];
       for (const [i, c] of clips.entries()) {
@@ -186,6 +231,8 @@ async function main() {
         clips: kitClips,
         source: "style",
         stylePlan: { card, voiceMode: liveVoice ? "LIVE" : "AI", script, concept },
+        revise: revise?.revise ?? null,
+        reviseFrames: revise?.frames,
         sfxRenderer: renderStyleSfx,
         // 자막 디자인 AI가 참고하는 글 — 레퍼런스 자막 모양(글꼴 · 모션 지시)과 카드의 자막 · 화면 설명
         editStyleText: [refLook ? captionFontDirective(refLook) : "", card.sections.captions, card.sections.visual].filter(Boolean).join("\n"),
@@ -195,6 +242,8 @@ async function main() {
       console.log(
         `[style-edit] ${label} 완성: ${kit.seconds.toFixed(1)}초, 컷 ${kit.timeline.cuts.length}개, 효과음 ${kit.timeline.sfx.length}개, 음악 ${kit.sounds.music}, ${Math.round((Date.now() - startedAt) / 1000)}초 걸림`,
       );
+      if (revise) kit.warnings.unshift(...revise.warnings);
+      if (reviseLost) kit.warnings.unshift(reviseLost);
       for (const w of kit.warnings) console.log(`  ! ${w}`);
 
       if (dryRun) {

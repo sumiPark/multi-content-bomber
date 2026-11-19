@@ -5,9 +5,9 @@ import { JobView, type VersionView } from "@/components/style-shorts/job-view";
 import { AutoRefresh } from "@/components/ui/auto-refresh";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import type { MusicSource } from "@/lib/shoot/video-kit/music";
-import { CLIP_KEEP_DAYS, type JobClip } from "@/lib/style-shorts/jobs";
+import { CLIP_KEEP_DAYS, type JobClip, type VersionRequest } from "@/lib/style-shorts/jobs";
 
-// 만든 쇼츠 하나 — 완성본 버전(재생 · 받기 · 경고), 다시 만들기 · 지우기. 3단계에서 주석 수정이 붙는다.
+// 만든 쇼츠 하나 — 완성본 버전(재생 · 받기 · 경고 · 주석 수정), 다시 만들기 · 지우기.
 
 export const metadata = { title: "스타일 쇼츠 | MCB", robots: { index: false, follow: false } };
 
@@ -38,6 +38,11 @@ export default async function StyleShortJobPage({ params }: { params: Promise<{ 
     .eq("job_id", id)
     .order("version", { ascending: false });
   const versions = rows ?? [];
+  // 아직 보내지 않은 주석(편집 화면에서 이어 단다)
+  const doneIds = versions.filter((v) => v.status === "DONE").map((v) => v.id);
+  const { data: noteRows } = doneIds.length
+    ? await supabase.from("style_short_notes").select("id, version_id, no, at, x, y, body").in("version_id", doneIds).is("sent_at", null).order("no")
+    : { data: [] };
 
   const title = job.title || job.folder_name;
   const paths = versions.flatMap((v) => [v.video_path, v.cover_path]).filter((p): p is string => !!p);
@@ -53,7 +58,8 @@ export default async function StyleShortJobPage({ params }: { params: Promise<{ 
 
   const views: VersionView[] = versions.map((v, i) => {
     const sounds = v.sounds as { music?: string | null; musicSource?: MusicSource | null; sfx?: string[] } | null;
-    const req = v.request as { kind?: string; from?: number } | null;
+    const req = v.request as VersionRequest | null;
+    const num = (n: unknown) => (n == null ? null : Number(n));
     return {
       id: v.id,
       version: v.version,
@@ -68,6 +74,8 @@ export default async function StyleShortJobPage({ params }: { params: Promise<{ 
       sfxCount: sounds?.sfx?.length ?? 0,
       error: v.error,
       finishedAt: v.finished_at,
+      draftNotes: (noteRows ?? []).filter((n) => n.version_id === v.id).map((n) => ({ id: n.id, no: n.no, at: num(n.at), x: num(n.x), y: num(n.y), body: n.body })),
+      sentNotes: req?.kind === "revise" ? req.notes : [],
     };
   });
   const busy = versions.some((v) => v.status === "PENDING" || v.status === "EDITING");

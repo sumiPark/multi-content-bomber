@@ -1,5 +1,5 @@
 import { editKit } from "@/lib/agents/ko-skills";
-import type { EditPlanContext } from "@/lib/agents/edit-plan";
+import type { EditPlan, EditPlanContext } from "@/lib/agents/edit-plan";
 import { captionLookText } from "@/lib/style-shorts/caption-look";
 import { CARD_SECTIONS, type StyleCard } from "@/lib/style-shorts/card";
 import { SFX_PALETTE } from "@/lib/style-shorts/sfx-palette";
@@ -58,6 +58,43 @@ ${script}
   }
   return `소리: AI 음성이 읽는다. 모든 비트를 mode tts로 쓴다. 찍은 영상의 소리는 쓰지 않는다.
 - 대본은 네가 쓴다. 아래 컨셉과 레퍼런스 스타일 카드의 말 · 말투, 그리고 프레임에서 실제로 보이는 장면으로 쓴다. 보이지 않는 장면을 말하지 않는다.`;
+}
+
+/**
+ * 주석 수정(3단계) 지시 — 사용자 메시지 끝에 붙는다. 직접 촬영 고치기와 달리 글 수정도 미리 적용하지 않고, 여기서 주석 전체를 처리한다.
+ * frameNos: 촬영본 프레임 묶음 뒤에 붙인 주석 화면의 번호(보낸 차례대로).
+ */
+export function styleReviseBlock(revise: { plan: EditPlan; request: string; items: string[] }, frameNos: number[], g: StylePlanGuide): string {
+  // 고른 음악 · 자막 디자인은 코드가 따로 이어 쓰고(바꾸라는 주석이 있으면 코드가 지운다), 지난 경고는 새 계획과 상관없다
+  const past = Object.fromEntries(Object.entries(revise.plan).filter(([k]) => !["warnings", "pickedMusic", "captionDesign", "redoCaptionLines"].includes(k)));
+  const frames = frameNos.length
+    ? `\n프레임 묶음 다음의 마지막 ${frameNos.length}장은 지난 완성본에서 주석 시각의 화면이다(차례대로 ${frameNos.map((n) => `${n}번`).join(", ")} 주석). 노란 동그라미가 관리자가 짚은 자리이고, 옆 숫자가 주석 번호, 왼쪽 위가 번호와 시각이다. 동그라미 안에 있는 것(자막 · 그래픽 · 사람 · 물건)이 주석이 말하는 대상이다.`
+    : "";
+  const live = g.voiceMode === "LIVE"
+    ? "\n- 영상 내 음성 영상이라 자막은 받아쓰기로 코드가 넣는다. 자막 글자를 고치라는 주석은 그 말을 하는 구간을 바꾸거나 빼서 반영하고, 그래도 안 되면 warnings에 적는다."
+    : g.script?.trim()
+      ? "\n- 대본을 그대로 쓰는 규칙보다 주석이 먼저다. 주석이 말을 바꾸라고 하면 그 부분만 바꾸고 나머지 대본은 그대로 둔다."
+      : "";
+  return `
+
+이미 만든 완성본을 관리자가 주석으로 고쳐 달라고 했다. 지난 편집 계획과 주석이 아래에 있다. 지난 계획을 바탕으로 주석이 말하는 것만 고친 계획 전체를 낸다.${frames}
+- 주석마다 [ ] 안에 그 시각의 장면(촬영본 번호 · 구간) · 자막 · 그래픽 · 효과음이 적혀 있다. 이것과 주석 화면으로 지난 계획의 어느 비트 · 컷 · 자막 · 그래픽 · 효과음인지 찾는다. "영상 전체 의견"은 특정 시각이 없는 의견이다.
+- 주석이 말하지 않은 것은 지난 계획 그대로 둔다: 후킹 · 표지 · 읽는 말 · 자막 · 비트 순서 · 컷 · 그래픽 · 효과음 · look · caption_style. 후킹 공식 · 채점 도구는 후킹을 고치라는 주석이 있을 때만 쓴다.
+- 장면을 바꾸거나 더 넣으라는 주석은 촬영본 프레임을 다시 보고 고른다. 시각이 애매하면 look_closer로 확인한다.
+- 효과음 · 그래픽을 넣으라 · 빼라는 주석은 그 시각의 비트에서 고친다. 효과음은 위 목록의 id만 쓴다.
+- 음악을 바꾸라는 주석이 있으면 look.music_query(영어 2~4낱말, 악기 · 분위기)와 look.music_intent를 주석대로 고친다. 코드가 그 검색어로 다른 곡을 찾는다. 없으면 지난 값 그대로 둔다.
+- 레퍼런스 스타일 카드보다 주석이 먼저다. 주석이 없는 부분은 계속 카드를 따른다.
+- 주석에서 따옴표로 적은 글자는 다듬지 않고 글자 그대로 쓴다.${live}${g.card.captionLook ? "\n- 자막 글자색 · 강조색 · 상자 · 크기는 레퍼런스 자막 모양으로 코드가 고정한다. 이것을 바꾸라는 주석은 warnings에 \"주석 N번: 자막 색 · 크기는 레퍼런스 자막 모양으로 고정돼 있어 바꾸지 않았어요\"라고 적는다. 글꼴 · 움직임은 코드가 주석을 보고 다시 고른다." : ""}
+- 반영하지 못한 주석은 warnings에 "주석 N번: 이유" 형식으로 적는다. 다 반영했으면 주석 얘기는 warnings에 쓰지 않는다.
+- 새로 쓰거나 고친 말만 check_ai_tone${g.voiceMode === "AI" ? ", read_tts" : ""}로 점검한다.
+
+주석:
+"""
+${revise.request}
+"""
+
+지난 계획:
+${JSON.stringify(past)}`;
 }
 
 export function styleSystemPrompt(ctx: EditPlanContext, g: StylePlanGuide): string {

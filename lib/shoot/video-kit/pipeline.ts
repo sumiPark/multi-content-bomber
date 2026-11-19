@@ -82,6 +82,8 @@ export interface KitInput {
   // 완성본 고치기에서 촬영본을 다시 봐야 하는 요청이 있을 때: 지난 계획을 그대로 쓰지 않고, 편집 에이전트가 프레임을 다시 보고
   // 요청한 것만 바꾼 계획을 세운다. 고른 음악 · 자막 디자인은 지난 계획의 값을 이어 쓴다. reusePlan과 함께 넘기지 않는다
   revise?: { plan: EditPlan; request: string; items: string[] } | null;
+  // 스타일 쇼츠 주석 수정만: 지난 완성본의 주석 시각 화면(번호 동그라미). revise와 함께 넘긴다
+  reviseFrames?: { no: number; image: string }[];
   // 예전 방식(칸별 입력)으로 저장된 컷별 문구. 새로 저장하지 않지만 남아 있는 값은 반영한다
   overrides?: { no: number; onScreen?: string | null; subtitle?: string | null }[];
   // 이미 만든 음성(lemo 경로). 있으면 음성을 새로 만들지 않고 비트마다 이 음성을 쓴다.
@@ -517,6 +519,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     const ask = (retry: { plan: EditPlan; problems: string[] } | null) => writeEditPlan({
       retry,
       revise: input.revise,
+      reviseFrames: input.reviseFrames,
       service: input.service,
       readService: input.readService,
       planId: input.planId,
@@ -660,12 +663,12 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   const priorMusic = prior?.pickedMusic;
   const music =
     (priorMusic ? (priorMusic.source ? await reloadMusic(priorMusic, workDir) : libraryMusic(priorMusic.name)) : null) ??
-    // 스타일 쇼츠는 카드의 음악 검색어(사람이 고칠 수 있다)로 찾는다
+    // 스타일 쇼츠는 카드의 음악 검색어(사람이 고칠 수 있다)로 찾는다. 주석으로 음악을 바꾸라고 했으면 편집 에이전트가 주석대로 고친 검색어로 찾는다
     (await findMusic({
       service: input.service,
       readService: input.readService,
-      query: input.stylePlan?.card.music.query || look.music_query,
-      intent: input.stylePlan?.card.music.mood || look.music_intent,
+      query: (input.stylePlan && !input.revise ? input.stylePlan.card.music.query : "") || look.music_query || input.stylePlan?.card.music.query || "",
+      intent: (input.stylePlan && !input.revise ? input.stylePlan.card.music.mood : "") || look.music_intent || input.stylePlan?.card.music.mood || "",
       workDir,
     })) ??
     libraryMusic(look.music);

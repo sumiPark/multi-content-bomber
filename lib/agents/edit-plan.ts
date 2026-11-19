@@ -8,7 +8,7 @@ import { runAgent, type AgentResult, type AgentSkill } from "@/lib/agents/runner
 import { writerSkills } from "@/lib/agents/script";
 import type { ContentRule } from "@/lib/rules/check";
 import { lookSchema } from "@/lib/shoot/video-kit/caption-style";
-import { styleSystemPrompt, type StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
+import { styleReviseBlock, styleSystemPrompt, type StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
 import { SFX_IDS } from "@/lib/style-shorts/sfx-palette";
 import type { createServiceClient } from "@/lib/supabase/service";
 
@@ -199,6 +199,8 @@ export interface EditPlanContext {
   // 완성본 고치기: 촬영본을 다시 봐야 하는 요청이 있을 때만 넘긴다(lib/agents/edit-revise.ts). 지난 계획에서 요청한 것만 바꾼다.
   // 없으면 지시문 · 동작은 예전 그대로다
   revise?: { plan: EditPlan; request: string; items: string[] } | null;
+  // 스타일 쇼츠 주석 수정만: 지난 완성본의 주석 시각 화면(번호 동그라미). 촬영본 프레임 묶음 뒤에 붙인다
+  reviseFrames?: { no: number; image: string }[];
 }
 
 /** 완성본 고치기 지시 — 지난 계획과 고칠 내용. 사용자 메시지 끝에 붙는다. */
@@ -385,11 +387,14 @@ export async function writeEditPlan(ctx: EditPlanContext, opts: { maxSteps?: num
   const clipLines = ctx.clips.map((c) =>
     JSON.stringify({ clip: c.no, seconds: Number(c.duration.toFixed(1)), shot: c.shot ?? "", on_screen: c.onScreen ?? "", voice: c.voice ?? "", narration: c.narration ?? "", ...(c.transcript?.length ? { transcript: c.transcript } : {}) }),
   );
+  // 스타일 쇼츠의 주석 수정은 주석 화면과 전용 지시를 쓴다. 직접 촬영 고치기는 예전 그대로다
+  const reviseFrames = ctx.style && ctx.revise ? (ctx.reviseFrames ?? []) : [];
+  const reviseText = ctx.revise ? (ctx.style ? styleReviseBlock(ctx.revise, reviseFrames.map((f) => f.no), ctx.style) : reviseBlock(ctx.revise)) : "";
   return runAgent({
     agent: "edit",
     system: ctx.style ? styleSystemPrompt(ctx, ctx.style) : systemPrompt(ctx),
-    user: `${facts.name} 촬영본 ${ctx.clips.length}개의 편집 계획을 세워 줘. 프레임 묶음은 촬영본 순서대로이고, 왼쪽 위 글자가 그 촬영본의 시각이다.\n\n${clipLines.join("\n")}${ctx.revise ? reviseBlock(ctx.revise) : ""}${ctx.retry ?`\n\n먼저 낸 계획이 점검에서 걸렸다. 이것을 고쳐서 계획 전체를 다시 내라:\n${ctx.retry.problems.map((p) => `- ${p}`).join("\n")}\n\n먼저 낸 계획:\n${JSON.stringify(ctx.retry.plan.beats.map((b) => ({ tts: b.tts, cuts: b.cuts })))}` : ""}`,
-    userImages: ctx.sheets,
+    user: `${facts.name} 촬영본 ${ctx.clips.length}개의 편집 계획을 세워 줘. 프레임 묶음은 촬영본 순서대로이고, 왼쪽 위 글자가 그 촬영본의 시각이다.\n\n${clipLines.join("\n")}${reviseText}${ctx.retry ?`\n\n먼저 낸 계획이 점검에서 걸렸다. 이것을 고쳐서 계획 전체를 다시 내라:\n${ctx.retry.problems.map((p) => `- ${p}`).join("\n")}\n\n먼저 낸 계획:\n${JSON.stringify(ctx.retry.plan.beats.map((b) => ({ tts: b.tts, cuts: b.cuts })))}` : ""}`,
+    userImages: [...ctx.sheets, ...reviseFrames.map((f) => f.image)],
     skills,
     // 스타일 쇼츠는 earshot 효과음 목록으로. 계획 형식은 효과음 이름만 다르다
     outputSchema: (ctx.style ? styleEditPlanSchema : editPlanSchema) as typeof editPlanSchema,

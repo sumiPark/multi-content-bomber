@@ -6,6 +6,8 @@ import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { triggerStyleEditRun, triggerStyleRefsRun } from "@/lib/github-dispatch";
 import { cardEditSchema, MAX_REFERENCES, parseInstagramUrl, type StyleCard } from "@/lib/style-shorts/card";
 import { CONCEPT_MAX, MAX_CLIP_BYTES, MAX_CLIPS, SCRIPT_MAX, type JobClip, type VersionRequest } from "@/lib/style-shorts/jobs";
+import { NOTE_MAX, NOTES_PER_VERSION } from "@/lib/style-shorts/revise";
+import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 
@@ -409,6 +411,122 @@ export async function retryVersionAction(input: z.infer<typeof idSchema>): Promi
   if (!jobId) return { ok: false, error: "다시 편집할 수 있는 버전이 아니에요." };
   const warning = await wakeEdit("스타일 쇼츠 다시 편집");
   revalidateJob(jobId);
+  return { ok: true, warning };
+}
+
+// ─── 주석 수정 (3단계) ────────────────────────────────────────────────────────
+
+/** 주석을 달 수 있는 버전 — 이 조직의 완성(DONE) 버전이고 촬영본이 남아 있어야 한다. */
+async function loadNoteVersion(service: Service, versionId: string, orgId: string): Promise<{ ok: true; id: string; jobId: string; version: number } | { ok: false; error: string }> {
+  const { data: v } = await service.from("style_short_versions").select("id, job_id, version, status").eq("id", versionId).eq("organization_id", orgId).maybeSingle();
+  if (!v) return { ok: false, error: "완성본을 찾지 못했어요." };
+  if (v.status !== "DONE") return { ok: false, error: "완성된 버전에만 주석을 달 수 있어요." };
+  const job = await loadJob(service, v.job_id, orgId);
+  if (!job) return { ok: false, error: "요청을 찾지 못했어요." };
+  if (job.clips_deleted_at) return { ok: false, error: "촬영본 보관 기간이 지나 수정할 수 없어요." };
+  return { ok: true, id: v.id, jobId: v.job_id, version: v.version };
+}
+
+const noteSchema = z.object({
+  versionId: z.string().uuid(),
+  // 없으면 새 주석
+  id: z.string().uuid().optional(),
+  at: z.number().min(0).max(600).nullable(),
+  x: z.number().min(0).max(1).nullable(),
+  y: z.number().min(0).max(1).nullable(),
+  body: z.string().trim().min(1).max(NOTE_MAX),
+});
+
+export type NoteResult = { ok: true; id: string; no: number } | { ok: false; error: string };
+
+/** 주석 저장(Enter). 새 주석은 다음 번호를 받는다. 수정 요청으로 보낸 주석은 고칠 수 없다. */
+export async function saveNoteAction(input: z.infer<typeof noteSchema>): Promise<NoteResult> {
+  const parsed = noteSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: `고칠 내용은 1~${NOTE_MAX}자로 적어 주세요.` };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const d = parsed.data;
+  const service = createServiceClient();
+  const v = await loadNoteVersion(service, d.versionId, auth.orgId);
+  if (!v.ok) return v;
+  // 위치는 시각이 있을 때만 — 영상 전체 의견은 셋 다 비운다
+  const at = d.at == null ? null : Math.round(d.at * 100) / 100;
+  const x = at == null || d.x == null ? null : Math.round(d.x * 1000) / 1000;
+  const y = at == null || d.y == null ? null : Math.round(d.y * 1000) / 1000;
+  const now = new Date().toISOString();
+
+  if (d.id) {
+    const { data, error } = await service
+      .from("style_short_notes")
+      .update({ at, x, y, body: d.body, updated_at: now })
+      .eq("id", d.id)
+      .eq("version_id", v.id)
+      .is("sent_at", null)
+      .select("id, no");
+    if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
+    if (!data?.length) return { ok: false, error: "이미 수정 요청으로 보낸 주석이에요." };
+    return { ok: true, id: data[0].id, no: data[0].no };
+  }
+
+  const { data: open } = await service.from("style_short_notes").select("no").eq("version_id", v.id).is("sent_at", null).order("no", { ascending: false });
+  if ((open?.length ?? 0) >= NOTES_PER_VERSION) return { ok: false, error: `주석은 한 번에 ${NOTES_PER_VERSION}개까지 달 수 있어요.` };
+  const no = (open?.[0]?.no ?? 0) + 1;
+  const { data, error } = await service
+    .from("style_short_notes")
+    .insert({ organization_id: auth.orgId, version_id: v.id, no, at, x, y, body: d.body, created_by: auth.userId })
+    .select("id")
+    .single();
+  if (error) return { ok: false, error: `저장하지 못했어요: ${error.message}` };
+  return { ok: true, id: data.id, no };
+}
+
+/** 주석 지우기 — 뒤 번호를 하나씩 당겨 1, 2, 3 차례를 유지한다. */
+export async function deleteNoteAction(input: z.infer<typeof idSchema>): Promise<StyleResult> {
+  const parsed = idSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const { data: note } = await service.from("style_short_notes").select("id, version_id, no, sent_at").eq("id", parsed.data.id).eq("organization_id", auth.orgId).maybeSingle();
+  if (!note) return { ok: false, error: "주석을 찾지 못했어요." };
+  if (note.sent_at) return { ok: false, error: "이미 수정 요청으로 보낸 주석이에요." };
+  const { error } = await service.from("style_short_notes").delete().eq("id", note.id);
+  if (error) return { ok: false, error: `지우지 못했어요: ${error.message}` };
+  const { data: after } = await service.from("style_short_notes").select("id, no").eq("version_id", note.version_id).is("sent_at", null).gt("no", note.no).order("no");
+  for (const n of after ?? []) await service.from("style_short_notes").update({ no: n.no - 1 }).eq("id", n.id);
+  return { ok: true };
+}
+
+/** 수정 요청 보내기 — 달아 둔 주석을 묶어 다음 버전을 만든다. 보낸 주석은 그 버전 기록으로 남고 더 고칠 수 없다. */
+export async function sendRevisionAction(input: { versionId: string }): Promise<StyleResult> {
+  const parsed = z.object({ versionId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "잘못된 입력" };
+  const auth = await authorize();
+  if (!auth.ok) return auth;
+  const service = createServiceClient();
+  const v = await loadNoteVersion(service, parsed.data.versionId, auth.orgId);
+  if (!v.ok) return v;
+  const { busy, latest } = await busyOrLatest(service, v.jobId);
+  if (busy) return { ok: false, error: "지금 편집 중이에요. 끝난 뒤 보내 주세요." };
+  const { data: notes } = await service.from("style_short_notes").select("id, no, at, x, y, body").eq("version_id", v.id).is("sent_at", null).order("no");
+  if (!notes?.length) return { ok: false, error: "보낼 주석이 없어요. 영상에서 고칠 곳을 눌러 주석을 달아 주세요." };
+
+  const request: VersionRequest = {
+    kind: "revise",
+    from: v.version,
+    notes: notes.map((n) => ({ no: n.no, at: n.at == null ? null : Number(n.at), x: n.x == null ? null : Number(n.x), y: n.y == null ? null : Number(n.y), body: n.body })),
+  };
+  const { error } = await service
+    .from("style_short_versions")
+    .insert({ organization_id: auth.orgId, job_id: v.jobId, version: latest + 1, request: request as unknown as Json, created_by: auth.userId });
+  if (error) return { ok: false, error: `수정 요청을 보내지 못했어요: ${error.message}` };
+  const now = new Date().toISOString();
+  warnIfError(
+    await service.from("style_short_notes").update({ sent_at: now, updated_at: now }).in("id", notes.map((n) => n.id)),
+    `주석 보냄 표시 (${v.id})`,
+  );
+  const warning = await wakeEdit("스타일 쇼츠 주석 수정");
+  revalidateJob(v.jobId);
   return { ok: true, warning };
 }
 
