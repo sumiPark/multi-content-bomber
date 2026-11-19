@@ -117,6 +117,11 @@ export async function triggerProfileReviewRun(reason: string, accountId?: string
   await dispatch(PROFILE_REVIEW_DISPATCH_EVENT, reason, accountId ? { account: accountId } : {});
 }
 
+/** 스타일 쇼츠(/style-shorts) — 레퍼런스를 넣거나 카드 다시 만들기를 누른 직후. 분석은 ffmpeg · earshot이라 Actions에서만. */
+export async function triggerStyleRefsRun(reason: string, folderId?: string): Promise<void> {
+  await dispatch("style-refs", reason, folderId ? { folder: folderId } : {});
+}
+
 /** 다른 계정 비교 — 비교 계정을 추가한 직후. 평소엔 매일 04:50 schedule. */
 export async function triggerBenchmarkRun(reason: string): Promise<void> {
   await dispatch("benchmark-collect", reason);

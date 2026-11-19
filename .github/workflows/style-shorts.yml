@@ -1,0 +1,68 @@
+name: style-shorts
+
+# 스타일 쇼츠(/style-shorts) 워커.
+#   style-refs: 레퍼런스 분석 + 스타일 카드(worker/analyze-style-refs.ts). 화면에서 레퍼런스를 넣으면 바로 깨운다.
+# 레퍼런스 소리 분석은 earshot(MIT, 고정 커밋)이 한다. 처음 쓸 때 받는 모델(~1.1GB)은 캐시에 둔다.
+# schedule은 트리거가 실패했을 때의 백업(하루 두 번).
+on:
+  schedule:
+    # 12:41 · 20:41 KST
+    - cron: "41 3,11 * * *"
+  repository_dispatch:
+    types: [style-refs]
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: "이 스타일 폴더만 (비우면 대기 중인 것 전부)"
+        required: false
+
+concurrency:
+  group: style-shorts-refs
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  EARSHOT_REF: 591fa3e028032e6dce56620a20e932e35667e8d8
+
+jobs:
+  refs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: earshot-pip-${{ env.EARSHOT_REF }}
+      # torch는 CPU 판만. 설치가 실패해도 워커는 소리 분석 없이 화면 · 말만 분석한다
+      - name: Install earshot
+        continue-on-error: true
+        run: |
+          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -q "earshot @ git+https://github.com/Leonxlnx/earshot@${EARSHOT_REF}"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.earshot
+          key: earshot-models-${{ env.EARSHOT_REF }}
+      - name: Analyze references
+        run: npm run worker:style-refs -- ${{ (inputs.folder || github.event.client_payload.folder) && format('--folder {0}', inputs.folder || github.event.client_payload.folder) || '' }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          IG_DISCOVERY_TOKEN: ${{ secrets.IG_DISCOVERY_TOKEN }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+          EARSHOT_PYTHON: python
+          EARSHOT_HOME: /home/runner/.earshot

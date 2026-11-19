@@ -2613,6 +2613,137 @@ export type Database = {
           },
         ]
       }
+      style_folders: {
+        Row: {
+          card: Json | null
+          card_built_from: string[]
+          card_edited: boolean
+          card_error: string | null
+          card_started_at: string | null
+          card_status: string
+          card_updated_at: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          memo: string | null
+          name: string
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          card?: Json | null
+          card_built_from?: string[]
+          card_edited?: boolean
+          card_error?: string | null
+          card_started_at?: string | null
+          card_status?: string
+          card_updated_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          memo?: string | null
+          name: string
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          card?: Json | null
+          card_built_from?: string[]
+          card_edited?: boolean
+          card_error?: string | null
+          card_started_at?: string | null
+          card_status?: string
+          card_updated_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          memo?: string | null
+          name?: string
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "style_folders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      style_references: {
+        Row: {
+          analysis: Json | null
+          analyzed_from: string | null
+          analyzing_since: string | null
+          created_at: string
+          created_by: string | null
+          error: string | null
+          file_name: string | null
+          folder_id: string
+          id: string
+          kind: string
+          organization_id: string
+          permalink: string | null
+          status: string
+          storage_path: string | null
+          updated_at: string
+          username: string | null
+        }
+        Insert: {
+          analysis?: Json | null
+          analyzed_from?: string | null
+          analyzing_since?: string | null
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          file_name?: string | null
+          folder_id: string
+          id?: string
+          kind: string
+          organization_id: string
+          permalink?: string | null
+          status?: string
+          storage_path?: string | null
+          updated_at?: string
+          username?: string | null
+        }
+        Update: {
+          analysis?: Json | null
+          analyzed_from?: string | null
+          analyzing_since?: string | null
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          file_name?: string | null
+          folder_id?: string
+          id?: string
+          kind?: string
+          organization_id?: string
+          permalink?: string | null
+          status?: string
+          storage_path?: string | null
+          updated_at?: string
+          username?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "style_references_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "style_folders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "style_references_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       track_settings: {
         Row: {
           a_shoot_deadline: string

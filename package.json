@@ -28,7 +28,8 @@
     "worker:profile-review": "tsx worker/review-profiles.ts",
     "worker:benchmarks": "tsx worker/collect-benchmarks.ts",
     "worker:post-history": "tsx worker/sync-post-history.ts",
-    "worker:benchmark-analysis": "tsx worker/analyze-benchmarks.ts"
+    "worker:benchmark-analysis": "tsx worker/analyze-benchmarks.ts",
+    "worker:style-refs": "tsx worker/analyze-style-refs.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

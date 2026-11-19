@@ -59,6 +59,7 @@ multi-content-bomber/
 │       ├── auto/settings/              # 자동 콘텐츠 설정 (계정 · 칸 · AI 자동 참고 내용) — 촬영 설정과 분리, 쓸 상품만 공유
 │       ├── shoot/{plans,uploads,review,settings}  # 직접 촬영: 기획 목록 → 촬영 → 완성본 받기 → 올렸어요 + 릴스 연결
 │       ├── schedule-rules/page.tsx     # /schedule 영구 리다이렉트 (구 예약 규칙)
+│       ├── style-shorts/               # 스타일 쇼츠(메뉴 없는 시험 페이지, 0059) — 레퍼런스 스타일 폴더 · 카드(worker/analyze-style-refs.ts, earshot 소리 분석)
 │       └── uploads/page.tsx            # /postings 영구 리다이렉트 (구 업로드 이력)
 │
 ├── components/
