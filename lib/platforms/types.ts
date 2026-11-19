@@ -82,6 +82,10 @@ export interface PublishContext {
 export interface PublishResult {
   platformPostId: string;
   platformPostUrl: string;
+  // 게시 성공을 기록한 뒤에 할 뒷일(선택). 워커는 SUCCESS 기록 뒤 바로 시작하고, 다른 발행을
+  // 막지 않게 기다리지 않은 채 다음 일을 하다가 run 끝에 모아서 기다린다. 실패해도 발행 결과는 그대로다.
+  // 예: 유튜브는 처리(인코딩)가 끝난 뒤 표지를 다시 지정해야 쇼츠 세로 표지에 반영된다.
+  afterSuccess?: () => Promise<void>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

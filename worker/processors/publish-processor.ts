@@ -156,6 +156,8 @@ export async function processClaimedPublishJob(
   const alreadyPublished = parsePublishedMarker(row.resume_state);
 
   let result: { platformPostId: string; platformPostUrl: string };
+  // 게시 성공 기록 뒤 할 뒷일(유튜브 처리 뒤 표지 다시 지정 등). 결과 기록에 섞이지 않게 따로 든다.
+  let afterSuccess: (() => Promise<void>) | undefined;
   let successNote: string | undefined;
   try {
     if (alreadyPublished) {
@@ -173,7 +175,9 @@ export async function processClaimedPublishJob(
       successNote = gate.note ?? undefined;
 
       // 3. social_accounts + contents 조회 → 어댑터로 게시
-      result = await runPublish(supabase, row, deadlineAt, persistResumeState);
+      const published = await runPublish(supabase, row, deadlineAt, persistResumeState);
+      result = { platformPostId: published.platformPostId, platformPostUrl: published.platformPostUrl };
+      afterSuccess = published.afterSuccess;
     }
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -277,7 +281,18 @@ export async function processClaimedPublishJob(
     await recordSeriesEpisode(supabase, row, result);
   }
 
-  return { ok: true, ...result };
+  // 4-3. 뒷일은 지금 시작하되 기다리지 않는다 — 같은 묶음의 다른 발행을 막지 않게.
+  //      호출측(process-due)이 run 끝에 모아서 기다린다. 실패해도 발행 결과(SUCCESS)는 그대로.
+  const followUp = afterSuccess
+    ? afterSuccess().catch((err) => {
+        console.warn(
+          `[publish-processor] 게시 뒤 작업 실패 — 발행은 완료 (job=${publishJobId}):`,
+          err instanceof Error ? err.message : err,
+        );
+      })
+    : null;
+
+  return { ok: true, ...result, followUp };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

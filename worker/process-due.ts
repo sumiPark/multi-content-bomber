@@ -43,6 +43,7 @@ async function processBatch(
   supabase: ReturnType<typeof createServiceClient>,
   rows: PublishJobRow[],
   deadlineAt: number,
+  followUps: Promise<void>[],
 ): Promise<{ ok: number; failed: number }> {
   let ok = 0;
   let failed = 0;
@@ -56,8 +57,10 @@ async function processBatch(
       ),
     );
     for (const r of results) {
-      if (r.status === "fulfilled") ok++;
-      else {
+      if (r.status === "fulfilled") {
+        ok++;
+        if (r.value.followUp) followUps.push(r.value.followUp);
+      } else {
         failed++;
         // 상태/이력은 processor가 이미 DB에 기록함. 여기선 로그만.
         console.error(
@@ -78,6 +81,8 @@ async function main() {
   let totalOk = 0;
   let totalFailed = 0;
   let totalClaimed = 0;
+  // 게시 성공 뒤 작업(유튜브 처리 끝나면 표지 다시 지정 등). 각자 시작돼 있고, run 끝에 모아 기다린다.
+  const followUps: Promise<void>[] = [];
 
   // 1. due job이 없을 때까지 claim → 처리 반복 (run당 MAX_JOBS_PER_RUN 상한).
   //    실패한 job은 RETRYING으로 바로 due가 되므로 같은 run 안에서 다시 claim된다 —
@@ -104,7 +109,7 @@ async function main() {
     totalClaimed += rows.length;
     console.log(`[process-due] claimed=${rows.length} (누적 ${totalClaimed})`);
 
-    const { ok, failed } = await processBatch(supabase, rows, deadlineAt);
+    const { ok, failed } = await processBatch(supabase, rows, deadlineAt, followUps);
     totalOk += ok;
     totalFailed += failed;
   }
@@ -119,6 +124,12 @@ async function main() {
     console.warn(
       `[process-due] run 시간 예산(${CLAIM_CUTOFF_MS / 60_000}분) 소진 — 잔여는 다음 sweep에서 처리.`,
     );
+  }
+
+  // 1-2. 게시 뒤 작업 마무리 — 각 작업은 스스로 상한(유튜브 10분 · run 마감 1분 전)이 있다.
+  if (followUps.length > 0) {
+    console.log(`[process-due] 게시 뒤 작업 ${followUps.length}개 마무리 대기`);
+    await Promise.allSettled(followUps);
   }
 
   // 2. 토큰 만료 sweep (publish와 독립적으로 항상 1회).

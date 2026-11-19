@@ -466,16 +466,29 @@ export const youtube: PlatformAdapter = {
       throw new PublishError("YouTube 응답에 video id가 없습니다");
     }
 
-    // 4. 커스텀 썸네일(커버) — 사용자가 고른 프레임을 이미지로 추출해 올려둔 것.
+    // 4. 커스텀 썸네일(커버) — 사용자가 고른 프레임 또는 따로 올린 표지 이미지.
     //    best-effort: 영상 업로드는 이미 성공했으므로 실패해도 throw하지 않는다.
     //    미인증 채널(403)·일시 오류 등은 경고만 남기고 영상 게시는 성공 처리.
-    if (ctx.coverSignedUrl) {
-      await setThumbnail(uploaded.id, ctx.coverSignedUrl, accessToken);
+    //    ⚠️ 업로드 직후(처리 중)에 지정하면 일반 썸네일은 바뀌지만 쇼츠 세로 표지(sardefault)는
+    //    반영되지 않는다(2026-11-19 실측: 처리가 끝난 뒤 같은 이미지를 다시 지정하니 1분 안에 바뀜).
+    //    그래서 지금 한 번 지정하고, 처리가 끝나면 한 번 더 지정한다(afterSuccess).
+    const videoId = uploaded.id;
+    const cover = ctx.coverSignedUrl ? await fetchCover(ctx.coverSignedUrl) : null;
+    if (cover) {
+      await setThumbnail(videoId, cover, accessToken);
     }
 
     return {
-      platformPostId: uploaded.id,
-      platformPostUrl: `https://www.youtube.com/watch?v=${uploaded.id}`,
+      platformPostId: videoId,
+      platformPostUrl: `https://www.youtube.com/watch?v=${videoId}`,
+      afterSuccess: cover
+        ? async () => {
+            const done = await waitForProcessing(videoId, accessToken, ctx.deadlineAt);
+            if (!done) return;
+            const ok = await setThumbnail(videoId, cover, accessToken);
+            if (ok) console.log(`[youtube] 처리 완료 뒤 표지 다시 지정 (video=${videoId})`);
+          }
+        : undefined,
     };
   },
 
@@ -531,33 +544,51 @@ export const youtube: PlatformAdapter = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 커스텀 썸네일 업로드 (best-effort). 커버 이미지를 Storage에서 가져와 그대로
-// thumbnails.set에 PUT한다. 영상 게시는 이미 끝났으므로 실패해도 throw하지 않고
-// 경고만 남긴다 — 미인증 채널이면 403(youtubeSignupRequired 등)이 흔하다.
+// 커스텀 썸네일 업로드 (best-effort). 커버 이미지를 Storage에서 한 번 받아 두고
+// thumbnails.set에 그대로 보낸다(처리 뒤 다시 지정할 때 서명 URL 만료를 피하려고 바이트를 들고 있는다).
+// 영상 게시는 이미 끝났으므로 실패해도 throw하지 않고 경고만 남긴다 — 미인증 채널이면
+// 403(youtubeSignupRequired 등)이 흔하다.
 // ─────────────────────────────────────────────────────────────────────────────
-async function setThumbnail(
-  videoId: string,
-  coverSignedUrl: string,
-  accessToken: string,
-): Promise<void> {
+interface CoverImage {
+  bytes: Buffer;
+  contentType: string;
+}
+
+async function fetchCover(coverSignedUrl: string): Promise<CoverImage | null> {
   try {
     const imgRes = await fetch(coverSignedUrl);
     if (!imgRes.ok) {
       console.warn(
         `[youtube] 커버 이미지 fetch 실패 (${imgRes.status}) — 썸네일 건너뜀`,
       );
-      return;
+      return null;
     }
-    const imgBytes = Buffer.from(await imgRes.arrayBuffer());
-    const contentType = imgRes.headers.get("content-type") ?? "image/jpeg";
+    return {
+      bytes: Buffer.from(await imgRes.arrayBuffer()),
+      contentType: imgRes.headers.get("content-type") ?? "image/jpeg",
+    };
+  } catch (err) {
+    console.warn(
+      "[youtube] 커버 이미지 fetch 중 예외 — 썸네일 건너뜀:",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
 
+async function setThumbnail(
+  videoId: string,
+  cover: CoverImage,
+  accessToken: string,
+): Promise<boolean> {
+  try {
     const res = await fetch(`${THUMBNAIL_SET_URL}&videoId=${videoId}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        "Content-Type": contentType,
+        "Content-Type": cover.contentType,
       },
-      body: imgBytes,
+      body: new Uint8Array(cover.bytes),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -565,11 +596,77 @@ async function setThumbnail(
         `[youtube] 썸네일 set 실패 (${res.status}) — 영상 게시는 완료됨. ` +
           `미인증 채널이면 채널 전화 인증 필요. ${text.slice(0, 200)}`,
       );
+      return false;
     }
+    return true;
   } catch (err) {
     console.warn(
       "[youtube] 썸네일 set 중 예외 — 영상 게시는 완료됨:",
       err instanceof Error ? err.message : err,
     );
+    return false;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 업로드 뒤 유튜브 처리(인코딩)가 끝날 때까지 기다린다. 고정 시간을 기다리지 않고
+// 15초마다 상태를 조회해 끝나는 즉시 돌아온다(쇼츠는 보통 몇 분 안). 상한 10분 · run 마감 전까지.
+// videos.list는 호출당 할당량 1이라 상한까지 조회해도 40 정도다.
+// true = 처리 완료(표지를 다시 지정해도 됨), false = 실패 · 상한 초과 · 조회 불가.
+// ─────────────────────────────────────────────────────────────────────────────
+const PROCESSING_POLL_MS = 15_000;
+const PROCESSING_MAX_WAIT_MS = 10 * 60_000;
+
+async function waitForProcessing(
+  videoId: string,
+  accessToken: string,
+  deadlineAt: number | null,
+): Promise<boolean> {
+  const startedAt = Date.now();
+  // run 마감 1분 전에는 손을 뗀다 — 뒷일 때문에 Actions timeout에 걸리지 않게.
+  const until = Math.min(
+    startedAt + PROCESSING_MAX_WAIT_MS,
+    deadlineAt != null ? deadlineAt - 60_000 : Infinity,
+  );
+  let lastState = "?";
+  while (Date.now() < until) {
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=status,processingDetails&id=${videoId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (res.ok) {
+        const data = (await res.json()) as {
+          items?: Array<{
+            status?: { uploadStatus?: string };
+            processingDetails?: { processingStatus?: string };
+          }>;
+        };
+        const item = data.items?.[0];
+        const upload = item?.status?.uploadStatus;
+        const processing = item?.processingDetails?.processingStatus;
+        lastState = `upload=${upload ?? "?"} processing=${processing ?? "?"}`;
+        if (upload === "processed" || processing === "succeeded") {
+          console.log(
+            `[youtube] 처리 완료 (video=${videoId}, ${Math.round((Date.now() - startedAt) / 1000)}초)`,
+          );
+          return true;
+        }
+        if (upload === "failed" || upload === "rejected" || upload === "deleted" ||
+            processing === "failed" || processing === "terminated") {
+          console.warn(`[youtube] 처리 실패로 표지 다시 지정 안 함 (video=${videoId}, ${lastState})`);
+          return false;
+        }
+      } else {
+        lastState = `조회 ${res.status}`;
+      }
+    } catch (err) {
+      lastState = `조회 예외: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    await new Promise((r) => setTimeout(r, PROCESSING_POLL_MS));
+  }
+  console.warn(
+    `[youtube] 처리 대기 상한 넘음 — 표지 다시 지정 안 함 (video=${videoId}, ${lastState}). 쇼츠 표지는 스튜디오에서 다시 지정 필요`,
+  );
+  return false;
 }
