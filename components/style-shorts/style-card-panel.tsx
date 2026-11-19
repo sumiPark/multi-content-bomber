@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { RelativeTime } from "@/components/ui/relative-time";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
+import { CAPTION_POSITIONS, CAPTION_SIZES, FONT_KINDS, FONT_WEIGHTS, type CaptionLook } from "@/lib/style-shorts/caption-look";
 import { CARD_SECTIONS, CARD_STATUS, CARD_TEXT_MAX, sfxKindLabel, type CardEdit, type StyleCard } from "@/lib/style-shorts/card";
 
 // 스타일 카드 — 보기 · 글 고치기 · 지금 레퍼런스로 다시 만들기. 숫자는 레퍼런스에서 잰 값이라 고치지 않는다.
@@ -19,7 +20,74 @@ import { CARD_SECTIONS, CARD_STATUS, CARD_TEXT_MAX, sfxKindLabel, type CardEdit,
 const CAPTION_LABEL = { sentence: "문장 자막", keyword: "낱말 자막", none: "자막 없음", mixed: "레퍼런스마다 다름" } as const;
 
 function editOf(card: StyleCard): CardEdit {
-  return { summary: card.summary, sections: { ...card.sections }, music: { ...card.music } };
+  return { summary: card.summary, sections: { ...card.sections }, music: { ...card.music }, captionLook: card.captionLook ? { ...card.captionLook } : null };
+}
+
+function Swatch({ color, label }: { color: string; label: string }) {
+  if (!color) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-ink-2">
+      <span className="inline-block size-4 rounded border" style={{ backgroundColor: color }} aria-hidden />
+      {label} {color}
+    </span>
+  );
+}
+
+/** 레퍼런스 자막 모양 고치기 — 색은 색 고르기, 테두리 · 상자는 없음도 고를 수 있다. */
+function CaptionLookFields({ value, onChange }: { value: CaptionLook; onChange: (v: CaptionLook) => void }) {
+  const select = <K extends keyof CaptionLook>(key: K, options: readonly string[], label: string) => (
+    <label className="block space-y-1">
+      <span className="text-xs font-semibold text-muted-foreground">{label}</span>
+      <select value={String(value[key])} onChange={(e) => onChange({ ...value, [key]: e.target.value })} className="h-9 w-full rounded-md border border-input bg-card px-3 text-sm">
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const color = (key: "text_color" | "accent_color" | "outline_color" | "box_color", label: string, optional: boolean) => (
+    <div className="space-y-1">
+      <span className="block text-xs font-semibold text-muted-foreground">{label}</span>
+      <div className="flex h-9 items-center gap-2">
+        {(!optional || value[key]) && (
+          <input type="color" value={value[key] || "#000000"} onChange={(e) => onChange({ ...value, [key]: e.target.value.toUpperCase() })} className="h-9 w-12 cursor-pointer rounded border border-input bg-card" aria-label={label} />
+        )}
+        {optional && (
+          <label className="inline-flex items-center gap-1 text-xs text-ink-2">
+            <input type="checkbox" checked={!value[key]} onChange={(e) => onChange({ ...value, [key]: e.target.checked ? "" : "#000000" })} />
+            없음
+          </label>
+        )}
+      </div>
+    </div>
+  );
+  return (
+    <fieldset className="space-y-3 rounded-lg border p-3">
+      <legend className="px-1 text-xs font-semibold text-muted-foreground">자막 모양</legend>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {select("font", FONT_KINDS, "글꼴 계열")}
+        {select("weight", FONT_WEIGHTS, "굵기")}
+        {select("position", CAPTION_POSITIONS, "자리")}
+        {select("size", CAPTION_SIZES, "크기")}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-4">
+        {color("text_color", "글자색", false)}
+        {color("accent_color", "강조색", false)}
+        {color("outline_color", "테두리", true)}
+        {color("box_color", "상자", true)}
+      </div>
+      <label className="inline-flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={value.shadow} onChange={(e) => onChange({ ...value, shadow: e.target.checked })} />
+        그림자
+      </label>
+      <label className="block space-y-1">
+        <span className="text-xs font-semibold text-muted-foreground">움직임</span>
+        <Input value={value.motion} maxLength={60} onChange={(e) => onChange({ ...value, motion: e.target.value })} />
+      </label>
+    </fieldset>
+  );
 }
 
 export function StyleCardPanel({
@@ -163,6 +231,28 @@ export function StyleCardPanel({
                 </div>
               ))}
               <div className="grid gap-1 p-3 sm:grid-cols-[120px_1fr] sm:gap-3">
+                <dt className="text-xs font-semibold text-muted-foreground">자막 모양</dt>
+                <dd className="space-y-1.5 text-sm text-ink-2">
+                  {card.captionLook ? (
+                    <>
+                      <p>
+                        {card.captionLook.font} · {card.captionLook.weight} · {card.captionLook.position} · {card.captionLook.size}
+                        {card.captionLook.shadow && " · 그림자"}
+                        {card.captionLook.motion && ` · ${card.captionLook.motion}`}
+                      </p>
+                      <p className="flex flex-wrap gap-3">
+                        <Swatch color={card.captionLook.text_color} label="글자" />
+                        <Swatch color={card.captionLook.accent_color} label="강조" />
+                        <Swatch color={card.captionLook.outline_color} label="테두리" />
+                        <Swatch color={card.captionLook.box_color} label="상자" />
+                      </p>
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">이 카드는 자막 모양을 읽기 전에 만들었어요. 다시 만들기를 누르면 레퍼런스를 다시 분석해 채워요.</span>
+                  )}
+                </dd>
+              </div>
+              <div className="grid gap-1 p-3 sm:grid-cols-[120px_1fr] sm:gap-3">
                 <dt className="text-xs font-semibold text-muted-foreground">배경음악 찾기</dt>
                 <dd className="text-sm text-ink-2">
                   {card.music.mood} <span className="text-muted-foreground">· 검색어 “{card.music.query}”</span>
@@ -205,6 +295,7 @@ export function StyleCardPanel({
                 <Input value={draft.music.query} maxLength={80} onChange={(e) => setDraft({ ...draft, music: { ...draft.music, query: e.target.value } })} />
               </label>
             </div>
+            {draft.captionLook && <CaptionLookFields value={draft.captionLook} onChange={(captionLook) => setDraft({ ...draft, captionLook })} />}
             {formError && <p className="text-xs text-risk">{formError}</p>}
             <div className="flex gap-2">
               <Button type="submit" disabled={pending}>

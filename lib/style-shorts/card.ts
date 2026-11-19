@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { captionLookEditSchema, captionLookSchema, type CaptionLook } from "@/lib/style-shorts/caption-look";
 
 // 스타일 쇼츠(/style-shorts) — 레퍼런스 분석 값과 스타일 카드 형식. 앱 · 워커가 함께 쓴다(Node 전용 모듈을 불러오지 않는다).
 //
@@ -56,6 +57,7 @@ export const visualReadSchema = z.object({
   voice: z.string().describe("말: 내레이션인지, 사람이 직접 말하는지, 말이 없는지, 말투 · 속도. 받아쓰기가 있으면 참고. 80자 안"),
   ending: z.string().describe("끝맺음: 마지막 장면 · 마지막 글자 · 마지막 말. 60자 안"),
   notes: z.string().describe("이 영상만의 특징 한 줄. 40자 안"),
+  captionLook: captionLookSchema.describe("말 자막의 모양을 프레임에서 그대로 읽는다. 색은 글자에서 실제로 보이는 색"),
 });
 export type VisualRead = z.infer<typeof visualReadSchema>;
 
@@ -110,6 +112,8 @@ export interface StyleCard {
   sections: Record<CardSectionKey, string>;
   // Openverse에서 BGM을 찾을 영어 검색어 · 분위기 설명(사람이 고칠 수 있다)
   music: { query: string; mood: string };
+  // 레퍼런스 자막 모양. 2026-11-19 이전에 만든 카드에는 없다(다시 만들기로 채운다)
+  captionLook?: CaptionLook | null;
   numbers: StyleCardNumbers;
   // 카드가 만들어진 시각 · 사람이 고친 시각
   builtAt: string;
@@ -130,6 +134,7 @@ export const cardWriteSchema = z.object({
   rules: z.array(z.string()).describe("편집할 때 꼭 지킬 것 4~8개. 한 줄 60자 안. 레퍼런스들에 공통으로 보인 것만"),
   musicQuery: z.string().describe("Openverse에서 배경음악을 찾을 영어 검색어 2~4낱말. 장르 · 분위기 · 악기. 예: upbeat acoustic pop"),
   musicMood: z.string().describe("배경음악 분위기를 한국어로. 40자 안"),
+  captionLook: captionLookSchema.describe("레퍼런스들의 말 자막 모양 가운데 가장 많이 보인 것. 레퍼런스마다 다르면 가장 많은 쪽을 고르고 captions 글에 다른 점을 적는다"),
 });
 export type CardWrite = z.infer<typeof cardWriteSchema>;
 
@@ -138,6 +143,7 @@ export const cardEditSchema = z.object({
   summary: z.string().trim().min(1).max(80),
   sections: z.object(Object.fromEntries(CARD_SECTIONS.map((s) => [s.key, z.string().trim().max(CARD_TEXT_MAX * 2)])) as Record<CardSectionKey, z.ZodString>),
   music: z.object({ query: z.string().trim().min(1).max(80), mood: z.string().trim().max(80) }),
+  captionLook: captionLookEditSchema.nullable().optional(),
 });
 export type CardEdit = z.infer<typeof cardEditSchema>;
 

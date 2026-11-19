@@ -20,10 +20,16 @@ const FAMILY = "MCB Video";
 const MIN_BYTES = 10_000;
 const TRIES = 3;
 
-/** 고를 수 있는 글꼴: 한글이 있고 고딕이 아닌 것. */
+// 스타일 쇼츠 워커만 켠다(레퍼런스 자막이 고딕이면 고딕도 고를 수 있게, 사용자 결정 2026-11-19). 직접 촬영 · AI 자동은 켜지 않아 고딕 제외 그대로다
+let gothicAllowed = false;
+export function allowGothicFonts(on: boolean): void {
+  gothicAllowed = on;
+}
+
+/** 고를 수 있는 글꼴: 한글이 있고 고딕이 아닌 것(스타일 쇼츠는 고딕 포함). */
 export function loadSkillFonts(dir: string): SkillFont[] {
   const list = JSON.parse(readFileSync(join(dir, "references", "fonts.json"), "utf8")) as (SkillFont & { lang?: string })[];
-  return list.filter((f) => f.lang === "ko" && f.webfont?.length && !/고딕/.test(`${f.name} ${f.role} ${f.look}`));
+  return list.filter((f) => f.lang === "ko" && f.webfont?.length && (gothicAllowed || !/고딕/.test(`${f.name} ${f.role} ${f.look}`)));
 }
 
 // 스킬 안내(SKILL.md 「폰트 바꾸기」 · 「디자인 자막 기본 짝꿍」)의 짝 고르는 규칙을 고딕 제외 목록에 맞춰 옮긴 것.

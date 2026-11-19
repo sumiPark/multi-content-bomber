@@ -25,6 +25,7 @@ import { captionZones, writeCoverProject, writeProject, type BehindWord, type Vi
 import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import { layoutBeats, snapCuts, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
+import { applyCaptionLook } from "@/lib/style-shorts/apply-look";
 import type { StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
 import type { PlacedSfx } from "@/lib/style-shorts/sfx";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -575,7 +576,10 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   // 직접 촬영은 예전처럼 조용히 기본 자막으로 만든다. 자동 영상은 경고를 남겨 자동 발행을 멈춘다
   if (renderer === "basic" && readable) warnings.push(`${CAPTION_FALLBACK_WARNING} (스킬 파일을 받지 못함)`);
   // 문장 자막 영상은 스킬 없이 기본 자막으로 만들 때도 한 흐름 · 한 번에 나오는 자막으로 둔다
-  const look = normalizeLook(plan.caption_style === "sentence" ? { ...plan.look, layout: "inline", reveal: "line" } : plan.look);
+  const baseLook = normalizeLook(plan.caption_style === "sentence" ? { ...plan.look, layout: "inline", reveal: "line" } : plan.look);
+  // 스타일 쇼츠는 레퍼런스 자막 모양(색 · 상자 · 테두리 · 크기)으로 덮는다. 모션 자막이 실패해 기본 자막으로 만들 때도 같은 모양이 나온다
+  const refLook = input.stylePlan?.card.captionLook;
+  const look = refLook ? normalizeLook(applyCaptionLook(baseLook, refLook)) : baseLook;
 
   // 2. 음성 → 시각표
   const preset = input.presetVoices;

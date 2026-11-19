@@ -1,5 +1,6 @@
 import { editKit } from "@/lib/agents/ko-skills";
 import type { EditPlanContext } from "@/lib/agents/edit-plan";
+import { captionLookText } from "@/lib/style-shorts/caption-look";
 import { CARD_SECTIONS, type StyleCard } from "@/lib/style-shorts/card";
 import { SFX_PALETTE } from "@/lib/style-shorts/sfx-palette";
 
@@ -34,6 +35,7 @@ export function cardText(card: StyleCard): string {
     `요약: ${card.summary}`,
     `측정값: ${numbers.join(" · ")}`,
     ...CARD_SECTIONS.map((s) => `[${s.title}]\n${card.sections[s.key] || "-"}`),
+    ...(card.captionLook ? [`[자막 모양]\n${captionLookText(card.captionLook)}\n글자색 · 강조색 · 상자 · 크기는 코드가 이 값으로 고정한다. 자막 자리(hook.position 포함)와 한 줄 길이를 이 값에 맞춘다.`] : []),
     `[배경음악] ${card.music.mood} (검색어: ${card.music.query})`,
   ].join("\n");
 }

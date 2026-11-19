@@ -9,7 +9,10 @@ import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import type { ProductFacts } from "@/lib/agents/product-facts";
 import { DEFAULT_EDIT_STYLE } from "@/lib/shoot/edit-style";
+import { setReferencePalette } from "@/lib/shoot/video-kit/caption-skill";
 import { readClip, renderKitEdit, type KitClip, type KitResult } from "@/lib/shoot/video-kit/pipeline";
+import { allowGothicFonts } from "@/lib/shoot/video-kit/skill-fonts";
+import { captionFontDirective } from "@/lib/style-shorts/caption-look";
 import { transcribeWords } from "@/lib/shoot/video-kit/tools";
 import type { StyleCard } from "@/lib/style-shorts/card";
 import { renderStyleSfx } from "@/lib/style-shorts/sfx";
@@ -111,6 +114,8 @@ async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const only = arg("--version");
   const service = createServiceClient();
+  // 스타일 쇼츠는 레퍼런스가 고딕이면 고딕 글꼴도 고른다(사용자 결정 2026-11-19). 이 워커 프로세스에서만 켜진다
+  allowGothicFonts(true);
   if (!dryRun) await cleanupClips(service);
 
   const staleBefore = new Date(Date.now() - STALE_MS).toISOString();
@@ -167,6 +172,9 @@ async function main() {
       }
 
       const title = job.title?.trim() || "스타일 쇼츠";
+      // 레퍼런스 자막 색을 모션 자막에도 쓴다(이 워커 안에서만). 예전 카드(자막 모양 없음)는 스킬 기본색
+      const refLook = card.captionLook ?? null;
+      setReferencePalette(refLook ? { text: refLook.text_color, accent: refLook.accent_color } : null);
       const kit = await renderKitEdit({
         workDir: join(workDir, "kit"),
         service: dryRun ? null : service,
@@ -179,8 +187,8 @@ async function main() {
         source: "style",
         stylePlan: { card, voiceMode: liveVoice ? "LIVE" : "AI", script, concept },
         sfxRenderer: renderStyleSfx,
-        // 자막 디자인 AI가 참고하는 글 — 카드의 자막 · 화면 설명
-        editStyleText: `${card.sections.captions}\n${card.sections.visual}`,
+        // 자막 디자인 AI가 참고하는 글 — 레퍼런스 자막 모양(글꼴 · 모션 지시)과 카드의 자막 · 화면 설명
+        editStyleText: [refLook ? captionFontDirective(refLook) : "", card.sections.captions, card.sections.visual].filter(Boolean).join("\n"),
         tone: concept,
         style: DEFAULT_EDIT_STYLE,
       });

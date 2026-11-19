@@ -85,6 +85,13 @@ const DARK_TEXT = "#1B1F27";
 const TEXT = "#FFFFFF";
 const ACCENT = "#FFD23F";
 
+// 스타일 쇼츠 워커만 넣는다: 레퍼런스 자막의 글자색 · 강조색(사용자 결정 2026-11-19). 넣지 않으면(직접 촬영 · AI 자동) 위 기본값 그대로다.
+// 밝은 배경에서 어두운 글자로 바꾸는 것과 강조색 명도 보정(readableAccent)은 그대로 둔다
+let referencePalette: { text: string; accent: string } | null = null;
+export function setReferencePalette(palette: { text: string; accent: string } | null): void {
+  referencePalette = palette;
+}
+
 export function captionSkillDir(): string | null {
   const dir = process.env.CAPTION_SKILL_DIR || join(homedir(), ".claude", "skills", "caption-motion-seqc");
   return existsSync(join(dir, "scripts", "subs.cjs")) && existsSync(join(dir, "node_modules")) ? dir : null;
@@ -320,17 +327,19 @@ export interface AccentBackgrounds {
 /** 편집 결과의 시각 · 글자를 그대로 쓰는 자막 파일 내용. */
 export function buildSubtitleFile(video: string, captions: TimedCaption[], zones: Zone[], design: CaptionDesign, brightness: (number | null)[] = [], blocks: SkillBlock[] = [], blockBrightness: (number | null)[] = [], fonts: SubtitleFonts = { key: "그리운 코코초이툰", small: "온글잎 박다현체", smallSize: SMALL_SIZE }, backgrounds: AccentBackgrounds = {}) {
   const byNo = new Map(design.lines.map((l) => [l.no, l]));
+  const TEXT_COLOR = referencePalette?.text ?? TEXT;
+  const ACCENT_COLOR = referencePalette?.accent ?? ACCENT;
   // 흰 글자를 쓰는 자막만 강조색을 쓴다. 밝은 배경 자막은 강조어 줄도 어두운 글자라 재지 않는다
   const captionAccent = (i: number) => {
     const bg = backgrounds.captions?.[i];
-    return (brightness[i] ?? 0) > BRIGHT || bg == null ? null : readableAccent(ACCENT, bg, TEXT);
+    return (brightness[i] ?? 0) > BRIGHT || bg == null ? null : readableAccent(ACCENT_COLOR, bg, TEXT_COLOR);
   };
   // 후킹 · 끝 화면의 강조 낱말(*…*)은 스킬이 style.accent 하나로 그린다. 흰 글자 블록 중 가장 밝은 배경에 맞춘다
   const blockBgs = blocks.flatMap((_, i) => {
     const bg = backgrounds.blocks?.[i];
     return (blockBrightness[i] ?? 0) > BRIGHT || bg == null ? [] : [bg];
   });
-  const accent = blockBgs.length ? readableAccent(ACCENT, Math.max(...blockBgs), TEXT) : ACCENT;
+  const accent = blockBgs.length ? readableAccent(ACCENT_COLOR, Math.max(...blockBgs), TEXT_COLOR) : ACCENT_COLOR;
   // 작은 줄은 스킬 기본 굵기(본문 800)가 아니라 고른 글꼴의 보통 굵기로. 굵기가 여럿인 글꼴이 작은 줄에서 강조어보다 굵어지지 않게 한다
   const smallWeight = fonts.smallWeight ? { weight: fonts.smallWeight, subWeight: fonts.smallWeight } : {};
   return {
@@ -342,7 +351,7 @@ export function buildSubtitleFile(video: string, captions: TimedCaption[], zones
     // 밝은 제품 사진 위에서도 읽히게 그림자를 스킬 기본보다 진하게 둔다
     // 글자 색은 스킬 기본값을 쓴다. look 색은 글자 상자가 있을 때 고른 값이라 그대로 쓰면 빨간 배경에 초록 글자처럼 나온다
     // 강조어 줄은 keyFont, 나머지 줄은 font. subFont까지 같게 해 한 영상에 글꼴을 두 개만 쓴다
-    style: { font: fonts.small, subFont: fonts.small, keyFont: fonts.key, ...smallWeight, size: fonts.smallSize, color: TEXT, accent, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 880 },
+    style: { font: fonts.small, subFont: fonts.small, keyFont: fonts.key, ...smallWeight, size: fonts.smallSize, color: TEXT_COLOR, accent, glow: "rgba(0,0,0,.62)", glowR: 14, shadowY: 6, maxW: 880 },
     lines: [...blocks.map((b, i) => blockLine(b, (blockBrightness[i] ?? 0) > BRIGHT, fonts)), ...captions.map((c, i) => {
       const line = byNo.get(i);
       const box = ZONE_BOX[zones[i] ?? "lower"];
