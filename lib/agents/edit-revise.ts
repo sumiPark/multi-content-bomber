@@ -23,6 +23,8 @@ type Service = ReturnType<typeof createServiceClient>;
 /** 워커가 저장한 계획 — 고른 음악 · 자막 디자인이 붙어 있다(pipeline.ts renderKitEdit의 반환값). */
 export type SavedEditPlan = EditPlan & {
   pickedMusic?: PickedMusic;
+  // 스타일 쇼츠가 중간에 바꿔 쓴 곡(from초부터). 다시 편집할 때 같은 곡을 쓴다
+  pickedMusicExtra?: { from: number; music: PickedMusic }[];
   captionDesign?: CaptionDesign;
   // 장면을 빼거나 순서를 바꿔 자막 번호가 달라졌다 — 워커가 자막 디자인의 줄별 값만 다시 정한다(모션 · 모양 · 글꼴은 그대로)
   redoCaptionLines?: boolean;
@@ -394,7 +396,10 @@ export function applyRevision(plan: SavedEditPlan, raw: EditRevision, opts: { pi
   const lookChanged = (key: LookKey) => !!plan.look && out.look[key] !== plan.look[key];
   const repickMusic = rev.repick_music || MUSIC_KEYS.some(lookChanged);
   const repickDesign = rev.repick_caption_design;
-  if (repickMusic) delete out.pickedMusic;
+  if (repickMusic) {
+    delete out.pickedMusic;
+    delete out.pickedMusicExtra;
+  }
   if (repickDesign) delete out.captionDesign;
 
   // 6. 사람이 정해 둔 글 — 워커가 다시 편집할 때 덮어쓰는 값과 같게 맞춘다

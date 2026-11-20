@@ -30,6 +30,8 @@ export function cardText(card: StyleCard): string {
     n.sfxPer10s != null && `효과음 10초당 ${n.sfxPer10s}개${n.sfxIsMin ? " 이상" : ""}`,
     n.sfxOverBedDb != null && `효과음 크기 바로 앞 소리보다 ${n.sfxOverBedDb}dB`,
     n.endDropShare != null && `끝 직전에 음악을 끊는 레퍼런스 ${Math.round(n.endDropShare * 100)}%`,
+    n.musicChangeShare != null &&
+      `배경음악을 중간에 바꾸는 레퍼런스 ${Math.round(n.musicChangeShare * 100)}%${n.musicChangeShare >= 0.5 && n.musicChangeAt?.length ? `(영상 ${n.musicChangeAt.map((r) => `${Math.round(r * 100)}%`).join(" · ")} 지점, 곡은 코드가 장면 전환에 맞춰 바꾼다)` : ""}`,
     n.charsPerSec != null && `말 초당 ${n.charsPerSec}자`,
     n.maxPauseSec != null && `말 사이 가장 긴 빈틈 ${n.maxPauseSec}초 · 0.6초 넘는 빈틈 10초당 ${n.pausePer10s}개 · 빈틈 비율 ${Math.round((n.silentShare ?? 0) * 100)}%`,
     n.captionPer10s != null && `말 자막 10초당 ${n.captionPer10s}개 · 자막 하나 평균 ${n.captionChars}자 · 한 줄 ${Math.round((n.captionOneLine ?? 0) * 100)}% · 크게 강조 ${Math.round((n.captionBigShare ?? 0) * 100)}%${n.captionPlace ? ` · 주로 ${({ top: "위", mid: "가운데", lower: "아래" } as const)[n.captionPlace]}` : ""}${n.captionColors?.length ? ` · 색 ${n.captionColors.join(", ")}` : ""}`,
@@ -110,7 +112,7 @@ ${script}
  */
 export function styleReviseBlock(revise: { plan: EditPlan; request: string; items: string[] }, frameNos: number[], g: StylePlanGuide): string {
   // 고른 음악 · 자막 디자인은 코드가 따로 이어 쓰고(바꾸라는 주석이 있으면 코드가 지운다), 지난 경고는 새 계획과 상관없다
-  const past = Object.fromEntries(Object.entries(revise.plan).filter(([k]) => !["warnings", "pickedMusic", "captionDesign", "redoCaptionLines"].includes(k)));
+  const past = Object.fromEntries(Object.entries(revise.plan).filter(([k]) => !["warnings", "pickedMusic", "pickedMusicExtra", "captionDesign", "redoCaptionLines"].includes(k)));
   const frames = frameNos.length
     ? `\n프레임 묶음 다음의 마지막 ${frameNos.length}장은 지난 완성본에서 주석 시각의 화면이다(차례대로 ${frameNos.map((n) => `${n}번`).join(", ")} 주석). 노란 동그라미가 관리자가 짚은 자리이고, 옆 숫자가 주석 번호, 왼쪽 위가 번호와 시각이다. 동그라미 안에 있는 것(자막 · 그래픽 · 사람 · 물건)이 주석이 말하는 대상이다.`
     : "";

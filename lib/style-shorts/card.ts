@@ -53,6 +53,8 @@ export interface SoundAnalysis {
   truePeakDb?: number | null;
   // 끝 4초 안에 소리를 잠깐 끊었다(끝맺음 직전 음악 멈춤)
   endDrop?: boolean;
+  // 배경음악이 바뀐 시각(초, py/music_changes.py, 분석 판 3). 재지 못했으면 null
+  musicChanges?: number[] | null;
 }
 
 /** 말 사이 빈틈(받아쓰기 낱말 시각으로 코드가 잰 값, 2026-11-20 추가) */
@@ -162,7 +164,8 @@ export interface OverlayStats {
 
 // 분석 형식 판. 올리면 카드 다시 만들기가 이 판보다 오래된 레퍼런스를 다시 분석한다
 // 2: 말 사이 빈틈 · 말 자막 · 효과음 크기 · 끝 직전 음악 끊김(2026-11-20)
-export const ANALYSIS_VERSION = 2;
+// 3: 배경음악이 바뀐 시각(2026-11-20)
+export const ANALYSIS_VERSION = 3;
 
 export interface ReferenceAnalysis {
   // 분석 형식 판(ANALYSIS_VERSION). 2026-11-20 전 분석에는 없다
@@ -242,6 +245,9 @@ export interface StyleCardNumbers {
   captionPlace?: "top" | "mid" | "lower" | null;
   captionColors?: string[];
   captionBigShare?: number | null;
+  // 배경음악: 곡을 바꾼 레퍼런스 비율(0~1) · 바꾼 위치(영상 길이 대비 0~1, 첫 번째 · 두 번째 바뀜의 중앙값)
+  musicChangeShare?: number | null;
+  musicChangeAt?: number[];
 }
 
 export interface StyleCard {

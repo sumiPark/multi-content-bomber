@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { EditPlan } from "@/lib/agents/edit-plan";
 import { captionZones } from "@/lib/shoot/video-kit/compose";
-import { planProblems, styleFinish } from "@/lib/shoot/video-kit/pipeline";
+import { planProblems, styleFinish, styleMusicSwitches } from "@/lib/shoot/video-kit/pipeline";
 import type { Timeline } from "@/lib/shoot/video-kit/timeline";
-import { captionStats, cardNumbers, speechPauses } from "./analyze";
+import { captionStats, cardNumbers, musicChangeAt, speechPauses } from "./analyze";
 import type { OverlayScan, ReferenceAnalysis } from "./card";
 import { sfxBoostDb } from "./sfx";
 
@@ -145,4 +145,32 @@ test("믹스 마무리: 레퍼런스 대부분이 끝에 음악을 끊으면 마
   assert.deepEqual(styleFinish({ endDropShare: 0.33, loudnessLufs: -16 }, tl), { musicDropAt: null, targetLufs: -14 });
   // 예전 카드: 아무것도 바꾸지 않는다
   assert.deepEqual(styleFinish({}, tl), { musicDropAt: null, targetLufs: null });
+});
+
+// 배경음악 바꾸기(2026-11-20 사용자 결정, (가) 측정 방식)
+
+test("곡 바뀜 위치: 처음 · 끝 10% 안(음악이 들어오고 나간 곳)은 뺀다", () => {
+  // 사람 편집 추황배 실측: 3.7(음악 시작) · 18.3 · 34.2 · 47.0(음악 끝), 길이 50.7초
+  assert.deepEqual(musicChangeAt([3.7, 18.3, 34.2, 47.0], 50.7), [0.36, 0.67]);
+  assert.deepEqual(musicChangeAt([], 40), []);
+});
+
+test("카드: 곡을 바꾼 레퍼런스 비율과 첫 · 두 번째 바뀜 위치의 중앙값", () => {
+  const withMusic = (dur: number, changes: number[] | null | undefined) =>
+    ref({ durationSec: dur, sound: { sections: [], events: [], sfxPer10s: 1, kinds: {}, tempo: null, steadyBeat: false, loudnessLufs: -10, cutsWithSound: 1, hasMusic: true, hasVoice: true, musicChanges: changes } });
+  // 사람 편집 6개 실측: 해물모듬 · 사과 · 추황배는 두 번, 나머지는 한 곡
+  const n = cardNumbers([withMusic(52.8, [14.3, 44.8]), withMusic(46.1, [17.2, 35.8]), withMusic(50.7, [3.7, 18.3, 34.2, 47.0]), withMusic(44, []), withMusic(46.3, []), withMusic(55.8, [])]);
+  assert.equal(n.musicChangeShare, 0.5);
+  assert.deepEqual(n.musicChangeAt, [0.36, 0.78]);
+  // 재지 못한 레퍼런스뿐이면 칸이 없다
+  assert.equal(cardNumbers([withMusic(40, null)]).musicChangeShare, undefined);
+});
+
+test("곡 바꿈 시각: 레퍼런스 절반 이상이 바꾸면 그 위치에서 가장 가까운 컷 시작에", () => {
+  const tl = { duration: 40, cuts: [0, 4, 9, 13.5, 16, 22, 27, 30.5, 35].map((start) => ({ start })) } as unknown as Timeline;
+  assert.deepEqual(styleMusicSwitches({ musicChangeShare: 0.5, musicChangeAt: [0.36, 0.78] }, tl), [13.5, 30.5]);
+  assert.deepEqual(styleMusicSwitches({ musicChangeShare: 0.33, musicChangeAt: [0.36] }, tl), []);
+  assert.deepEqual(styleMusicSwitches({}, tl), []);
+  // 끝 3초 안의 컷에는 두지 않는다
+  assert.deepEqual(styleMusicSwitches({ musicChangeShare: 1, musicChangeAt: [0.99] }, tl), [35]);
 });

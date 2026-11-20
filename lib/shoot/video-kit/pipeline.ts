@@ -117,7 +117,8 @@ export interface KitResult {
   segments: KitSegment[];
   hook: { text: string; source: "human" | "saved" | "ai" };
   warnings: string[];
-  sounds: { sfx: string[]; music: string | null; musicSource: MusicSource | null };
+  // musicSources: 스타일 쇼츠가 곡을 바꿨을 때 구간마다 쓴 곡(출처 기록용)
+  sounds: { sfx: string[]; music: string | null; musicSource: MusicSource | null; musicSources?: MusicSpanSource[] };
   loudness: number | null;
   tokens: { input: number; output: number };
   usedVoice: boolean;
@@ -425,6 +426,12 @@ function buildVoiceTrack(tl: Timeline, workDir: string): string {
   return out;
 }
 
+export interface MusicSpanSource {
+  from: number;
+  name: string;
+  source: MusicSource | null;
+}
+
 /** 내레이션 + 효과음 + 음악. 말할 때 음악과 효과음이 자동으로 줄어든다. */
 export function buildMix(
   tl: Timeline,
@@ -435,8 +442,9 @@ export function buildMix(
   // 편집용 묶음: 섞기 직전의 음성 · 음악 · 효과음을 이 폴더에 따로 남긴다(말할 때 줄어드는 것까지 적용된 상태)
   stemsDir?: string,
   // 스타일 쇼츠만(2026-11-20 사용자 결정 — 레퍼런스 소리에 맞춘다): 이 시각 직전 MUSIC_DROP_SEC 동안 음악을 끊고, 완성 믹스를 이 음량(LUFS)까지 올린다
-  finish?: { musicDropAt?: number | null; targetLufs?: number | null },
-): { sfx: string[]; music: string | null; musicSource: MusicSource | null; stems?: { voice: string; music: string; sfx: string } } {
+  // musicParts: from초부터 다른 곡으로 바꾼다(앞 곡은 그 직전에 짧게 줄여 끝낸다)
+  finish?: { musicDropAt?: number | null; targetLufs?: number | null; musicParts?: { from: number; music: MusicToUse }[] },
+): { sfx: string[]; music: string | null; musicSource: MusicSource | null; musicSources?: MusicSpanSource[]; stems?: { voice: string; music: string; sfx: string } } {
   const kit = editKit();
   const D = tl.duration.toFixed(3);
   // 스타일 쇼츠는 미리 만든 효과음(placed), 나머지는 kit.json 효과음
@@ -460,14 +468,36 @@ export function buildMix(
   const m = used.length;
   parts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${D}[z]`);
   parts.push(`[z]${used.map((_, i) => `[s${i}]`).join("")}amix=inputs=${m + 1}:normalize=0:duration=longest,apad=whole_dur=${D},atrim=0:${D}[sfx]`);
-  inputs.push("-stream_loop", "-1", "-i", music.file, "-i", voice);
+  // 곡 구간: 처음 곡은 0초부터, 바꾼 곡은 from초부터 다음 바뀜(없으면 끝)까지
+  const spans = [{ from: 0, music }, ...(finish?.musicParts ?? []).filter((p) => p.from > 0 && p.from < tl.duration).sort((a, b) => a.from - b.from)].map((p, i, all) => ({
+    ...p,
+    to: i + 1 < all.length ? all[i + 1].from : tl.duration,
+  }));
+  for (const s of spans) inputs.push("-stream_loop", "-1", "-i", s.music.file);
+  inputs.push("-i", voice);
+  const voiceIn = m + spans.length;
   const dropAt = finish?.musicDropAt;
   const drop = dropAt != null && dropAt > MUSIC_DROP_SEC + 1 ? `,volume=enable='between(t,${(dropAt - MUSIC_DROP_SEC).toFixed(3)},${dropAt.toFixed(3)})':volume=0` : "";
-  parts.push(`[${m}:a]atrim=${music.in}:${music.in + tl.duration},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=${music.gain_db}dB,afade=t=in:d=0.3,afade=t=out:st=${Math.max(0, tl.duration - 1).toFixed(3)}:d=1${drop}[bg]`);
-  parts.push(`[${m + 1}:a]aformat=channel_layouts=stereo,asplit=3[k1][k2][vm]`);
+  spans.forEach((s, i) => {
+    const len = s.to - s.from;
+    const last = i === spans.length - 1;
+    // 첫 곡은 0.3초에 걸쳐 들어오고, 바꾼 곡은 장면 전환에 맞춰 바로 들어온다. 마지막 곡만 1초에 걸쳐 끝난다
+    const fadeIn = i === 0 ? 0.3 : MUSIC_SWITCH_FADE;
+    const fadeOut = last ? 1 : MUSIC_SWITCH_FADE;
+    parts.push(
+      `[${m + i}:a]atrim=${s.music.in}:${s.music.in + len},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=${s.music.gain_db}dB,afade=t=in:d=${fadeIn},afade=t=out:st=${Math.max(0, len - fadeOut).toFixed(3)}:d=${fadeOut},adelay=${Math.round(s.from * 1000)}:all=1[bg${i}]`,
+    );
+  });
+  parts.push(spans.length > 1 ? `${spans.map((_, i) => `[bg${i}]`).join("")}amix=inputs=${spans.length}:normalize=0:duration=longest,atrim=0:${D}${drop}[bg]` : `[bg0]atrim=0:${D}${drop}[bg]`);
+  parts.push(`[${voiceIn}:a]aformat=channel_layouts=stereo,asplit=3[k1][k2][vm]`);
   parts.push("[bg][k1]sidechaincompress=threshold=0.05:ratio=3.5:attack=20:release=260:makeup=1[bgd]");
   parts.push("[sfx][k2]sidechaincompress=threshold=0.06:ratio=2:attack=5:release=120:makeup=1[sfxd]");
-  const result = { sfx: [...new Set(used.map((s) => s.name))], music: music.name, musicSource: music.source };
+  const result = {
+    sfx: [...new Set(used.map((s) => s.name))],
+    music: spans.map((s) => s.music.name).join(" → "),
+    musicSource: music.source,
+    ...(spans.length > 1 ? { musicSources: spans.map((s) => ({ from: s.from, source: s.music.source, name: s.music.name })) } : {}),
+  };
   if (!stemsDir) {
     parts.push(`[vm][sfxd][bgd]amix=inputs=3:normalize=0:duration=first,volume=1dB,alimiter=limit=0.84:level=false,atrim=0:${D}[mix]`);
     ffmpeg(["-y", "-v", "error", ...inputs, "-filter_complex", parts.join(";"), "-map", "[mix]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", dest]);
@@ -495,6 +525,28 @@ export function styleFinish(n: Pick<StyleCardNumbers, "endDropShare" | "loudness
     musicDropAt: n.endDropShare != null && n.endDropShare >= 0.5 && last && last.start > 3 ? last.start : null,
     targetLufs: n.loudnessLufs != null ? Math.max(STYLE_LUFS.min, Math.min(STYLE_LUFS.max, n.loudnessLufs)) : null,
   };
+}
+
+// 곡을 바꿀 때 앞 곡을 줄이고 다음 곡을 올리는 길이(초) — 장면 전환에 맞춰 거의 바로 바꾼다
+const MUSIC_SWITCH_FADE = 0.08;
+// 곡 바꿈은 처음 · 끝 이 초 안에 두지 않고, 바꿈끼리 이만큼 띄운다
+const MUSIC_SWITCH_EDGE = 3;
+const MUSIC_SWITCH_GAP = 4;
+
+/**
+ * 스타일 쇼츠 곡 바꿈 시각. 레퍼런스 절반 이상이 곡을 바꾸면, 카드의 바꿈 위치(영상 길이 대비)에서 가장 가까운 컷 시작에 둔다.
+ * 예전 카드(값 없음)나 곡을 바꾸지 않는 레퍼런스면 빈 배열.
+ */
+export function styleMusicSwitches(n: Pick<StyleCardNumbers, "musicChangeShare" | "musicChangeAt">, tl: Pick<Timeline, "cuts" | "duration">): number[] {
+  if (!n.musicChangeShare || n.musicChangeShare < 0.5 || !n.musicChangeAt?.length) return [];
+  const starts = [...new Set(tl.cuts.map((c) => c.start))].filter((t) => t >= MUSIC_SWITCH_EDGE && t <= tl.duration - MUSIC_SWITCH_EDGE).sort((a, b) => a - b);
+  const out: number[] = [];
+  for (const r of n.musicChangeAt) {
+    const want = r * tl.duration;
+    const near = starts.filter((t) => out.every((o) => Math.abs(t - o) >= MUSIC_SWITCH_GAP)).sort((a, b) => Math.abs(a - want) - Math.abs(b - want))[0];
+    if (near != null) out.push(near);
+  }
+  return out.sort((a, b) => a - b);
 }
 
 // 끝 직전 음악을 끊는 길이(사람 편집 실측 0.3초, 2026-11-20)
@@ -853,13 +905,39 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     })) ??
     libraryMusic(look.music);
   console.log(`[video-kit] 음악: ${music.name}${music.source ? ` (${music.source.creator}, ${music.source.license}, 검색어 "${music.query}")` : " (대체 곡)"}`);
+  // 스타일 쇼츠: 레퍼런스가 곡을 바꾸면 그 위치에서 가장 가까운 장면 전환에 다른 곡으로 바꾼다(2026-11-20 사용자 결정).
+  // 다시 편집이면 지난번에 바꿔 쓴 곡을 그대로 쓴다. 다른 곡을 찾지 못하면 한 곡으로 만들고 알린다
+  const musicParts: { from: number; music: MusicToUse }[] = [];
+  const switches = input.stylePlan ? styleMusicSwitches(input.stylePlan.card.numbers, tl) : [];
+  for (const [k, from] of switches.entries()) {
+    const dir = join(workDir, `music-extra-${k}`);
+    mkdirSync(dir, { recursive: true });
+    const old = prior?.pickedMusicExtra?.[k]?.music;
+    const extra =
+      (old ? (old.source ? await reloadMusic(old, dir) : libraryMusic(old.name)) : null) ??
+      (await findMusic({
+        service: input.service,
+        readService: input.readService,
+        query: input.stylePlan!.card.music.query || look.music_query,
+        intent: input.stylePlan!.card.music.mood || look.music_intent,
+        workDir: dir,
+        singleWords: true,
+        exclude: [music, ...musicParts.map((p) => p.music)].map((m) => m.source?.id).filter((id): id is string => !!id),
+      }));
+    if (!extra) {
+      warnings.push(`레퍼런스처럼 ${from.toFixed(1)}초에 배경음악을 바꾸려 했지만 다른 곡을 찾지 못해 한 곡으로 이어 만들었어요.`);
+      break;
+    }
+    console.log(`[video-kit] 음악 바꿈 ${from.toFixed(1)}초: ${extra.name}`);
+    musicParts.push({ from, music: extra });
+  }
   let placedSfx: PlacedSfx[] | undefined;
   if (input.sfxRenderer) {
     const made = input.sfxRenderer(tl.sfx, workDir);
     placedSfx = made.placed;
     warnings.push(...made.warnings);
   }
-  const { stems, ...sounds } = buildMix(tl, voice, mix, music, placedSfx, input.exportParts ? join(workDir, "stems") : undefined, input.stylePlan ? styleFinish(input.stylePlan.card.numbers, tl) : undefined);
+  const { stems, ...sounds } = buildMix(tl, voice, mix, music, placedSfx, input.exportParts ? join(workDir, "stems") : undefined, input.stylePlan ? { ...styleFinish(input.stylePlan.card.numbers, tl), musicParts } : undefined);
   // 장면마다 상품 · 사람이 있는 자리를 읽어 글자가 피하게 한다. 못 읽으면 기본 자리
   const zones = input.presetZones ?? subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
     const owner = allClips.find((c) => c.no === tl.cuts[i]?.clip);
@@ -1059,7 +1137,12 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     final,
     cover,
     seconds: mediaSeconds(final),
-    plan: { ...plan, pickedMusic: { name: music.name, in: music.in, gain_db: music.gain_db, source: music.source, query: music.query }, ...(design ? { captionDesign: design } : {}) } as EditPlan,
+    plan: {
+      ...plan,
+      pickedMusic: { name: music.name, in: music.in, gain_db: music.gain_db, source: music.source, query: music.query },
+      ...(musicParts.length ? { pickedMusicExtra: musicParts.map((p) => ({ from: p.from, music: { name: p.music.name, in: p.music.in, gain_db: p.music.gain_db, source: p.music.source, query: p.music.query } })) } : {}),
+      ...(design ? { captionDesign: design } : {}),
+    } as EditPlan,
     timeline: tl,
     segments: buildSegments(plan, tl, visual.realClipOf),
     hook: { text: hookText, source: input.humanHook?.trim() ? "human" : input.fixedHook?.trim() ? "saved" : "ai" },

@@ -116,7 +116,10 @@ async function loadRevise(
   const text = reviseRequestText(notes, timeline);
   const plan = JSON.parse(JSON.stringify(prev.plan)) as SavedEditPlan;
   const asks = asksFor(notes);
-  if (asks.music) delete plan.pickedMusic;
+  if (asks.music) {
+    delete plan.pickedMusic;
+    delete plan.pickedMusicExtra;
+  }
   if (asks.captionDesign) delete plan.captionDesign;
   console.log(`[style-edit] 주석 ${notes.length}개로 v${request.from} 고치기${asks.music ? " · 음악 다시 고름" : ""}${asks.captionDesign ? " · 자막 모양 다시 고름" : ""}`);
 

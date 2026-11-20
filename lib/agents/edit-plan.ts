@@ -246,7 +246,7 @@ export interface EditPlanContext {
 /** 완성본 고치기 지시 — 지난 계획과 고칠 내용. 사용자 메시지 끝에 붙는다. */
 function reviseBlock(revise: NonNullable<EditPlanContext["revise"]>): string {
   // 고른 음악 · 자막 디자인은 코드가 따로 이어 쓰고, 지난 경고는 새 계획과 상관없어 계획 글에서 뺀다
-  const past = Object.fromEntries(Object.entries(revise.plan).filter(([k]) => !["warnings", "pickedMusic", "captionDesign", "redoCaptionLines"].includes(k)));
+  const past = Object.fromEntries(Object.entries(revise.plan).filter(([k]) => !["warnings", "pickedMusic", "pickedMusicExtra", "captionDesign", "redoCaptionLines"].includes(k)));
   return `
 
 이미 만든 완성본을 고치는 작업이다. 지난 계획과 관리자가 적은 고칠 내용이 아래에 있다.

@@ -110,7 +110,8 @@ function measure(file: string, seconds: number): { lufs: number; start: number; 
 }
 
 /** 검색해서 고른다. 없거나 실패하면 null. */
-export async function findMusic(opts: { service: Service | null; readService?: Service; query: string; intent: string; workDir: string; singleWords?: boolean }): Promise<MusicToUse | null> {
+// exclude: 이미 고른 곡 id(스타일 쇼츠가 곡을 바꿀 때 같은 곡을 다시 고르지 않게). 받은 파일은 workDir에 둔다 — 여러 곡을 고르면 부르는 쪽이 폴더를 나눈다
+export async function findMusic(opts: { service: Service | null; readService?: Service; query: string; intent: string; workDir: string; singleWords?: boolean; exclude?: string[] }): Promise<MusicToUse | null> {
   const words = opts.query.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return null;
   // 검색 결과는 낱말을 모두 포함한 것만 나와 긴 검색어는 비기 쉽다. 없으면 낱말을 줄여 다시 찾는다.
@@ -124,13 +125,13 @@ export async function findMusic(opts: { service: Service | null; readService?: S
   return null;
 }
 
-async function findWith(opts: { service: Service | null; readService?: Service; query: string; intent: string; workDir: string }): Promise<MusicToUse | null> {
+async function findWith(opts: { service: Service | null; readService?: Service; query: string; intent: string; workDir: string; exclude?: string[] }): Promise<MusicToUse | null> {
   const query = opts.query;
   const read = opts.readService ?? opts.service;
   try {
     const hits = (await search(query)).filter((h) => {
       const sec = (h.duration ?? 0) / 1000;
-      return h.license === "cc0" && h.url && sec >= MIN_SECONDS && sec <= MAX_SECONDS && !NOT_MUSIC.test(`${h.title ?? ""} ${tagsOf(h)}`);
+      return h.license === "cc0" && h.url && !opts.exclude?.includes(h.id) && sec >= MIN_SECONDS && sec <= MAX_SECONDS && !NOT_MUSIC.test(`${h.title ?? ""} ${tagsOf(h)}`);
     });
     if (!hits.length) return null;
     const { data: known } = read ? await read.from("stock_music").select("track_id, rejected, last_used_at").in("track_id", hits.map((h) => h.id)) : { data: [] };
@@ -171,12 +172,12 @@ async function findWith(opts: { service: Service | null; readService?: Service; 
 }
 
 /** 다시 편집: 처음 고른 곡을 그대로 쓴다. 받지 못하면 null. */
-export async function reloadMusic(picked: PickedMusic, workDir: string): Promise<MusicToUse | null> {
+export async function reloadMusic(picked: PickedMusic, workDir: string, fileName = "music-reuse"): Promise<MusicToUse | null> {
   if (!picked.source?.url) return null;
   try {
     const res = await fetch(picked.source.url, { headers: { "User-Agent": "MCB-Video/1.0" } });
     if (!res.ok) return null;
-    const file = join(workDir, "music-reuse");
+    const file = join(workDir, fileName);
     writeFileSync(file, Buffer.from(await res.arrayBuffer()));
     return { ...picked, file };
   } catch {
