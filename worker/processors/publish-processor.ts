@@ -16,6 +16,7 @@ import {
 import { warnIfError } from "@/lib/supabase/result";
 import { mediaItemKinds } from "@/lib/upload/media-kind";
 import type { Json } from "@/types/database";
+import { fitInstagramImages } from "./instagram-image-fit";
 
 // publish_jobs.status_history는 jsonb. 워커가 쓰는 항목 형태.
 // (DB 컬럼 정의: docs/functional-specification.md §6.8, migration 0007)
@@ -467,8 +468,19 @@ async function runPublish(
   if (content.media_type === "TEXT" && account.platform !== "THREADS") {
     throw new PublishError(`글만 있는 콘텐츠는 스레드에만 올릴 수 있어요 (${account.platform})`, { permanent: true });
   }
-  const mediaSignedUrls =
+  let mediaSignedUrls =
     content.media_type === "TEXT" ? [] : await signMedia(supabase, content.media_urls);
+  // 3e-1. 인스타 사진 비율(4:5~1.91:1) — 범위 밖 사진은 동의(metadata.ig_auto_fit)했으면 잘라 사본으로 바꾸고,
+  //   아니면 인스타에 보내기 전에 멈춘다(instagram-image-fit.ts). 다른 플랫폼은 원본 그대로.
+  if (account.platform === "INSTAGRAM" && content.media_type === "IMAGE") {
+    mediaSignedUrls = await fitInstagramImages(
+      supabase,
+      MEDIA_BUCKET,
+      SIGNED_URL_TTL_SEC,
+      content,
+      mediaSignedUrls,
+    );
+  }
 
   // 3e-2. 커버(썸네일) — 사용자가 마법사에서 고른 프레임. metadata에서 추출.
   //   cover_ms:   TikTok/Instagram에 프레임 오프셋(ms)으로 전달.

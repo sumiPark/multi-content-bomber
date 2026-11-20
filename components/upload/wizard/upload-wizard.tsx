@@ -45,6 +45,12 @@ import {
 } from "@/app/(dashboard)/actions";
 import type { Captions } from "@/lib/ai/caption-generator";
 import type { ContentPlatform as Platform } from "@/lib/platforms";
+import {
+  describeRatio,
+  igAutoFitAllowed,
+  igFeedCrop,
+  type CropRect,
+} from "@/lib/platforms/instagram-aspect";
 import { TEXT_ONLY_PLATFORMS } from "@/lib/platforms/types";
 import type { WizardDraft, WizardDraftState } from "@/lib/upload/draft";
 import { uploadMedia, uploadOne } from "@/lib/storage/upload";
@@ -205,6 +211,13 @@ export function UploadWizard({
         )
       : null,
   );
+  // 인스타 비율(4:5~1.91:1) 밖 사진을 발행 때 가운데 기준으로 잘라 올려도 되는지 — 2단계에서 잘릴 모양을
+  // 보고 동의한다. 동의 전엔 인스타 계정이 막혀 다음으로 못 넘어간다(contents.metadata.ig_auto_fit).
+  const [igAutoFit, setIgAutoFit] = useState<boolean>(
+    () => draft?.state.igAutoFit ?? igAutoFitAllowed(draft?.metadata),
+  );
+  // 고른 사진의 크기 — 인스타 비율 밖 사진의 잘릴 모양 미리 보기에 쓴다.
+  const [imageItems, setImageItems] = useState<MediaItem[]>([]);
   const [uploading, setUploading] = useState(false);
   const [internalTitle, setInternalTitle] = useState(draft?.internalTitle ?? "");
   const [presetId, setPresetId] = useState<string>(draft?.state.presetId ?? "");
@@ -321,6 +334,7 @@ export function UploadWizard({
       }
       if (mediaType === "IMAGE") {
         if (files.length === 0) {
+          setImageItems([]);
           setValidation(
             resumedMedia
               ? restoredValidationFor(draft?.state.validation ?? null, selectedPlatforms)
@@ -349,7 +363,8 @@ export function UploadWizard({
           }),
         );
         if (cancelled) return;
-        setValidation(validateMedia("IMAGE", items, selectedPlatforms));
+        setImageItems(items);
+        setValidation(validateMedia("IMAGE", items, selectedPlatforms, { igAutoFit }));
       } else {
         if (!videoFile) {
           setValidation(
@@ -389,7 +404,19 @@ export function UploadWizard({
     return () => {
       cancelled = true;
     };
-  }, [files, videoFile, mediaType, selectedPlatforms, resumedMedia, draft]);
+  }, [files, videoFile, mediaType, selectedPlatforms, resumedMedia, draft, igAutoFit]);
+
+  // 인스타 계정에 사진을 올릴 때, 비율 밖이라 잘릴 사진과 남길 영역.
+  const igCropItems = useMemo(() => {
+    if (mediaType !== "IMAGE" || !selectedPlatforms.includes("INSTAGRAM")) return [];
+    const out: IgCropItem[] = [];
+    for (const item of imageItems) {
+      if (isVideoFile(item.file) || !item.width || !item.height) continue;
+      const crop = igFeedCrop(item.width, item.height);
+      if (crop) out.push({ file: item.file, width: item.width, height: item.height, crop });
+    }
+    return out;
+  }, [imageItems, mediaType, selectedPlatforms]);
 
   const canAdvanceStep1 = selectedAccountIds.length > 0;
 
@@ -447,6 +474,8 @@ export function UploadWizard({
     // 드롭존은 처음 그려질 때 빈 배열을 한 번 알린다 — 실제로 고른 때만 임시 저장 미디어를 버린다.
     if (next.length > 0) setResumedMedia(false);
     setFiles(next);
+    // 동의는 그때 본 잘릴 모양에 대한 것 — 새 사진이 들어오면 다시 확인받는다(순서만 바꾸거나 빼면 유지).
+    if (next.some((f) => !files.includes(f))) setIgAutoFit(false);
   }
 
   // 미리보기에서 캡처한 커버 프레임 — 시점(초)과 JPEG blob을 함께 받는다.
@@ -754,6 +783,10 @@ export function UploadWizard({
       accountIds: selectedAccountIds,
       scheduledFor,
       seriesByAccount,
+      // 인스타에 사진을 올릴 때만 동의 여부를 콘텐츠에 남긴다 — 워커가 이 값을 보고 자르거나 멈춘다.
+      ...(mediaType === "IMAGE" && selectedPlatforms.includes("INSTAGRAM")
+        ? { igAutoFit }
+        : {}),
     });
     if (!result.ok) {
       completingRef.current = false;
@@ -795,6 +828,7 @@ export function UploadWizard({
       replyChoice,
       analyzePaths,
       validation,
+      igAutoFit,
     };
     const result = await saveDraftAction({
       contentId,
@@ -930,6 +964,9 @@ export function UploadWizard({
             canAdvance={canAdvanceStep2}
             usingResumedMedia={usingResumedMedia}
             textAllowed={textAllowed}
+            igCropItems={igCropItems}
+            igAutoFit={igAutoFit}
+            onChangeIgAutoFit={setIgAutoFit}
           />
         )}
 
@@ -1510,10 +1547,17 @@ function Step2Media({
   canAdvance,
   usingResumedMedia,
   textAllowed,
+  igCropItems,
+  igAutoFit,
+  onChangeIgAutoFit,
 }: {
   mediaType: MediaType;
   /** 고른 계정이 모두 스레드라 글만 올릴 수 있는지. */
   textAllowed: boolean;
+  /** 인스타 비율(4:5~1.91:1) 밖이라 잘릴 사진들. */
+  igCropItems: IgCropItem[];
+  igAutoFit: boolean;
+  onChangeIgAutoFit: (on: boolean) => void;
   files: File[];
   videoFile: File | null;
   uploading: boolean;
@@ -1581,6 +1625,14 @@ function Step2Media({
             onCoverImageChange={onChangeCoverImage}
           />
         )}
+        {mediaType === "IMAGE" && igCropItems.length > 0 && (
+          <IgAspectFit
+            items={igCropItems}
+            checked={igAutoFit}
+            onChange={onChangeIgAutoFit}
+            disabled={uploading}
+          />
+        )}
         {validation && (
           <ValidationPanel
             validation={validation}
@@ -1601,6 +1653,91 @@ function Step2Media({
         </Button>
       </StepFooter>
     </>
+  );
+}
+
+interface IgCropItem {
+  file: File;
+  width: number;
+  height: number;
+  crop: CropRect;
+}
+
+// 인스타 비율 밖 사진 — 잘릴 모양을 먼저 보여 주고, 동의하면 발행 때 그 모양대로 잘라 올린다.
+// 밝은 칸이 남는 부분, 어두운 곳이 잘리는 부분. 다른 플랫폼에는 원본이 그대로 올라간다.
+function IgAspectFit({
+  items,
+  checked,
+  onChange,
+  disabled,
+}: {
+  items: IgCropItem[];
+  checked: boolean;
+  onChange: (on: boolean) => void;
+  disabled: boolean;
+}) {
+  const urls = useMemo(() => items.map((i) => URL.createObjectURL(i.file)), [items]);
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+
+  return (
+    <div
+      className={cn(
+        "space-y-3 rounded-lg px-3.5 py-3",
+        checked ? "bg-surface-2" : "bg-warn-soft",
+      )}
+    >
+      <div className="flex gap-2.5 text-sm text-ink-2">
+        <PlatformIcon platform="INSTAGRAM" size={16} />
+        <p className="min-w-0">
+          인스타그램은 4:5~1.91:1 비율의 사진만 받아요. 아래 {items.length}장은 비율이 맞지 않아
+          그대로 올리면 발행이 실패해요. 가운데를 기준으로 어두운 부분을 잘라서 올릴 수 있어요.
+        </p>
+      </div>
+      <ul className="flex flex-wrap gap-3">
+        {items.map((item, i) => {
+          const { crop } = item;
+          return (
+            <li key={`${item.file.name}-${i}`} className="space-y-1">
+              <div
+                className="relative h-32 overflow-hidden rounded-md bg-muted"
+                style={{ aspectRatio: `${item.width} / ${item.height}` }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- 로컬 파일 미리 보기(blob URL) */}
+                <img src={urls[i]} alt="" className="size-full object-fill" />
+                <div
+                  className="absolute rounded-[2px] shadow-[0_0_0_9999px_rgb(0_0_0/0.55)] ring-2 ring-white"
+                  style={{
+                    left: `${(crop.left / item.width) * 100}%`,
+                    top: `${(crop.top / item.height) * 100}%`,
+                    width: `${(crop.width / item.width) * 100}%`,
+                    height: `${(crop.height / item.height) * 100}%`,
+                  }}
+                />
+              </div>
+              <p className="max-w-40 truncate text-xs text-muted-foreground tabular-nums">
+                {describeRatio(item.width, item.height)} →{" "}
+                {describeRatio(crop.width, crop.height)}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+          className="mt-0.5 size-4 accent-primary"
+        />
+        <span className="min-w-0 text-sm">
+          인스타그램에는 이렇게 잘라서 올려도 괜찮아요
+          <span className="block text-xs text-muted-foreground">
+            다른 플랫폼에는 원본 그대로 올라가요. 잘리면 안 되는 사진이면 직접 잘라서 다시 골라 주세요.
+          </span>
+        </span>
+      </label>
+    </div>
   );
 }
 

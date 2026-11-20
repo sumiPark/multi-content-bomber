@@ -10,6 +10,7 @@ import {
 } from "@/lib/ai/caption-generator";
 import type { CaptionAccount } from "@/lib/ai/prompts";
 import { triggerPublishRun } from "@/lib/github-dispatch";
+import { igFitPaths } from "@/lib/platforms/instagram-aspect";
 import { TEXT_ONLY_PLATFORMS, type ContentPlatform } from "@/lib/platforms/types";
 import type { ContentRule } from "@/lib/rules/check";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -85,6 +86,8 @@ const createJobsInputSchema = z.object({
   seriesByAccount: z
     .record(z.string().uuid(), z.object({ seriesId: z.string().uuid(), reply: z.boolean() }))
     .optional(),
+  // 인스타 비율(4:5~1.91:1) 밖 사진을 발행 때 잘라 올려도 되는지(2026-11-20). 인스타에 사진을 올릴 때만 온다.
+  igAutoFit: z.boolean().optional(),
 });
 
 const createBlankInputSchema = z
@@ -750,6 +753,7 @@ export async function deleteContentsAction(
     delete rest.cover_path;
     delete rest.cover_image_path;
     delete rest.item_thumbs;
+    delete rest.ig_fit_paths;
     const { data: erased, error: eraseError } = await supabase
       .from("contents")
       .update({ ai_captions: null, draft_saved_at: null, metadata: { ...rest, erased_at: new Date().toISOString() } as Json })
@@ -791,7 +795,7 @@ export async function deleteContentsAction(
   const pathsOf = (t: { media_urls: string[]; metadata: unknown }) => {
     const meta = (t.metadata && typeof t.metadata === "object" ? t.metadata : {}) as Record<string, unknown>;
     // item_thumbs = 사진 게시물에 섞인 영상 장의 첫 프레임(lib/upload/media-kind.ts)
-    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path, meta.cover_image_path, meta.ig_cover_path, ...Object.values(itemThumbs(meta))].filter((x): x is string => typeof x === "string" && !!x);
+    return [...(t.media_urls ?? []), meta.thumbnail_path, meta.cover_path, meta.cover_image_path, meta.ig_cover_path, ...Object.values(itemThumbs(meta)), ...Object.values(igFitPaths(meta))].filter((x): x is string => typeof x === "string" && !!x);
   };
   const candidatePaths = Array.from(new Set(targets.filter((t) => deletedIds.has(t.id)).flatMap(pathsOf)));
 
@@ -863,7 +867,7 @@ export async function createPublishJobsAction(
 
   const { data: content } = await supabase
     .from("contents")
-    .select("media_type, media_urls, ai_captions")
+    .select("media_type, media_urls, ai_captions, metadata")
     .eq("id", parsed.data.contentId)
     .maybeSingle();
   if (!content) return { ok: false, error: "콘텐츠를 찾을 수 없습니다." };
@@ -928,6 +932,23 @@ export async function createPublishJobsAction(
     for (const [accountId, { seriesId }] of Object.entries(seriesByAccount)) {
       if (ownerById.get(seriesId) !== accountId) {
         return { ok: false, error: "선택한 시리즈를 찾을 수 없어요. 새로고침 후 다시 골라주세요." };
+      }
+    }
+  }
+
+  // 인스타 사진 자동 맞춤 동의를 발행 등록 전에 콘텐츠에 남긴다 — 워커가 이 값을 보고 자르거나 멈춘다.
+  if (parsed.data.igAutoFit !== undefined && content.media_type === "IMAGE") {
+    const prev =
+      content.metadata && typeof content.metadata === "object" && !Array.isArray(content.metadata)
+        ? (content.metadata as Record<string, Json | undefined>)
+        : {};
+    if (prev.ig_auto_fit !== parsed.data.igAutoFit) {
+      const { error: metaError } = await supabase
+        .from("contents")
+        .update({ metadata: { ...prev, ig_auto_fit: parsed.data.igAutoFit } })
+        .eq("id", parsed.data.contentId);
+      if (metaError) {
+        return { ok: false, error: `인스타 사진 맞춤 설정을 저장하지 못했어요: ${metaError.message}` };
       }
     }
   }

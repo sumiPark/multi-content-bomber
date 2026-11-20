@@ -3,6 +3,7 @@ import "./load-env";
 
 import { POSTED_KEEP_DAYS, shootFilesDeleteAt, UNPOSTED_KEEP_DAYS } from "@/lib/shoot/retention";
 import { AUTO_VIDEO_KEEP_DAYS } from "@/lib/auto-video/retention";
+import { igFitPaths } from "@/lib/platforms/instagram-aspect";
 import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
 
@@ -63,7 +64,14 @@ interface ContentRow {
 
 function contentPaths(c: ContentRow): string[] {
   const meta = (c.metadata && typeof c.metadata === "object" ? c.metadata : {}) as Record<string, unknown>;
-  const extra = [meta.thumbnail_path, meta.cover_path, meta.cover_image_path, meta.ig_cover_path].filter((p): p is string => typeof p === "string");
+  const extra = [
+    meta.thumbnail_path,
+    meta.cover_path,
+    meta.cover_image_path,
+    meta.ig_cover_path,
+    // 인스타 비율에 맞춰 워커가 잘라 올린 사진 사본(lib/platforms/instagram-aspect.ts)
+    ...Object.values(igFitPaths(meta)),
+  ].filter((p): p is string => typeof p === "string");
   return [...(c.media_urls ?? []), ...extra];
 }
 

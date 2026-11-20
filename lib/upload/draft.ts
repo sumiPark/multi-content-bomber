@@ -23,6 +23,8 @@ export interface WizardDraftState {
   analyzePaths: string[];
   /** 저장할 때의 미디어 검증 결과 — 이어서 할 땐 원본 파일이 없어 다시 검증할 수 없다. */
   validation: ValidationResult | null;
+  /** 인스타 비율 밖 사진을 발행 때 잘라 올리는 데 동의했는지(2026-11-20). 예전 임시 저장엔 없다. */
+  igAutoFit?: boolean;
 }
 
 /** 이어서 하기로 마법사를 열 때 넘기는 값 (upload/page.tsx가 만든다). */

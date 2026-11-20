@@ -1,4 +1,5 @@
 import type { ContentPlatform as Platform } from "@/lib/platforms";
+import { isIgFeedRatioOk } from "@/lib/platforms/instagram-aspect";
 import { TEXT_ONLY_PLATFORMS } from "@/lib/platforms/types";
 import {
   CAROUSEL_VIDEO_MAX_SEC,
@@ -136,10 +137,16 @@ function ratio(width?: number, height?: number): number | null {
   return width / height;
 }
 
+export interface ValidateOptions {
+  /** 인스타 비율 밖 사진을 발행 때 자동으로 잘라 올리는 데 동의했는지(contents.metadata.ig_auto_fit). */
+  igAutoFit?: boolean;
+}
+
 function evaluatePlatform(
   platform: Platform,
   mediaType: MediaType,
   items: MediaItem[],
+  options: ValidateOptions,
 ): PlatformVerdict {
   const c = CONSTRAINTS[platform];
   const { name, topic } = PLATFORM_KO[platform];
@@ -218,6 +225,37 @@ function evaluatePlatform(
         code: "carousel_video_tall",
         message: `${topic} 캐러셀을 4:5보다 길게 보여 주지 않아요. 세로 영상(9:16)은 위아래가 잘릴 수 있어요.`,
       });
+    }
+  }
+
+  // 인스타 피드 사진 비율(4:5~1.91:1). API는 범위 밖 사진을 자르지 않고 400으로 거부한다(2026-11-20).
+  // 동의(igAutoFit)가 없으면 막고, 있으면 워커가 발행 때 가운데 기준으로 잘라 올린다는 경고만 남긴다.
+  const igPhotoIsCheckedHere = platform === "INSTAGRAM" && mediaType === "IMAGE";
+  if (igPhotoIsCheckedHere) {
+    const outOfRange = items.filter(
+      (i) =>
+        !isVideoFile(i.file) &&
+        i.width !== undefined &&
+        i.height !== undefined &&
+        !isIgFeedRatioOk(i.width, i.height),
+    );
+    if (outOfRange.length > 0) {
+      const names = outOfRange.map((i) => i.file.name).join(", ");
+      issues.push(
+        options.igAutoFit
+          ? {
+              severity: "warning",
+              platform,
+              code: "ig_photo_aspect_fit",
+              message: `${topic} 비율이 맞지 않는 사진 ${outOfRange.length}장을 가운데 기준으로 잘라서 올려요 (${names}). 다른 플랫폼에는 원본 그대로 올라가요.`,
+            }
+          : {
+              severity: "error",
+              platform,
+              code: "ig_photo_aspect",
+              message: `${topic} 4:5~1.91:1 비율의 사진만 받아요. 비율이 맞지 않는 사진이 ${outOfRange.length}장 있어요 (${names}). 아래에서 잘릴 모양을 확인하고 자동 맞춤에 동의하거나, 사진을 잘라 다시 골라 주세요.`,
+            },
+      );
     }
   }
 
@@ -303,7 +341,8 @@ function evaluatePlatform(
     }
 
     const r = ratio(item.width, item.height);
-    if (r !== null && c.recommendedAspectRatio) {
+    // 인스타 사진은 위의 4:5~1.91:1 검사가 대신한다 — 9:16 권장 비율과 비교하면 정상 사진에도 경고가 떴다.
+    if (r !== null && c.recommendedAspectRatio && !(igPhotoIsCheckedHere && !itemIsVideo)) {
       const diff = Math.abs(r - c.recommendedAspectRatio);
       if (diff > ASPECT_TOLERANCE) {
         issues.push({
@@ -344,6 +383,7 @@ export function validateMedia(
   mediaType: MediaType,
   items: MediaItem[],
   selectedPlatforms: Platform[],
+  options: ValidateOptions = {},
 ): ValidationResult {
   if (items.length === 0 && mediaType !== "TEXT") {
     return {
@@ -355,7 +395,7 @@ export function validateMedia(
   }
 
   const perPlatform = selectedPlatforms.map((p) =>
-    evaluatePlatform(p, mediaType, items),
+    evaluatePlatform(p, mediaType, items, options),
   );
   const blocked = perPlatform
     .filter((v) => v.status === "blocked")
