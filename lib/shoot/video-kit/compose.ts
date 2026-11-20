@@ -2,7 +2,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editKitAsset } from "@/lib/agents/ko-skills";
 import type { EditPlan } from "@/lib/agents/edit-plan";
-import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, readableCaptionBlock, readableRows, ZONE_BOX, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
+import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, readableCaptionBlock, readableRows, ZONE_BOX, zoneCover, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import type { TimedGraphic, TimedReaction, Timeline } from "@/lib/shoot/video-kit/timeline";
 
 // 시각표 → HyperFrames 프로젝트(index.html + compositions). 글자 · 그래픽 틀은 ig-edit-ko/kit.json과 같은 이름을 쓴다.
@@ -52,6 +52,9 @@ export function hookLines(text: string): string[] {
 }
 
 // 위쪽 자리를 쓰는 그래픽 — 이 동안 자막은 위로 가지 않는다
+// 레퍼런스 자막 자리를 쓰다가 사람 · 상품이 이보다 많이 가리면 평소처럼 피한다(평소 기준 0.18보다 넉넉하게 — 사람 편집은 몸 위에도 자막을 둔다)
+const PREFER_MAX_COVER = 0.5;
+
 const TOP_GRAPHICS = new Set(["badge", "title", "chip", "notice", "stat", "split", "steps", "end_card"]);
 
 function graphicHtml(g: TimedGraphic): string {
@@ -174,6 +177,8 @@ export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
     if (tl.graphics.some((g) => TOP_GRAPHICS.has(g.type) && g.start < c.end && g.end > c.start)) busy.push("top");
     // 문장 자막은 늘 같은 자리(아래)에 둔다. 후킹 글자가 그 자리를 쓰는 동안만 다른 자리로 피한다
     if (c.sentence && !c.big && !busy.includes("lower")) return "lower";
+    // 스타일 쇼츠: 레퍼런스 자막 자리를 먼저 쓴다. 사람 · 상품이 그 자리를 많이 가릴 때만 평소처럼 피한다
+    if (tl.captionPrefer && !busy.includes(tl.captionPrefer) && zoneCover(zones, c.start, c.end, tl.captionPrefer) < PREFER_MAX_COVER) return tl.captionPrefer;
     return captionZone(zones, c.start, c.end, busy);
   });
 }

@@ -14,6 +14,16 @@ const TARGET_LUFS = -19;
 const SOFT_KINDS = new Set(["WHOOSH", "RISER", "DROP"]);
 const MAX_GAIN = 10;
 const MIN_GAIN = -14;
+// 지금 기준(TARGET_LUFS)으로 만든 완성본의 효과음 크기 — 바로 앞 소리보다 약 13dB(2026-11-20 실측, 933f2274).
+// 레퍼런스가 더 크게 쓰면 그 차이만큼(최대 MAX_BOOST) 올린다
+const BASE_OVER_BED_DB = 13;
+const MAX_BOOST = 6;
+
+/** 레퍼런스 효과음 크기(바로 앞 소리 대비 dB)에 맞춰 올릴 양. 값이 없거나 더 작으면 0. */
+export function sfxBoostDb(refOverBedDb: number | null | undefined): number {
+  if (refOverBedDb == null) return 0;
+  return Math.round(Math.max(0, Math.min(MAX_BOOST, refOverBedDb - BASE_OVER_BED_DB)) * 10) / 10;
+}
 
 export interface PlacedSfx {
   name: string;
@@ -32,7 +42,7 @@ interface Rendered {
 }
 
 /** 시각이 정해진 효과음을 만든다. 실패한 소리는 빼고 경고를 남긴다. 같은 id는 시각마다 다른 seed로 만들어 똑같이 들리지 않게 한다. */
-export function renderStyleSfx(sfx: { name: string; t: number }[], workDir: string): { placed: PlacedSfx[]; warnings: string[] } {
+export function renderStyleSfx(sfx: { name: string; t: number }[], workDir: string, boostDb = 0): { placed: PlacedSfx[]; warnings: string[] } {
   const known = sfx.filter((s) => paletteSound(s.name));
   if (!known.length) return { placed: [], warnings: [] };
   const dir = join(workDir, "sfx");
@@ -60,7 +70,7 @@ export function renderStyleSfx(sfx: { name: string; t: number }[], workDir: stri
       return;
     }
     const kind = paletteSound(s.name)?.kind ?? "UI";
-    const target = TARGET_LUFS - (SOFT_KINDS.has(kind) ? 3 : 0);
+    const target = TARGET_LUFS + boostDb - (SOFT_KINDS.has(kind) ? 3 : 0);
     const gain = res.lufs_m_max == null ? -6 : Math.max(MIN_GAIN, Math.min(MAX_GAIN, target - res.lufs_m_max));
     placed.push({ name: s.name, file: res.out, start: Math.max(0, s.t - (res.peak_s ?? 0)), gainDb: Math.round(gain * 10) / 10 });
   });

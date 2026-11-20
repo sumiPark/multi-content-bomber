@@ -185,6 +185,11 @@ export function hookZone(zones: CutZones[] | null, start: number, end: number, f
 }
 
 /** 자막 자리: 아래부터 보되, 후킹 · 위쪽 그래픽이 쓰는 자리는 뺀다. */
+/** 그 시간 동안 한 자리를 사람 · 상품이 가장 많이 가린 비율(0~1). 자리를 못 읽었으면 0. */
+export function zoneCover(zones: CutZones[] | null, start: number, end: number, zone: Zone): number {
+  return zones?.length ? worstCover(zones, start, end)[zone] : 0;
+}
+
 export function captionZone(zones: CutZones[] | null, start: number, end: number, busy: Zone[]): Zone {
   const order = (["lower", "mid", "top"] as Zone[]).filter((z) => !busy.includes(z));
   const allowed = order.length ? order : (["lower"] as Zone[]);

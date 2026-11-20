@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { EditPlan } from "@/lib/agents/edit-plan";
-import { planProblems } from "@/lib/shoot/video-kit/pipeline";
+import { captionZones } from "@/lib/shoot/video-kit/compose";
+import { planProblems, styleFinish } from "@/lib/shoot/video-kit/pipeline";
+import type { Timeline } from "@/lib/shoot/video-kit/timeline";
 import { captionStats, cardNumbers, speechPauses } from "./analyze";
 import type { OverlayScan, ReferenceAnalysis } from "./card";
+import { sfxBoostDb } from "./sfx";
 
 // 레퍼런스 카드에 더한 측정(2026-11-20): 말 사이 빈틈 · 말 자막 · 효과음 최소값
 
@@ -101,4 +104,45 @@ test("효과음 최소값 레퍼런스: 개수 상한 없이, 적으면 더 넣�
   // 최소값 레퍼런스인데 효과음이 없으면 더 넣으라고 한다
   const none = { ...plan, beats: beats.map((b) => ({ ...b, sfx: [] })) } as EditPlan;
   assert.ok(planProblems(none, undefined, { ...style, sfxIsMin: true }).some((p) => p.includes("5개 이상")));
+});
+
+// 렌더를 레퍼런스에 맞추기(2026-11-20 사용자 결정): 자막 자리 · 효과음 크기 · 끝 음악 끊기 · 음량
+
+test("자막 자리: 레퍼런스 자리를 먼저 쓰고, 사람 · 상품이 절반 넘게 가리면 평소처럼 피한다", () => {
+  const tl = {
+    duration: 10,
+    lines: [],
+    cuts: [],
+    graphics: [],
+    sfx: [],
+    hook: { start: 0, end: 1, onScreen: "", highlight: "", position: "top" },
+    captions: [
+      { id: "a", text: "가", emphasis: [], start: 2, end: 3, beat: 0 },
+      { id: "b", text: "나", emphasis: [], start: 5, end: 6, beat: 1 },
+    ],
+  } as unknown as Timeline;
+  // 2~4초는 아래를 몸이 30% 가림, 4~10초는 아래를 80% 가림
+  const zones = [
+    { start: 0, end: 4, cover: { top: 0, mid: 0.1, lower: 0.3 } },
+    { start: 4, end: 10, cover: { top: 0, mid: 0.2, lower: 0.8 } },
+  ];
+  // 지금(레퍼런스 자리 없음): 18% 넘게 가리면 피해 위 · 가운데로
+  assert.deepEqual(captionZones(tl, zones), ["mid", "top"]);
+  // 레퍼런스 아래: 30%는 아래에 두고, 80%는 피한다
+  assert.deepEqual(captionZones({ ...tl, captionPrefer: "lower" }, zones), ["lower", "top"]);
+});
+
+test("효과음 크기: 레퍼런스가 더 크게 쓰면 그만큼(최대 6dB) 올린다", () => {
+  assert.equal(sfxBoostDb(15.8), 2.8);
+  assert.equal(sfxBoostDb(12), 0);
+  assert.equal(sfxBoostDb(30), 6);
+  assert.equal(sfxBoostDb(null), 0);
+});
+
+test("믹스 마무리: 레퍼런스 대부분이 끝에 음악을 끊으면 마지막 말 직전에, 음량은 -14~-11 LUFS", () => {
+  const tl = { duration: 40, lines: [{ start: 0 }, { start: 36.5 }] } as unknown as Timeline;
+  assert.deepEqual(styleFinish({ endDropShare: 0.67, loudnessLufs: -8.3 }, tl), { musicDropAt: 36.5, targetLufs: -11 });
+  assert.deepEqual(styleFinish({ endDropShare: 0.33, loudnessLufs: -16 }, tl), { musicDropAt: null, targetLufs: -14 });
+  // 예전 카드: 아무것도 바꾸지 않는다
+  assert.deepEqual(styleFinish({}, tl), { musicDropAt: null, targetLufs: null });
 });

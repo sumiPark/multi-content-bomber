@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
@@ -27,6 +27,7 @@ import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/vid
 import { layoutBeats, snapCuts, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
 import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
 import { applyCaptionLook } from "@/lib/style-shorts/apply-look";
+import type { StyleCardNumbers } from "@/lib/style-shorts/card";
 import type { StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
 import type { PlacedSfx } from "@/lib/style-shorts/sfx";
 import type { createServiceClient } from "@/lib/supabase/service";
@@ -433,6 +434,8 @@ export function buildMix(
   placed?: PlacedSfx[],
   // 편집용 묶음: 섞기 직전의 음성 · 음악 · 효과음을 이 폴더에 따로 남긴다(말할 때 줄어드는 것까지 적용된 상태)
   stemsDir?: string,
+  // 스타일 쇼츠만(2026-11-20 사용자 결정 — 레퍼런스 소리에 맞춘다): 이 시각 직전 MUSIC_DROP_SEC 동안 음악을 끊고, 완성 믹스를 이 음량(LUFS)까지 올린다
+  finish?: { musicDropAt?: number | null; targetLufs?: number | null },
 ): { sfx: string[]; music: string | null; musicSource: MusicSource | null; stems?: { voice: string; music: string; sfx: string } } {
   const kit = editKit();
   const D = tl.duration.toFixed(3);
@@ -458,7 +461,9 @@ export function buildMix(
   parts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${D}[z]`);
   parts.push(`[z]${used.map((_, i) => `[s${i}]`).join("")}amix=inputs=${m + 1}:normalize=0:duration=longest,apad=whole_dur=${D},atrim=0:${D}[sfx]`);
   inputs.push("-stream_loop", "-1", "-i", music.file, "-i", voice);
-  parts.push(`[${m}:a]atrim=${music.in}:${music.in + tl.duration},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=${music.gain_db}dB,afade=t=in:d=0.3,afade=t=out:st=${Math.max(0, tl.duration - 1).toFixed(3)}:d=1[bg]`);
+  const dropAt = finish?.musicDropAt;
+  const drop = dropAt != null && dropAt > MUSIC_DROP_SEC + 1 ? `,volume=enable='between(t,${(dropAt - MUSIC_DROP_SEC).toFixed(3)},${dropAt.toFixed(3)})':volume=0` : "";
+  parts.push(`[${m}:a]atrim=${music.in}:${music.in + tl.duration},asetpts=PTS-STARTPTS,aresample=48000,aformat=channel_layouts=stereo,volume=${music.gain_db}dB,afade=t=in:d=0.3,afade=t=out:st=${Math.max(0, tl.duration - 1).toFixed(3)}:d=1${drop}[bg]`);
   parts.push(`[${m + 1}:a]aformat=channel_layouts=stereo,asplit=3[k1][k2][vm]`);
   parts.push("[bg][k1]sidechaincompress=threshold=0.05:ratio=3.5:attack=20:release=260:makeup=1[bgd]");
   parts.push("[sfx][k2]sidechaincompress=threshold=0.06:ratio=2:attack=5:release=120:makeup=1[sfxd]");
@@ -466,6 +471,7 @@ export function buildMix(
   if (!stemsDir) {
     parts.push(`[vm][sfxd][bgd]amix=inputs=3:normalize=0:duration=first,volume=1dB,alimiter=limit=0.84:level=false,atrim=0:${D}[mix]`);
     ffmpeg(["-y", "-v", "error", ...inputs, "-filter_complex", parts.join(";"), "-map", "[mix]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", dest]);
+    raiseLoudness(dest, finish?.targetLufs);
     return result;
   }
   mkdirSync(stemsDir, { recursive: true });
@@ -475,7 +481,35 @@ export function buildMix(
   parts.push(`[vmS]atrim=0:${D}[vo]`, `[sfS]apad=whole_dur=${D},atrim=0:${D}[fx]`, `[bgS]apad=whole_dur=${D},atrim=0:${D}[bm]`);
   const wav = ["-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le"];
   ffmpeg(["-y", "-v", "error", ...inputs, "-filter_complex", parts.join(";"), "-map", "[mix]", ...wav, dest, "-map", "[vo]", ...wav, stems.voice, "-map", "[fx]", ...wav, stems.sfx, "-map", "[bm]", ...wav, stems.music]);
+  raiseLoudness(dest, finish?.targetLufs);
   return { ...result, stems };
+}
+
+// 스타일 쇼츠 완성 음량 범위(LUFS). 레퍼런스가 더 커도(사람 편집 -8.3, 찢어진 소리 있음) -11까지만 올린다
+const STYLE_LUFS = { min: -14, max: -11 };
+
+/** 스타일 쇼츠 믹스 마무리 — 레퍼런스 대부분이 끝 직전 음악을 끊으면 마지막 말 직전에 끊고, 레퍼런스 음량에 맞춰 올린다. 예전 카드(값 없음)는 그대로. */
+export function styleFinish(n: Pick<StyleCardNumbers, "endDropShare" | "loudnessLufs">, tl: Pick<Timeline, "lines" | "duration">): { musicDropAt: number | null; targetLufs: number | null } {
+  const last = tl.lines.at(-1);
+  return {
+    musicDropAt: n.endDropShare != null && n.endDropShare >= 0.5 && last && last.start > 3 ? last.start : null,
+    targetLufs: n.loudnessLufs != null ? Math.max(STYLE_LUFS.min, Math.min(STYLE_LUFS.max, n.loudnessLufs)) : null,
+  };
+}
+
+// 끝 직전 음악을 끊는 길이(사람 편집 실측 0.3초, 2026-11-20)
+const MUSIC_DROP_SEC = 0.3;
+// 완성 믹스 음량을 올릴 때 넘지 않는 표본 최고점(약 -1dB)
+const LOUDNESS_PEAK_LIMIT = 0.89;
+
+/** 완성 믹스를 목표 음량까지 올린다(낮추지는 않는다). 최고점은 리미터로 약 -1dB 아래에 둔다. */
+function raiseLoudness(file: string, target: number | null | undefined): void {
+  if (target == null) return;
+  const now = lufs(file);
+  if (now == null || target - now < 0.5) return;
+  const tmp = `${file}.loud.wav`;
+  ffmpeg(["-y", "-v", "error", "-i", file, "-af", `volume=${(target - now).toFixed(1)}dB,alimiter=limit=${LOUDNESS_PEAK_LIMIT}:level=false`, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", tmp]);
+  renameSync(tmp, file);
 }
 
 function lufs(file: string): number | null {
@@ -786,6 +820,9 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   let tl = timeText(plan, preset ? base : snapCuts(base, words, seconds), words, live, { keepEndCardCaptions: readable });
   if (input.presetSfx) tl = { ...tl, sfx: input.presetSfx.filter((s) => s.t >= 0 && s.t < tl.duration) };
   if (readable) tl = { ...tl, captions: readableCaptions(tl.captions) };
+  // 스타일 쇼츠: 레퍼런스에서 잰 말 자막 자리를 먼저 쓴다(2026-11-20 사용자 결정)
+  const refPlace = input.stylePlan?.card.numbers.captionPlace;
+  if (refPlace) tl = { ...tl, captionPrefer: refPlace };
   // 사람이 볼 수 있게 어디에 들어갔는지 남긴다. 경고가 있으면 자동 발행도 멈춘다
   for (const u of visual.used) {
     const line = tl.lines[u.beat];
@@ -822,7 +859,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     placedSfx = made.placed;
     warnings.push(...made.warnings);
   }
-  const { stems, ...sounds } = buildMix(tl, voice, mix, music, placedSfx, input.exportParts ? join(workDir, "stems") : undefined);
+  const { stems, ...sounds } = buildMix(tl, voice, mix, music, placedSfx, input.exportParts ? join(workDir, "stems") : undefined, input.stylePlan ? styleFinish(input.stylePlan.card.numbers, tl) : undefined);
   // 장면마다 상품 · 사람이 있는 자리를 읽어 글자가 피하게 한다. 못 읽으면 기본 자리
   const zones = input.presetZones ?? subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
     const owner = allClips.find((c) => c.no === tl.cuts[i]?.clip);

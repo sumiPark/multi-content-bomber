@@ -19,7 +19,7 @@ import { allowGothicFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import { captionFontDirective } from "@/lib/style-shorts/caption-look";
 import { transcribeWords } from "@/lib/shoot/video-kit/tools";
 import type { StyleCard } from "@/lib/style-shorts/card";
-import { renderStyleSfx } from "@/lib/style-shorts/sfx";
+import { renderStyleSfx, sfxBoostDb } from "@/lib/style-shorts/sfx";
 import { CLIP_KEEP_DAYS, PARTS_BUCKET, type JobClip, type VersionRequest, type VersionTimeline } from "@/lib/style-shorts/jobs";
 import { warnIfError } from "@/lib/supabase/result";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -238,7 +238,8 @@ async function main() {
         stylePlan: { card, voiceMode: liveVoice ? "LIVE" : "AI", script, concept },
         revise: revise?.revise ?? null,
         reviseFrames: revise?.frames,
-        sfxRenderer: renderStyleSfx,
+        // 효과음 크기는 레퍼런스에서 잰 값에 맞춘다(2026-11-20 사용자 결정). 예전 카드는 그대로
+        sfxRenderer: (sfx, dir) => renderStyleSfx(sfx, dir, sfxBoostDb(card.numbers.sfxOverBedDb)),
         // 캡컷 등에서 이어 편집할 파일 묶음(2026-11-19 사용자 결정)
         exportParts: true,
         // 자막 디자인 AI가 참고하는 글 — 레퍼런스 자막 모양(글꼴 · 모션 지시)과 카드의 자막 · 화면 설명

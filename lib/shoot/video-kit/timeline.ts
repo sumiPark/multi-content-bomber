@@ -113,6 +113,8 @@ export interface Timeline {
   // 스타일 쇼츠만. 다른 경로에는 없다
   reactions?: TimedReaction[];
   zooms?: TimedZoom[];
+  // 레퍼런스에서 잰 말 자막 자리(2026-11-20 사용자 결정). 사람 · 상품이 많이 가릴 때만 다른 자리로 피한다
+  captionPrefer?: "top" | "mid" | "lower";
 }
 
 // 반응 글자가 화면에 머무는 시간(초) — 글자 수로 어림한다
