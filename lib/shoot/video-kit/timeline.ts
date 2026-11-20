@@ -55,6 +55,8 @@ export interface TimedCaption {
   big?: boolean;
   // 사람이 정한 자리(스타일 쇼츠 주석). 없으면 코드가 상품 · 사람을 피해 고른다
   pin?: "top" | "mid" | "lower";
+  // 이 말을 하는 사람(스타일 쇼츠의 말소리 영상). 화면 속 사람의 말은 위 · 가운데, 화면 밖 목소리는 아래에 둔다
+  speaker?: "on_screen" | "off_screen";
 }
 
 export interface TimedGraphic {
@@ -100,6 +102,8 @@ export interface TimedLine {
   fileOut: number;
   tts: string;
   live: boolean;
+  // 원본을 이 배수로 빠르게 돌린 말소리 줄(스타일 쇼츠). 없으면 원래 빠르기
+  speed?: number;
 }
 
 export interface Timeline {
@@ -132,20 +136,42 @@ export interface FixedLayout {
   duration?: number;
 }
 
-export function layoutBeats(plan: EditPlan, voices: VoiceClip[], clipSeconds: Map<number, number>, fixed?: FixedLayout): Omit<Timeline, "captions" | "graphics" | "sfx" | "hook"> {
+/**
+ * 말 길이 말고 시각표가 더하는 시간(초) — 맨 앞 여유 + 비트 사이 틈 + 끝 여유. 길이 점검(planProblems)이 완성본 길이를 어림할 때 쓴다.
+ * liveGap: 말소리 비트끼리 이어질 때의 틈(layoutBeats와 같은 값을 넘긴다).
+ */
+export function layoutExtraSeconds(plan: Pick<EditPlan, "beats">, liveGap?: number): number {
+  const gaps = plan.beats.reduce((s, b, i) => s + (i === 0 ? 0 : beatGap(plan.beats[i - 1], b, liveGap)), 0);
+  const hasEndCard = plan.beats[plan.beats.length - 1]?.graphics.some((g) => g.type === "end_card");
+  return HEAD + gaps + (hasEndCard ? TAIL_END_CARD : TAIL_PLAIN);
+}
+
+function beatGap(prev: Pick<EditBeat, "mode">, beat: Pick<EditBeat, "mode">, liveGap?: number): number {
+  return liveGap != null && prev.mode === "live" && beat.mode === "live" ? liveGap : GAP;
+}
+
+/**
+ * opts.liveGap: 말소리 비트가 이어질 때 그 사이에 두는 틈(초). 스타일 쇼츠의 말소리 영상만 0을 넘긴다(2026-11-20 사용자 결정) —
+ * 점프 컷마다 0.14초씩 말이 끊겨 완성본이 3~4초 길어지고 말이 느리게 들렸다. 넘기지 않으면(직접 촬영 · AI 자동 · lemo) 예전 그대로 GAP이다.
+ * opts.liveSpeed: 말소리 비트의 원본(화면 + 말)을 이 배수로 빠르게 돌린다. 스타일 쇼츠의 말소리 영상만 넘긴다(2026-11-20 사용자 결정 —
+ * 사람 편집본이 같은 말을 원본보다 약 1.3배 빠르게 쓴다). 넘기지 않으면 예전처럼 원래 빠르기다.
+ */
+export function layoutBeats(plan: EditPlan, voices: VoiceClip[], clipSeconds: Map<number, number>, fixed?: FixedLayout, opts: { liveGap?: number; liveSpeed?: number } = {}): Omit<Timeline, "captions" | "graphics" | "sfx" | "hook"> {
   const lines: TimedLine[] = [];
+  const liveSpeed = opts.liveSpeed && opts.liveSpeed > 0 ? opts.liveSpeed : 1;
   let t = HEAD;
   plan.beats.forEach((beat, i) => {
     const v = voices[i];
-    const length = v.estimated ?? v.fileOut - v.fileIn;
-    if (i > 0) t += GAP;
+    const speed = beat.mode === "live" && !fixed?.lines[i] ? liveSpeed : 1;
+    const length = v.estimated ?? (v.fileOut - v.fileIn) / speed;
+    if (i > 0) t += beatGap(plan.beats[i - 1], beat, opts.liveGap);
     const at = fixed?.lines[i];
     if (at) {
       lines.push({ beat: i, start: round(at.start), end: round(at.end), file: v.file, fileIn: v.fileIn, fileOut: v.fileOut, tts: beat.tts, live: beat.mode === "live" });
       t = at.end;
       return;
     }
-    lines.push({ beat: i, start: round(t), end: round(t + length), file: v.file, fileIn: v.fileIn, fileOut: v.fileOut, tts: beat.tts, live: beat.mode === "live" });
+    lines.push({ beat: i, start: round(t), end: round(t + length), file: v.file, fileIn: v.fileIn, fileOut: v.fileOut, tts: beat.tts, live: beat.mode === "live", ...(speed !== 1 ? { speed } : {}) });
     t += length;
   });
   const hasEndCard = plan.beats[plan.beats.length - 1]?.graphics.some((g) => g.type === "end_card");
@@ -168,9 +194,9 @@ export function layoutBeats(plan: EditPlan, voices: VoiceClip[], clipSeconds: Ma
       let to = clamp(c.out, from + 0.1, seconds);
       let rate = (to - from) / Math.max(0.05, dur);
       if (beat.mode === "live") {
-        // 말은 원래 빠르기로
-        rate = 1;
-        to = Math.min(seconds, from + dur);
+        // 말은 원래 빠르기로. 스타일 쇼츠만 정해진 배수로 돌린다(소리도 같은 배수 — buildVoiceTrack)
+        rate = lines[i]?.speed ?? 1;
+        to = Math.min(seconds, from + dur * rate);
       } else if (rate > MAX_RATE) {
         to = from + dur * MAX_RATE;
         rate = MAX_RATE;
@@ -339,10 +365,12 @@ export function timeText(plan: EditPlan, base: Omit<Timeline, "captions" | "grap
   const first = base.lines[0];
   // 사람이 정한 글자 자리(스타일 쇼츠 주석). 계획에 없으면 지금처럼 자동 자리
   const pinOf = new Map((plan.text_places?.captions ?? []).map((p) => [p.beat, p.place]));
+  const whoOf = new Map((plan.speakers ?? []).map((p) => [p.beat, p.who]));
+  const placed = captions.map((c) => ({ ...c, ...(pinOf.has(c.beat) ? { pin: pinOf.get(c.beat) } : {}), ...(whoOf.has(c.beat) ? { speaker: whoOf.get(c.beat) } : {}) }));
   const hookPin = plan.text_places?.hook && plan.text_places.hook !== "auto" ? plan.text_places.hook : undefined;
   return {
     ...base,
-    captions: pinOf.size ? captions.map((c) => (pinOf.has(c.beat) ? { ...c, pin: pinOf.get(c.beat) } : c)) : captions,
+    captions: pinOf.size || whoOf.size ? placed : captions,
     graphics,
     sfx: sfx.sort((a, b) => a.t - b.t),
     hook: {

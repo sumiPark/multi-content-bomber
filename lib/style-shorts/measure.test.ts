@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { EditPlan } from "@/lib/agents/edit-plan";
+import { transcriptForPlan, type EditPlan } from "@/lib/agents/edit-plan";
 import { captionZones } from "@/lib/shoot/video-kit/compose";
-import { planProblems, styleFinish, styleMusicSwitches } from "@/lib/shoot/video-kit/pipeline";
-import type { Timeline } from "@/lib/shoot/video-kit/timeline";
+import { liveCaptionLines, liveLineWords, planProblems, styleFinish, styleLiveGap, styleLiveSpeed, styleMusicSwitches } from "@/lib/shoot/video-kit/pipeline";
+import { layoutBeats, layoutExtraSeconds, type Timeline } from "@/lib/shoot/video-kit/timeline";
 import { captionStats, cardNumbers, musicChangeAt, speechPauses } from "./analyze";
 import type { OverlayScan, ReferenceAnalysis } from "./card";
 import { sfxBoostDb } from "./sfx";
@@ -173,4 +173,156 @@ test("곡 바꿈 시각: 레퍼런스 절반 이상이 바꾸면 그 위치에�
   assert.deepEqual(styleMusicSwitches({}, tl), []);
   // 끝 3초 안의 컷에는 두지 않는다
   assert.deepEqual(styleMusicSwitches({ musicChangeShare: 1, musicChangeAt: [0.99] }, tl), [35]);
+});
+
+// 사람 편집본과 비교해 고친 세 가지(2026-11-20 사용자 결정): 자막은 얼굴만 피하기 · 낱말 시각으로 자르기 · 길이 점검에 틈 포함
+
+test("자막 자리: 얼굴 자리를 쟀으면 몸이 가려도 레퍼런스 자리에 두고, 얼굴이 있을 때만 피한다", () => {
+  const tl = {
+    duration: 10,
+    lines: [],
+    cuts: [],
+    graphics: [],
+    sfx: [],
+    hook: { start: 0, end: 1, onScreen: "", highlight: "", position: "top" },
+    captionPrefer: "lower",
+    captions: [
+      { id: "a", text: "가", emphasis: [], start: 2, end: 3, beat: 0 },
+      { id: "b", text: "나", emphasis: [], start: 5, end: 6, beat: 1 },
+      { id: "c", text: "다", emphasis: [], start: 8, end: 9, beat: 2 },
+    ],
+  } as unknown as Timeline;
+  const zones = [
+    // 몸이 아래를 90% 가리지만 얼굴은 위에 있다 → 아래 그대로
+    { start: 0, end: 4, cover: { top: 0.5, mid: 0.8, lower: 0.9 }, face: { top: 1, mid: 0, lower: 0 } },
+    // 얼굴이 아래에 걸쳤다 → 얼굴이 없는 자리 중 덜 가린 곳으로
+    { start: 4, end: 7, cover: { top: 0.1, mid: 0.6, lower: 0.7 }, face: { top: 0, mid: 0.6, lower: 0.5 } },
+    // 얼굴을 못 잰 컷은 예전 기준(절반 넘게 가리면 피한다)
+    { start: 7, end: 10, cover: { top: 0, mid: 0.2, lower: 0.8 } },
+  ];
+  assert.deepEqual(captionZones(tl, zones), ["lower", "top", "top"]);
+});
+
+test("말소리 자막: 문장 중간에서 자른 컷에는 그 컷에 들어온 낱말만 쓴다", () => {
+  const segments = [{ text: "어 오늘은 해물모듬을 소개할게요.", start: 1, end: 5 }];
+  const words = [
+    { text: "어", start: 1, end: 1.3 },
+    { text: "오늘은", start: 2, end: 2.5 },
+    { text: "해물모듬을", start: 2.6, end: 3.4 },
+    { text: "소개할게요", start: 3.5, end: 4.6 },
+  ];
+  // 군말 "어"를 빼고 2초부터 쓴 컷
+  const [part] = liveCaptionLines(segments, words, 1.95, 4.7, 10);
+  assert.equal(part.text, "오늘은 해물모듬을 소개할게요");
+  assert.ok(Math.abs(part.start - 10.05) < 1e-6 && Math.abs(part.end - 12.65) < 1e-6);
+  // 문장이 다 들어오면 받아쓰기 문장 그대로(문장부호 유지)
+  assert.equal(liveCaptionLines(segments, words, 0.9, 5, 0)[0].text, "어 오늘은 해물모듬을 소개할게요.");
+  // 낱말이 하나도 안 들어온 컷(문장 끝의 쉼만 걸침)은 자막이 없다
+  assert.deepEqual(liveCaptionLines(segments, words, 4.7, 5, 0), []);
+  // 낱말 시각이 없으면 예전처럼 겹친 문장 전체
+  assert.equal(liveCaptionLines(segments, [], 2, 4, 0)[0].text, "어 오늘은 해물모듬을 소개할게요.");
+});
+
+test("계획 AI에 넘기는 받아쓰기: 문장마다 낱말별 시각을 붙인다", () => {
+  const out = transcriptForPlan({ transcript: [{ text: "가 나.", start: 0, end: 2 }, { text: "다.", start: 3, end: 4 }], transcriptWords: [{ text: "가", start: 0.1, end: 0.5 }, { text: "나", start: 0.7, end: 1.234 }] });
+  assert.deepEqual(out, [{ text: "가 나.", start: 0, end: 2, words: [["가", 0.1, 0.5], ["나", 0.7, 1.23]] }, { text: "다.", start: 3, end: 4 }]);
+});
+
+test("말소리 스타일 쇼츠: 점프 컷 사이에 틈이 없고, 다른 경로는 0.14초 틈 그대로", () => {
+  const live = (i: number): EditPlan["beats"][number] => ({ mode: "live", tts: "", captions: [], big: false, emphasis: [], cuts: [{ clip: 1, in: i * 3, out: i * 3 + 2, what: "" }], graphics: [], sfx: [] });
+  const plan = { beats: [live(0), live(1), live(2)] } as unknown as EditPlan;
+  const voices = plan.beats.map((b) => ({ file: "a.mov", fileIn: b.cuts[0].in, fileOut: b.cuts[0].out }));
+  const seconds = new Map([[1, 20]]);
+  const before = layoutBeats(plan, voices, seconds);
+  assert.deepEqual(before.lines.map((l) => l.start), [0.05, 2.19, 4.33]);
+  const tight = layoutBeats(plan, voices, seconds, undefined, { liveGap: styleLiveGap({ voiceMode: "LIVE" }) });
+  assert.deepEqual(tight.lines.map((l) => l.start), [0.05, 2.05, 4.05]);
+  assert.ok(Math.abs(tight.duration - 6.25) < 0.02);
+  // AI 음성 스타일 쇼츠는 틈을 그대로 둔다
+  assert.equal(styleLiveGap({ voiceMode: "AI" }), undefined);
+  // 길이 점검이 쓰는 값과 시각표가 맞는다
+  assert.ok(Math.abs(layoutExtraSeconds(plan, 0) - 0.25) < 1e-9);
+  assert.ok(Math.abs(layoutExtraSeconds(plan) - 0.53) < 1e-9);
+});
+
+test("길이 점검: 말소리 영상은 고른 구간 + 시각표 여유로 재고 5%만 넘어간다", () => {
+  const live = (len: number, i: number): EditPlan["beats"][number] => ({ mode: "live", tts: "", captions: [], big: false, emphasis: [], cuts: [{ clip: i + 1, in: 0, out: len, what: "" }], graphics: [], sfx: [] });
+  const of = (len: number) => ({ hook: { on_screen: "첫 글자" }, caption_style: "sentence", beats: Array.from({ length: 20 }, (_, i) => live(len, i)) }) as unknown as EditPlan;
+  const style = { sfxPer10s: null, avgShotSec: null, durationSec: [44, 55.8] as [number, number], footageSeconds: 500, liveGap: 0 };
+  const long = (p: EditPlan, s = style) => planProblems(p, undefined, s).filter((x) => x.includes("길어요"));
+  // 20컷 × 3.2초 = 64초: 예전(15% 여유)에는 통과했다
+  assert.match(long(of(3.2))[0], /영상이 64\.3초라 레퍼런스\(44~55\.8초\)보다 길어요.*낱말 시각/);
+  // 20컷 × 2.9초 = 58.25초: 5% 안
+  assert.deepEqual(long(of(2.9)), []);
+  // 틈이 있는 경로(liveGap 없음)는 틈 2.66초까지 더해 잰다
+  assert.match(long(of(2.9), { ...style, liveGap: undefined as never })[0], /60\.9초\(장면 사이 틈 · 끝 여유 2\.9초 포함\)라 레퍼런스/);
+});
+
+test("말소리 스타일 쇼츠: 원본(화면 + 말)을 1.3배속으로 돌리고 자막 시각 · 길이 점검도 같은 배수로 잰다", () => {
+  const live = (i: number): EditPlan["beats"][number] => ({ mode: "live", tts: "", captions: [], big: false, emphasis: [], cuts: [{ clip: 1, in: i * 5, out: i * 5 + 2.6, what: "" }], graphics: [], sfx: [] });
+  const plan = { beats: [live(0), live(1)] } as unknown as EditPlan;
+  const voices = plan.beats.map((b) => ({ file: "a.mov", fileIn: b.cuts[0].in, fileOut: b.cuts[0].out }));
+  const speed = styleLiveSpeed({ voiceMode: "LIVE" });
+  assert.equal(speed, 1.3);
+  assert.equal(styleLiveSpeed({ voiceMode: "AI" }), undefined);
+  const tl = layoutBeats(plan, voices, new Map([[1, 20]]), undefined, { liveGap: 0, liveSpeed: speed });
+  // 2.6초짜리 말이 2초가 된다
+  assert.deepEqual(tl.lines.map((l) => [l.start, l.end, l.speed]), [[0.05, 2.05, 1.3], [2.05, 4.05, 1.3]]);
+  // 화면도 같은 배수: 컷 길이 × 1.3만큼의 원본을 쓴다
+  for (const c of tl.cuts) {
+    assert.equal(c.rate, 1.3);
+    assert.ok(Math.abs((c.out - c.in) / c.duration - 1.3) < 0.01);
+  }
+  // 넘기지 않으면 원래 빠르기
+  assert.equal(layoutBeats(plan, voices, new Map([[1, 20]])).cuts[0].rate, 1);
+  // 자막: 원본에서 1.3초 뒤에 시작한 말은 완성본에서 1초 뒤
+  const [cap] = liveCaptionLines([{ text: "가 나", start: 1.3, end: 2.6 }], [], 0, 2.6, 10, 1.3);
+  assert.ok(Math.abs(cap.start - 11) < 1e-6 && Math.abs(cap.end - 12) < 1e-6);
+  // 길이 점검: 20컷 × 3.6초 = 72초 원본 → 55.4초 영상이라 통과, 배속이 없으면 길다
+  const of = { hook: { on_screen: "첫 글자" }, caption_style: "sentence", beats: Array.from({ length: 20 }, (_, i) => ({ ...live(0), cuts: [{ clip: i + 1, in: 0, out: 3.6, what: "" }] })) } as unknown as EditPlan;
+  const style = { sfxPer10s: null, avgShotSec: null, durationSec: [44, 55.8] as [number, number], footageSeconds: 500, liveGap: 0 };
+  assert.deepEqual(planProblems(of, undefined, { ...style, liveSpeed: 1.3 }).filter((x) => x.includes("길어요")), []);
+  assert.equal(planProblems(of, undefined, style).filter((x) => x.includes("길어요")).length, 1);
+});
+
+test("자막 자리: 화면 밖 목소리는 아래, 화면 속 사람의 말은 가운데 · 위 중 얼굴이 없는 자리", () => {
+  const cap = (id: string, start: number, speaker?: "on_screen" | "off_screen") => ({ id, text: "가", emphasis: [], start, end: start + 1, beat: 0, ...(speaker ? { speaker } : {}) });
+  const tl = {
+    duration: 20,
+    lines: [],
+    cuts: [],
+    graphics: [],
+    sfx: [],
+    hook: { start: 0, end: 1, onScreen: "", highlight: "", position: "top" },
+    captionPrefer: "lower",
+    captions: [cap("a", 2, "off_screen"), cap("b", 5, "on_screen"), cap("c", 8, "on_screen"), cap("d", 11), cap("e", 14, "on_screen")],
+  } as unknown as Timeline;
+  const zones = [
+    // 얼굴이 가운데에 있는 컷: 화면 밖 목소리는 아래, 화면 속 사람의 말은 위
+    { start: 0, end: 7, cover: { top: 0.3, mid: 0.8, lower: 0.9 }, face: { top: 0.1, mid: 0.8, lower: 0 } },
+    // 얼굴이 위에 있는 컷: 가운데가 비어 가운데에
+    { start: 7, end: 10, cover: { top: 0.6, mid: 0.4, lower: 0.9 }, face: { top: 0.9, mid: 0.1, lower: 0 } },
+    // 말하는 사람을 모르는 자막은 예전처럼 레퍼런스 자리
+    { start: 10, end: 13, cover: { top: 0, mid: 0.5, lower: 0.9 }, face: { top: 0, mid: 0.8, lower: 0 } },
+    // 위 · 가운데 모두 얼굴이 걸치면 덜 걸친 쪽
+    { start: 13, end: 20, cover: { top: 0.5, mid: 0.9, lower: 0.9 }, face: { top: 0.4, mid: 0.9, lower: 0.2 } },
+  ];
+  assert.deepEqual(captionZones(tl, zones), ["lower", "top", "mid", "lower", "top"]);
+});
+
+test("말소리 영상의 낱말 시각: 원본 받아쓰기의 낱말 시각을 완성본 시각으로 옮긴다(다시 받아쓰지 않는다)", () => {
+  const plan = { beats: [{ cuts: [{ clip: 1, in: 2, out: 4.6 }] }, { cuts: [{ clip: 2, in: 0, out: 1.3 }] }] } as unknown as EditPlan;
+  const lines = [
+    { beat: 0, start: 0.05, fileIn: 2, fileOut: 4.6, live: true, speed: 1.3 },
+    { beat: 1, start: 2.05, fileIn: 0, fileOut: 1.3, live: true, speed: 1.3 },
+  ];
+  const clips = [
+    { no: 1, hasAudio: true, transcriptWords: [{ text: "앞", start: 0.5, end: 0.9 }, { text: "가", start: 2, end: 2.65 }, { text: "나", start: 3.3, end: 3.95 }] },
+    { no: 2, hasAudio: false },
+  ];
+  const words = liveLineWords(lines, plan, clips)!;
+  assert.deepEqual(words.map((w) => [w.text, Number(w.start.toFixed(2)), Number(w.end.toFixed(2))]), [["가", 0.05, 0.55], ["나", 1.05, 1.55]]);
+  // AI 음성 줄이 섞였거나, 소리가 있는데 낱말 시각이 없으면 예전처럼 완성본을 받아쓴다
+  assert.equal(liveLineWords([{ ...lines[0], live: false }], plan, clips), null);
+  assert.equal(liveLineWords(lines, plan, [{ no: 1, hasAudio: true }, clips[1]]), null);
 });

@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createReadStream, readFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { getOpenAI } from "@/lib/openai";
 
@@ -15,6 +16,36 @@ export function ffmpeg(args: string[]): string {
   if (r.status !== 0) throw new Error(`ffmpeg 오류(${r.status}): ${(r.stderr || "").split("\n").slice(-6).join(" ").slice(0, 600)}`);
   // 측정 필터는 stderr에 쓴다
   return `${r.stdout}\n${r.stderr}`;
+}
+
+// 한꺼번에 돌리는 ffmpeg 수. 러너(4코어)는 2개, 코어가 많은 PC는 4개까지
+export const FFMPEG_PARALLEL = Math.min(4, Math.max(2, Math.floor(availableParallelism() / 2)));
+
+/** ffmpeg를 기다리지 않고 돌린다 — 서로 상관없는 작업(컷 자르기 등)을 동시에 돌릴 때 쓴다. 결과 · 오류 형식은 ffmpeg()와 같다. */
+export function ffmpegAsync(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const p = spawn(FFMPEG, ["-nostdin", ...args], { windowsHide: true });
+    let out = "";
+    let err = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.stderr.on("data", (d) => (err += d));
+    p.on("error", (e) => reject(new Error(`ffmpeg 실행 실패: ${e.message}`)));
+    p.on("close", (code) => (code === 0 ? resolve(`${out}\n${err}`) : reject(new Error(`ffmpeg 오류(${code}): ${err.split("\n").slice(-6).join(" ").slice(0, 600)}`))));
+  });
+}
+
+/** 한 번에 limit개씩만 돌리고, 결과는 넣은 순서대로 돌려준다. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return out;
 }
 
 export function mediaSeconds(file: string): number {
@@ -41,7 +72,9 @@ export function contactSheet(input: string, out: string, opts: { from?: number; 
   const to = Math.min(total || Infinity, opts.to ?? total);
   const frames = opts.frames ?? 12;
   const step = Math.max(0.05, (to - from) / frames);
-  const label = `text='%{eif\\:t+${from.toFixed(2)}\\:d}.%{eif\\:mod((t+${from.toFixed(2)})*10\\,10)\\:d}':x=4:y=4:fontsize=22:fontcolor=yellow:box=1:boxcolor=black@0.7`;
+  // 윈도우 로컬의 ffmpeg는 글꼴을 지정하지 않으면 죽는다(Fontconfig 설정 없음, 2026-11-20). 러너(리눅스)는 예전처럼 기본 글꼴을 쓴다
+  const font = process.platform === "win32" ? `fontfile='${(process.env.SHOOT_FONT || "C:/Windows/Fonts/malgunbd.ttf").replace(/\\/g, "/").replace(/:/g, "\\:")}':` : "";
+  const label = `${font}text='%{eif\\:t+${from.toFixed(2)}\\:d}.%{eif\\:mod((t+${from.toFixed(2)})*10\\,10)\\:d}':x=4:y=4:fontsize=22:fontcolor=yellow:box=1:boxcolor=black@0.7`;
   ffmpeg([
     "-y", "-v", "error",
     "-ss", from.toFixed(3),
@@ -102,7 +135,7 @@ export type Spoken = { text: string; start: number; end: number };
 
 /** 낱말 시각 받아쓰기. 파일을 줄여 보낸다. 대본을 힌트로 주지 않아 발음 확인에도 쓴다. */
 export async function transcribeWords(file: string, workDir: string, hint?: string): Promise<{ words: Spoken[]; segments: Spoken[]; text: string }> {
-  const small = join(workDir, `stt-${Date.now()}.mp3`);
+  const small = join(workDir, `stt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.mp3`);
   ffmpeg(["-y", "-v", "error", "-i", file, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "libmp3lame", "-b:a", "64k", small]);
   const r = await getOpenAI().audio.transcriptions.create({
     file: createReadStream(small),

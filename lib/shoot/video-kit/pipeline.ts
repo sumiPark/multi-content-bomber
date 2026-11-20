@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
@@ -18,17 +18,17 @@ import { inspectAndRepairVideo, type VideoQuality, type VideoReview } from "@/li
 import { buildVisualClips, loadVisualLibrary, type UsedVisual } from "@/lib/shoot/video-kit/generated-visual";
 import { blockRows, captionSkillDir, designCaptions, isMotionEffect, overlayCaptions, type CaptionDesign, type SkillBlock } from "@/lib/shoot/video-kit/caption-skill";
 import { applyHumanText } from "@/lib/shoot/video-kit/human-text";
-import { findMusic, libraryMusic, reloadMusic, type MusicSource, type MusicToUse } from "@/lib/shoot/video-kit/music";
+import { findMusic, libraryMusic, reloadMusic, type MusicJudge, type MusicPool, type MusicSource, type MusicToUse } from "@/lib/shoot/video-kit/music";
 import { frameZones, runVisionTool, subjectZones } from "@/lib/shoot/video-kit/vision-tools";
-import { concatSegments, probe, renderSegment } from "@/lib/shoot/ffmpeg";
+import { concatSegments, probe, segmentArgs } from "@/lib/shoot/ffmpeg";
 import { buildEditParts } from "@/lib/shoot/video-kit/edit-parts";
 import { captionZones, hookPlace, writeCoverProject, writeProject, type BehindWord, type VideoFonts } from "@/lib/shoot/video-kit/compose";
 import { chosenFonts, downloadVideoFonts, loadSkillFonts } from "@/lib/shoot/video-kit/skill-fonts";
-import { layoutBeats, snapCuts, timeText, type FixedLayout, type TimedCut, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
-import { contactSheet, ffmpeg, fishTts, hyperframes, imageDataUrl, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
+import { layoutBeats, layoutExtraSeconds, snapCuts, timeText, type FixedLayout, type TimedCut, type TimedLine, type TimedSfx, type Timeline, type VoiceClip } from "@/lib/shoot/video-kit/timeline";
+import { contactSheet, ffmpeg, ffmpegAsync, FFMPEG_PARALLEL, fishTts, hyperframes, imageDataUrl, mapLimit, mediaSeconds, transcribeWords, voicedSpan, type Spoken } from "@/lib/shoot/video-kit/tools";
 import { applyCaptionLook } from "@/lib/style-shorts/apply-look";
 import type { StyleCardNumbers } from "@/lib/style-shorts/card";
-import type { StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
+import { STYLE_LIVE_SPEED, type StylePlanGuide } from "@/lib/style-shorts/plan-prompt";
 import type { PlacedSfx } from "@/lib/style-shorts/sfx";
 import type { createServiceClient } from "@/lib/supabase/service";
 
@@ -59,6 +59,8 @@ export interface KitInput {
   stylePlan?: StylePlanGuide;
   // 스타일 쇼츠만: 효과음을 kit.json 파일 대신 만들어 넣는다(earshot). 없으면 지금처럼 kit.json 효과음
   sfxRenderer?: (sfx: TimedSfx[], workDir: string) => { placed: PlacedSfx[]; warnings: string[] };
+  // 스타일 쇼츠만: 배경음악 후보의 소리를 재서 고른다(earshot, lib/style-shorts/music-fit.ts). 없으면 지금처럼 제목 · 태그 순위의 첫 곡
+  musicJudge?: (warnings: string[]) => MusicJudge;
   scriptLines?: string[];
   // 계정 설정의 목소리. 없으면 기본 목소리. 모델은 kit.json의 무료 모델 고정
   voiceId?: string | null;
@@ -157,6 +159,52 @@ async function voiceMatch(file: string, text: string, workDir: string): Promise<
   }
 }
 
+/**
+ * 모든 줄이 원본 말소리이고 그 촬영본의 낱말별 시각이 있으면, 낱말 시각을 완성본 시각으로 옮겨 돌려준다. 아니면 null(완성본을 받아쓴다).
+ */
+export function liveLineWords(lines: Pick<TimedLine, "beat" | "start" | "fileIn" | "fileOut" | "live" | "speed">[], plan: Pick<EditPlan, "beats">, clips: Pick<KitClip, "no" | "hasAudio" | "transcriptWords">[]): Spoken[] | null {
+  if (!lines.length || !lines.every((l) => l.live)) return null;
+  const out: Spoken[] = [];
+  for (const line of lines) {
+    const owner = clips.find((c) => c.no === plan.beats[line.beat]?.cuts[0]?.clip);
+    if (!owner) return null;
+    if (!owner.transcriptWords) {
+      // 소리가 없는 촬영본은 낱말이 없는 게 맞다. 소리가 있는데 낱말 시각이 없으면 예전 방식으로
+      if (owner.hasAudio) return null;
+      continue;
+    }
+    const speed = line.speed ?? 1;
+    for (const w of owner.transcriptWords) {
+      const mid = (w.start + w.end) / 2;
+      if (mid < line.fileIn || mid >= line.fileOut) continue;
+      out.push({ text: w.text, start: line.start + Math.max(0, w.start - line.fileIn) / speed, end: line.start + (Math.min(line.fileOut, w.end) - line.fileIn) / speed });
+    }
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * 말소리 컷(원본 from~to초)에 들어온 받아쓰기 문장을 자막 줄로 바꾼다. at은 그 컷이 완성본에서 시작하는 시각.
+ * 낱말별 시각이 있으면(스타일 쇼츠) 문장 중간에서 자른 컷에는 그 컷에 들어온 낱말만 자막으로 쓴다 —
+ * 문장 전체를 쓰면 말하지 않은 글자가 자막에 나온다. 낱말 시각이 없으면 예전처럼 겹친 문장 전체를 쓴다.
+ */
+export function liveCaptionLines(segments: Spoken[], words: Spoken[], from: number, to: number, at: number, speed = 1): Spoken[] {
+  const mid = (w: Spoken) => (w.start + w.end) / 2;
+  // speed: 그 컷을 빠르게 돌린 배수 — 원본 시각 차이를 완성본 시각으로 바꾼다
+  return segments
+    .filter((s) => s.end > from && s.start < to)
+    .flatMap((s) => {
+      const whole = { text: s.text, start: at + Math.max(0, s.start - from) / speed, end: at + (Math.min(to, s.end) - from) / speed };
+      const own = words.filter((w) => mid(w) >= s.start && mid(w) < s.end);
+      if (!own.length) return [whole];
+      const kept = own.filter((w) => mid(w) >= from && mid(w) < to);
+      if (kept.length === own.length) return [whole];
+      // 이 컷에는 그 문장의 낱말이 하나도 없다(문장 앞뒤의 쉼만 걸침)
+      if (!kept.length) return [];
+      return [{ text: kept.map((w) => w.text.trim()).join(" "), start: at + Math.max(0, kept[0].start - from) / speed, end: at + (Math.min(to, kept.at(-1)!.end) - from) / speed }];
+    });
+}
+
 // 사람이 넣은 문구 덮어쓰기는 완성본 고치기의 미리 보기(앱)도 같은 함수를 쓰도록 human-text로 옮겼다
 export { applyHumanText };
 
@@ -204,7 +252,8 @@ export function sanitizePlan(plan: EditPlan, clips: KitClip[], liveVoice: boolea
   const kept = fixed.map(keep);
   const reactions = remapBeats(plan.reactions, kept);
   const zooms = remapBeats(plan.zooms, kept);
-  return { ...plan, beats, visuals, thumbnail: thumb, ...places, ...(reactions ? { reactions } : {}), ...(zooms ? { zooms } : {}) };
+  const speakers = remapBeats(plan.speakers, kept);
+  return { ...plan, beats, visuals, thumbnail: thumb, ...places, ...(reactions ? { reactions } : {}), ...(zooms ? { zooms } : {}), ...(speakers ? { speakers } : {}) };
 }
 
 /**
@@ -227,6 +276,10 @@ export interface StyleNumbers {
   sfxIsMin?: boolean;
   // 주석 수정은 주석이 말한 것만 고친다 — 컷 속도 · 화면 위 글자 · 확대 빈도로 다시 쓰게 하지 않는다
   revise?: boolean;
+  // 말소리 비트 사이의 틈(초). 시각표(layoutBeats)와 같은 값을 넘겨 길이 점검이 완성본 길이와 맞게 한다
+  liveGap?: number;
+  // 말소리 비트를 빠르게 돌리는 배수. 시각표와 같은 값을 넘긴다
+  liveSpeed?: number;
 }
 
 // 컷 평균이 레퍼런스 평균의 이 배수를 넘으면 다시 쓴다(2026-11-19: 레퍼런스 1.4~2.2초인데 완성본 컷이 길었다)
@@ -234,6 +287,19 @@ const STYLE_SHOT_SLACK = 1.5;
 
 // 레퍼런스 길이에서 이만큼은 넘어간다(말 길이 어림값이라)
 const STYLE_LENGTH_SLACK = 0.15;
+// 말소리 영상은 고른 구간 길이가 곧 영상 길이라 어림이 아니다 — 긴 쪽은 이만큼만 넘어간다
+// (2026-11-20: 15%를 주니 레퍼런스 최대 55.8초에 64.0초짜리 계획이 통과했다)
+const STYLE_LIVE_OVER_SLACK = 0.05;
+
+/** 스타일 쇼츠의 말소리 영상은 점프 컷 사이에 틈을 두지 않는다(timeline.layoutBeats의 liveGap). 나머지 경로는 예전 틈 그대로. */
+export function styleLiveGap(style: { voiceMode: "AI" | "LIVE" } | null | undefined): number | undefined {
+  return style?.voiceMode === "LIVE" ? 0 : undefined;
+}
+
+/** 스타일 쇼츠의 말소리 영상은 원본(화면 + 말)을 정해진 배수로 빠르게 돌린다(timeline.layoutBeats의 liveSpeed). 나머지 경로는 원래 빠르기. */
+export function styleLiveSpeed(style: { voiceMode: "AI" | "LIVE" } | null | undefined): number | undefined {
+  return style?.voiceMode === "LIVE" ? STYLE_LIVE_SPEED : undefined;
+}
 
 export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, style?: StyleNumbers): string[] {
   const problems: string[] = [];
@@ -256,13 +322,18 @@ export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, 
     const range = style.durationSec;
     if (range && !style.fixedScript) {
       const hasTts = plan.beats.some((b) => b.mode === "tts");
-      const seconds = hasTts ? syllables / SYLLABLES_PER_SECOND : all.reduce((s, c) => s + Math.max(0, c.out - c.in), 0);
+      // 시각표가 더하는 시간(맨 앞 · 비트 사이 틈 · 끝 여유)까지 넣어 완성본 길이로 잰다(2026-11-20: 빼고 재서 완성본이 3~4초씩 길었다)
+      const extra = layoutExtraSeconds(plan, style.liveGap);
+      const spoken = hasTts ? syllables / SYLLABLES_PER_SECOND : all.reduce((s, c) => s + Math.max(0, c.out - c.in), 0) / (style.liveSpeed ?? 1);
+      const seconds = spoken + extra;
       // 촬영본에 쓸 장면이 모자라면 짧아도 된다
       const min = Math.min(range[0], Math.floor((style.footageSeconds ?? Infinity) * 0.9));
       const max = range[1];
-      const what = hasTts ? `대본이 약 ${Math.round(seconds)}초 분량(읽는 글자 ${syllables}자)` : `고른 구간이 모두 ${Math.round(seconds)}초`;
-      if (seconds < min * (1 - STYLE_LENGTH_SLACK)) problems.push(`${what}이라 레퍼런스(${range[0]}~${max}초)보다 짧아요. ${min}~${max}초가 되게 늘리세요.`);
-      else if (seconds > max * (1 + STYLE_LENGTH_SLACK)) problems.push(`${what}이라 레퍼런스(${range[0]}~${max}초)보다 길어요. ${max}초 안에 들어오게 줄이세요.`);
+      const gapNote = extra >= 1 ? `(장면 사이 틈 · 끝 여유 ${extra.toFixed(1)}초 포함)` : "";
+      const what = hasTts ? `대본(읽는 글자 ${syllables}자)으로 만든 영상이 약 ${Math.round(seconds)}초${gapNote}` : `고른 구간으로 만든 영상이 ${seconds.toFixed(1)}초${gapNote}`;
+      const cutHow = hasTts ? "" : " 덜 중요한 말을 빼고, 남기는 말도 낱말 시각으로 문장 안의 군말 · 되풀이 · 쉼을 잘라 내세요. 이야기 줄기(처음 소개 · 중간 사건 · 끝맺음 말)는 남기세요.";
+      if (seconds < min * (1 - STYLE_LENGTH_SLACK)) problems.push(`${what}라 레퍼런스(${range[0]}~${max}초)보다 짧아요. ${min}~${max}초가 되게 늘리세요.`);
+      else if (seconds > max * (1 + (hasTts ? STYLE_LENGTH_SLACK : STYLE_LIVE_OVER_SLACK))) problems.push(`${what}라 레퍼런스(${range[0]}~${max}초)보다 길어요. ${max}초 안에 들어오게 줄이세요.${cutHow}`);
     } else if (!style.fixedScript && syllables > 630) problems.push("대본이 너무 길어요. 85초 안에 들어오게 줄이세요.");
   } else {
     if (plan.beats.some((b) => b.mode === "tts") && syllables < 60) problems.push("대본이 너무 짧아요. 15초 이상 나오게 쓰세요.");
@@ -274,7 +345,7 @@ export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, 
   // 효과음은 15초에 2~3개(kit.json sfx_rules). 말 길이는 음절 수로 어림한다
   const sfxCount = plan.beats.reduce((s, b) => s + b.sfx.length, 0);
   // 스타일 쇼츠의 말소리 영상(tts 없음)은 고른 구간 길이로 어림한다
-  const seconds = style && !syllables ? all.reduce((s, c) => s + Math.max(0, c.out - c.in), 0) : syllables / SYLLABLES_PER_SECOND;
+  const seconds = style && !syllables ? all.reduce((s, c) => s + Math.max(0, c.out - c.in), 0) / (style.liveSpeed ?? 1) : syllables / SYLLABLES_PER_SECOND;
   // 스타일 쇼츠는 레퍼런스 빈도로만 잰다. 레퍼런스 측정값이 없으면 개수를 제한하지 않는다(2026-11-19 사용자 결정)
   // 레퍼런스 값이 최소값이면 상한을 두지 않는다(2026-11-20: 최소값을 상한으로 써 효과음이 레퍼런스보다 적게 들어갔다)
   const sfxMax = style?.sfxIsMin ? Infinity : style?.sfxPer10s != null ? Math.max(3, Math.ceil((seconds / 10) * style.sfxPer10s * 1.5) + 1) : style ? Infinity : Math.max(3, Math.ceil((seconds / 15) * 3) + 1);
@@ -385,21 +456,21 @@ export async function makeVoices(plan: EditPlan, clips: KitClip[], workDir: stri
   return { voices, usedVoice, warnings };
 }
 
-function renderCuts(tl: Timeline, clips: KitClip[], workDir: string, style: EditStyle): string {
+// 컷은 서로 상관없어 여러 개를 동시에 자른다(2026-11-20: 30컷을 하나씩 자르면 1분 37초). ffmpeg 인자는 하나씩 자를 때와 같아 결과는 그대로다
+async function renderCuts(tl: Timeline, clips: KitClip[], workDir: string, style: EditStyle): Promise<string> {
   const clipOf = new Map(clips.map((c) => [c.no, c]));
-  const out: string[] = [];
-  tl.cuts.forEach((c: TimedCut, i) => {
-    const owner = clipOf.get(c.clip);
-    if (!owner) throw new Error(`${c.clip}번 촬영본이 없어요`);
+  for (const c of tl.cuts) if (!clipOf.has(c.clip)) throw new Error(`${c.clip}번 촬영본이 없어요`);
+  const out = await mapLimit(tl.cuts, FFMPEG_PARALLEL, async (c: TimedCut, i) => {
+    const owner = clipOf.get(c.clip)!;
     const raw = join(workDir, `raw${i}.mp4`);
     const seg = join(workDir, `seg${i}.mp4`);
     // 소리는 믹스에서 따로 입힌다. 글자도 HyperFrames에서 입힌다
-    renderSegment({ input: owner.file, start: c.in, duration: c.out - c.in, hasAudio: false, onScreen: "", subtitles: [], hdrTransfer: owner.hdrTransfer, style }, raw, workDir, `k${i}`);
+    await ffmpegAsync(segmentArgs({ input: owner.file, start: c.in, duration: c.out - c.in, hasAudio: false, onScreen: "", subtitles: [], hdrTransfer: owner.hdrTransfer, style }, raw, workDir, `k${i}`));
     const rate = (c.out - c.in) / c.duration;
     // 구간이 말보다 짧으면 마지막 프레임을 잠시 둔다
     const pad = rate < 0.56 ? `,tpad=stop_mode=clone:stop_duration=${c.duration.toFixed(3)}` : "";
-    ffmpeg(["-y", "-v", "error", "-i", raw, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000", "-filter:v", `setpts=PTS/${Math.max(0.55, rate).toFixed(4)},fps=30${pad}`, "-map", "0:v:0", "-map", "1:a:0", "-t", c.duration.toFixed(4), "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", seg]);
-    out.push(seg);
+    await ffmpegAsync(["-y", "-v", "error", "-i", raw, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000", "-filter:v", `setpts=PTS/${Math.max(0.55, rate).toFixed(4)},fps=30${pad}`, "-map", "0:v:0", "-map", "1:a:0", "-t", c.duration.toFixed(4), "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", seg]);
+    return seg;
   });
   const base = join(workDir, "base.mp4");
   concatSegments(out, base, workDir);
@@ -416,10 +487,12 @@ function buildVoiceTrack(tl: Timeline, workDir: string): string {
     return out;
   }
   const inputs = lines.flatMap((l) => ["-i", l.file!]);
-  const parts = lines.map(
-    (l, i) =>
-      `[${i}:a]atrim=${l.fileIn.toFixed(3)}:${l.fileOut.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:d=0.015,afade=t=out:st=${Math.max(0, l.fileOut - l.fileIn - 0.03).toFixed(3)}:d=0.03,aresample=48000,aformat=channel_layouts=mono,adelay=${Math.round(l.start * 1000)}:all=1[v${i}]`,
-  );
+  // 빠르게 돌린 말소리 줄(스타일 쇼츠)은 목소리 높이를 그대로 두고 빠르기만 바꾼다(atempo)
+  const parts = lines.map((l, i) => {
+    const speed = l.speed ?? 1;
+    const tempo = speed !== 1 ? `atempo=${speed.toFixed(4)},` : "";
+    return `[${i}:a]atrim=${l.fileIn.toFixed(3)}:${l.fileOut.toFixed(3)},asetpts=PTS-STARTPTS,${tempo}afade=t=in:d=0.015,afade=t=out:st=${Math.max(0, (l.fileOut - l.fileIn) / speed - 0.03).toFixed(3)}:d=0.03,aresample=48000,aformat=channel_layouts=mono,adelay=${Math.round(l.start * 1000)}:all=1[v${i}]`;
+  });
   parts.push(`anullsrc=r=48000:cl=mono,atrim=0:${D}[z]`);
   parts.push(`[z]${lines.map((_, i) => `[v${i}]`).join("")}amix=inputs=${lines.length + 1}:normalize=0:duration=longest,acompressor=threshold=-18dB:ratio=2.5:attack=8:release=120,loudnorm=I=-15:TP=-2:LRA=7,aresample=48000,apad=whole_dur=${D},atrim=0:${D}[out]`);
   ffmpeg(["-y", "-v", "error", ...inputs, "-filter_complex", parts.join(";"), "-map", "[out]", "-ar", "48000", "-ac", "1", out]);
@@ -551,16 +624,37 @@ export function styleMusicSwitches(n: Pick<StyleCardNumbers, "musicChangeShare" 
 
 // 끝 직전 음악을 끊는 길이(사람 편집 실측 0.3초, 2026-11-20)
 const MUSIC_DROP_SEC = 0.3;
-// 완성 믹스 음량을 올릴 때 넘지 않는 표본 최고점(약 -1dB)
-const LOUDNESS_PEAK_LIMIT = 0.89;
+// 완성 믹스 음량을 올릴 때 처음 쓰는 표본 최고점 한도(dB)
+const LOUDNESS_PEAK_START_DB = -2.5;
+// 렌더 도구(HyperFrames)는 AAC로 바꾼 소리의 최고점(true peak)이 -1dB를 넘으면 소리 전체를 낮춘다.
+// 2026-11-20 실측: 한도를 표본 -1dB로 올린 믹스가 렌더 뒤 1.0~2.6dB 작아져 목표 음량에 못 미쳤다. 그래서 여기서 AAC 최고점을 이 값 아래로 맞춘다
+const LOUDNESS_AAC_PEAK_DB = -1.3;
+// 리미터에 눌려 목표에 이만큼 못 미치면 더 올려 다시 만든다
+const LOUDNESS_MISS_DB = 0.3;
+const LOUDNESS_PASSES = 4;
 
-/** 완성 믹스를 목표 음량까지 올린다(낮추지는 않는다). 최고점은 리미터로 약 -1dB 아래에 둔다. */
+/**
+ * 완성 믹스를 목표 음량까지 올린다(낮추지는 않는다). 올린 뒤 다시 재서 리미터에 눌린 만큼 더 올리고,
+ * AAC로 바꿨을 때 최고점이 렌더 도구 기준을 넘으면 한도를 낮춘다 — 렌더가 소리를 다시 낮추지 않게.
+ */
 function raiseLoudness(file: string, target: number | null | undefined): void {
   if (target == null) return;
   const now = lufs(file);
   if (now == null || target - now < 0.5) return;
   const tmp = `${file}.loud.wav`;
-  ffmpeg(["-y", "-v", "error", "-i", file, "-af", `volume=${(target - now).toFixed(1)}dB,alimiter=limit=${LOUDNESS_PEAK_LIMIT}:level=false`, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", tmp]);
+  let gain = target - now;
+  let limitDb = LOUDNESS_PEAK_START_DB;
+  for (let pass = 0; pass < LOUDNESS_PASSES; pass++) {
+    ffmpeg(["-y", "-v", "error", "-i", file, "-af", `volume=${gain.toFixed(2)}dB,alimiter=limit=${(10 ** (limitDb / 20)).toFixed(4)}:level=false`, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", tmp]);
+    const peak = aacTruePeak(tmp);
+    const got = lufs(tmp);
+    if (peak != null && peak > LOUDNESS_AAC_PEAK_DB) {
+      limitDb -= peak - LOUDNESS_AAC_PEAK_DB + 0.1;
+      continue;
+    }
+    if (got == null || target - got <= LOUDNESS_MISS_DB) break;
+    gain += target - got;
+  }
   renameSync(tmp, file);
 }
 
@@ -568,6 +662,21 @@ function lufs(file: string): number | null {
   const out = ffmpeg(["-hide_banner", "-i", file, "-af", "ebur128=framelog=quiet", "-f", "null", "-"]);
   const m = out.match(/I:\s+(-?[0-9.]+) LUFS/);
   return m ? Number(m[1]) : null;
+}
+
+/** AAC로 바꾼 뒤의 최고점(true peak, dB). 렌더 도구가 소리를 낮추는 기준과 같은 값을 미리 잰다. 못 재면 null. */
+function aacTruePeak(file: string): number | null {
+  const m4a = `${file}.peak.m4a`;
+  try {
+    ffmpeg(["-y", "-v", "error", "-i", file, "-c:a", "aac", "-b:a", "192k", m4a]);
+    const out = ffmpeg(["-hide_banner", "-i", m4a, "-af", "ebur128=framelog=quiet:peak=true", "-f", "null", "-"]);
+    const m = [...out.matchAll(/Peak:\s+(-?[0-9.]+) dBFS/g)].at(-1);
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  } finally {
+    rmSync(m4a, { force: true });
+  }
 }
 
 function buildSegments(plan: EditPlan, tl: Timeline, realClipOf: Map<number, number>): KitSegment[] {
@@ -783,6 +892,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
           zoomPer10s: input.stylePlan.card.numbers.zoomPer10s ?? null,
           sfxIsMin: !!input.stylePlan.card.numbers.sfxIsMin,
           revise: !!input.revise,
+          liveGap: styleLiveGap(input.stylePlan),
+          liveSpeed: styleLiveSpeed(input.stylePlan),
         }
       : undefined;
     const problems = planProblems(applyHumanText(plan, input), show, styleNumbers);
@@ -836,14 +947,16 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   tokens.output += visual.tokens.output;
   const allClips = visual.clips;
   const seconds = new Map(allClips.map((c) => [c.no, c.duration]));
-  const base = layoutBeats(visual.plan, made.voices, seconds, preset?.layout ? { lines: preset.layout, duration: preset.duration } : undefined);
+  const base = layoutBeats(visual.plan, made.voices, seconds, preset?.layout ? { lines: preset.layout, duration: preset.duration } : undefined, { liveGap: styleLiveGap(input.stylePlan), liveSpeed: styleLiveSpeed(input.stylePlan) });
 
   const draftTimeline = timeText(plan, base, [], new Map());
   const voice = buildVoiceTrack(draftTimeline, workDir);
 
   // 3. 받아쓰기 — 낱말 시각과 발음 확인. 실패해도 글자 수 비율로 이어 간다
-  let words: Spoken[] = [];
-  if (made.usedVoice || base.lines.some((l) => l.live)) {
+  // 원본을 받아쓸 때 낱말별 시각을 남긴 말소리 영상(스타일 쇼츠)은 그 시각을 완성본 시각으로 옮겨 쓴다 — 다시 받아쓰지 않는다.
+  // (2026-11-20: 1.3배속 음성을 통째로 다시 받아쓰니 16초 구간의 낱말이 통째로 빠져 "자막과 말이 8.8초 어긋난다"는 틀린 경고가 났다)
+  let words: Spoken[] = liveLineWords(base.lines, plan, clips) ?? [];
+  if (!words.length && (made.usedVoice || base.lines.some((l) => l.live))) {
     try {
       const stt = await transcribeWords(voice, workDir);
       words = stt.words;
@@ -862,10 +975,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
     const beat = plan.beats[line.beat];
     const c = beat.cuts[0];
     const owner = clips.find((x) => x.no === c.clip);
-    const shifted = (owner?.transcript ?? [])
-      .filter((s) => s.end > c.in && s.start < c.out)
-      .map((s) => ({ text: s.text, start: line.start + Math.max(0, s.start - c.in), end: line.start + Math.min(c.out, s.end) - c.in }));
-    live.set(line.beat, shifted);
+    live.set(line.beat, liveCaptionLines(owner?.transcript ?? [], owner?.transcriptWords ?? [], c.in, c.out, line.start, line.speed ?? 1));
   }
   // 비트 안에서 컷이 바뀌는 시각을 낱말 시작에 맞춘다. 줄 시각이 미리 정해진 경로(lemo)는 그대로 둔다
   // AI 자동 영상은 아래에서 끝 화면을 빼고 마지막 자막을 끝까지 두므로, 끝 화면이 있는 비트의 자막도 남긴다
@@ -882,7 +992,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   }
 
   // 4. 컷 → 믹스 → 프로젝트
-  const baseVideo = renderCuts(tl, allClips, workDir, input.style ?? DEFAULT_EDIT_STYLE);
+  const baseVideo = await renderCuts(tl, allClips, workDir, input.style ?? DEFAULT_EDIT_STYLE);
   const project = join(workDir, "project");
   mkdirSync(join(project, "assets"), { recursive: true });
   copyFileSync(baseVideo, join(project, "assets", "base.mp4"));
@@ -892,23 +1002,24 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   // 다시 고르라는 요청이면 앱이 저장된 계획에서 그 값을 지워 두므로 여기서 새로 고른다
   const prior = (input.reusePlan ?? input.revise?.plan) as SavedEditPlan | null | undefined;
   const priorMusic = prior?.pickedMusic;
-  const music =
-    (priorMusic ? (priorMusic.source ? await reloadMusic(priorMusic, workDir) : libraryMusic(priorMusic.name)) : null) ??
-    // 스타일 쇼츠는 카드의 음악 검색어(사람이 고칠 수 있다)로 찾는다. 주석으로 음악을 바꾸라고 했으면 편집 에이전트가 주석대로 고친 검색어로 찾는다
-    (await findMusic({
-      service: input.service,
-      readService: input.readService,
-      query: (input.stylePlan && !input.revise ? input.stylePlan.card.music.query : "") || look.music_query || input.stylePlan?.card.music.query || "",
-      intent: (input.stylePlan && !input.revise ? input.stylePlan.card.music.mood : "") || look.music_intent || input.stylePlan?.card.music.mood || "",
-      workDir,
-      singleWords: !!input.stylePlan,
-    })) ??
-    libraryMusic(look.music);
-  console.log(`[video-kit] 음악: ${music.name}${music.source ? ` (${music.source.creator}, ${music.source.license}, 검색어 "${music.query}")` : " (대체 곡)"}`);
-  // 스타일 쇼츠: 레퍼런스가 곡을 바꾸면 그 위치에서 가장 가까운 장면 전환에 다른 곡으로 바꾼다(2026-11-20 사용자 결정).
-  // 다시 편집이면 지난번에 바꿔 쓴 곡을 그대로 쓴다. 다른 곡을 찾지 못하면 한 곡으로 만들고 알린다
-  const musicParts: { from: number; music: MusicToUse }[] = [];
+  // 곡을 여러 번 고르는 영상(스타일 쇼츠의 곡 바꿈)은 검색 · AI 순위를 한 번만 하고 그 순위에서 차례로 쓴다
+  const musicPool: MusicPool = new Map();
+  const musicJudge = input.musicJudge?.(warnings);
+  // 스타일 쇼츠는 카드의 음악 검색어(사람이 고칠 수 있다)로 찾는다. 주석으로 음악을 바꾸라고 했으면 편집 에이전트가 주석대로 고친 검색어로 찾는다
+  const musicQuery = (input.stylePlan && !input.revise ? input.stylePlan.card.music.query : "") || look.music_query || input.stylePlan?.card.music.query || "";
+  const musicIntent = (input.stylePlan && !input.revise ? input.stylePlan.card.music.mood : "") || look.music_intent || input.stylePlan?.card.music.mood || "";
+  const kept = priorMusic ? (priorMusic.source ? await reloadMusic(priorMusic, workDir) : libraryMusic(priorMusic.name)) : null;
+  // 스타일 쇼츠: 레퍼런스가 곡을 바꾸면 그 위치에서 가장 가까운 장면 전환에 다른 곡으로 바꾼다(2026-11-20 사용자 결정)
   const switches = input.stylePlan ? styleMusicSwitches(input.stylePlan.card.numbers, tl) : [];
+  // 한 곡을 이어서 쓰는 가장 짧은 길이 — 판정기가 곡의 그 앞부분으로 분위기를 잰다
+  const musicSpan = Math.min(...[0, ...switches, tl.duration].slice(1).map((end, i) => end - [0, ...switches][i]));
+  const found = kept ?? (await findMusic({ service: input.service, readService: input.readService, query: musicQuery, intent: musicIntent, workDir, singleWords: !!input.stylePlan, pool: musicPool, judge: musicJudge, seconds: musicSpan }));
+  // 소리를 재서 고르는 영상은 통과한 곡이 없을 때 알린다 — 대체 곡은 분위기를 재지 않고 쓴다
+  if (!found && musicJudge) warnings.push(`"${musicQuery}"로 찾은 배경음악 가운데 분위기가 맞고 같은 소리가 반복되지 않는 곡이 없어 대체 곡을 썼어요. 음악 검색어를 바꿔 다시 만들어 보세요.`);
+  const music = found ?? libraryMusic(look.music);
+  console.log(`[video-kit] 음악: ${music.name}${music.source ? ` (${music.source.creator}, ${music.source.license}, 검색어 "${music.query}")` : " (대체 곡)"}`);
+  // 곡 바꿈: 다시 편집이면 지난번에 바꿔 쓴 곡을 그대로 쓴다. 다른 곡을 찾지 못하면 한 곡으로 만들고 알린다
+  const musicParts: { from: number; music: MusicToUse }[] = [];
   for (const [k, from] of switches.entries()) {
     const dir = join(workDir, `music-extra-${k}`);
     mkdirSync(dir, { recursive: true });
@@ -918,11 +1029,16 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
       (await findMusic({
         service: input.service,
         readService: input.readService,
-        query: input.stylePlan!.card.music.query || look.music_query,
-        intent: input.stylePlan!.card.music.mood || look.music_intent,
+        // 첫 곡과 같은 검색어 · 분위기로 찾는다 — 판정기를 쓰면 첫 곡 때 통과한 후보에서 첫 곡과 닮은 곡을 먼저 쓴다
+        query: musicJudge ? musicQuery : input.stylePlan!.card.music.query || look.music_query,
+        intent: musicJudge ? musicIntent : input.stylePlan!.card.music.mood || look.music_intent,
         workDir: dir,
         singleWords: true,
+        pool: musicPool,
         exclude: [music, ...musicParts.map((p) => p.music)].map((m) => m.source?.id).filter((id): id is string => !!id),
+        judge: musicJudge,
+        like: { id: music.source?.id ?? null, file: music.file, start: music.in },
+        seconds: musicSpan,
       }));
     if (!extra) {
       warnings.push(`레퍼런스처럼 ${from.toFixed(1)}초에 배경음악을 바꾸려 했지만 다른 곡을 찾지 못해 한 곡으로 이어 만들었어요.`);
@@ -939,7 +1055,8 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   }
   const { stems, ...sounds } = buildMix(tl, voice, mix, music, placedSfx, input.exportParts ? join(workDir, "stems") : undefined, input.stylePlan ? { ...styleFinish(input.stylePlan.card.numbers, tl), musicParts } : undefined);
   // 장면마다 상품 · 사람이 있는 자리를 읽어 글자가 피하게 한다. 못 읽으면 기본 자리
-  const zones = input.presetZones ?? subjectZones(baseVideo, tl.cuts, workDir)?.map((z, i) => {
+  // 스타일 쇼츠는 얼굴 자리도 잰다 — 자막을 레퍼런스 자리에 두고 얼굴만 피한다
+  const zones = input.presetZones ?? subjectZones(baseVideo, tl.cuts, workDir, { faces: !!input.stylePlan })?.map((z, i) => {
     const owner = allClips.find((c) => c.no === tl.cuts[i]?.clip);
     return owner?.shot?.startsWith("[코드 모션]") ? { ...z, cover: { ...z.cover, mid: 1 } } : z;
   }) ?? null;
@@ -1090,14 +1207,18 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
   }
   // 컷마다 여러 시점(25 · 50 · 75%)을 보고, 한 시점이라도 거의 한 색이거나 위아래 단색 띠 때문에 그림이 작으면 빈 화면으로 본다.
   // 경고로만 남긴다(발행을 막지 않는다)
-  for (const cut of tl.cuts) {
+  // 컷마다 따로 재도 되는 일이라 여러 컷을 동시에 잰다(보는 프레임 · 경고 순서는 하나씩 잴 때와 같다)
+  const blank = await mapLimit(tl.cuts, FFMPEG_PARALLEL * 2, async (cut) => {
     const times = BLANK_POINTS.map((p) => cut.start + (cut.end - cut.start) * p);
     // 거의 한 색: 자막 · 그래픽까지 얹은 완성본
-    const flat = grayFrames(final, times, 64, 64)?.some(nearlyFlat) ?? false;
+    const flat = (await grayFrames(final, times, 64, 64))?.some(nearlyFlat) ?? false;
     // 단색 띠: 자막이 띠 위에 얹히면 띠가 끊겨 보이므로 컷만 이은 바탕 영상에서 잰다
-    const small = !flat && (grayFrames(baseVideo, times, BAR_W, BAR_H, true)?.some((px) => pictureShare(px, BAR_W, BAR_H) < MIN_PICTURE_SHARE) ?? false);
-    if (flat || small) warnings.push(`${cut.start.toFixed(1)}~${cut.end.toFixed(1)}초 화면이 거의 한 색이에요. 빈 화면처럼 보일 수 있어요.`);
-  }
+    const small = !flat && ((await grayFrames(baseVideo, times, BAR_W, BAR_H, true))?.some((px) => pictureShare(px, BAR_W, BAR_H) < MIN_PICTURE_SHARE) ?? false);
+    return flat || small;
+  });
+  tl.cuts.forEach((cut, i) => {
+    if (blank[i]) warnings.push(`${cut.start.toFixed(1)}~${cut.end.toFixed(1)}초 화면이 거의 한 색이에요. 빈 화면처럼 보일 수 있어요.`);
+  });
   const coverClip = clips.find((c) => c.no === plan.thumbnail.clip) ?? clips[0];
   let cover: string | null = null;
   if (design && skillDir) {
@@ -1173,11 +1294,19 @@ const BAR_ROW_SHIFT = 3;
 const MIN_PICTURE_SHARE = 0.45;
 
 /** 여러 시각의 회색 프레임(w×h)을 한 번에 뽑는다. area는 화소 평균으로 줄인다(띠 경계용). 실패하면 null. */
-function grayFrames(video: string, times: number[], w: number, h: number, area = false): Uint8Array[] | null {
+function grayFrames(video: string, times: number[], w: number, h: number, area = false): Promise<Uint8Array[] | null> {
   const graph = `${times.map((_, n) => `[${n}:v]scale=${w}:${h}${area ? ":flags=area" : ""},format=gray[g${n}]`).join(";")};${times.map((_, n) => `[g${n}]`).join("")}${times.length > 1 ? `vstack=inputs=${times.length}` : "null"}`;
-  const res = spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-v", "error", ...times.flatMap((t) => ["-ss", Math.max(0, t).toFixed(3), "-i", video]), "-filter_complex", graph, "-frames:v", "1", "-f", "rawvideo", "-"], { maxBuffer: 4 * 1024 * 1024 });
-  if (res.status !== 0 || !res.stdout || res.stdout.length < w * h * times.length) return null;
-  return times.map((_, n) => new Uint8Array(res.stdout.subarray(n * w * h, (n + 1) * w * h)));
+  return new Promise((resolve) => {
+    const p = spawn(process.env.FFMPEG_PATH || "ffmpeg", ["-nostdin", "-v", "error", ...times.flatMap((t) => ["-ss", Math.max(0, t).toFixed(3), "-i", video]), "-filter_complex", graph, "-frames:v", "1", "-f", "rawvideo", "-"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    const chunks: Buffer[] = [];
+    p.stdout.on("data", (d: Buffer) => chunks.push(d));
+    p.on("error", () => resolve(null));
+    p.on("close", (code) => {
+      const out = Buffer.concat(chunks);
+      if (code !== 0 || out.length < w * h * times.length) return resolve(null);
+      resolve(times.map((_, n) => new Uint8Array(out.subarray(n * w * h, (n + 1) * w * h))));
+    });
+  });
 }
 
 /** 화면 전체 밝기 편차가 작으면 거의 한 색이다. */

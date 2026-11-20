@@ -2,7 +2,7 @@ import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { editKitAsset } from "@/lib/agents/ko-skills";
 import type { EditPlan } from "@/lib/agents/edit-plan";
-import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, readableCaptionBlock, readableRows, ZONE_BOX, zoneCover, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
+import { bigText, captionBlock, captionZone, DEFAULT_LOOK, hookZone, lookCss, readableCaptionBlock, readableRows, ZONE_BOX, zoneCover, zoneFace, type CutZones, type Look, type Zone } from "@/lib/shoot/video-kit/caption-style";
 import type { TimedGraphic, TimedReaction, Timeline } from "@/lib/shoot/video-kit/timeline";
 
 // 시각표 → HyperFrames 프로젝트(index.html + compositions). 글자 · 그래픽 틀은 ig-edit-ko/kit.json과 같은 이름을 쓴다.
@@ -53,7 +53,10 @@ export function hookLines(text: string): string[] {
 
 // 위쪽 자리를 쓰는 그래픽 — 이 동안 자막은 위로 가지 않는다
 // 레퍼런스 자막 자리를 쓰다가 사람 · 상품이 이보다 많이 가리면 평소처럼 피한다(평소 기준 0.18보다 넉넉하게 — 사람 편집은 몸 위에도 자막을 둔다)
+// 얼굴 자리를 잰 컷에는 쓰지 않는다(아래 FACE_IN_ZONE)
 const PREFER_MAX_COVER = 0.5;
+// 얼굴 세로의 이만큼이 레퍼런스 자막 자리에 걸치면 자막이 얼굴을 가린다고 본다
+const FACE_IN_ZONE = 0.3;
 
 const TOP_GRAPHICS = new Set(["badge", "title", "chip", "notice", "stat", "split", "steps", "end_card"]);
 
@@ -175,10 +178,29 @@ export function captionZones(tl: Timeline, zones: CutZones[] | null): Zone[] {
     if (c.start < tl.hook.end) busy.push(hookAt);
     if (c.pin && !busy.includes(c.pin)) return c.pin;
     if (tl.graphics.some((g) => TOP_GRAPHICS.has(g.type) && g.start < c.end && g.end > c.start)) busy.push("top");
+    // 스타일 쇼츠의 말소리 영상(2026-11-20 사용자 결정): 화면 밖 목소리는 아래에, 화면 속 사람의 말은 가운데 · 위 중 얼굴이 없는 자리에 둔다.
+    // 가운데를 먼저 보고, 둘 다 얼굴이 걸치면 덜 걸친 쪽에 둔다. 두 자리를 모두 못 쓰면(첫 화면 글자 · 위쪽 그래픽) 아래로 내린다
+    if (c.speaker === "off_screen" && !busy.includes("lower")) return "lower";
+    if (c.speaker === "on_screen") {
+      const open = (["mid", "top"] as Zone[]).filter((z) => !busy.includes(z));
+      const faceAt = (z: Zone) => zoneFace(zones, c.start, c.end, z) ?? 0;
+      if (open.length) return open.find((z) => faceAt(z) < FACE_IN_ZONE) ?? open.reduce((a, b) => (faceAt(b) < faceAt(a) ? b : a));
+      if (!busy.includes("lower")) return "lower";
+    }
     // 문장 자막은 늘 같은 자리(아래)에 둔다. 후킹 글자가 그 자리를 쓰는 동안만 다른 자리로 피한다
     if (c.sentence && !c.big && !busy.includes("lower")) return "lower";
-    // 스타일 쇼츠: 레퍼런스 자막 자리를 먼저 쓴다. 사람 · 상품이 그 자리를 많이 가릴 때만 평소처럼 피한다
-    if (tl.captionPrefer && !busy.includes(tl.captionPrefer) && zoneCover(zones, c.start, c.end, tl.captionPrefer) < PREFER_MAX_COVER) return tl.captionPrefer;
+    // 스타일 쇼츠: 레퍼런스 자막 자리를 먼저 쓴다. 몸 · 상품 위에는 그대로 두고 얼굴이 그 자리에 있을 때만 피한다
+    // (2026-11-20 사용자 결정 — 사람 편집본은 몸 위에 자막을 둔다. 가림 50% 기준은 사람이 화면을 채운 영상에서 자막을 거의 다 옮겼다)
+    // 얼굴 자리를 못 잰 컷만 예전처럼 사람 · 상품이 많이 가릴 때 피한다
+    if (tl.captionPrefer && !busy.includes(tl.captionPrefer)) {
+      const face = zoneFace(zones, c.start, c.end, tl.captionPrefer);
+      if (face != null ? face < FACE_IN_ZONE : zoneCover(zones, c.start, c.end, tl.captionPrefer) < PREFER_MAX_COVER) return tl.captionPrefer;
+      // 얼굴을 피해 옮길 때는 얼굴이 있는 다른 자리도 뺀다
+      if (face != null) {
+        const faceBusy = (["top", "mid", "lower"] as Zone[]).filter((z) => !busy.includes(z) && (zoneFace(zones, c.start, c.end, z) ?? 0) >= FACE_IN_ZONE);
+        if (busy.length + faceBusy.length < 3) return captionZone(zones, c.start, c.end, [...busy, ...faceBusy]);
+      }
+    }
     return captionZone(zones, c.start, c.end, busy);
   });
 }

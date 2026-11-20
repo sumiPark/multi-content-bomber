@@ -160,6 +160,12 @@ export const zoomSchema = z.object({
   at_word: z.string().describe("이 낱말을 말할 때 확대한다. 없으면 빈 문자열"),
   at: z.number().describe("at_word가 없을 때 비트 안의 위치 0~1"),
 });
+// 비트마다 누가 말하는지(스타일 쇼츠의 말소리 영상만, 2026-11-20 사용자 결정) — 화면 속 사람의 말은 위 · 가운데, 화면 밖 목소리는 아래에 자막을 둔다
+export const speakerSchema = z.object({
+  beat: z.number().int().describe("비트 번호(0부터)"),
+  who: z.enum(["on_screen", "off_screen"]).describe("on_screen 그 장면에 보이는 사람이 말한다, off_screen 화면에 안 보이는 사람(카메라 뒤 · 전화 상대 등)의 목소리다"),
+});
+export type EditSpeaker = z.infer<typeof speakerSchema>;
 export type EditReaction = z.infer<typeof reactionSchema>;
 export type EditZoom = z.infer<typeof zoomSchema>;
 
@@ -168,6 +174,7 @@ const styleEditPlanSchema = makeEditPlanSchema(SFX_IDS).extend({
   text_places: textPlacesSchema,
   reactions: z.array(reactionSchema).describe("반응 · 속마음 글자. 레퍼런스에 없으면 빈 배열"),
   zooms: z.array(zoomSchema).describe("같은 컷 안에서 화면을 확 당기는 곳(펀치인). 그 컷 끝까지 확대가 이어진다. 레퍼런스에 없으면 빈 배열"),
+  speakers: z.array(speakerSchema).describe("말소리(live) 영상에서 말이 있는 비트마다 누가 말하는지. AI 음성 영상은 빈 배열"),
 });
 type ParsedEditPlan = z.infer<typeof editPlanSchema>;
 // caption_style · big · components는 나중에 생긴 값이라 그 전에 저장된 계획(다시 편집)과 코드가 만든 계획(lemo)에는 없다. 없으면 예전 방식(keyword)이다
@@ -179,6 +186,8 @@ export type EditPlan = Omit<ParsedEditPlan, "caption_style" | "beats" | "compone
   // 스타일 쇼츠만(2026-11-19). 그 전에 저장된 계획과 다른 경로에는 없다
   reactions?: EditReaction[];
   zooms?: EditZoom[];
+  // 스타일 쇼츠의 말소리 영상만(2026-11-20). 없으면 자막 자리를 말하는 사람으로 나누지 않는다
+  speakers?: EditSpeaker[];
   beats: (Omit<ParsedEditPlan["beats"][number], "big"> & { big?: boolean })[];
 };
 export type EditBeat = EditPlan["beats"][number];
@@ -199,6 +208,17 @@ export interface EditClipInfo {
   narration?: string;
   // 말하는 계정의 받아쓰기
   transcript?: { text: string; start: number; end: number }[];
+  // 받아쓰기의 낱말별 시각(스타일 쇼츠의 말소리 영상만). 계획 AI가 문장 안에서 자를 수 있게 넘기고, 잘린 문장의 자막 글을 만드는 데 쓴다
+  transcriptWords?: { text: string; start: number; end: number }[];
+}
+
+/** 받아쓰기 문장에 낱말별 시각을 붙인다 — words는 [낱말, 시작초, 끝초]. 낱말 시각이 없으면 문장만. */
+export function transcriptForPlan(c: Pick<EditClipInfo, "transcript" | "transcriptWords">): unknown[] {
+  const words = c.transcriptWords ?? [];
+  return (c.transcript ?? []).map((s) => {
+    const inside = words.filter((w) => (w.start + w.end) / 2 >= s.start && (w.start + w.end) / 2 < s.end);
+    return inside.length ? { ...s, words: inside.map((w) => [w.text, Number(w.start.toFixed(2)), Number(w.end.toFixed(2))]) } : s;
+  });
 }
 
 export interface EditPlanContext {
@@ -425,7 +445,7 @@ export async function writeEditPlan(ctx: EditPlanContext, opts: { maxSteps?: num
     },
   ];
   const clipLines = ctx.clips.map((c) =>
-    JSON.stringify({ clip: c.no, seconds: Number(c.duration.toFixed(1)), shot: c.shot ?? "", on_screen: c.onScreen ?? "", voice: c.voice ?? "", narration: c.narration ?? "", ...(c.transcript?.length ? { transcript: c.transcript } : {}) }),
+    JSON.stringify({ clip: c.no, seconds: Number(c.duration.toFixed(1)), shot: c.shot ?? "", on_screen: c.onScreen ?? "", voice: c.voice ?? "", narration: c.narration ?? "", ...(c.transcript?.length ? { transcript: c.transcriptWords?.length ? transcriptForPlan(c) : c.transcript } : {}) }),
   );
   // 스타일 쇼츠의 주석 수정은 주석 화면과 전용 지시를 쓴다. 직접 촬영 고치기는 예전 그대로다
   const reviseFrames = ctx.style && ctx.revise ? (ctx.reviseFrames ?? []) : [];

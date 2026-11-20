@@ -163,6 +163,8 @@ export interface CutZones {
   end: number;
   // 그 자리를 상품 · 사람이 얼마나 차지하는지 0~1
   cover: Record<Zone, number>;
+  // 얼굴이 그 자리에 걸친 세로 비율 0~1(스타일 쇼츠만 잰다). 없으면 재지 않은 컷이다
+  face?: Record<Zone, number>;
 }
 
 const FREE = 0.18;
@@ -188,6 +190,12 @@ export function hookZone(zones: CutZones[] | null, start: number, end: number, f
 /** 그 시간 동안 한 자리를 사람 · 상품이 가장 많이 가린 비율(0~1). 자리를 못 읽었으면 0. */
 export function zoneCover(zones: CutZones[] | null, start: number, end: number, zone: Zone): number {
   return zones?.length ? worstCover(zones, start, end)[zone] : 0;
+}
+
+/** 그 시간 동안 얼굴이 한 자리에 가장 많이 걸친 비율(0~1). 얼굴을 재지 않았으면 null. */
+export function zoneFace(zones: CutZones[] | null, start: number, end: number, zone: Zone): number | null {
+  const at = (zones ?? []).filter((z) => z.face && z.end > start && z.start < end);
+  return at.length ? Math.max(...at.map((z) => z.face![zone])) : null;
 }
 
 export function captionZone(zones: CutZones[] | null, start: number, end: number, busy: Zone[]): Zone {

@@ -39,9 +39,29 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # 설치된 패키지 폴더를 통째로 캐시한다. package-lock.json이 그대로면 npm ci(약 40초)를 건너뛴다
+      - uses: actions/cache@v4
+        id: node-modules
+        with:
+          path: node_modules
+          key: style-edit-node22-modules-${{ hashFiles('package-lock.json') }}
       - run: npm ci
+        if: steps.node-modules.outputs.cache-hit != 'true'
+      # 받은 설치 파일(.deb)을 캐시해 다음 실행은 내려받지 않는다. 캐시를 쓰는 설치가 실패하면 예전 방식으로 설치한다
+      - uses: actions/cache@v4
+        with:
+          path: ~/apt-archives
+          key: style-edit-apt-${{ runner.os }}-v1
+      # 저장소 서버가 느릴 때 오래 멈추지 않게 시간 제한 · 재시도를 건다(2026-11-20: 이 단계가 14.7분 걸린 실행이 있었다)
       - name: Install ffmpeg and Korean font
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-nanum > /dev/null
+        run: |
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          mkdir -p "$HOME/apt-archives/partial"
+          sudo apt-get update -qq $APT
+          sudo apt-get install -y -qq $APT -o Dir::Cache::Archives="$HOME/apt-archives" ffmpeg fonts-nanum > /dev/null \
+            || sudo apt-get install -y -qq $APT ffmpeg fonts-nanum > /dev/null
+          sudo chown -R "$USER" "$HOME/apt-archives" || true
+          rm -rf "$HOME/apt-archives/partial" "$HOME/apt-archives/lock"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -56,12 +76,17 @@ jobs:
         with:
           path: ~/.u2net
           key: video-models-v1
-      # 효과음(earshot 소리 묶음). 설치가 실패하면 효과음 없이 만들고 경고를 남긴다
+      # 효과음(earshot 소리 묶음) · 배경음악 후보 판정. 설치가 실패하면 효과음 없이 만들고, 음악은 제목 · 태그로 골라 경고를 남긴다
       - name: Install earshot
         continue-on-error: true
         run: |
           pip install -q torch --index-url https://download.pytorch.org/whl/cpu
           pip install -q "earshot @ git+https://github.com/Leonxlnx/earshot@${EARSHOT_REF}"
+      # 배경음악 후보의 소리를 재는 모델(~1.1GB). 레퍼런스 분석(style-shorts.yml)과 같은 캐시를 쓴다
+      - uses: actions/cache@v4
+        with:
+          path: ~/.earshot
+          key: earshot-models-${{ env.EARSHOT_REF }}
       - name: Prepare HyperFrames browser
         run: npx --yes hyperframes@0.8.210 browser ensure
         continue-on-error: true
@@ -87,4 +112,5 @@ jobs:
           FISH_VOICE_ID: ${{ vars.FISH_VOICE_ID }}
           VIDEO_PYTHON: python
           EARSHOT_PYTHON: python
+          EARSHOT_HOME: /home/runner/.earshot
           AGENT_MODEL: ${{ vars.AGENT_MODEL }}

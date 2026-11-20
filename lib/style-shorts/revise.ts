@@ -23,7 +23,7 @@ export function noteContext(note: ReviseNote, tl: VersionTimeline | null): strin
   }
   if (tl) {
     const cut = tl.cuts.find((c) => c.start <= t && t < c.end) ?? tl.cuts[tl.cuts.length - 1];
-    if (cut) parts.push(`장면: 촬영본 ${cut.clip}번 ${sec(cut.in + Math.max(0, t - cut.start))} 근처 (영상 ${sec(cut.start)}~${sec(cut.end)} 컷)`);
+    if (cut) parts.push(`장면: 촬영본 ${cut.clip}번 ${sec(cut.in + Math.max(0, t - cut.start) * (cut.rate ?? 1))} 근처 (영상 ${sec(cut.start)}~${sec(cut.end)} 컷)`);
     const cap = tl.captions.find((c) => c.start <= t && t < c.end);
     // 지금 글은 〈 〉로 감싼다 — 따옴표로 감싸면 "따옴표 글자는 그대로" 규칙(quotedTexts)이 지금 글을 사람이 정한 글로 잘못 본다
     if (cap) parts.push(`그때 자막: 〈${cap.text}〉`);

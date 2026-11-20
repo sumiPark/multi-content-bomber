@@ -171,6 +171,11 @@ export interface SegmentSpec {
 
 /** 컷 하나 → 1080x1920 · 30fps · H.264 · AAC 48kHz 스테레오 조각 (모두 같은 규격이라 이어 붙일 때 다시 인코딩하지 않는다). */
 export function renderSegment(spec: SegmentSpec, out: string, workDir: string, tag: string): void {
+  run(FFMPEG, segmentArgs(spec, out, workDir, tag));
+}
+
+/** renderSegment가 돌리는 ffmpeg 인자. 여러 컷을 동시에 자르는 쪽(편집 키트)이 같은 인자로 직접 돌린다. */
+export function segmentArgs(spec: SegmentSpec, out: string, workDir: string, tag: string): string[] {
   const filters = [
     ...(spec.hdrTransfer && hasZscale() ? toneMapFilters(spec.hdrTransfer) : []),
     `scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=increase`,
@@ -218,7 +223,7 @@ export function renderSegment(spec: SegmentSpec, out: string, workDir: string, t
     "-shortest",
     out,
   );
-  run(FFMPEG, args);
+  return args;
 }
 
 /** 조각 이어 붙이기 + 소리 크기 맞추기(-14 LUFS, 인스타 권장 근처) + 빠른 재생 시작(faststart). */

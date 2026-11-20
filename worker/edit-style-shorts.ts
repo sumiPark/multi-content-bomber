@@ -17,8 +17,9 @@ import { setReferencePalette } from "@/lib/shoot/video-kit/caption-skill";
 import { readClip, renderKitEdit, type KitClip, type KitResult } from "@/lib/shoot/video-kit/pipeline";
 import { allowGothicFonts } from "@/lib/shoot/video-kit/skill-fonts";
 import { captionFontDirective } from "@/lib/style-shorts/caption-look";
-import { transcribeWords } from "@/lib/shoot/video-kit/tools";
+import { mapLimit, transcribeWords } from "@/lib/shoot/video-kit/tools";
 import type { StyleCard } from "@/lib/style-shorts/card";
+import { makeMusicJudge } from "@/lib/style-shorts/music-fit";
 import { renderStyleSfx, sfxBoostDb } from "@/lib/style-shorts/sfx";
 import { CLIP_KEEP_DAYS, PARTS_BUCKET, type JobClip, type VersionRequest, type VersionTimeline } from "@/lib/style-shorts/jobs";
 import { warnIfError } from "@/lib/supabase/result";
@@ -86,7 +87,7 @@ function timelineSummary(kit: KitResult): VersionTimeline {
   const r = (n: number) => Math.round(n * 100) / 100;
   return {
     duration: r(tl.duration),
-    cuts: tl.cuts.map((c) => ({ start: r(c.start), end: r(c.end), clip: c.clip, in: r(c.in) })),
+    cuts: tl.cuts.map((c) => ({ start: r(c.start), end: r(c.end), clip: c.clip, in: r(c.in), ...(c.hasAudio && c.rate !== 1 ? { rate: c.rate } : {}) })),
     captions: tl.captions.map((c) => ({ start: r(c.start), end: r(c.end), text: c.text })),
     // 반응 · 속마음 글자와 화면 확대도 그래픽 칸에 같이 남긴다 — 주석이 그 시각의 무엇을 말하는지 찾을 수 있게
     graphics: [
@@ -213,16 +214,21 @@ async function main() {
       const reviseLost = request?.kind === "revise" && !revise ? `v${request.from}의 편집 기록이 없어 주석을 반영하지 못하고 처음부터 다시 만들었어요.` : null;
       if (reviseLost) console.log(`[style-edit] ${label}: ${reviseLost}`);
 
-      const kitClips: KitClip[] = [];
-      for (const [i, c] of clips.entries()) {
+      // 촬영본 받기 · 받아쓰기는 촬영본끼리 상관없어 여러 개를 동시에 한다(2026-11-20: 8개를 하나씩 하면 약 1분). 순서는 올린 순서 그대로다
+      const kitClips: KitClip[] = await mapLimit(clips, 4, async (c, i) => {
         const ext = c.path.split(".").pop() ?? "mp4";
         const file = join(workDir, `in${i + 1}.${ext}`);
         await download(service, c.path, file);
         const k = readClip(i + 1, file, { shot: "", how: "", onScreen: "", voice: "", narration: "" });
         // 말소리 모드만 원본의 말을 받아 적는다. 대본이 있으면 맞춤법 힌트로
-        if (liveVoice && k.hasAudio) k.transcript = (await transcribeWords(file, workDir, script ?? undefined)).segments;
-        kitClips.push(k);
-      }
+        // 낱말별 시각도 남긴다 — 계획 AI가 문장 안의 군말 · 쉼 · 되풀이를 잘라 길이를 레퍼런스에 맞춘다(2026-11-20: 문장 단위로만 잘라 완성본이 길었다)
+        if (liveVoice && k.hasAudio) {
+          const heard = await transcribeWords(file, workDir, script ?? undefined);
+          k.transcript = heard.segments;
+          k.transcriptWords = heard.words;
+        }
+        return k;
+      });
 
       const title = job.title?.trim() || "스타일 쇼츠";
       // 레퍼런스 자막 색을 모션 자막에도 쓴다(이 워커 안에서만). 예전 카드(자막 모양 없음)는 스킬 기본색
@@ -243,6 +249,8 @@ async function main() {
         reviseFrames: revise?.frames,
         // 효과음 크기는 레퍼런스에서 잰 값에 맞춘다(2026-11-20 사용자 결정). 예전 카드는 그대로
         sfxRenderer: (sfx, dir) => renderStyleSfx(sfx, dir, sfxBoostDb(card.numbers.sfxOverBedDb)),
+        // 배경음악은 후보의 소리를 재서 분위기가 맞고 같은 소리가 반복되지 않는 곡만 쓴다(2026-11-20 사용자 결정)
+        musicJudge: makeMusicJudge,
         // 캡컷 등에서 이어 편집할 파일 묶음(2026-11-19 사용자 결정)
         exportParts: true,
         // 자막 디자인 AI가 참고하는 글 — 레퍼런스 자막 모양(글꼴 · 모션 지시)과 카드의 자막 · 화면 설명

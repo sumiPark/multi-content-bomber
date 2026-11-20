@@ -24,7 +24,8 @@ export type VersionRequest =
 /** 주석 시각을 장면 · 자막에 맞추는 데 쓰는 시각표 요약 */
 export interface VersionTimeline {
   duration: number;
-  cuts: { start: number; end: number; clip: number; in: number }[];
+  // rate: 원본을 돌린 배수(없으면 1). 완성본 시각을 원본 시각으로 바꿀 때 쓴다
+  cuts: { start: number; end: number; clip: number; in: number; rate?: number }[];
   captions: { start: number; end: number; text: string }[];
   graphics: { start: number; end: number; type: string; text: string }[];
   sfx: { t: number; name: string }[];
