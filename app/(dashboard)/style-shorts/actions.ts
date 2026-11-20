@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getCurrentProfile, getSessionUser } from "@/lib/auth";
 import { triggerStyleEditRun, triggerStyleRefsRun } from "@/lib/github-dispatch";
-import { cardEditSchema, MAX_REFERENCES, parseInstagramUrl, type StyleCard } from "@/lib/style-shorts/card";
+import { ANALYSIS_VERSION, cardEditSchema, MAX_REFERENCES, parseInstagramUrl, type StyleCard } from "@/lib/style-shorts/card";
 import { CONCEPT_MAX, MAX_CLIP_BYTES, MAX_CLIPS, PARTS_BUCKET, SCRIPT_MAX, type JobClip, type VersionRequest } from "@/lib/style-shorts/jobs";
 import { NOTE_MAX, NOTES_PER_VERSION } from "@/lib/style-shorts/revise";
 import { warnIfError } from "@/lib/supabase/result";
@@ -252,14 +252,15 @@ export async function rebuildCardAction(input: z.infer<typeof idSchema>): Promis
     .select("id");
   if (error) return { ok: false, error: `요청하지 못했어요: ${error.message}` };
   if (!data?.length) return { ok: false, error: "카드를 만드는 중이에요. 끝난 뒤 다시 눌러 주세요." };
-  // 자막 모양 · 화면 위 글자 · 점프 컷(2026-11-19 추가)을 재기 전에 분석한 레퍼런스는 다시 분석한다 — 카드에 새 값이 들어가게
+  // 지금 분석 판(ANALYSIS_VERSION)보다 오래된 레퍼런스는 다시 분석한다 — 카드에 새 값이 들어가게
+  // (2026-11-19 자막 모양 · 화면 위 글자 · 점프 컷, 2026-11-20 말 사이 빈틈 · 말 자막 · 효과음 크기)
   await service
     .from("style_references")
     .update({ status: "PENDING", error: null, updated_at: new Date().toISOString() })
     .eq("folder_id", parsed.data.id)
     .eq("status", "DONE")
     .eq("analyzed_from", "VIDEO")
-    .or("analysis->read->captionLook.is.null,analysis->overlays.is.null");
+    .or(`analysis->version.is.null,analysis->version.lt.${ANALYSIS_VERSION}`);
   const warning = await wake("카드 다시 만들기", parsed.data.id);
   revalidate(parsed.data.id);
   return { ok: true, warning };

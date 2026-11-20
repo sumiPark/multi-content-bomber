@@ -27,7 +27,12 @@ export function cardText(card: StyleCard): string {
     n.durationSec && `레퍼런스 길이 ${n.durationSec[0]}~${n.durationSec[1]}초`,
     n.avgShotSec != null && `평균 컷 ${n.avgShotSec}초`,
     n.cutsPer10s != null && `10초당 컷 ${n.cutsPer10s}개`,
-    n.sfxPer10s != null && `효과음 10초당 ${n.sfxPer10s}개`,
+    n.sfxPer10s != null && `효과음 10초당 ${n.sfxPer10s}개${n.sfxIsMin ? " 이상" : ""}`,
+    n.sfxOverBedDb != null && `효과음 크기 바로 앞 소리보다 ${n.sfxOverBedDb}dB`,
+    n.endDropShare != null && `끝 직전에 음악을 끊는 레퍼런스 ${Math.round(n.endDropShare * 100)}%`,
+    n.charsPerSec != null && `말 초당 ${n.charsPerSec}자`,
+    n.maxPauseSec != null && `말 사이 가장 긴 빈틈 ${n.maxPauseSec}초 · 0.6초 넘는 빈틈 10초당 ${n.pausePer10s}개 · 빈틈 비율 ${Math.round((n.silentShare ?? 0) * 100)}%`,
+    n.captionPer10s != null && `말 자막 10초당 ${n.captionPer10s}개 · 자막 하나 평균 ${n.captionChars}자 · 한 줄 ${Math.round((n.captionOneLine ?? 0) * 100)}% · 크게 강조 ${Math.round((n.captionBigShare ?? 0) * 100)}%${n.captionPlace ? ` · 주로 ${({ top: "위", mid: "가운데", lower: "아래" } as const)[n.captionPlace]}` : ""}${n.captionColors?.length ? ` · 색 ${n.captionColors.join(", ")}` : ""}`,
     n.sfxKinds.length && `효과음 종류 비율 ${n.sfxKinds.map((k) => `${k.kind} ${Math.round(k.share * 100)}%`).join(", ")}`,
     n.tempo != null && `음악 ${n.tempo}BPM`,
     `자막 방식 ${n.captionStyle}`,
@@ -74,9 +79,15 @@ ${reactionLookLines()}`;
 
 function voiceBlock(g: StylePlanGuide): string {
   const script = g.script?.trim();
+  const n = g.card.numbers;
   if (g.voiceMode === "LIVE") {
+    // 레퍼런스에서 잰 말 사이 빈틈(2026-11-20 추가). 예전 카드는 없다
+    const pause =
+      n.maxPauseSec != null
+        ? `\n- 말 사이 빈틈: 레퍼런스는 가장 긴 빈틈이 ${n.maxPauseSec}초, 0.6초 넘는 빈틈이 10초당 ${n.pausePer10s}개다. 비트 안이나 비트 사이에 이보다 긴 쉼이 남지 않게 in · out을 말 시작 · 끝에 붙여 자른다. 이야기 줄기(처음 소개 · 중간 사건 · 끝맺음 말)는 빼지 말고 쉼만 줄여 길이를 맞춘다.`
+        : "";
     return `소리: 찍은 영상의 말소리를 그대로 쓴다. 모든 비트를 mode live로 쓰고 tts는 빈 문자열로 둔다.
-- 말이 있는 촬영본은 받아쓰기(transcript)를 보고 NG · 말 더듬기 · 같은 말 되풀이 · 긴 침묵을 빼고, 가장 또렷하게 말한 구간만 고른다. 한 문장이 끊기지 않게 낱말 시각에 맞춰 in · out을 잡는다.
+- 말이 있는 촬영본은 받아쓰기(transcript)를 보고 NG · 말 더듬기 · 같은 말 되풀이 · 긴 침묵을 빼고, 가장 또렷하게 말한 구간만 고른다. 한 문장이 끊기지 않게 낱말 시각에 맞춰 in · out을 잡는다.${pause}
 - 말이 없는 장면도 mode live로 쓴다(원본의 현장 소리가 그대로 나간다). live 비트는 컷이 정확히 1개다.
 - live 비트는 컷이 1개라 비트 수가 곧 컷 수다. 레퍼런스 컷이 짧으면(점프 컷) 한 문장도 구절마다 다른 비트로 나누고, 구절 사이의 쉼 · "어 · 음" 같은 군말은 빼서 바로 이어 붙인다. 비트 5~14개 제한보다 레퍼런스 컷 속도가 먼저다.
 - 자막은 코드가 받아쓰기로 넣는다. captions는 빈 배열로 둔다.${script ? `\n- 아래 대본은 찍을 때 말하려던 내용이다. 받아쓰기의 맞춤법 · 고유명사를 맞출 때와 어떤 구간을 어떤 순서로 쓸지 정할 때 참고한다. 대본에 없는 말을 새로 넣지 않는다.\n"""\n${script}\n"""` : ""}`;
@@ -157,7 +168,12 @@ export function styleSystemPrompt(ctx: EditPlanContext, g: StylePlanGuide): stri
       ? `영상 길이는 레퍼런스 길이(${n.durationSec[0]}~${n.durationSec[1]}초, 코드가 잰 값) 안에 맞춘다. ${g.voiceMode === "AI" ? "AI 음성은 읽는 글자(띄어쓰기 · 문장부호 제외) 약 6~7자가 1초다." : "영상 내 음성은 고른 구간 길이의 합이 영상 길이다."} 촬영본에 쓸 장면이 모자랄 때만 짧게 끝낸다.`
       : "내용에 맞게 15~60초.";
   const palette = SFX_PALETTE.map((s) => `${s.id} [${s.kind}] ${s.use}`).join("\n");
-  const sfxDensity = n.sfxPer10s != null ? `영상 10초마다 약 ${n.sfxPer10s}개(레퍼런스 측정값)` : "카드에 적힌 만큼";
+  const sfxDensity =
+    n.sfxPer10s != null
+      ? n.sfxIsMin
+        ? `영상 10초마다 ${n.sfxPer10s}개 이상(레퍼런스 측정값은 최소값이라 더 많아도 된다)`
+        : `영상 10초마다 약 ${n.sfxPer10s}개(레퍼런스 측정값)`
+      : "카드에 적힌 만큼";
   return `너는 숏폼 영상 편집자다. 사람이 찍은 원본 영상을 보고, 아래 "레퍼런스 스타일 카드"와 같은 스타일로 보이는 편집 계획을 세운다. 계획은 코드가 그대로 만든다.
 이 영상은 상품 자료가 없는 편집이다. 사실은 대본 · 컨셉과 프레임에서 실제로 보이는 것에만 근거한다.
 

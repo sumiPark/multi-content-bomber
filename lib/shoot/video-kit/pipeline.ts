@@ -221,6 +221,8 @@ export interface StyleNumbers {
   // 화면 위 글자 · 그래픽(말 자막 제외)과 화면 확대의 10초당 빈도(2026-11-19 추가). 예전 카드에는 없다
   overlayPer10s?: number | null;
   zoomPer10s?: number | null;
+  // 레퍼런스 효과음 수가 최소값이다(earshot이 이름 붙일 사건을 다 씀, 2026-11-20 추가) — 개수 상한을 두지 않는다
+  sfxIsMin?: boolean;
   // 주석 수정은 주석이 말한 것만 고친다 — 컷 속도 · 화면 위 글자 · 확대 빈도로 다시 쓰게 하지 않는다
   revise?: boolean;
 }
@@ -272,7 +274,8 @@ export function planProblems(plan: EditPlan, show?: { footageSeconds: number }, 
   // 스타일 쇼츠의 말소리 영상(tts 없음)은 고른 구간 길이로 어림한다
   const seconds = style && !syllables ? all.reduce((s, c) => s + Math.max(0, c.out - c.in), 0) : syllables / SYLLABLES_PER_SECOND;
   // 스타일 쇼츠는 레퍼런스 빈도로만 잰다. 레퍼런스 측정값이 없으면 개수를 제한하지 않는다(2026-11-19 사용자 결정)
-  const sfxMax = style?.sfxPer10s != null ? Math.max(3, Math.ceil((seconds / 10) * style.sfxPer10s * 1.5) + 1) : style ? Infinity : Math.max(3, Math.ceil((seconds / 15) * 3) + 1);
+  // 레퍼런스 값이 최소값이면 상한을 두지 않는다(2026-11-20: 최소값을 상한으로 써 효과음이 레퍼런스보다 적게 들어갔다)
+  const sfxMax = style?.sfxIsMin ? Infinity : style?.sfxPer10s != null ? Math.max(3, Math.ceil((seconds / 10) * style.sfxPer10s * 1.5) + 1) : style ? Infinity : Math.max(3, Math.ceil((seconds / 15) * 3) + 1);
   if (sfxCount > sfxMax) problems.push(`효과음이 ${sfxCount}개예요. ${sfxMax}개 이하로 줄여 ${style ? "레퍼런스 빈도에 맞추세요" : "시작 · 완성 · 반전처럼 힘을 줄 곳에만 남기세요"}.`);
   if (style && !style.revise && seconds > 0) problems.push(...styleRhythmProblems(plan, all.length, seconds, style));
   if (plan.caption_style === "sentence") {
@@ -308,6 +311,12 @@ export function styleRhythmProblems(plan: EditPlan, cuts: number, seconds: numbe
     const target = Math.round(overlays);
     if (count < overlays * 0.5) problems.push(`화면 위 글자 · 그래픽이 ${count}개예요. 레퍼런스는 10초당 ${style.overlayPer10s}개라 ${target}개 안팎이 되게 반응 · 속마음 글자나 그래픽을 더 넣으세요.`);
     else if (count > overlays * 2 + 2) problems.push(`화면 위 글자 · 그래픽이 ${count}개예요. 레퍼런스는 10초당 ${style.overlayPer10s}개라 ${target}개 안팎으로 줄이세요.`);
+  }
+  // 레퍼런스 효과음 수가 최소값이면 그보다 적을 때만 다시 쓴다
+  const sfxMin = style.sfxIsMin ? expected(style.sfxPer10s) : null;
+  if (sfxMin != null && sfxMin >= 1) {
+    const count = plan.beats.reduce((s, b) => s + b.sfx.length, 0);
+    if (count < sfxMin * 0.8) problems.push(`효과음이 ${count}개예요. 레퍼런스는 10초당 ${style.sfxPer10s}개 이상이라 ${Math.ceil(sfxMin)}개 이상 넣으세요. 컷이 바뀌는 순간 · 반응 글자 · 확대 · 강조하는 말에 붙이세요.`);
   }
   const zooms = expected(style.zoomPer10s);
   if (zooms != null && zooms >= 1 && !(plan.zooms?.length)) problems.push(`화면 확대가 없어요. 레퍼런스는 10초당 ${style.zoomPer10s}번 확대하니 반응 · 강조 순간에 ${Math.round(zooms)}번 안팎 넣으세요.`);
@@ -686,6 +695,7 @@ export async function renderKitEdit(input: KitInput): Promise<KitResult> {
           footageSeconds: clips.reduce((s, c) => s + c.duration, 0),
           overlayPer10s: input.stylePlan.card.numbers.overlayPer10s ?? null,
           zoomPer10s: input.stylePlan.card.numbers.zoomPer10s ?? null,
+          sfxIsMin: !!input.stylePlan.card.numbers.sfxIsMin,
           revise: !!input.revise,
         }
       : undefined;

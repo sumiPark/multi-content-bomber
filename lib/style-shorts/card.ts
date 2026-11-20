@@ -45,6 +45,40 @@ export interface SoundAnalysis {
   cutsWithSound: number | null;
   hasMusic: boolean;
   hasVoice: boolean;
+  // 2026-11-20 추가(예전 분석에는 없다)
+  // earshot이 이름 붙일 사건을 다 썼다 — sfxPer10s는 최소값
+  sfxCapped?: boolean;
+  // 효과음이 바로 앞 소리보다 큰 정도(dB, 중앙값)
+  sfxOverBedDb?: number | null;
+  truePeakDb?: number | null;
+  // 끝 4초 안에 소리를 잠깐 끊었다(끝맺음 직전 음악 멈춤)
+  endDrop?: boolean;
+}
+
+/** 말 사이 빈틈(받아쓰기 낱말 시각으로 코드가 잰 값, 2026-11-20 추가) */
+export interface SpeechPauses {
+  // 0.6초 넘는 빈틈의 10초당 개수 · 가장 긴 빈틈(초)
+  per10s: number;
+  maxSec: number;
+  // 첫 낱말부터 마지막 낱말까지에서 0.25초 넘는 빈틈의 합 비율(0~1)
+  silentShare: number;
+}
+
+/** 말 자막 통계(1초마다 본 프레임으로 코드가 센 값, 2026-11-20 추가) */
+export interface CaptionStats {
+  // 프레임에서 본 서로 다른 자막 수(1초 간격이라 실제보다 적을 수 있다)
+  seen: number;
+  // 10초당 자막 수 — 말한 글자 수 ÷ 자막 평균 글자 수로 어림한다(말이 없으면 seen으로)
+  per10s: number;
+  // 자막 하나의 평균 글자 수(띄어쓰기 제외)
+  avgChars: number;
+  // 한 줄 자막 비율(0~1)
+  oneLineShare: number;
+  places: Partial<Record<"top" | "mid" | "lower", number>>;
+  // 많이 쓴 글자색(많은 순, 4개까지)
+  colors: string[];
+  // 크게 강조한 자막 비율(0~1)
+  bigShare: number;
 }
 
 export const visualReadSchema = z.object({
@@ -91,6 +125,16 @@ export const overlayScanSchema = z.object({
             }),
           )
           .describe("말 자막(말을 받아 적은 글자)은 넣지 않는다. 없으면 빈 배열"),
+        caption: z
+          .object({
+            text: z.string().describe("보이는 말 자막 글자 그대로"),
+            lines: z.number().int().describe("줄 수"),
+            color: z.string().describe("글자의 주된 색 #RRGGBB"),
+            place: z.enum(["top", "mid", "lower"]).describe("화면 위 · 가운데 · 아래"),
+            big: z.boolean().describe("평소 자막보다 눈에 띄게 크게 강조한 자막이면 true"),
+          })
+          .nullable()
+          .describe("이 프레임의 말 자막(사람이 한 말을 받아 적은 글자). 없으면 null"),
         zoomed: z.boolean().describe("바로 앞 프레임과 같은 장면인데 화면을 확대해 더 가깝게 잡았으면 true"),
       }),
     )
@@ -116,7 +160,13 @@ export interface OverlayStats {
   examples: { kind: OverlayKind; text: string; color: string }[];
 }
 
+// 분석 형식 판. 올리면 카드 다시 만들기가 이 판보다 오래된 레퍼런스를 다시 분석한다
+// 2: 말 사이 빈틈 · 말 자막 · 효과음 크기 · 끝 직전 음악 끊김(2026-11-20)
+export const ANALYSIS_VERSION = 2;
+
 export interface ReferenceAnalysis {
+  // 분석 형식 판(ANALYSIS_VERSION). 2026-11-20 전 분석에는 없다
+  version?: number;
   durationSec: number;
   // 화면 위 글자 · 그래픽(2026-11-19 추가). 그 전에 분석한 레퍼런스는 없다
   overlays?: OverlayStats | null;
@@ -125,7 +175,10 @@ export interface ReferenceAnalysis {
   avgShotSec: number | null;
   cutsPer10s: number;
   first3sCuts: number;
-  speech: { has: boolean; transcript: string; charsPerSec: number | null };
+  // chars · pauses는 2026-11-20 추가(예전 분석에는 없다)
+  speech: { has: boolean; transcript: string; charsPerSec: number | null; chars?: number; pauses?: SpeechPauses | null };
+  // 말 자막 통계(2026-11-20 추가)
+  captions?: CaptionStats | null;
   sound: SoundAnalysis | null;
   // 소리를 분석하지 못한 이유(소리 없음 · 도구 실패)
   soundNote: string | null;
@@ -170,6 +223,25 @@ export interface StyleCardNumbers {
   // 안내 카드로 끝나는 레퍼런스 비율(0~1)
   endCardShare?: number | null;
   overlayExamples?: { kind: OverlayKind; text: string; color: string }[];
+  // 2026-11-20 추가(예전 카드에는 없다)
+  // 효과음 수가 최소값인지(earshot이 이름 붙일 사건을 다 쓴 레퍼런스가 있다)
+  sfxIsMin?: boolean;
+  sfxOverBedDb?: number | null;
+  loudnessLufs?: number | null;
+  // 끝 직전에 음악을 끊은 레퍼런스 비율(0~1)
+  endDropShare?: number | null;
+  // 말: 초당 글자 · 0.6초 넘는 빈틈 10초당 · 가장 긴 빈틈 · 빈틈 비율
+  charsPerSec?: number | null;
+  pausePer10s?: number | null;
+  maxPauseSec?: number | null;
+  silentShare?: number | null;
+  // 말 자막: 10초당 수 · 평균 글자 수 · 한 줄 비율 · 많이 쓴 자리 · 색 · 크게 강조한 비율
+  captionPer10s?: number | null;
+  captionChars?: number | null;
+  captionOneLine?: number | null;
+  captionPlace?: "top" | "mid" | "lower" | null;
+  captionColors?: string[];
+  captionBigShare?: number | null;
 }
 
 export interface StyleCard {
