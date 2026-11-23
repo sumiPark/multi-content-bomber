@@ -273,6 +273,83 @@ export async function fetchProduct(shop: ShopCode, id: number): Promise<ShopProd
   };
 }
 
+export type LandingStatus =
+  | "on_sale"
+  | "sold_out"
+  | "suspended"
+  | "deleted"
+  | "not_open"
+  | "sale_ended"
+  | "restricted"
+  | "unknown";
+
+export interface LandingProduct {
+  name: string;
+  price: number | null;
+  /** 광고 랜딩으로 들어왔을 때의 판매 상태 — 목록 노출 여부는 보지 않는다(landingStatusOf). */
+  landingStatus: LandingStatus;
+  /** 수집 · 콘텐츠용 판정(stockStatusOf) — 목록에 안 보이면 unavailable. */
+  stockStatus: StockStatus;
+  productStatus: string | null;
+  hiddenInList: boolean;
+  appOnly: boolean;
+  representImageUrl: string | null;
+}
+
+/**
+ * 광고 랜딩 기준 판매 상태 (Marketing Hub 상품 점검, 2026-11-23).
+ * 광고는 목록에 안 보이는 광고 전용 상품(isVisibleInList=false, 상품명에 인플루언서 이름)으로 보내는 일이 많아,
+ * stockStatusOf와 달리 목록 노출 여부로 판매 중이 아니라고 보지 않는다. 링크로 들어온 사람이 살 수 있는지만 본다.
+ */
+export function landingStatusOf(
+  d: {
+    productStatus?: string | null;
+    deletedAt?: string | null;
+    minAppUserGrade?: unknown;
+    isGiftOnly?: boolean | null;
+    productSaleType?: {
+      isCommingSoon?: boolean | null;
+      saleType?: string | null;
+      limitedPeriodSaleEndDate?: string | null;
+    } | null;
+  },
+  now: number,
+): LandingStatus {
+  const sale = d.productSaleType;
+  if (d.deletedAt) return "deleted";
+  if (d.productStatus === "suspended") return "suspended";
+  if (sale?.isCommingSoon) return "not_open";
+  if (
+    !!sale?.saleType?.includes("PERIOD") &&
+    !!sale.limitedPeriodSaleEndDate &&
+    Date.parse(sale.limitedPeriodSaleEndDate) < now
+  ) {
+    return "sale_ended";
+  }
+  if (d.minAppUserGrade || d.isGiftOnly) return "restricted";
+  if (d.productStatus === "stock_in") return "on_sale";
+  if (d.productStatus === "temp_stock_out" || d.productStatus === "stock_out") return "sold_out";
+  return "unknown";
+}
+
+/** 광고 랜딩 점검용 — 상품명 · 가격 · 판매 상태. 없는 상품이면 ShopApiError(몰은 400 · E1031로 답한다). */
+export async function fetchLandingProduct(shop: ShopCode, id: number): Promise<LandingProduct> {
+  const d = detailSchema.parse(await getJson(`${SHOPS[shop].apiBase}/v1/products/${id}`));
+  if (d.id !== id) throw new ShopApiError(`${shop} 상품 ${id}: 응답 id 불일치(${d.id})`, null);
+  const now = Date.now();
+  const represent = d.representImageBucketUrl ?? null;
+  return {
+    name: d.name.trim(),
+    price: d.productPrice?.price ?? null,
+    landingStatus: landingStatusOf(d, now),
+    stockStatus: stockStatusOf(d, now),
+    productStatus: d.productStatus ?? null,
+    hiddenInList: d.isVisibleInList === false,
+    appOnly: d.isAppOnly === true,
+    representImageUrl: represent && isShopAsset(represent, shop) ? represent : null,
+  };
+}
+
 /**
  * 가격 · 판매 상태만 — 발행 직전 다시 확인(5-4)용. 상세 이미지 개수 검사 같은 수집용 검사는 하지 않는다
  * (발행을 막을 이유가 아니므로).

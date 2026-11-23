@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MAX_CHECK_URLS, checkProductUrls } from "@/lib/products/landing-check";
 import { KIND_LABEL, SHOPS, type ProductKind, type ShopCode } from "@/lib/products/shops";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { McpServer, McpTool } from "./server";
@@ -23,7 +24,9 @@ const INSTRUCTIONS = `MCB 상품 카탈로그 MCP입니다. 오늘과일(과일 
 - 화장품: 질병 치료 · 예방, 의약품 오인 표현(치료, 완치, 염증 개선, 재생), 기능성 표기 없는 미백 · 주름 · 자외선 차단 주장,
   최상급 · 절대 표현, 타사 비방을 쓰지 않고 개인차를 밝힙니다. get_rules의 금지 표현은 모두 피합니다.
 - stockStatus가 available이 아닌 상품은 판매 중처럼 소개하지 않습니다. 가격 · 재고는 게시 직전에 url에서 다시 확인합니다.
-- 이미지는 images.main · images.detail(몰 공식 자산)만 소재로 씁니다.`;
+- 이미지는 images.main · images.detail(몰 공식 자산)만 소재로 씁니다.
+광고 랜딩 점검: check_product_urls에 상품 주소(최대 ${MAX_CHECK_URLS}개)를 주면 몰에서 지금 상품명 · 가격 · 판매 상태(landingStatus)를 읽습니다.
+카탈로그에 없는 광고 전용 상품(목록 비노출)도 조회되고, landingStatus는 목록 노출 여부와 상관없이 링크로 살 수 있는지만 봅니다.`;
 
 const db = () => createServiceClient();
 
@@ -174,9 +177,26 @@ const getRules: McpTool = {
   },
 };
 
+// 광고 랜딩 점검 (Marketing Hub 상품 점검이 매시 부른다, 2026-11-23) — 몰 공개 API를 바로 읽는다(DB 안 씀).
+const checkProductUrlsTool: McpTool = {
+  name: "check_product_urls",
+  title: "광고 랜딩 상품 확인",
+  description:
+    "상품 주소(광고 최종 URL, utm 등 쿼리는 무시)마다 몰에서 지금 상품명 · 가격 · 판매 상태를 읽습니다. " +
+    "landingStatus: on_sale 판매 중 · sold_out 품절 · suspended 판매 중지 · deleted 삭제 · not_open 판매 전 · " +
+    "sale_ended 판매 기간 끝 · restricted 등급 · 선물 전용 · unknown. result: ok · not_product_url(몰 상품 주소 아님) · not_found(몰에 없음) · error.",
+  input: z.object({
+    urls: z.array(z.string().max(2000)).min(1).max(MAX_CHECK_URLS).describe(`상품 주소 1~${MAX_CHECK_URLS}개`),
+  }),
+  async run(args) {
+    const a = args as { urls: string[] };
+    return { checkedAt: new Date().toISOString(), results: await checkProductUrls(a.urls) };
+  },
+};
+
 export const catalogServer: McpServer = {
   name: "mcb-catalog",
-  version: "1.0.0",
+  version: "1.1.0",
   instructions: INSTRUCTIONS,
-  tools: [searchProducts, getProducts, getRules],
+  tools: [searchProducts, getProducts, getRules, checkProductUrlsTool],
 };
