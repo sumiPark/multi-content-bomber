@@ -3040,6 +3040,206 @@ export type Database = {
 
         ]
       }
+      // 모아링크 (0063) — 손으로 추가
+      moa_pages: {
+        Row: {
+          id: string
+          organization_id: string
+          social_account_id: string | null
+          slug: string
+          title: string
+          bio: string
+          avatar_url: string | null
+          theme: Json
+          status: "DRAFT" | "PUBLISHED" | "PAUSED"
+          hide_sold_out: boolean
+          auto_limit: number
+          published_at: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          social_account_id?: string | null
+          slug: string
+          title?: string
+          bio?: string
+          avatar_url?: string | null
+          theme?: Json
+          status?: "DRAFT" | "PUBLISHED" | "PAUSED"
+          hide_sold_out?: boolean
+          auto_limit?: number
+          published_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["moa_pages"]["Insert"]>
+        Relationships: []
+      }
+      moa_slug_redirects: {
+        Row: { old_slug: string; page_id: string; created_at: string }
+        Insert: { old_slug: string; page_id: string; created_at?: string }
+        Update: { old_slug?: string; page_id?: string; created_at?: string }
+        Relationships: []
+      }
+      moa_blocks: {
+        Row: {
+          id: string
+          page_id: string
+          organization_id: string
+          kind: "PRODUCT" | "LINK" | "BANNER" | "HEADING" | "SOCIAL" | "AUTO_SECTION"
+          position: number
+          in_auto_section: boolean
+          pinned: boolean
+          enabled: boolean
+          starts_at: string | null
+          ends_at: string | null
+          title: string
+          subtitle: string
+          url: string | null
+          image_url: string | null
+          shop_code: string | null
+          shop_product_id: number | null
+          data: Json
+          source: "MANUAL" | "CONTENT"
+          surfaced_at: string
+          deleted_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          page_id: string
+          organization_id: string
+          kind: "PRODUCT" | "LINK" | "BANNER" | "HEADING" | "SOCIAL" | "AUTO_SECTION"
+          position?: number
+          in_auto_section?: boolean
+          pinned?: boolean
+          enabled?: boolean
+          starts_at?: string | null
+          ends_at?: string | null
+          title?: string
+          subtitle?: string
+          url?: string | null
+          image_url?: string | null
+          shop_code?: string | null
+          shop_product_id?: number | null
+          data?: Json
+          source?: "MANUAL" | "CONTENT"
+          surfaced_at?: string
+          deleted_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["moa_blocks"]["Insert"]>
+        Relationships: []
+      }
+      moa_product_status: {
+        Row: {
+          shop_code: string
+          shop_product_id: number
+          name: string | null
+          price: number | null
+          image_url: string | null
+          landing_status: string | null
+          app_only: boolean
+          checked_at: string | null
+          last_ok_at: string | null
+          fail_count: number
+          last_error: string | null
+          status_changed_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          shop_code: string
+          shop_product_id: number
+          name?: string | null
+          price?: number | null
+          image_url?: string | null
+          landing_status?: string | null
+          app_only?: boolean
+          checked_at?: string | null
+          last_ok_at?: string | null
+          fail_count?: number
+          last_error?: string | null
+          status_changed_at?: string | null
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["moa_product_status"]["Insert"]>
+        Relationships: []
+      }
+      moa_events: {
+        Row: {
+          id: number
+          page_id: string
+          block_id: string | null
+          kind: "VIEW" | "IMPRESSION" | "CLICK"
+          session_id: string | null
+          visitor_hash: string | null
+          source: string
+          campaign: string
+          created_at: string
+        }
+        Insert: {
+          page_id: string
+          block_id?: string | null
+          kind: "VIEW" | "IMPRESSION" | "CLICK"
+          session_id?: string | null
+          visitor_hash?: string | null
+          source?: string
+          campaign?: string
+          created_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["moa_events"]["Insert"]>
+        Relationships: []
+      }
+      moa_daily_page_stats: {
+        Row: {
+          day: string
+          page_id: string
+          source: string
+          views: number
+          visits: number
+          visitors: number
+          clicks: number
+          click_visits: number
+        }
+        Insert: {
+          day: string
+          page_id: string
+          source: string
+          views?: number
+          visits?: number
+          visitors?: number
+          clicks?: number
+          click_visits?: number
+        }
+        Update: Partial<Database["public"]["Tables"]["moa_daily_page_stats"]["Insert"]>
+        Relationships: []
+      }
+      moa_daily_block_stats: {
+        Row: {
+          day: string
+          page_id: string
+          block_id: string
+          impressions: number
+          clicks: number
+          click_visits: number
+        }
+        Insert: {
+          day: string
+          page_id: string
+          block_id: string
+          impressions?: number
+          clicks?: number
+          click_visits?: number
+        }
+        Update: Partial<Database["public"]["Tables"]["moa_daily_block_stats"]["Insert"]>
+        Relationships: []
+      }
     }
     Views: {
       account_post_stats: {
@@ -3165,6 +3365,9 @@ export type Database = {
         Args: { p_secret: string }
         Returns: boolean
       }
+      // 모아링크 (0063)
+      moa_record_events: { Args: { p_rows: Json }; Returns: number }
+      moa_rollup_day: { Args: { p_day: string }; Returns: undefined }
     }
     Enums: {
       media_type: "VIDEO" | "IMAGE" | "TEXT"

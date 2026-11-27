@@ -1,7 +1,11 @@
 import type { NextRequest } from "next/server";
+import { moaHostRoute } from "@/lib/moa/proxy-route";
 import { updateSession } from "@/lib/supabase/proxy";
 
 export async function proxy(request: NextRequest) {
+  // 모아링크 공개 주소(moa.cuma.co.kr) — 세션 갱신 없이 공개 페이지로 넘긴다
+  const moa = moaHostRoute(request);
+  if (moa) return moa;
   return await updateSession(request);
 }
 

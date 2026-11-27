@@ -14,6 +14,7 @@ import {
   Clapperboard,
   Film,
   LayoutDashboard,
+  LayoutList,
   Link2,
   LogOut,
   Menu,
@@ -91,6 +92,8 @@ const NAV_GROUPS: NavGroup[] = [
         badgeKind: "count",
       },
       { href: "/contents", label: "보관함", icon: Archive },
+      // 모아링크(2026-11-27) — 계정별 프로필 링크 모음 페이지(인포크링크 대체)
+      { href: "/moa", label: "모아링크", icon: LayoutList },
     ],
   },
   // AI 자동 콘텐츠(2026-11 신규) — 기존 메뉴와 섞지 않고 따로 묶는다(사용자 요청).
