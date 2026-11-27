@@ -19,6 +19,7 @@ import type { Json } from "@/types/database";
 // Required scopes: 콘텐츠 게시는 instagram_business_content_publish 필수.
 // 성과 권한 이름 — 계정 연동 화면의 "다시 연결 필요" 판단에도 쓴다.
 export const INSTAGRAM_INSIGHTS_SCOPE = "instagram_business_manage_insights";
+export const INSTAGRAM_MESSAGES_SCOPE = "instagram_business_manage_messages";
 
 // 성과(조회 · 도달 · 저장 · 공유 · 팔로워 증감) 읽기 — 콘텐츠 자동화 1단계 계정 분석.
 // ⚠️ Meta 앱에 이 권한을 추가하기 전에 요청하면 인스타 로그인이 "Invalid Scopes"로 막혀
@@ -31,6 +32,11 @@ function scopes(): string {
     "instagram_business_manage_comments",
     ...(process.env.INSTAGRAM_REQUEST_INSIGHTS === "true"
       ? [INSTAGRAM_INSIGHTS_SCOPE]
+      : []),
+    // 댓글 · DM 자동화(0062) — 댓글 기반 DM에 메시지 권한이 필요하다고 실측되면 켠다. 성과 권한과 같은 이유로
+    // Meta 앱에 권한을 추가한 뒤에만 true(아니면 "Invalid Scopes"로 로그인이 막힌다). 켠 뒤엔 계정을 다시 연결.
+    ...(process.env.INSTAGRAM_REQUEST_MESSAGES === "true"
+      ? [INSTAGRAM_MESSAGES_SCOPE]
       : []),
   ].join(",");
 }

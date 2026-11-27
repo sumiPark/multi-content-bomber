@@ -229,6 +229,21 @@ async function sendReplies(
         continue;
       }
 
+      // 같은 댓글에 게시물 댓글 · DM 자동화(0062)가 답글을 달았거나 달 차례면 그쪽이 먼저 — 시리즈는 건너뛴다.
+      const { data: postReply } = await service
+        .from("post_automation_events")
+        .select("id")
+        .eq("comment_id", row.ig_comment_id)
+        .in("reply_status", ["PENDING", "SENDING", "SENT"])
+        .limit(1);
+      if (postReply?.length) {
+        await updateReply(service, row.id, {
+          status: "SKIPPED",
+          skip_reason: "게시물 자동화 답글로 대신해요",
+        });
+        continue;
+      }
+
       const text = renderTemplate(pickTemplate(templates, rotation), {
         username: row.commenter_username ?? "",
         series: series.name,

@@ -18,6 +18,7 @@ import {
   Link2,
   LogOut,
   Menu,
+  MessageCircleReply,
   MessageSquareReply,
   Package,
   Send,
@@ -128,6 +129,8 @@ const NAV_GROUPS: NavGroup[] = [
         label: "시리즈 댓글 자동화",
         icon: BellRing,
       },
+      // 게시물 댓글 · DM 자동화(0062, 2026-11-27) — 게시물마다 첫 댓글 · 키워드 답글 · DM
+      { href: "/post-automations", label: "댓글 · DM 자동화", icon: MessageCircleReply },
       {
         href: "/auto-reply",
         label: "DM 자동 응답",

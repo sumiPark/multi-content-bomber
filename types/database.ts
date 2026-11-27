@@ -1258,6 +1258,244 @@ export type Database = {
         }
         Relationships: []
       }
+      // 0062 — 게시물 댓글 · DM 자동화 (손으로 추가)
+      post_automations: {
+        Row: {
+          backfill_done_at: string | null
+          config: Json
+          content_id: string | null
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          ends_at: string | null
+          first_comment_at: string | null
+          first_comment_error: string | null
+          first_comment_id: string | null
+          first_comment_status: string
+          id: string
+          last_comment_count: number | null
+          last_polled_at: string | null
+          locked_at: string | null
+          organization_id: string
+          paused_reason: string | null
+          platform: string
+          platform_post_id: string | null
+          post_caption: string | null
+          post_permalink: string | null
+          post_posted_at: string | null
+          product_id: string | null
+          publish_job_id: string | null
+          social_account_id: string
+          source: string
+          starts_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          backfill_done_at?: string | null
+          config: Json
+          content_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          ends_at?: string | null
+          first_comment_at?: string | null
+          first_comment_error?: string | null
+          first_comment_id?: string | null
+          first_comment_status?: string
+          id?: string
+          last_comment_count?: number | null
+          last_polled_at?: string | null
+          locked_at?: string | null
+          organization_id: string
+          paused_reason?: string | null
+          platform: string
+          platform_post_id?: string | null
+          post_caption?: string | null
+          post_permalink?: string | null
+          post_posted_at?: string | null
+          product_id?: string | null
+          publish_job_id?: string | null
+          social_account_id: string
+          source?: string
+          starts_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["post_automations"]["Insert"]>
+        Relationships: []
+      }
+      post_automation_events: {
+        Row: {
+          attempts: number
+          automation_id: string
+          comment_id: string
+          comment_text: string | null
+          commented_at: string | null
+          commenter_id: string | null
+          commenter_username: string | null
+          created_at: string
+          dm_error: string | null
+          dm_fallback: boolean
+          dm_format: string | null
+          dm_message_id: string | null
+          dm_sent_at: string | null
+          dm_status: string
+          id: string
+          locked_at: string | null
+          matched_keyword: string | null
+          next_attempt_at: string | null
+          organization_id: string
+          reply_error: string | null
+          reply_id: string | null
+          reply_sent_at: string | null
+          reply_status: string
+          reply_text: string | null
+          resolution: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          skip_reason: string | null
+          social_account_id: string
+          source: string
+          step2_sent_at: string | null
+          step2_status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          automation_id: string
+          comment_id: string
+          comment_text?: string | null
+          commented_at?: string | null
+          commenter_id?: string | null
+          commenter_username?: string | null
+          created_at?: string
+          dm_error?: string | null
+          dm_fallback?: boolean
+          dm_format?: string | null
+          dm_message_id?: string | null
+          dm_sent_at?: string | null
+          dm_status?: string
+          id?: string
+          locked_at?: string | null
+          matched_keyword?: string | null
+          next_attempt_at?: string | null
+          organization_id: string
+          reply_error?: string | null
+          reply_id?: string | null
+          reply_sent_at?: string | null
+          reply_status?: string
+          reply_text?: string | null
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          skip_reason?: string | null
+          social_account_id: string
+          source: string
+          step2_sent_at?: string | null
+          step2_status?: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["post_automation_events"]["Insert"]>
+        Relationships: []
+      }
+      post_automation_links: {
+        Row: {
+          automation_id: string
+          button_index: number
+          clicks: number
+          code: string
+          created_at: string
+          label: string
+          last_clicked_at: string | null
+          organization_id: string
+          target_url: string
+          updated_at: string
+        }
+        Insert: {
+          automation_id: string
+          button_index: number
+          clicks?: number
+          code: string
+          created_at?: string
+          label: string
+          last_clicked_at?: string | null
+          organization_id: string
+          target_url: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["post_automation_links"]["Insert"]>
+        Relationships: []
+      }
+      post_automation_templates: {
+        Row: {
+          config: Json
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          id: string
+          name: string
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          config: Json
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          name: string
+          organization_id: string
+          updated_at?: string
+        }
+        Update: Partial<Database["public"]["Tables"]["post_automation_templates"]["Insert"]>
+        Relationships: []
+      }
+      comment_dm_settings: {
+        Row: {
+          daily_limit: number
+          hourly_limit: number
+          organization_id: string
+          social_account_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          daily_limit?: number
+          hourly_limit?: number
+          organization_id: string
+          social_account_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: Partial<Database["public"]["Tables"]["comment_dm_settings"]["Insert"]>
+        Relationships: []
+      }
+      instagram_webhook_inbox: {
+        Row: {
+          field: string | null
+          ig_account_id: string | null
+          id: number
+          object: string | null
+          payload: Json
+          processed_at: string | null
+          received_at: string
+          result: string | null
+        }
+        Insert: {
+          field?: string | null
+          ig_account_id?: string | null
+          id?: never
+          object?: string | null
+          payload: Json
+          processed_at?: string | null
+          received_at?: string
+          result?: string | null
+        }
+        Update: Partial<Database["public"]["Tables"]["instagram_webhook_inbox"]["Insert"]>
+        Relationships: []
+      }
+      // 0062 끝
       post_history_sync: {
         Row: {
           all_listed_at: string | null
@@ -3331,6 +3569,15 @@ export type Database = {
           p_series_id: string
         }
         Returns: Database["public"]["Tables"]["series_episodes"]["Row"]
+      }
+      // 0062 — 게시물 댓글 · DM 자동화 (손으로 추가)
+      claim_post_automation_events: {
+        Args: { p_limit?: number }
+        Returns: Database["public"]["Tables"]["post_automation_events"]["Row"][]
+      }
+      record_post_automation_link_click: {
+        Args: { p_code: string }
+        Returns: string | null
       }
       claim_due_publish_jobs: {
         Args: {

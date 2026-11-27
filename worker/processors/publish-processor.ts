@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { decryptToken, encryptToken } from "@/lib/crypto";
 import { recordPublishedEpisode } from "@/lib/episode-alerts/server";
+import { runAfterPublish, runAfterPublishFailed } from "@/lib/post-publish";
 import { prepublishCheck } from "@/lib/products/prepublish-check";
 import { groupNameOf, pickShopTag, withShopTag } from "@/lib/products/shop-tag";
 import {
@@ -229,6 +230,7 @@ export async function processClaimedPublishJob(
         .eq("id", publishJobId),
       `${nextStatus} 기록 (job=${publishJobId})`,
     );
+    if (isLastAttempt) await runAfterPublishFailed(supabase, publishJobId);
 
     // status는 위에서 이미 RETRYING/FAILED로 기록됨. 호출측(process-due)이 job별로
     // catch해 로그만 남긴다 — 재시도는 RETRYING row를 다음 sweep이 다시 claim.
@@ -281,6 +283,14 @@ export async function processClaimedPublishJob(
   if (row.series_id && !alreadyPublished) {
     await recordSeriesEpisode(supabase, row, result);
   }
+
+  // 콘텐츠 생성에서 켜 둔 댓글 · DM 자동화 시작 + 첫 댓글 (0062). 실패해도 발행 결과는 그대로.
+  await runAfterPublish(supabase, {
+    publishJobId,
+    socialAccountId: row.social_account_id,
+    platformPostId: result.platformPostId,
+    platformPostUrl: result.platformPostUrl,
+  });
 
   // 4-3. 뒷일은 지금 시작하되 기다리지 않는다 — 같은 묶음의 다른 발행을 막지 않게.
   //      호출측(process-due)이 run 끝에 모아서 기다린다. 실패해도 발행 결과(SUCCESS)는 그대로.
