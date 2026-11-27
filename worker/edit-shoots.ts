@@ -1,5 +1,6 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
+import { stopIfPaused } from "./pause-check";
 
 import { createReadStream, createWriteStream, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -227,6 +228,7 @@ async function loadRules(service: Service): Promise<ContentRule[]> {
 const STALE_EDIT_MS = 55 * 60_000;
 
 async function main() {
+  if (stopIfPaused("shoot", "edit-shoots")) return;
   const argv = process.argv.slice(2);
   const dryRun = argv.includes("--dry-run");
   const onlyRequest = arg(argv, "--request");

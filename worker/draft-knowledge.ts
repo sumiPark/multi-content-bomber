@@ -1,4 +1,5 @@
 import "./load-env";
+import { stopIfPaused } from "./pause-check";
 import { draftedRecently, topUpKnowledge } from "@/lib/agents/knowledge-draft";
 import { loadProductFacts } from "@/lib/agents/product-facts";
 import { kstDate } from "@/lib/automation/time";
@@ -16,6 +17,7 @@ function arg(argv: string[], flag: string): string | undefined {
 }
 
 async function main() {
+  if (stopIfPaused("auto", "draft-knowledge")) return;
   const argv = process.argv.slice(2);
   const onlyProduct = arg(argv, "--product");
   const service = createServiceClient();

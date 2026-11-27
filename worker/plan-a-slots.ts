@@ -1,5 +1,6 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
+import { stopIfPaused } from "./pause-check";
 
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { planShootIdeas } from "@/lib/agents/plan-a";
@@ -64,6 +65,7 @@ async function tidyList(service: Service, accountId: string, dryRun: boolean): P
 }
 
 async function main() {
+  if (stopIfPaused("shoot", "plan-a-slots")) return;
   const argv = process.argv.slice(2);
   const dryRun = argv.includes("--dry-run");
   const onlyAccount = arg(argv, "--account");

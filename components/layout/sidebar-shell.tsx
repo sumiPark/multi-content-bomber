@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { signOut } from "@/app/(auth)/actions";
 import { Toaster } from "@/components/ui/toast";
+import { AUTO_CONTENT_PAUSED, pausedPaths } from "@/lib/paused";
 import { cn } from "@/lib/utils";
 
 // 앱 셸 — DESIGN.md 6장(Marketing Hub와 같은 구조): 240px 사이드바(로고 → 조직 카드 → 메뉴 묶음 → 사용자) +
@@ -141,6 +142,13 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+// 일시 중지한 기능의 메뉴는 숨긴다(lib/paused.ts). AI 자동 콘텐츠를 멈추면 그 묶음에는 상품 분석 · 광고 문구 규칙만 남아 묶음 이름을 "상품"으로 쓴다.
+const HIDDEN_PATHS = pausedPaths();
+const VISIBLE_GROUPS: NavGroup[] = NAV_GROUPS.map((g) => ({
+  label: g.label === "AI 자동 콘텐츠" && AUTO_CONTENT_PAUSED ? "상품" : g.label,
+  items: g.items.filter((it) => !HIDDEN_PATHS.some((p) => isActive(it.href, p))),
+})).filter((g) => g.items.length > 0);
+
 // 상단바 화면 이름 — 메뉴에 없는 화면(상세 · 온보딩 등)도 이름을 갖게
 const EXTRA_TITLES: { prefix: string; title: string }[] = [
   { prefix: "/onboarding", title: "시작하기" },
@@ -245,7 +253,7 @@ export function SidebarShell({
 
   const navContent = (
     <nav aria-label="주요 메뉴" className="flex flex-col gap-3">
-      {NAV_GROUPS.map((group, idx) => (
+      {VISIBLE_GROUPS.map((group, idx) => (
         <div key={group.label ?? `top-${idx}`} className="flex flex-col gap-px">
           {group.label && (
             <p className="px-2.5 py-1 text-xs font-semibold text-faint">

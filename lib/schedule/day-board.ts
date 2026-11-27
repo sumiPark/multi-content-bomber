@@ -1,5 +1,6 @@
 import { isConfirmDue, isPastSlot } from "@/lib/automation/deadline";
 import { addDays, kstDate, kstToIso } from "@/lib/automation/time";
+import { AUTO_CONTENT_PAUSED, SHOOT_PAUSED } from "@/lib/paused";
 import { cellStatus, type CellTone } from "@/lib/schedule/cell-status";
 import type { getServerSupabase } from "@/lib/auth";
 
@@ -44,16 +45,22 @@ export async function loadDashboardAlerts(supabase: Supabase, now = Date.now()):
   const today = kstDate(0, now);
   const horizon = addDays(today, HORIZON_DAYS);
 
+  // 일시 중지한 기능(lib/paused.ts)의 칸 · 편집 · 연결 경고는 읽지 않는다 — 눌러도 들어갈 화면이 없다
+  const none = Promise.resolve({ data: null });
   const [{ data: plans }, { data: settings }, { data: rules }, { data: failedEdits }] = await Promise.all([
-    supabase
-      .from("content_plans")
-      .select("id, social_account_id, slot_date, slot_time, status, note, error, publish_jobs(status), social_accounts(display_name)")
-      .eq("track", "B")
-      .gte("slot_date", addDays(today, -LOOKBACK_DAYS))
-      .lte("slot_date", horizon),
+    AUTO_CONTENT_PAUSED
+      ? none
+      : supabase
+          .from("content_plans")
+          .select("id, social_account_id, slot_date, slot_time, status, note, error, publish_jobs(status), social_accounts(display_name)")
+          .eq("track", "B")
+          .gte("slot_date", addDays(today, -LOOKBACK_DAYS))
+          .lte("slot_date", horizon),
     supabase.from("track_settings").select("social_account_id, shoot_enabled, social_accounts(display_name, is_active, disconnected_at)"),
-    supabase.from("slot_rules").select("social_account_id").eq("track", "B").eq("active", true),
-    supabase.from("shoot_requests").select("id, error, content_plans!inner(status, social_accounts(display_name))").eq("status", "FAILED").eq("content_plans.status", "SHOT"),
+    AUTO_CONTENT_PAUSED ? none : supabase.from("slot_rules").select("social_account_id").eq("track", "B").eq("active", true),
+    SHOOT_PAUSED
+      ? none
+      : supabase.from("shoot_requests").select("id, error, content_plans!inner(status, social_accounts(display_name))").eq("status", "FAILED").eq("content_plans.status", "SHOT"),
   ]);
 
   const blocked: BlockedItem[] = [];
@@ -92,7 +99,7 @@ export async function loadDashboardAlerts(supabase: Supabase, now = Date.now()):
   for (const s of settings ?? []) {
     const acc = s.social_accounts;
     if (!acc || acc.disconnected_at || acc.is_active !== false) continue;
-    if (!s.shoot_enabled && !inUse.has(s.social_account_id)) continue;
+    if (!(s.shoot_enabled && !SHOOT_PAUSED) && !inUse.has(s.social_account_id)) continue;
     atRisk.unshift({ key: `off-${s.social_account_id}`, label: `@${acc.display_name ?? ""} 연결이 끊겼어요`, reason: "다시 연결해야 기획과 발행이 이어져요", href: "/accounts" });
   }
   return { blocked, atRisk };
@@ -122,14 +129,17 @@ export async function loadUploadSchedule(supabase: Supabase, now = Date.now()): 
   const horizon = addDays(today, HORIZON_DAYS);
   const until = kstToIso(addDays(horizon, 1), "00:00");
 
+  // AI 자동 콘텐츠를 멈춘 동안(lib/paused.ts)은 자동 칸을 빼고 예약된 발행만 보인다 — 이미 예약된 발행은 그대로 올라가니 남긴다
   const [{ data: plans }, { data: jobs }] = await Promise.all([
-    supabase
-      .from("content_plans")
-      .select("id, slot_date, slot_time, status, publish_job_id, products(name), publish_jobs(status), social_accounts(display_name, disconnected_at)")
-      .eq("track", "B")
-      .gte("slot_date", today)
-      .lte("slot_date", horizon)
-      .not("status", "in", "(SKIPPED,FAILED,PUBLISHED)"),
+    AUTO_CONTENT_PAUSED
+      ? Promise.resolve({ data: null })
+      : supabase
+          .from("content_plans")
+          .select("id, slot_date, slot_time, status, publish_job_id, products(name), publish_jobs(status), social_accounts(display_name, disconnected_at)")
+          .eq("track", "B")
+          .gte("slot_date", today)
+          .lte("slot_date", horizon)
+          .not("status", "in", "(SKIPPED,FAILED,PUBLISHED)"),
     supabase
       .from("publish_jobs")
       .select("id, status, scheduled_for, social_accounts!inner(display_name), contents!inner(internal_title, ai_captions)")

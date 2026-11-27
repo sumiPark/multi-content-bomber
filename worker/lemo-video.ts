@@ -1,5 +1,6 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
+import { stopIfPaused } from "./pause-check";
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -89,6 +90,7 @@ function boardFonts(board: Storyboard): { key_font: string; small_font: string }
 }
 
 async function main() {
+  if (stopIfPaused("auto", "lemo-video")) return;
   const argv = process.argv.slice(2);
   const out = resolve(arg(argv, "--out") ?? join("lemo-out", String(Date.now())));
   mkdirSync(out, { recursive: true });

@@ -1,4 +1,5 @@
 import type { getServerSupabase } from "@/lib/auth";
+import { AUTO_CONTENT_PAUSED, SHOOT_PAUSED } from "@/lib/paused";
 import { freeVoiceNotice } from "@/lib/shoot/voices";
 
 // 수집 누락 감지 (콘텐츠 자동화 2-6) — 매일 돌아야 할 수집이 빠졌는지 대시보드가 경고한다.
@@ -27,7 +28,8 @@ export async function loadCollectionHealth(supabase: Supabase, now: number): Pro
   const warnings: HealthWarning[] = [];
 
   // 무료 음성 모델 종료 예고 — 수집과 별개로 대시보드 한곳에서 알린다
-  const voiceNotice = freeVoiceNotice(now);
+  // 음성은 두 기능의 편집에만 쓰여, 둘 다 일시 중지(lib/paused.ts)면 알리지 않는다
+  const voiceNotice = AUTO_CONTENT_PAUSED && SHOOT_PAUSED ? null : freeVoiceNotice(now);
   if (voiceNotice) warnings.push({ ...voiceNotice, href: "/auto/settings" });
 
   const [{ data: lastProducts }, { data: lastProductRun }, { data: lastDaily }, { count: igCount }, { count: failedCount }] =

@@ -1,5 +1,6 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
+import { stopIfPaused } from "./pause-check";
 
 import { loadAccountConcept } from "@/lib/agents/concept";
 import { selectProducts, type ProductScope } from "@/lib/agents/select";
@@ -25,6 +26,7 @@ function arg(argv: string[], flag: string): string | undefined {
 }
 
 async function main() {
+  if (stopIfPaused("auto", "plan-b-slots")) return;
   const argv = process.argv.slice(2);
   const dryRun = argv.includes("--dry-run");
   const slotDate = arg(argv, "--date") ?? kstDate(1);

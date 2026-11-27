@@ -1,5 +1,6 @@
 // .env.local 로드는 다른 어떤 import보다 먼저 (dev 전용 — GitHub Actions에선 no-op).
 import "./load-env";
+import { stopIfPaused } from "./pause-check";
 
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,6 +42,7 @@ function arg(argv: string[], flag: string): string | undefined {
 }
 
 async function main() {
+  if (stopIfPaused("auto", "make-auto-videos")) return;
   const argv = process.argv.slice(2);
   const dryRun = argv.includes("--dry-run");
   const onlyPlan = arg(argv, "--plan");

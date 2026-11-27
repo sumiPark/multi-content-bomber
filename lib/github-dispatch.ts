@@ -8,6 +8,8 @@
 //
 // 토큰(GITHUB_DISPATCH_TOKEN)을 쓰므로 서버 전용. 클라이언트 번들에 들어가면 안 된다.
 
+import { isPausedEvent } from "@/lib/paused";
+
 const GITHUB_API = "https://api.github.com";
 
 // repository_dispatch의 event_type — 워크플로 on.repository_dispatch.types와 일치해야 함.
@@ -133,6 +135,11 @@ export async function triggerBenchmarkRun(reason: string): Promise<void> {
 }
 
 async function dispatch(eventType: string, reason: string, extra: Record<string, string> = {}): Promise<void> {
+  // 일시 중지한 기능(lib/paused.ts)의 워크플로는 깨우지 않는다 — 버튼이 남아 있어도 비용이 나가지 않게
+  if (isPausedEvent(eventType)) {
+    console.log(`[dispatch] ${eventType} 건너뜀 — 일시 중지 (${reason})`);
+    return;
+  }
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   const repo = process.env.GITHUB_REPO;
   if (!token || !repo) {

@@ -3,6 +3,7 @@ import { CircleAlert, OctagonAlert, TriangleAlert } from "lucide-react";
 import { TrackBadge } from "@/components/schedule/slot-rule-cell";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AUTO_CONTENT_PAUSED } from "@/lib/paused";
 import type { CellTone } from "@/lib/schedule/cell-status";
 import type { BlockedItem, UploadSchedule, YesterdayLine } from "@/lib/schedule/day-board";
 import type { TodayPosts } from "@/lib/dashboard/today-posts";
@@ -165,12 +166,17 @@ export function UploadScheduleCard({ data, today, tomorrow }: { data: UploadSche
           <CardTitle>
             업로드 예정 <span className="font-normal text-muted-foreground tabular-nums">· {data.total}건</span>
           </CardTitle>
-          <CardDescription className="mt-1">앞으로 7일의 AI 자동 업로드와 콘텐츠 생성에서 예약한 건이에요.</CardDescription>
+          <CardDescription className="mt-1">
+            {AUTO_CONTENT_PAUSED ? "앞으로 7일 동안 예약된 업로드예요." : "앞으로 7일의 AI 자동 업로드와 콘텐츠 생성에서 예약한 건이에요."}
+          </CardDescription>
         </div>
         <div className="flex gap-1.5">
-          <Link href="/schedule" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
-            자동 업로드 일정
-          </Link>
+          {/* AI 자동 콘텐츠 일시 중지(lib/paused.ts) 중엔 일정 화면이 없다 */}
+          {!AUTO_CONTENT_PAUSED && (
+            <Link href="/schedule" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+              자동 업로드 일정
+            </Link>
+          )}
           <Link href="/postings?status=scheduled" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
             배포 관리
           </Link>

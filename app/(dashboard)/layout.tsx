@@ -2,6 +2,7 @@ import { SidebarShell } from "@/components/layout/sidebar-shell";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
 import { isConfirmDue } from "@/lib/automation/deadline";
 import { kstDate } from "@/lib/automation/time";
+import { AUTO_CONTENT_PAUSED } from "@/lib/paused";
 
 export default async function DashboardLayout({
   children,
@@ -36,6 +37,8 @@ export default async function DashboardLayout({
 
 // 사이드바 "AI 자동 업로드" 뱃지 — 올리기 2시간 안인데 아직 상품 확인을 안 한 칸. 읽다 실패해도 화면은 그대로.
 async function loadConfirmDueCount(): Promise<number> {
+  // 일시 중지(lib/paused.ts) 중엔 메뉴가 숨어 있어 셀 필요가 없다
+  if (AUTO_CONTENT_PAUSED) return 0;
   const profile = await getCurrentProfile();
   if (!profile?.organization_id) return 0;
   const supabase = await getServerSupabase();
