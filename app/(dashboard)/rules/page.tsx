@@ -10,6 +10,7 @@ import {
 } from "@/components/rules/rules-client";
 import { Badge } from "@/components/ui/badge";
 import { getCurrentProfile, getServerSupabase, getSessionUser } from "@/lib/auth";
+import { AUTO_CONTENT_PAUSED } from "@/lib/paused";
 import { SHOPS, type ShopCode } from "@/lib/products/shops";
 
 // 표현 규칙 — 금지 표현 · 꼭 넣을 문구, 건기식 심의 문구 확정 (콘텐츠 자동화 2단계, 0026).
@@ -78,8 +79,11 @@ export default async function RulesPage() {
           <Badge variant="outline">사람만 수정</Badge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          AI 자동 업로드 영상은 사람이 보지 않고 올라가서, 올리기 전에 이 규칙으로 자동 검사하고 걸리면 멈춥니다. AI가
-          스스로 이 규칙을 바꾸지는 못해요.
+          {/* AI 자동 콘텐츠 일시 중지(lib/paused.ts) 중엔 멈춘 기능 설명을 빼고 지금 쓰는 곳만 알린다 */}
+          {AUTO_CONTENT_PAUSED
+            ? "콘텐츠 생성에서 AI가 캡션을 쓰고 점검할 때 이 규칙을 씁니다."
+            : "AI 자동 업로드 영상은 사람이 보지 않고 올라가서, 올리기 전에 이 규칙으로 자동 검사하고 걸리면 멈춥니다."}{" "}
+          AI가 스스로 이 규칙을 바꾸지는 못해요.
         </p>
       </header>
 
@@ -116,8 +120,9 @@ export default async function RulesPage() {
         <div>
           <h2 className="text-base font-semibold">건기식 심의 문구</h2>
           <p className="text-sm text-muted-foreground">
-            상세페이지 분석이 건강기능식품으로 판정한 상품입니다. 확정한 기능성 문구만 영상 · 캡션에 쓰고, 확정 문구가
-            없는 상품은 AI 자동 업로드 후보에서 뺍니다.
+            {AUTO_CONTENT_PAUSED
+              ? "상세페이지 분석이 건강기능식품으로 판정한 상품입니다. 확정한 기능성 문구만 기능성 표현으로 씁니다."
+              : "상세페이지 분석이 건강기능식품으로 판정한 상품입니다. 확정한 기능성 문구만 영상 · 캡션에 쓰고, 확정 문구가 없는 상품은 AI 자동 업로드 후보에서 뺍니다."}
             {unconfirmed > 0 && (
               <>
                 {" "}

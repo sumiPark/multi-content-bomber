@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { AUTO_CONTENT_PAUSED } from "@/lib/paused";
 import type { RuleHit } from "@/lib/rules/check";
 import { cn } from "@/lib/utils";
 
@@ -208,7 +209,7 @@ export function ClaimProductCard({ product, canManage }: { product: ClaimProduct
           </Badge>
         ) : (
           <Badge variant="outline" className="text-xs">
-            확정 전 · AI 자동 업로드에 안 씀
+            {AUTO_CONTENT_PAUSED ? "확정 전" : "확정 전 · AI 자동 업로드에 안 씀"}
           </Badge>
         )}
         {!product.analysisConfirmed && (
@@ -303,7 +304,8 @@ export function PreviewCheck() {
     <div className="space-y-2 rounded-lg border bg-card p-3">
       <p className="text-sm font-semibold">미리 검사</p>
       <p className="text-xs text-muted-foreground">
-        캡션이나 자막을 넣으면 지금 켜진 규칙으로 검사해요. AI 자동 업로드 영상은 올리기 전에 이 검사를 자동으로 거칩니다.
+        캡션이나 자막을 넣으면 지금 켜진 규칙으로 검사해요.
+        {!AUTO_CONTENT_PAUSED && " AI 자동 업로드 영상은 올리기 전에 이 검사를 자동으로 거칩니다."}
       </p>
       <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={5000} placeholder="예: 피부 재생에 최고인 세럼" />
       <div className="flex items-center gap-2">
